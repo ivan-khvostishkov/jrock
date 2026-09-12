@@ -63,6 +63,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -120,19 +123,37 @@ public class JRock {
     // JRock-branded color for the role headers ([HUMAN OPERATOR] / assistant).
     private static final java.awt.Color BRAND = new java.awt.Color(0x0F, 0x8B, 0x8D); // teal
 
-    // A styled log backed by a list of entries so it can be re-rendered on demand:
-    //   - GRAY  : app/system status, echoes, raw request/response/stats.
-    //   - MODEL : actual dialog content (human input, model reply) - black.
-    //   - HEADER: [HUMAN OPERATOR] / [OPERATOR'S ASSISTANT] - branded teal.
-    // "Dialog only" mode hides GRAY entries, leaving a clean, copy-pastable
-    // transcript of just the headers and dialog.
-    private static final class LogView {
-        private enum Kind { GRAY, MODEL, HEADER }
+    // Roles for dialog messages. The label is what shows as the teal header AND
+    // is used to build the per-message filename in logs/.
+    private static final String ROLE_HUMAN = "HUMAN OPERATOR";
+    private static final String ROLE_ASSISTANT = "OPERATOR'S ASSISTANT";
 
+    // Filesystem layout for persistence.
+    private static final Path LOG_FILE = Paths.get("jrock-log.txt");     // main, rewritten atomically
+    private static final Path LOGS_DIR = Paths.get("logs");              // per-message files (append-only)
+    private static final DateTimeFormatter STAMP_FMT =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
+
+    // A styled, persisted log backed by an ordered list of entries so it can be
+    // re-rendered on demand and rewritten to disk after every change.
+    //
+    //   GRAY   entry -> app/system text (gray). Stored INLINE in the main log.
+    //   DIALOG entry -> a human or assistant message. Rendered as a teal header
+    //                   + black body + blank line. The body is stored in its OWN
+    //                   file under logs/ (append-only, never modified); the main
+    //                   log stores only a reference: the header line + "@<stamp>".
+    //
+    // "Dialog only" mode hides GRAY entries, leaving a clean transcript of just
+    // the headers + dialog, which matches `cat logs/*.txt`.
+    private static final class LogView {
         private static final class Entry {
-            final Kind kind;
-            final String text;
-            Entry(Kind kind, String text) { this.kind = kind; this.text = text; }
+            final boolean dialog;      // true = dialog message, false = gray inline
+            final String role;         // dialog: ROLE_* ; gray: null
+            final String stamp;        // dialog: yyyyMMdd-HHmmss-SSS ; gray: null
+            final String text;         // body text (dialog) or gray text
+            Entry(boolean dialog, String role, String stamp, String text) {
+                this.dialog = dialog; this.role = role; this.stamp = stamp; this.text = text;
+            }
         }
 
         private final JTextPane pane;
@@ -141,59 +162,158 @@ public class JRock {
 
         LogView(JTextPane pane) { this.pane = pane; }
 
-        void gray(String line)   { add(Kind.GRAY, line); }
-        void model(String line)  { add(Kind.MODEL, line); }
-        void header(String line) { add(Kind.HEADER, line); }
-
-        private void add(Kind kind, String line) {
+        // ---- Public logging API --------------------------------------------
+        void gray(String line) {
             SwingUtilities.invokeLater(() -> {
-                Entry e = new Entry(kind, line);
+                Entry e = new Entry(false, null, null, line);
                 entries.add(e);
-                if (isVisible(e)) renderLine(e);
+                if (isVisible(e)) renderGray(e.text);
+                persistMainLog();
+            });
+        }
+
+        void human(String text)     { dialog(ROLE_HUMAN, text); }
+        void assistant(String text) { dialog(ROLE_ASSISTANT, text); }
+
+        private void dialog(String role, String text) {
+            SwingUtilities.invokeLater(() -> {
+                String stamp = LocalDateTime.now().format(STAMP_FMT);
+                Entry e = new Entry(true, role, stamp, text);
+                entries.add(e);
+                // Write the message body to its own append-only file in logs/.
+                writeMessageFile(role, stamp, text);
+                renderDialog(e);        // dialog is always visible
+                persistMainLog();
             });
         }
 
         void setDialogOnly(boolean on) {
-            SwingUtilities.invokeLater(() -> {
-                dialogOnly = on;
-                rebuild();
-            });
+            SwingUtilities.invokeLater(() -> { dialogOnly = on; rebuild(); });
         }
 
+        // Clears the on-screen log AND the main log file, but never touches logs/.
         void clear() {
             SwingUtilities.invokeLater(() -> {
                 entries.clear();
                 pane.setText("");
+                atomicWriteQuietly(LOG_FILE, "");  // overwrite main log with empty
             });
         }
 
-        private boolean isVisible(Entry e) {
-            return !dialogOnly || e.kind != Kind.GRAY;
+        // Loads and renders entries parsed from the main log file. Does NOT
+        // rewrite the file (loading shouldn't trigger a save). Returns the number
+        // of entries loaded.
+        int loadFromDisk() {
+            java.util.List<Entry> loaded = parseMainLog();
+            SwingUtilities.invokeLater(() -> {
+                entries.clear();
+                entries.addAll(loaded);
+                rebuild();
+            });
+            return loaded.size();
         }
+
+        // Parses the main log. The file is a bit-perfect copy of the pane text,
+        // with exactly ONE transformation: a role header line ("[HUMAN OPERATOR]"
+        // / "[OPERATOR'S ASSISTANT]") is followed by an "@<stamp>" line that stands
+        // in for the message body. On load we expand that single @<stamp> line back
+        // to the message file's verbatim contents (like #include). Every other line
+        // - including empty lines - is a plain gray line, reproduced as-is.
+        private java.util.List<Entry> parseMainLog() {
+            java.util.List<Entry> out = new ArrayList<>();
+            String content = readFileQuietly(LOG_FILE);
+            if (content == null) return out;
+            String[] lines = content.split("\n", -1);
+            // A non-empty file is written as a sequence of "<line>\n"; split(-1)
+            // therefore ends with one artifact "" for that final newline. Reverse
+            // it by dropping exactly that trailing element (nothing else).
+            int n = lines.length;
+            if (n > 0 && lines[n - 1].isEmpty()) n--;
+
+            int i = 0;
+            while (i < n) {
+                String line = lines[i];
+                String role = headerRole(line);
+                if (role != null && i + 1 < n && lines[i + 1].startsWith("@")) {
+                    String stamp = lines[i + 1].substring(1).trim();
+                    String body = resolveReference(role, stamp);
+                    if (body != null) {
+                        // Header + expanded body. The blank line that follows in the
+                        // file is a normal gray "" entry and is handled by the loop -
+                        // we do NOT consume or synthesize any empty line here.
+                        out.add(new Entry(true, role, stamp, body));
+                        i += 2;
+                        continue;
+                    }
+                    // Unresolvable reference: fall through and keep the header as a
+                    // plain gray line so nothing is silently dropped.
+                }
+                out.add(new Entry(false, null, null, line));
+                i++;
+            }
+            return out;
+        }
+
+        // Returns the role if the line is exactly a role header, else null.
+        private String headerRole(String line) {
+            if (line.equals("[" + ROLE_HUMAN + "]")) return ROLE_HUMAN;
+            if (line.equals("[" + ROLE_ASSISTANT + "]")) return ROLE_ASSISTANT;
+            return null;
+        }
+
+        // ---- Rendering -----------------------------------------------------
+        private boolean isVisible(Entry e) { return !dialogOnly || e.dialog; }
 
         private void rebuild() {
             pane.setText("");
             for (Entry e : entries) {
-                if (isVisible(e)) renderLine(e);
+                if (!isVisible(e)) continue;
+                if (e.dialog) renderDialog(e); else renderGray(e.text);
             }
         }
 
-        private void renderLine(Entry e) {
-            java.awt.Color color;
-            switch (e.kind) {
-                case HEADER: color = BRAND; break;
-                case MODEL:  color = java.awt.Color.BLACK; break;
-                default:     color = java.awt.Color.GRAY;
-            }
+        // Renders exactly two lines: the branded header and the (possibly
+        // multi-line) body. The blank line after a message is NOT baked in here -
+        // it is emitted separately as an explicit gray "" entry so it round-trips
+        // like any other line. Nothing here adds or removes empty lines.
+        private void renderDialog(Entry e) {
+            appendStyled("[" + e.role + "]", BRAND);
+            appendStyled(e.text, java.awt.Color.BLACK);
+        }
+
+        private void renderGray(String text) { appendStyled(text, java.awt.Color.GRAY); }
+
+        private void appendStyled(String line, java.awt.Color color) {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setForeground(attrs, color);
             try {
                 pane.getStyledDocument().insertString(
-                        pane.getStyledDocument().getLength(), e.text + "\n", attrs);
+                        pane.getStyledDocument().getLength(), line + "\n", attrs);
             } catch (BadLocationException ignored) {
                 // Position is always valid (document end); ignore defensively.
             }
             pane.setCaretPosition(pane.getStyledDocument().getLength());
+        }
+
+        // ---- Persistence ---------------------------------------------------
+        // Writes the main log as a bit-perfect copy of the pane, with exactly one
+        // transformation: a dialog entry's body is collapsed to a single "@<stamp>"
+        // line under its role header. Every entry (gray or dialog) contributes its
+        // own "<line>\n"; no extra blank lines are added. The blank line seen after
+        // a message is a separate gray "" entry, written like any other line.
+        //   gray entry   -> "<text>\n"
+        //   dialog entry -> "[<ROLE>]\n" + "@<stamp>\n"
+        private void persistMainLog() {
+            StringBuilder sb = new StringBuilder();
+            for (Entry e : entries) {
+                if (e.dialog) {
+                    sb.append('[').append(e.role).append(']').append('\n');
+                    sb.append('@').append(e.stamp).append('\n');
+                } else {
+                    sb.append(e.text).append('\n');
+                }
+            }
+            atomicWriteQuietly(LOG_FILE, sb.toString());
         }
     }
 
@@ -315,6 +435,18 @@ public class JRock {
                 javax.swing.BorderFactory.createEmptyBorder(6, 6, 6, 6),
                 javax.swing.BorderFactory.createLineBorder(java.awt.Color.GRAY)));
 
+        // Recover any previous log from disk BEFORE emitting startup messages, so
+        // the restored history appears first, then the new session's messages.
+        boolean hadLog = Files.exists(LOG_FILE);
+        int restored = log.loadFromDisk();
+        if (hadLog) {
+            // Blank line to separate the restored history from this new session.
+            if (restored > 0) log.gray("");
+            log.gray("Loaded previous log from " + LOG_FILE);
+        } else {
+            log.gray("New log file created: " + LOG_FILE);
+        }
+
         // Startup info goes to the text area (visible regardless of how the app
         // is launched), not the console.
         if (REGION_IS_DEFAULT) {
@@ -353,14 +485,13 @@ public class JRock {
             String prompt = input.getText().trim();
             if (prompt.isEmpty()) {
                 log.gray("");
-                log.gray("(nothing to send - type a prompt first)");
+                log.gray("Nothing to send - type a prompt first...");
                 return;
             }
             send.setEnabled(false);
-            log.gray("");
-            log.header("[HUMAN OPERATOR]");
-            log.model(prompt);
-            log.model("");
+            log.gray("");                        // blank line BEFORE the input message
+            log.human(prompt);
+            log.gray("");                        // blank line AFTER the input message
             log.gray("Calling " + ENDPOINT + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
@@ -385,16 +516,17 @@ public class JRock {
                         // result[2] = raw request/response/stats -> always gray, or null.
                         boolean ok = "1".equals(result[0]);
                         if (ok) {
-                            // A real reply is dialog: branded header + black text.
-                            log.gray("");
-                            log.header("[OPERATOR'S ASSISTANT]");
-                            log.model(result[1]);
-                            log.model("");
+                            // A real reply is dialog: branded header + black text,
+                            // and it's persisted to its own file in logs/. The blank
+                            // lines around the message are separate gray "" entries.
+                            log.gray("");        // blank line BEFORE the output message
+                            log.assistant(result[1]);
+                            log.gray("");        // blank line AFTER the output message
                         } else {
                             // Failures are NOT dialog: log in gray so they don't
                             // pollute the transcript or "Dialog only" view.
-                            log.gray("");
                             log.gray(result[1]);
+                            log.gray("");
                         }
                         if (result[2] != null) {
                             log.gray(result[2]);
@@ -629,26 +761,76 @@ public class JRock {
         }
     }
 
-    // Rewrites the whole persistent prompt file with the given text. Writes to a
-    // temp file first, then atomically moves it into place, so a crash mid-write
-    // cannot leave a half-written (corrupt) prompt file. Best-effort: swallows
-    // I/O errors so typing is never interrupted.
+    // Rewrites the persistent prompt file (crash recovery for the input box).
     private static void savePromptQuietly(String text) {
+        atomicWriteQuietly(PROMPT_FILE, text);
+    }
+
+    // Atomically rewrites `target` with `text`: write to a temp file, then move it
+    // into place, so a crash mid-write can't leave a half-written (corrupt) file.
+    // Best-effort: swallows I/O errors so the UI is never disrupted. Used for both
+    // the prompt file and the main log.
+    private static void atomicWriteQuietly(Path target, String text) {
         try {
-            Path dir = PROMPT_FILE.toAbsolutePath().getParent();
-            Path tmp = Files.createTempFile(dir, "jrock-prompt", ".tmp");
+            Path dir = target.toAbsolutePath().getParent();
+            Files.createDirectories(dir);
+            Path tmp = Files.createTempFile(dir, "jrock", ".tmp");
             Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
             try {
-                Files.move(tmp, PROMPT_FILE,
+                Files.move(tmp, target,
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                         java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             } catch (java.nio.file.AtomicMoveNotSupportedException amnse) {
-                // Fall back to a non-atomic replace if the filesystem can't do it.
-                Files.move(tmp, PROMPT_FILE,
+                Files.move(tmp, target,
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException ex) {
             // Persistence is best-effort; do not disrupt the UI on failure.
+        }
+    }
+
+    // ---- Message-file persistence (append-only logs/ directory) ------------
+    // Maps a role to a filename-safe slug. Kept explicit (no user text in the
+    // name) so filenames are always predictable and injection-free.
+    private static String roleSlug(String role) {
+        return role.equals(ROLE_HUMAN) ? "operator" : "assistant";
+    }
+
+    // Builds the per-message file path from a validated stamp + role. The stamp
+    // is ALWAYS a value we produced/validated (yyyyMMdd-HHmmss-SSS), never raw
+    // user text, so the path can't escape logs/.
+    private static Path messageFile(String role, String stamp) {
+        return LOGS_DIR.resolve(stamp + "-" + roleSlug(role) + ".txt");
+    }
+
+    // Writes a dialog message body to its own file in logs/. Written once and
+    // never modified afterwards. Best-effort.
+    private static void writeMessageFile(String role, String stamp, String text) {
+        try {
+            Files.createDirectories(LOGS_DIR);
+            Files.write(messageFile(role, stamp), text.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            // Best-effort; the on-screen log still shows the message.
+        }
+    }
+
+    // Validates a reference stamp is a REAL datetime in our format, then rebuilds
+    // the file path from the PARSED value (round-tripped back to the canonical
+    // string). This is the injection guard: we never open a path derived from raw
+    // reference text; only from a parsed, re-formatted LocalDateTime. Returns the
+    // message body, or null if the stamp is invalid or the file is missing.
+    private static String resolveReference(String role, String rawStamp) {
+        try {
+            LocalDateTime dt = LocalDateTime.parse(rawStamp, STAMP_FMT);
+            String canonical = dt.format(STAMP_FMT);   // round-trip -> safe stamp
+            Path file = messageFile(role, canonical);
+            // Ensure the resolved path is actually inside logs/ (defense in depth).
+            Path base = LOGS_DIR.toAbsolutePath().normalize();
+            Path resolved = file.toAbsolutePath().normalize();
+            if (!resolved.startsWith(base)) return null;
+            return readFileQuietly(file);
+        } catch (DateTimeParseException ex) {
+            return null;   // not a valid datetime -> ignore, no file access
         }
     }
 }
