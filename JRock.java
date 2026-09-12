@@ -31,7 +31,13 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
+import javax.swing.AbstractAction;
+import javax.swing.KeyStroke;
+import javax.swing.undo.UndoManager;
 import java.awt.BorderLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -59,6 +65,33 @@ public class JRock {
     // ---- UI ----------------------------------------------------------------
     public static void main(String[] args) {
         SwingUtilities.invokeLater(JRock::createAndShowGui);
+    }
+
+    // Wires undo/redo into a text component: Ctrl+Z undo, Ctrl+Y (and Ctrl+Shift+Z)
+    // redo. JTextArea has no built-in undo, so we attach an UndoManager to its
+    // document and bind the keystrokes.
+    private static void enableUndo(javax.swing.text.JTextComponent comp) {
+        UndoManager undo = new UndoManager();
+        comp.getDocument().addUndoableEditListener(e -> undo.addEdit(e.getEdit()));
+
+        comp.getInputMap().put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK), "undo");
+        comp.getInputMap().put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK), "redo");
+        comp.getInputMap().put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_Z,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK), "redo");
+
+        comp.getActionMap().put("undo", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (undo.canUndo()) undo.undo();
+            }
+        });
+        comp.getActionMap().put("redo", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (undo.canRedo()) undo.redo();
+            }
+        });
     }
 
     // Appends a line to the output area, ensuring the update runs on the EDT.
@@ -133,6 +166,7 @@ public class JRock {
         input.setLineWrap(true);
         input.setWrapStyleWord(true);
         input.setMargin(new java.awt.Insets(8, 8, 8, 8));
+        enableUndo(input);
         JScrollPane inputScroll = new JScrollPane(input);
         inputScroll.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                 javax.swing.BorderFactory.createEmptyBorder(6, 6, 6, 6),
@@ -233,7 +267,7 @@ public class JRock {
         String body = "{"
                 + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
                 + "\"messages\":[{\"role\":\"user\",\"content\":\"" + jsonEscape(prompt) + "\"}],"
-                + "\"max_tokens\":512"
+                + "\"max_tokens\":2048"
                 + "}";
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -253,8 +287,47 @@ public class JRock {
         if (resp.statusCode() != 200) {
             return "HTTP " + resp.statusCode() + "\n\n" + resp.body();
         }
-        return "HTTP 200\n\nModel reply:\n" + extractContent(resp.body())
-                + "\n\n--- raw response ---\n" + resp.body();
+
+        String reply = extractContent(resp.body());
+
+        // Symbol (character) counts are computed locally.
+        int inputSymbols = prompt.length();
+        int outputSymbols = reply.length();
+
+        // Token counts come from the API's "usage" object (best-effort parse).
+        long inputTokens = extractLong(resp.body(), "prompt_tokens");
+        long outputTokens = extractLong(resp.body(), "completion_tokens");
+
+        return "HTTP 200\n\nModel reply:\n" + reply
+                + "\n\n--- raw response ---\n" + resp.body()
+                + "\n\n--- stats ---"
+                + "\nInput symbols:  " + inputSymbols
+                + "\nOutput symbols: " + outputSymbols
+                + "\nInput tokens:   " + tokenStr(inputTokens)
+                + "\nOutput tokens:  " + tokenStr(outputTokens);
+    }
+
+    private static String tokenStr(long v) {
+        return v < 0 ? "(not reported)" : Long.toString(v);
+    }
+
+    // Best-effort read of a numeric JSON field like "prompt_tokens": 12.
+    // Returns -1 if the field isn't present.
+    private static long extractLong(String json, String key) {
+        int k = json.indexOf("\"" + key + "\"");
+        if (k < 0) return -1;
+        int colon = json.indexOf(':', k + key.length() + 2);
+        if (colon < 0) return -1;
+        int i = colon + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        int start = i;
+        while (i < json.length() && Character.isDigit(json.charAt(i))) i++;
+        if (i == start) return -1;
+        try {
+            return Long.parseLong(json.substring(start, i));
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
     }
 
     // Best-effort extraction of choices[0].message.content from an OpenAI Chat
@@ -293,14 +366,24 @@ public class JRock {
     // ---- Helpers -----------------------------------------------------------
     private static String jsonEscape(String s) {
         StringBuilder sb = new StringBuilder();
-        for (char c : s.toCharArray()) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
             switch (c) {
-                case '"': sb.append("\\\""); break;
+                case '"':  sb.append("\\\""); break;
                 case '\\': sb.append("\\\\"); break;
                 case '\n': sb.append("\\n"); break;
                 case '\r': sb.append("\\r"); break;
                 case '\t': sb.append("\\t"); break;
-                default: sb.append(c);
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                default:
+                    // JSON requires ALL control characters (U+0000..U+001F) to be
+                    // escaped. Anything below 0x20 not handled above becomes \\u00XX.
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
             }
         }
         return sb.toString();
