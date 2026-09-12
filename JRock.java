@@ -823,21 +823,43 @@ public class JRock {
     // Best-effort: swallows I/O errors so the UI is never disrupted. Used for both
     // the prompt file and the main log.
     private static void atomicWriteQuietly(Path target, String text) {
+        Path tmp = null;
         try {
             Path dir = target.toAbsolutePath().getParent();
             Files.createDirectories(dir);
-            Path tmp = Files.createTempFile(dir, "jrock", ".tmp");
+            tmp = Files.createTempFile(dir, "jrock", ".tmp");
             Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
             try {
                 Files.move(tmp, target,
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                         java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             } catch (java.nio.file.AtomicMoveNotSupportedException amnse) {
+                // Expected on some filesystems - fall back to a plain replace.
+                Files.move(tmp, target,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException moveEx) {
+                // The atomic move failed for another reason (e.g. AccessDenied on
+                // Windows when the target is momentarily locked). Log details to
+                // STDOUT for diagnosis, then try a plain (non-atomic) replace as a
+                // last resort so the data still gets written.
+                System.out.println("[JRock] atomic move failed for " + target
+                        + " tmp=" + tmp
+                        + " : " + moveEx.getClass().getName() + ": " + moveEx.getMessage());
                 Files.move(tmp, target,
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
+            tmp = null;   // moved successfully; nothing to clean up
         } catch (IOException ex) {
-            // Persistence is best-effort; do not disrupt the UI on failure.
+            // Even the fallback failed. Log details to STDOUT (not the UI). The
+            // target keeps its previous contents; the next autosave will retry.
+            System.out.println("[JRock] write failed for " + target
+                    + " : " + ex.getClass().getName() + ": " + ex.getMessage());
+        } finally {
+            // If nothing succeeded, delete the leftover temp file so junk .tmp
+            // files don't accumulate on every keystroke/message.
+            if (tmp != null) {
+                try { Files.deleteIfExists(tmp); } catch (IOException ignored) { }
+            }
         }
     }
 
