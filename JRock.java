@@ -138,9 +138,16 @@ public class JRock {
         append(pane, line, java.awt.Color.GRAY);
     }
 
-    // Default (dark) text: the model's actual reply, so the dialog stands out.
+    // Default (dark) text: the actual dialog content (human input and model reply).
     private static void logModel(JTextPane pane, String line) {
         append(pane, line, java.awt.Color.BLACK);
+    }
+
+    // JRock-branded color for the role headers ([HUMAN OPERATOR] / assistant).
+    private static final java.awt.Color BRAND = new java.awt.Color(0x0F, 0x8B, 0x8D); // teal
+
+    private static void logHeader(JTextPane pane, String line) {
+        append(pane, line, BRAND);
     }
 
     // Calls GET /v1/models on the mantle endpoint and returns a compact,
@@ -291,7 +298,9 @@ public class JRock {
             }
             send.setEnabled(false);
             logGray(output, "");
-            logGray(output, "> " + prompt);
+            logHeader(output, "[HUMAN OPERATOR]");
+            logModel(output, prompt);
+            logModel(output, "");
             logGray(output, "Calling " + ENDPOINT + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
@@ -310,9 +319,13 @@ public class JRock {
                 protected void done() {
                     try {
                         String[] result = get();
-                        // result[0] = model reply (or error) -> shown in default color.
+                        // result[0] = model reply (or error) -> black, under a
+                        //             branded [OPERATOR'S ASSISTANT] header.
                         // result[1] = raw request/response/stats -> shown in gray.
+                        logGray(output, "");
+                        logHeader(output, "[OPERATOR'S ASSISTANT]");
                         logModel(output, result[0]);
+                        logModel(output, "");
                         if (result[1] != null) {
                             logGray(output, result[1]);
                         }
@@ -346,8 +359,17 @@ public class JRock {
         split.setContinuousLayout(true);
         split.setOneTouchExpandable(true);
 
+        // Left-aligned button in a padded panel so it isn't full-width and doesn't
+        // sit against the window edges (avoids accidental clicks while resizing).
+        javax.swing.JPanel buttonBar = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        // Smaller top gap than bottom so the button visually groups with the text
+        // area above it, while keeping clearance from the window's bottom edge.
+        buttonBar.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 14, 12));
+        buttonBar.add(send);
+
         frame.add(split, BorderLayout.CENTER);
-        frame.add(send, BorderLayout.SOUTH);
+        frame.add(buttonBar, BorderLayout.SOUTH);
         frame.setVisible(true);
     }
 
