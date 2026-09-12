@@ -822,43 +822,75 @@ public class JRock {
     // into place, so a crash mid-write can't leave a half-written (corrupt) file.
     // Best-effort: swallows I/O errors so the UI is never disrupted. Used for both
     // the prompt file and the main log.
+    //
+    // All writes are serialized through WRITE_LOCK (all callers are on the EDT
+    // today; the lock is a safeguard should that ever change).
+    //
+    // Diagnosis showed the previous ATOMIC_MOVE approach failing with
+    // AccessDeniedException on Windows: the target (e.g. jrock-log.txt) is briefly
+    // opened by an external process - Windows Defender scanning the just-written
+    // file, the Search Indexer, cloud sync (OneDrive), or an editor/IDE that has
+    // the file open - and the rename is refused while that handle exists. The lock
+    // is typically held only a few milliseconds, so we RETRY the move a few times
+    // with a short backoff, which resolves it without losing data or leaving junk.
+    //
+    // On total failure we DO NOT delete the temp file (leave it for the user to
+    // inspect/clean up) and only log the cause to STDOUT.
+    private static final Object WRITE_LOCK = new Object();
+    private static final int WRITE_ATTEMPTS = 5;
+    private static final long WRITE_RETRY_MS = 40;
+
     private static void atomicWriteQuietly(Path target, String text) {
-        Path tmp = null;
-        try {
-            Path dir = target.toAbsolutePath().getParent();
-            Files.createDirectories(dir);
-            tmp = Files.createTempFile(dir, "jrock", ".tmp");
-            Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+        synchronized (WRITE_LOCK) {
+            Path tmp = null;
             try {
-                Files.move(tmp, target,
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException amnse) {
-                // Expected on some filesystems - fall back to a plain replace.
-                Files.move(tmp, target,
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException moveEx) {
-                // The atomic move failed for another reason (e.g. AccessDenied on
-                // Windows when the target is momentarily locked). Log details to
-                // STDOUT for diagnosis, then try a plain (non-atomic) replace as a
-                // last resort so the data still gets written.
-                System.out.println("[JRock] atomic move failed for " + target
-                        + " tmp=" + tmp
-                        + " : " + moveEx.getClass().getName() + ": " + moveEx.getMessage());
-                Files.move(tmp, target,
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            }
-            tmp = null;   // moved successfully; nothing to clean up
-        } catch (IOException ex) {
-            // Even the fallback failed. Log details to STDOUT (not the UI). The
-            // target keeps its previous contents; the next autosave will retry.
-            System.out.println("[JRock] write failed for " + target
-                    + " : " + ex.getClass().getName() + ": " + ex.getMessage());
-        } finally {
-            // If nothing succeeded, delete the leftover temp file so junk .tmp
-            // files don't accumulate on every keystroke/message.
-            if (tmp != null) {
-                try { Files.deleteIfExists(tmp); } catch (IOException ignored) { }
+                Path dir = target.toAbsolutePath().getParent();
+                Files.createDirectories(dir);
+                tmp = Files.createTempFile(dir, "jrock", ".tmp");
+                Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+
+                IOException last = null;
+                for (int attempt = 1; attempt <= WRITE_ATTEMPTS; attempt++) {
+                    try {
+                        Files.move(tmp, target,
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                        tmp = null;          // atomic move succeeded
+                        return;
+                    } catch (java.nio.file.AtomicMoveNotSupportedException amnse) {
+                        // Filesystem can't do atomic moves - this won't change on
+                        // retry, so do a single plain (non-atomic) replace instead.
+                        Files.move(tmp, target,
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        tmp = null;
+                        return;
+                    } catch (IOException moveEx) {
+                        // Transient failure (e.g. AccessDenied while the target is
+                        // momentarily locked by an external process). The FS DOES
+                        // support atomic moves, so keep retrying the atomic move -
+                        // do not drop to a non-atomic one. Wait briefly, then retry.
+                        last = moveEx;
+                        if (attempt < WRITE_ATTEMPTS) {
+                            try { Thread.sleep(WRITE_RETRY_MS); }
+                            catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                        }
+                    }
+                }
+                // All atomic attempts failed transiently. Target keeps its previous
+                // contents; the next autosave will retry. Leave the temp file for
+                // the user to inspect/clean up.
+                System.out.println("[JRock] write failed for " + target
+                        + " after " + WRITE_ATTEMPTS + " attempts, tmp=" + tmp
+                        + " on thread " + Thread.currentThread().getName()
+                        + " : " + (last == null ? "?" : last.getClass().getName() + ": " + last.getMessage()));
+            } catch (IOException ex) {
+                // Failure creating/writing the temp file itself.
+                System.out.println("[JRock] temp write failed for " + target
+                        + " tmp=" + tmp + " on thread " + Thread.currentThread().getName()
+                        + " : " + ex.getClass().getName() + ": " + ex.getMessage());
             }
         }
     }
