@@ -117,37 +117,84 @@ public class JRock {
         });
     }
 
-    // Appends a line to the output pane in the given color, on the EDT, and
-    // scrolls to the bottom.
-    private static void append(JTextPane pane, String line, java.awt.Color color) {
-        SwingUtilities.invokeLater(() -> {
+    // JRock-branded color for the role headers ([HUMAN OPERATOR] / assistant).
+    private static final java.awt.Color BRAND = new java.awt.Color(0x0F, 0x8B, 0x8D); // teal
+
+    // A styled log backed by a list of entries so it can be re-rendered on demand:
+    //   - GRAY  : app/system status, echoes, raw request/response/stats.
+    //   - MODEL : actual dialog content (human input, model reply) - black.
+    //   - HEADER: [HUMAN OPERATOR] / [OPERATOR'S ASSISTANT] - branded teal.
+    // "Dialog only" mode hides GRAY entries, leaving a clean, copy-pastable
+    // transcript of just the headers and dialog.
+    private static final class LogView {
+        private enum Kind { GRAY, MODEL, HEADER }
+
+        private static final class Entry {
+            final Kind kind;
+            final String text;
+            Entry(Kind kind, String text) { this.kind = kind; this.text = text; }
+        }
+
+        private final JTextPane pane;
+        private final java.util.List<Entry> entries = new ArrayList<>();
+        private boolean dialogOnly = false;
+
+        LogView(JTextPane pane) { this.pane = pane; }
+
+        void gray(String line)   { add(Kind.GRAY, line); }
+        void model(String line)  { add(Kind.MODEL, line); }
+        void header(String line) { add(Kind.HEADER, line); }
+
+        private void add(Kind kind, String line) {
+            SwingUtilities.invokeLater(() -> {
+                Entry e = new Entry(kind, line);
+                entries.add(e);
+                if (isVisible(e)) renderLine(e);
+            });
+        }
+
+        void setDialogOnly(boolean on) {
+            SwingUtilities.invokeLater(() -> {
+                dialogOnly = on;
+                rebuild();
+            });
+        }
+
+        void clear() {
+            SwingUtilities.invokeLater(() -> {
+                entries.clear();
+                pane.setText("");
+            });
+        }
+
+        private boolean isVisible(Entry e) {
+            return !dialogOnly || e.kind != Kind.GRAY;
+        }
+
+        private void rebuild() {
+            pane.setText("");
+            for (Entry e : entries) {
+                if (isVisible(e)) renderLine(e);
+            }
+        }
+
+        private void renderLine(Entry e) {
+            java.awt.Color color;
+            switch (e.kind) {
+                case HEADER: color = BRAND; break;
+                case MODEL:  color = java.awt.Color.BLACK; break;
+                default:     color = java.awt.Color.GRAY;
+            }
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setForeground(attrs, color);
             try {
                 pane.getStyledDocument().insertString(
-                        pane.getStyledDocument().getLength(), line + "\n", attrs);
+                        pane.getStyledDocument().getLength(), e.text + "\n", attrs);
             } catch (BadLocationException ignored) {
                 // Position is always valid (document end); ignore defensively.
             }
             pane.setCaretPosition(pane.getStyledDocument().getLength());
-        });
-    }
-
-    // Gray text: app/system status, echoes, and raw request/response/stats.
-    private static void logGray(JTextPane pane, String line) {
-        append(pane, line, java.awt.Color.GRAY);
-    }
-
-    // Default (dark) text: the actual dialog content (human input and model reply).
-    private static void logModel(JTextPane pane, String line) {
-        append(pane, line, java.awt.Color.BLACK);
-    }
-
-    // JRock-branded color for the role headers ([HUMAN OPERATOR] / assistant).
-    private static final java.awt.Color BRAND = new java.awt.Color(0x0F, 0x8B, 0x8D); // teal
-
-    private static void logHeader(JTextPane pane, String line) {
-        append(pane, line, BRAND);
+        }
     }
 
     // Calls GET /v1/models on the mantle endpoint and returns a compact,
@@ -206,6 +253,19 @@ public class JRock {
         JTextPane output = new JTextPane();
         output.setEditable(false);
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
+        LogView log = new LogView(output);
+
+        // Top bar: [Dialog only] checkbox on the left of a right-aligned [Clear log].
+        javax.swing.JCheckBox dialogOnly = new javax.swing.JCheckBox("Dialog only");
+        dialogOnly.setToolTipText("Show only the headers and dialog (hide gray system text)");
+        dialogOnly.addActionListener(e -> log.setDialogOnly(dialogOnly.isSelected()));
+        JButton clear = new JButton("Clear log");
+        clear.addActionListener(e -> log.clear());
+
+        javax.swing.JPanel topBar = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
+        topBar.add(dialogOnly);
+        topBar.add(clear);
 
         // Resolve the initial prompt text:
         //   1. If a source file was given on the command line, load it read-only.
@@ -258,14 +318,14 @@ public class JRock {
         // Startup info goes to the text area (visible regardless of how the app
         // is launched), not the console.
         if (REGION_IS_DEFAULT) {
-            logGray(output, "AWS region: " + REGION + " (DEFAULT applied - AWS_REGION env var not set)");
+            log.gray("AWS region: " + REGION + " (DEFAULT applied - AWS_REGION env var not set)");
         } else {
-            logGray(output, "AWS region: " + REGION + " (from AWS_REGION env var)");
+            log.gray("AWS region: " + REGION + " (from AWS_REGION env var)");
         }
-        logGray(output, "Configured model: " + MODEL_ID);
-        logGray(output, "Prompt source: " + promptSource);
-        logGray(output, "Autosaving prompt to: " + PROMPT_FILE);
-        logGray(output, "Available models (mantle): loading...");
+        log.gray("Configured model: " + MODEL_ID);
+        log.gray("Prompt source: " + promptSource);
+        log.gray("Autosaving prompt to: " + PROMPT_FILE);
+        log.gray("Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
         new SwingWorker<String, Void>() {
@@ -282,9 +342,9 @@ public class JRock {
                 } catch (Exception ex) {
                     models = "(error: " + ex.getMessage() + ")";
                 }
-                logGray(output, "Available models (mantle): " + models);
-                logGray(output, "");
-                logGray(output, "Ready.");
+                log.gray("Available models (mantle): " + models);
+                log.gray("");
+                log.gray("Ready.");
             }
         }.execute();
 
@@ -292,16 +352,16 @@ public class JRock {
         send.addActionListener(e -> {
             String prompt = input.getText().trim();
             if (prompt.isEmpty()) {
-                logGray(output, "");
-                logGray(output, "(nothing to send - type a prompt first)");
+                log.gray("");
+                log.gray("(nothing to send - type a prompt first)");
                 return;
             }
             send.setEnabled(false);
-            logGray(output, "");
-            logHeader(output, "[HUMAN OPERATOR]");
-            logModel(output, prompt);
-            logModel(output, "");
-            logGray(output, "Calling " + ENDPOINT + " ...");
+            log.gray("");
+            log.header("[HUMAN OPERATOR]");
+            log.model(prompt);
+            log.model("");
+            log.gray("Calling " + ENDPOINT + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
                 protected String[] doInBackground() {
@@ -322,15 +382,15 @@ public class JRock {
                         // result[0] = model reply (or error) -> black, under a
                         //             branded [OPERATOR'S ASSISTANT] header.
                         // result[1] = raw request/response/stats -> shown in gray.
-                        logGray(output, "");
-                        logHeader(output, "[OPERATOR'S ASSISTANT]");
-                        logModel(output, result[0]);
-                        logModel(output, "");
+                        log.gray("");
+                        log.header("[OPERATOR'S ASSISTANT]");
+                        log.model(result[0]);
+                        log.model("");
                         if (result[1] != null) {
-                            logGray(output, result[1]);
+                            log.gray(result[1]);
                         }
                     } catch (Exception ex) {
-                        logModel(output, "ERROR: " + ex.getMessage());
+                        log.model("ERROR: " + ex.getMessage());
                     }
                     send.setEnabled(true);
                 }
@@ -368,6 +428,7 @@ public class JRock {
         buttonBar.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 14, 12));
         buttonBar.add(send);
 
+        frame.add(topBar, BorderLayout.NORTH);
         frame.add(split, BorderLayout.CENTER);
         frame.add(buttonBar, BorderLayout.SOUTH);
         frame.setVisible(true);
