@@ -40,6 +40,10 @@ import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.JTextPane;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
+import javax.swing.text.BadLocationException;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.AbstractAction;
@@ -113,12 +117,30 @@ public class JRock {
         });
     }
 
-    // Appends a line to the output area, ensuring the update runs on the EDT.
-    private static void log(JTextArea area, String line) {
+    // Appends a line to the output pane in the given color, on the EDT, and
+    // scrolls to the bottom.
+    private static void append(JTextPane pane, String line, java.awt.Color color) {
         SwingUtilities.invokeLater(() -> {
-            area.append(line + "\n");
-            area.setCaretPosition(area.getDocument().getLength());
+            SimpleAttributeSet attrs = new SimpleAttributeSet();
+            StyleConstants.setForeground(attrs, color);
+            try {
+                pane.getStyledDocument().insertString(
+                        pane.getStyledDocument().getLength(), line + "\n", attrs);
+            } catch (BadLocationException ignored) {
+                // Position is always valid (document end); ignore defensively.
+            }
+            pane.setCaretPosition(pane.getStyledDocument().getLength());
         });
+    }
+
+    // Gray text: app/system status, echoes, and raw request/response/stats.
+    private static void logGray(JTextPane pane, String line) {
+        append(pane, line, java.awt.Color.GRAY);
+    }
+
+    // Default (dark) text: the model's actual reply, so the dialog stands out.
+    private static void logModel(JTextPane pane, String line) {
+        append(pane, line, java.awt.Color.BLACK);
     }
 
     // Calls GET /v1/models on the mantle endpoint and returns a compact,
@@ -174,9 +196,7 @@ public class JRock {
         frame.setSize(560, 460);
         frame.setLocationRelativeTo(null);
 
-        JTextArea output = new JTextArea();
-        output.setLineWrap(true);
-        output.setWrapStyleWord(true);
+        JTextPane output = new JTextPane();
         output.setEditable(false);
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
 
@@ -231,14 +251,14 @@ public class JRock {
         // Startup info goes to the text area (visible regardless of how the app
         // is launched), not the console.
         if (REGION_IS_DEFAULT) {
-            log(output, "AWS region: " + REGION + " (DEFAULT applied - AWS_REGION env var not set)");
+            logGray(output, "AWS region: " + REGION + " (DEFAULT applied - AWS_REGION env var not set)");
         } else {
-            log(output, "AWS region: " + REGION + " (from AWS_REGION env var)");
+            logGray(output, "AWS region: " + REGION + " (from AWS_REGION env var)");
         }
-        log(output, "Configured model: " + MODEL_ID);
-        log(output, "Prompt source: " + promptSource);
-        log(output, "Autosaving prompt to: " + PROMPT_FILE);
-        log(output, "Available models (mantle): loading...");
+        logGray(output, "Configured model: " + MODEL_ID);
+        logGray(output, "Prompt source: " + promptSource);
+        logGray(output, "Autosaving prompt to: " + PROMPT_FILE);
+        logGray(output, "Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
         new SwingWorker<String, Void>() {
@@ -255,9 +275,9 @@ public class JRock {
                 } catch (Exception ex) {
                     models = "(error: " + ex.getMessage() + ")";
                 }
-                log(output, "Available models (mantle): " + models);
-                log(output, "");
-                log(output, "Ready.");
+                logGray(output, "Available models (mantle): " + models);
+                logGray(output, "");
+                logGray(output, "Ready.");
             }
         }.execute();
 
@@ -265,30 +285,39 @@ public class JRock {
         send.addActionListener(e -> {
             String prompt = input.getText().trim();
             if (prompt.isEmpty()) {
-                log(output, "");
-                log(output, "(nothing to send - type a prompt first)");
+                logGray(output, "");
+                logGray(output, "(nothing to send - type a prompt first)");
                 return;
             }
             send.setEnabled(false);
-            log(output, "");
-            log(output, "> " + prompt);
-            log(output, "Calling " + ENDPOINT + " ...");
-            new SwingWorker<String, Void>() {
+            logGray(output, "");
+            logGray(output, "> " + prompt);
+            logGray(output, "Calling " + ENDPOINT + " ...");
+            new SwingWorker<String[], Void>() {
                 @Override
-                protected String doInBackground() {
+                protected String[] doInBackground() {
                     try {
                         return callModel(prompt);
                     } catch (Exception ex) {
-                        return "ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                        return new String[] {
+                            "ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage(),
+                            null
+                        };
                     }
                 }
 
                 @Override
                 protected void done() {
                     try {
-                        log(output, get());
+                        String[] result = get();
+                        // result[0] = model reply (or error) -> shown in default color.
+                        // result[1] = raw request/response/stats -> shown in gray.
+                        logModel(output, result[0]);
+                        if (result[1] != null) {
+                            logGray(output, result[1]);
+                        }
                     } catch (Exception ex) {
-                        log(output, "ERROR: " + ex.getMessage());
+                        logModel(output, "ERROR: " + ex.getMessage());
                     }
                     send.setEnabled(true);
                 }
@@ -323,13 +352,18 @@ public class JRock {
     }
 
     // ---- Bedrock call ------------------------------------------------------
-    private static String callModel(String prompt) throws Exception {
+    // Returns a 2-element array: [0] = model reply (shown in default color),
+    // [1] = raw request/response/stats detail block (shown in gray), or null.
+    private static String[] callModel(String prompt) throws Exception {
         String apiKey = System.getenv("BEDROCK_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            return "No BEDROCK_API_KEY found. Generate a Bedrock API key in the "
+            return new String[] {
+                "No BEDROCK_API_KEY found. Generate a Bedrock API key in the "
                     + "console and set it, e.g.:\n\n"
                     + "  $env:BEDROCK_API_KEY = \"<your key>\"\n\n"
-                    + "then relaunch: java JRock.java";
+                    + "then relaunch: java JRock.java",
+                null
+            };
         }
 
         // OpenAI Chat Completions request shape.
@@ -354,7 +388,12 @@ public class JRock {
                 client.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (resp.statusCode() != 200) {
-            return "HTTP " + resp.statusCode() + "\n\n" + resp.body();
+            return new String[] {
+                "HTTP " + resp.statusCode(),
+                "--- raw request ---\nPOST " + ENDPOINT + "\n"
+                    + maskFirst(body, jsonEscape(prompt), "<input masked>")
+                    + "\n\n--- raw response ---\n" + resp.body()
+            };
         }
 
         String reply = extractContent(resp.body());
@@ -373,14 +412,15 @@ public class JRock {
         String maskedRequest = maskFirst(body, jsonEscape(prompt), "<input masked>");
         String maskedResponse = maskFirst(resp.body(), jsonEscape(reply), "<output masked>");
 
-        return "HTTP 200\n\nModel reply:\n" + reply
-                + "\n\n--- raw request ---\n" + "POST " + ENDPOINT + "\n" + maskedRequest
+        String details = "--- raw request ---\n" + "POST " + ENDPOINT + "\n" + maskedRequest
                 + "\n\n--- raw response ---\n" + maskedResponse
                 + "\n\n--- stats ---"
                 + "\nInput symbols:  " + inputSymbols
                 + "\nOutput symbols: " + outputSymbols
                 + "\nInput tokens:   " + tokenStr(inputTokens)
                 + "\nOutput tokens:  " + tokenStr(outputTokens);
+
+        return new String[] { reply, details };
     }
 
     private static String tokenStr(long v) {
