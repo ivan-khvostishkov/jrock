@@ -261,7 +261,7 @@ public class JRock {
             }
         }.execute();
 
-        JButton send = new JButton("Send");
+        JButton send = new JButton("Send (Ctrl-Enter)");
         send.addActionListener(e -> {
             String prompt = input.getText().trim();
             if (prompt.isEmpty()) {
@@ -293,6 +293,15 @@ public class JRock {
                     send.setEnabled(true);
                 }
             }.execute();
+        });
+
+        // Ctrl+Enter in the prompt area triggers Send.
+        input.getInputMap().put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.CTRL_DOWN_MASK), "jrock-send");
+        input.getActionMap().put("jrock-send", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (send.isEnabled()) send.doClick();
+            }
         });
 
         JScrollPane outputScroll = new JScrollPane(output);
@@ -358,8 +367,15 @@ public class JRock {
         long inputTokens = extractLong(resp.body(), "prompt_tokens");
         long outputTokens = extractLong(resp.body(), "completion_tokens");
 
+        // Mask the prompt/reply text inside the raw JSON so it isn't duplicated
+        // (it's already shown above as "Model reply" and in the request line).
+        // We replace the JSON-escaped form of each, since that's what's in the JSON.
+        String maskedRequest = maskFirst(body, jsonEscape(prompt), "<input masked>");
+        String maskedResponse = maskFirst(resp.body(), jsonEscape(reply), "<output masked>");
+
         return "HTTP 200\n\nModel reply:\n" + reply
-                + "\n\n--- raw response ---\n" + resp.body()
+                + "\n\n--- raw request ---\n" + "POST " + ENDPOINT + "\n" + maskedRequest
+                + "\n\n--- raw response ---\n" + maskedResponse
                 + "\n\n--- stats ---"
                 + "\nInput symbols:  " + inputSymbols
                 + "\nOutput symbols: " + outputSymbols
@@ -369,6 +385,15 @@ public class JRock {
 
     private static String tokenStr(long v) {
         return v < 0 ? "(not reported)" : Long.toString(v);
+    }
+
+    // Replaces the first occurrence of `needle` in `haystack` with `placeholder`.
+    // Returns the haystack unchanged if the needle is empty or not found.
+    private static String maskFirst(String haystack, String needle, String placeholder) {
+        if (needle == null || needle.isEmpty()) return haystack;
+        int at = haystack.indexOf(needle);
+        if (at < 0) return haystack;
+        return haystack.substring(0, at) + placeholder + haystack.substring(at + needle.length());
     }
 
     // Best-effort read of a numeric JSON field like "prompt_tokens": 12.
