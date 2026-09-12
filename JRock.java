@@ -3,6 +3,17 @@
 // lightweight Bedrock API key (no SigV4, no AWS SDK, no ~/.aws credentials).
 //
 // Run directly with: java JRock.java
+//   Optionally: java JRock.java <initial-prompt-file>
+//
+// Prompt persistence (crash recovery):
+//   The prompt text is autosaved to "jrock-prompt.txt" on every keystroke (full
+//   rewrite via an atomic temp-file swap, so a crash can't corrupt it).
+//   On startup the initial prompt is resolved as:
+//     1. If a file path is passed as the first CLI arg, load it READ-ONLY and use
+//        its contents; the original file is never modified. That text is then
+//        written to the persistent file, which continues to receive autosaves.
+//     2. Else if jrock-prompt.txt exists, recover the prompt from it.
+//     3. Else use the built-in default prompt.
 //
 // Java version requirements:
 //   Minimum: JDK 11  - single-file source launch (JEP 330) and java.net.http.HttpClient
@@ -42,7 +53,11 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,10 +76,14 @@ public class JRock {
     private static final String MODELS_ENDPOINT = MANTLE_HOST + "/v1/models";
     private static final String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello world";
+    // Persistent prompt file (crash recovery). Name contains "jrock" and ends .txt.
+    private static final Path PROMPT_FILE = Paths.get("jrock-prompt.txt");
 
     // ---- UI ----------------------------------------------------------------
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(JRock::createAndShowGui);
+        // Optional first arg: a file to load the initial prompt from (read-only).
+        String sourceArg = (args.length > 0 && !args[0].isBlank()) ? args[0].trim() : null;
+        SwingUtilities.invokeLater(() -> createAndShowGui(sourceArg));
     }
 
     // Wires undo/redo into a text component: Ctrl+Z undo, Ctrl+Y (and Ctrl+Shift+Z)
@@ -149,7 +168,7 @@ public class JRock {
         return ids;
     }
 
-    private static void createAndShowGui() {
+    private static void createAndShowGui(String sourceArg) {
         JFrame frame = new JFrame("JRock - Bedrock (mantle)");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(560, 460);
@@ -161,12 +180,49 @@ public class JRock {
         output.setEditable(false);
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
 
-        // Input area for the user's prompt, seeded with the default.
-        JTextArea input = new JTextArea(PROMPT, 3, 20);
+        // Resolve the initial prompt text:
+        //   1. If a source file was given on the command line, load it read-only.
+        //   2. Else if the persistent prompt file exists, load that.
+        //   3. Else fall back to the built-in default.
+        String initialPrompt;
+        String promptSource;
+        if (sourceArg != null) {
+            String fromArg = readFileQuietly(Paths.get(sourceArg));
+            if (fromArg != null) {
+                initialPrompt = fromArg;
+                promptSource = "command-line file (read-only): " + sourceArg;
+            } else {
+                initialPrompt = PROMPT;
+                promptSource = "default (could not read " + sourceArg + ")";
+            }
+        } else {
+            String fromPersist = readFileQuietly(PROMPT_FILE);
+            if (fromPersist != null) {
+                initialPrompt = fromPersist;
+                promptSource = "recovered persistent file: " + PROMPT_FILE.getFileName();
+            } else {
+                initialPrompt = PROMPT;
+                promptSource = "default";
+            }
+        }
+
+        // Input area for the user's prompt.
+        JTextArea input = new JTextArea(initialPrompt, 3, 20);
         input.setLineWrap(true);
         input.setWrapStyleWord(true);
         input.setMargin(new java.awt.Insets(8, 8, 8, 8));
         enableUndo(input);
+
+        // Persist the initial text immediately (this also seeds/rewrites the
+        // persistent file when loading from a command-line source), then autosave
+        // on every document change so no keystroke can be lost to a crash.
+        savePromptQuietly(input.getText());
+        input.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { persist(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { persist(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { persist(); }
+            private void persist() { savePromptQuietly(input.getText()); }
+        });
         JScrollPane inputScroll = new JScrollPane(input);
         inputScroll.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                 javax.swing.BorderFactory.createEmptyBorder(6, 6, 6, 6),
@@ -180,6 +236,8 @@ public class JRock {
             log(output, "AWS region: " + REGION + " (from AWS_REGION env var)");
         }
         log(output, "Configured model: " + MODEL_ID);
+        log(output, "Prompt source: " + promptSource);
+        log(output, "Autosaving prompt to: " + PROMPT_FILE);
         log(output, "Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
@@ -392,5 +450,40 @@ public class JRock {
     private static String envOr(String name, String fallback) {
         String v = System.getenv(name);
         return (v == null || v.isBlank()) ? fallback : v;
+    }
+
+    // ---- Prompt persistence (crash recovery) -------------------------------
+    // Reads a file as UTF-8, returning null if it doesn't exist or can't be read.
+    // Never modifies the file (used for the read-only command-line source too).
+    private static String readFileQuietly(Path path) {
+        try {
+            if (path == null || !Files.exists(path) || !Files.isReadable(path)) return null;
+            return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            return null;
+        }
+    }
+
+    // Rewrites the whole persistent prompt file with the given text. Writes to a
+    // temp file first, then atomically moves it into place, so a crash mid-write
+    // cannot leave a half-written (corrupt) prompt file. Best-effort: swallows
+    // I/O errors so typing is never interrupted.
+    private static void savePromptQuietly(String text) {
+        try {
+            Path dir = PROMPT_FILE.toAbsolutePath().getParent();
+            Path tmp = Files.createTempFile(dir, "jrock-prompt", ".tmp");
+            Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+            try {
+                Files.move(tmp, PROMPT_FILE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException amnse) {
+                // Fall back to a non-atomic replace if the filesystem can't do it.
+                Files.move(tmp, PROMPT_FILE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException ex) {
+            // Persistence is best-effort; do not disrupt the UI on failure.
+        }
     }
 }
