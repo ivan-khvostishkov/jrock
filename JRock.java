@@ -200,6 +200,17 @@ public class JRock {
             });
         }
 
+        // Returns the dialog turns so far, in order, as {role, text} pairs
+        // (role is ROLE_HUMAN or ROLE_ASSISTANT). Used to build a multi-turn
+        // request in "append" mode. Gray entries are excluded.
+        java.util.List<String[]> dialogHistory() {
+            java.util.List<String[]> out = new ArrayList<>();
+            for (Entry e : entries) {
+                if (e.dialog) out.add(new String[] { e.role, e.text });
+            }
+            return out;
+        }
+
         // Loads and renders entries parsed from the main log file. Does NOT
         // rewrite the file (loading shouldn't trigger a save). Returns the number
         // of entries loaded.
@@ -480,6 +491,11 @@ public class JRock {
             }
         }.execute();
 
+        // "Append" mode: when on, each send includes the full prior dialog so the
+        // model sees a continuous conversation instead of a single message.
+        javax.swing.JCheckBox appendMode = new javax.swing.JCheckBox("Append conversation");
+        appendMode.setToolTipText("Send the whole prior dialog with each message (continuous chat)");
+
         JButton send = new JButton("Send (Ctrl-Enter)");
         send.addActionListener(e -> {
             String prompt = input.getText().trim();
@@ -489,15 +505,22 @@ public class JRock {
                 return;
             }
             send.setEnabled(false);
+            // In append mode, capture the prior dialog turns BEFORE adding the new
+            // prompt, so the request is [history...] + [new prompt].
+            boolean append = appendMode.isSelected();
+            java.util.List<String[]> history = append
+                    ? log.dialogHistory() : java.util.Collections.emptyList();
             log.gray("");                        // blank line BEFORE the input message
             log.human(prompt);
             log.gray("");                        // blank line AFTER the input message
-            log.gray("Calling " + ENDPOINT + " ...");
+            log.gray(append
+                    ? "Calling " + ENDPOINT + " (append: " + history.size() + " prior turns) ..."
+                    : "Calling " + ENDPOINT + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
                 protected String[] doInBackground() {
                     try {
-                        return callModel(prompt);
+                        return callModel(prompt, history);
                     } catch (Exception ex) {
                         return new String[] {
                             "0", // failure
@@ -561,14 +584,20 @@ public class JRock {
         split.setContinuousLayout(true);
         split.setOneTouchExpandable(true);
 
-        // Left-aligned button in a padded panel so it isn't full-width and doesn't
-        // sit against the window edges (avoids accidental clicks while resizing).
-        javax.swing.JPanel buttonBar = new javax.swing.JPanel(
+        // Bottom bar: Send on the left, Append checkbox on the right, same row.
+        javax.swing.JPanel sendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        // Smaller top gap than bottom so the button visually groups with the text
+        sendSide.add(send);
+        javax.swing.JPanel appendSide = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        appendSide.add(appendMode);
+
+        javax.swing.JPanel buttonBar = new javax.swing.JPanel(new BorderLayout());
+        // Smaller top gap than bottom so the row visually groups with the text
         // area above it, while keeping clearance from the window's bottom edge.
         buttonBar.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 14, 12));
-        buttonBar.add(send);
+        buttonBar.add(sendSide, BorderLayout.WEST);
+        buttonBar.add(appendSide, BorderLayout.EAST);
 
         frame.add(topBar, BorderLayout.NORTH);
         frame.add(split, BorderLayout.CENTER);
@@ -582,7 +611,8 @@ public class JRock {
     //   [1] = the model reply (success) or the error message (failure).
     //   [2] = raw request/response/stats detail block (gray), or null.
     // Only a successful reply is treated as dialog; failures are logged in gray.
-    private static String[] callModel(String prompt) throws Exception {
+    private static String[] callModel(String prompt, java.util.List<String[]> history)
+            throws Exception {
         String apiKey = System.getenv("BEDROCK_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
             return new String[] {
@@ -595,12 +625,32 @@ public class JRock {
             };
         }
 
+        // Build the messages array. In single-message mode `history` is empty, so
+        // this is just the new user turn. In append mode it is the full prior
+        // dialog (mapped to OpenAI roles) followed by the new user turn.
+        StringBuilder messages = new StringBuilder("[");
+        for (String[] turn : history) {
+            String openaiRole = ROLE_HUMAN.equals(turn[0]) ? "user" : "assistant";
+            messages.append("{\"role\":\"").append(openaiRole).append("\",\"content\":\"")
+                    .append(jsonEscape(turn[1])).append("\"},");
+        }
+        messages.append("{\"role\":\"user\",\"content\":\"").append(jsonEscape(prompt)).append("\"}]");
+
         // OpenAI Chat Completions request shape.
         String body = "{"
                 + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
-                + "\"messages\":[{\"role\":\"user\",\"content\":\"" + jsonEscape(prompt) + "\"}],"
-                + "\"max_tokens\":2048"
+                + "\"messages\":" + messages
+                + ",\"max_tokens\":2048"
                 + "}";
+
+        // Masked copy of the request for display: every message content (all
+        // history turns AND the new prompt) is replaced with <input masked> so
+        // the raw request isn't a noisy duplicate of the dialog.
+        String maskedRequestBody = body;
+        for (String[] turn : history) {
+            maskedRequestBody = maskFirst(maskedRequestBody, jsonEscape(turn[1]), "<input masked>");
+        }
+        maskedRequestBody = maskFirst(maskedRequestBody, jsonEscape(prompt), "<input masked>");
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(ENDPOINT))
@@ -620,29 +670,31 @@ public class JRock {
             return new String[] {
                 "0",
                 "HTTP " + resp.statusCode(),
-                "--- raw request ---\nPOST " + ENDPOINT + "\n"
-                    + maskFirst(body, jsonEscape(prompt), "<input masked>")
+                "--- raw request ---\nPOST " + ENDPOINT + "\n" + maskedRequestBody
                     + "\n\n--- raw response ---\n" + resp.body()
             };
         }
 
         String reply = extractContent(resp.body());
 
-        // Symbol (character) counts are computed locally.
+        // Symbol (character) counts are computed locally. Input counts the ENTIRE
+        // input sent to the model: all prior turns (append mode) plus the new
+        // prompt - matching what prompt_tokens measures.
         int inputSymbols = prompt.length();
+        for (String[] turn : history) {
+            inputSymbols += turn[1].length();
+        }
         int outputSymbols = reply.length();
 
         // Token counts come from the API's "usage" object (best-effort parse).
         long inputTokens = extractLong(resp.body(), "prompt_tokens");
         long outputTokens = extractLong(resp.body(), "completion_tokens");
 
-        // Mask the prompt/reply text inside the raw JSON so it isn't duplicated
-        // (it's already shown above as "Model reply" and in the request line).
-        // We replace the JSON-escaped form of each, since that's what's in the JSON.
-        String maskedRequest = maskFirst(body, jsonEscape(prompt), "<input masked>");
+        // Mask the reply text inside the raw response so it isn't duplicated
+        // (it's already shown above). The request is already masked (all turns).
         String maskedResponse = maskFirst(resp.body(), jsonEscape(reply), "<output masked>");
 
-        String details = "--- raw request ---\n" + "POST " + ENDPOINT + "\n" + maskedRequest
+        String details = "--- raw request ---\n" + "POST " + ENDPOINT + "\n" + maskedRequestBody
                 + "\n\n--- raw response ---\n" + maskedResponse
                 + "\n\n--- stats ---"
                 + "\nInput symbols:  " + inputSymbols
