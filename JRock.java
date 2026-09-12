@@ -295,19 +295,21 @@ public class JRock {
             }.execute();
         });
 
-        // Bottom panel: prompt input above, Send button below.
-        javax.swing.JPanel bottom = new javax.swing.JPanel(new BorderLayout());
-        bottom.add(inputScroll, BorderLayout.CENTER);
-        bottom.add(send, BorderLayout.SOUTH);
-
         JScrollPane outputScroll = new JScrollPane(output);
         // Same framed look as the input area.
         outputScroll.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                 javax.swing.BorderFactory.createEmptyBorder(6, 6, 6, 6),
                 javax.swing.BorderFactory.createLineBorder(java.awt.Color.GRAY)));
 
-        frame.add(outputScroll, BorderLayout.CENTER);
-        frame.add(bottom, BorderLayout.SOUTH);
+        // Draggable divider between the output (top) and input (bottom) areas.
+        javax.swing.JSplitPane split = new javax.swing.JSplitPane(
+                javax.swing.JSplitPane.VERTICAL_SPLIT, outputScroll, inputScroll);
+        split.setResizeWeight(0.75);   // give extra space to the output on resize
+        split.setContinuousLayout(true);
+        split.setOneTouchExpandable(true);
+
+        frame.add(split, BorderLayout.CENTER);
+        frame.add(send, BorderLayout.SOUTH);
         frame.setVisible(true);
     }
 
