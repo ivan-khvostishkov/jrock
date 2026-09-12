@@ -119,7 +119,7 @@ public class JRock {
     private static void createAndShowGui() {
         JFrame frame = new JFrame("JRock - Bedrock (mantle)");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(560, 360);
+        frame.setSize(560, 460);
         frame.setLocationRelativeTo(null);
 
         JTextArea output = new JTextArea();
@@ -127,6 +127,16 @@ public class JRock {
         output.setWrapStyleWord(true);
         output.setEditable(false);
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
+
+        // Input area for the user's prompt, seeded with the default.
+        JTextArea input = new JTextArea(PROMPT, 3, 20);
+        input.setLineWrap(true);
+        input.setWrapStyleWord(true);
+        input.setMargin(new java.awt.Insets(8, 8, 8, 8));
+        JScrollPane inputScroll = new JScrollPane(input);
+        inputScroll.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createEmptyBorder(6, 6, 6, 6),
+                javax.swing.BorderFactory.createLineBorder(java.awt.Color.GRAY)));
 
         // Startup info goes to the text area (visible regardless of how the app
         // is launched), not the console.
@@ -159,16 +169,23 @@ public class JRock {
             }
         }.execute();
 
-        JButton send = new JButton("Send Hello World");
+        JButton send = new JButton("Send");
         send.addActionListener(e -> {
+            String prompt = input.getText().trim();
+            if (prompt.isEmpty()) {
+                log(output, "");
+                log(output, "(nothing to send - type a prompt first)");
+                return;
+            }
             send.setEnabled(false);
             log(output, "");
+            log(output, "> " + prompt);
             log(output, "Calling " + ENDPOINT + " ...");
             new SwingWorker<String, Void>() {
                 @Override
                 protected String doInBackground() {
                     try {
-                        return callModel(PROMPT);
+                        return callModel(prompt);
                     } catch (Exception ex) {
                         return "ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage();
                     }
@@ -186,8 +203,19 @@ public class JRock {
             }.execute();
         });
 
-        frame.add(new JScrollPane(output), BorderLayout.CENTER);
-        frame.add(send, BorderLayout.SOUTH);
+        // Bottom panel: prompt input above, Send button below.
+        javax.swing.JPanel bottom = new javax.swing.JPanel(new BorderLayout());
+        bottom.add(inputScroll, BorderLayout.CENTER);
+        bottom.add(send, BorderLayout.SOUTH);
+
+        JScrollPane outputScroll = new JScrollPane(output);
+        // Same framed look as the input area.
+        outputScroll.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createEmptyBorder(6, 6, 6, 6),
+                javax.swing.BorderFactory.createLineBorder(java.awt.Color.GRAY)));
+
+        frame.add(outputScroll, BorderLayout.CENTER);
+        frame.add(bottom, BorderLayout.SOUTH);
         frame.setVisible(true);
     }
 
