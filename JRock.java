@@ -203,7 +203,7 @@ public class JRock {
     private static String listAvailableModels() {
         String apiKey = System.getenv("BEDROCK_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            return "(skipped - BEDROCK_API_KEY not set)";
+            return "(skipped - BEDROCK_API_KEY env var not set)";
         }
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -369,6 +369,7 @@ public class JRock {
                         return callModel(prompt);
                     } catch (Exception ex) {
                         return new String[] {
+                            "0", // failure
                             "ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage(),
                             null
                         };
@@ -379,18 +380,27 @@ public class JRock {
                 protected void done() {
                     try {
                         String[] result = get();
-                        // result[0] = model reply (or error) -> black, under a
-                        //             branded [OPERATOR'S ASSISTANT] header.
-                        // result[1] = raw request/response/stats -> shown in gray.
-                        log.gray("");
-                        log.header("[OPERATOR'S ASSISTANT]");
-                        log.model(result[0]);
-                        log.model("");
-                        if (result[1] != null) {
+                        // result[0] = "1" success / "0" failure.
+                        // result[1] = model reply (success) or error text (failure).
+                        // result[2] = raw request/response/stats -> always gray, or null.
+                        boolean ok = "1".equals(result[0]);
+                        if (ok) {
+                            // A real reply is dialog: branded header + black text.
+                            log.gray("");
+                            log.header("[OPERATOR'S ASSISTANT]");
+                            log.model(result[1]);
+                            log.model("");
+                        } else {
+                            // Failures are NOT dialog: log in gray so they don't
+                            // pollute the transcript or "Dialog only" view.
+                            log.gray("");
                             log.gray(result[1]);
                         }
+                        if (result[2] != null) {
+                            log.gray(result[2]);
+                        }
                     } catch (Exception ex) {
-                        log.model("ERROR: " + ex.getMessage());
+                        log.gray("ERROR: " + ex.getMessage());
                     }
                     send.setEnabled(true);
                 }
@@ -435,12 +445,16 @@ public class JRock {
     }
 
     // ---- Bedrock call ------------------------------------------------------
-    // Returns a 2-element array: [0] = model reply (shown in default color),
-    // [1] = raw request/response/stats detail block (shown in gray), or null.
+    // Returns a 3-element array:
+    //   [0] = "1" on success, "0" on failure.
+    //   [1] = the model reply (success) or the error message (failure).
+    //   [2] = raw request/response/stats detail block (gray), or null.
+    // Only a successful reply is treated as dialog; failures are logged in gray.
     private static String[] callModel(String prompt) throws Exception {
         String apiKey = System.getenv("BEDROCK_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
             return new String[] {
+                "0",
                 "No BEDROCK_API_KEY found. Generate a Bedrock API key in the "
                     + "console and set it, e.g.:\n\n"
                     + "  $env:BEDROCK_API_KEY = \"<your key>\"\n\n"
@@ -472,6 +486,7 @@ public class JRock {
 
         if (resp.statusCode() != 200) {
             return new String[] {
+                "0",
                 "HTTP " + resp.statusCode(),
                 "--- raw request ---\nPOST " + ENDPOINT + "\n"
                     + maskFirst(body, jsonEscape(prompt), "<input masked>")
@@ -503,7 +518,7 @@ public class JRock {
                 + "\nInput tokens:   " + tokenStr(inputTokens)
                 + "\nOutput tokens:  " + tokenStr(outputTokens);
 
-        return new String[] { reply, details };
+        return new String[] { "1", reply, details };
     }
 
     private static String tokenStr(long v) {
