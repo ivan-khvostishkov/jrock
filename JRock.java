@@ -98,8 +98,92 @@ public class JRock {
 
     // Derived endpoints/paths (recomputed from the mutable config above).
     private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
-    private static String endpoint()       { return mantleHost() + "/openai/v1/chat/completions"; }
     private static String modelsEndpoint() { return mantleHost() + "/v1/models"; }
+
+    // Chat Completions URL for the currently configured model. The mantle path
+    // differs per model (see BedrockModelCard); unknown/free-text models fall back
+    // to the mantle default of /v1/chat/completions.
+    private static String endpoint() {
+        BedrockModelCard card = cardFor(MODEL_ID);
+        String path = (card != null)
+                ? card.mantleChatCompletionsPath()
+                : "/v1/chat/completions";
+        return mantleHost() + path;
+    }
+
+    // ---- Bedrock model cards -----------------------------------------------
+    // Recorded from the AWS model-card pages: input/output modalities, supported
+    // APIs and endpoints. We currently implement only Chat Completions on the
+    // bedrock-mantle endpoint (all three models below support that), but the
+    // mantle URL path differs per model, which is what mantleChatCompletionsPath()
+    // captures.
+    private abstract static class BedrockModelCard {
+        abstract String modelId();
+        abstract String displayName();
+        abstract String cardUrl();          // AWS model-card documentation page
+        abstract String[] inputModalities();
+        abstract String[] outputModalities();
+        abstract String[] apisSupported();
+        abstract String[] endpointsSupported();
+
+        // Path (appended to the mantle host) for Chat Completions. Defaults to the
+        // mantle default of /v1; models served under the OpenAI-compatible base
+        // override this to /openai/v1.
+        String mantleChatCompletionsPath() { return "/v1/chat/completions"; }
+    }
+
+    // xAI Grok 4.3.
+    // Note from the model card: "On bedrock-mantle, this model is served at
+    // /openai/v1/responses, not the default /v1/responses." Its OpenAI-compatible
+    // base is /openai/v1, so Chat Completions lives at /openai/v1/chat/completions.
+    private static final class Grok43Card extends BedrockModelCard {
+        String modelId()              { return "xai.grok-4.3"; }
+        String displayName()          { return "Grok 4.3"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-xai-grok-4-3.html"; }
+        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
+        @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
+    }
+
+    // Moonshot AI Kimi K2.5.
+    // Mantle base per the model card is /v1, so Chat Completions is /v1/chat/completions.
+    private static final class KimiK25Card extends BedrockModelCard {
+        String modelId()              { return "moonshotai.kimi-k2.5"; }
+        String displayName()          { return "Kimi K2.5"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-moonshot-ai-kimi-k2-5.html"; }
+        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        // Uses the mantle default /v1/chat/completions (inherited).
+    }
+
+    // DeepSeek-V3.1.
+    // Mantle base per the model card is /v1, so Chat Completions is /v1/chat/completions.
+    private static final class DeepSeekV31Card extends BedrockModelCard {
+        String modelId()              { return "deepseek.v3.1"; }
+        String displayName()          { return "DeepSeek-V3.1"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-deepseek-deepseek-v3-1.html"; }
+        String[] inputModalities()    { return new String[] { "Text" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        // Uses the mantle default /v1/chat/completions (inherited).
+    }
+
+    // Registry of known model cards, and a lookup by model id.
+    private static final BedrockModelCard[] MODEL_CARDS = {
+        new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(),
+    };
+
+    private static BedrockModelCard cardFor(String modelId) {
+        for (BedrockModelCard c : MODEL_CARDS) {
+            if (c.modelId().equals(modelId)) return c;
+        }
+        return null;
+    }
     // All JRock files live under a "JRock" subfolder of the working directory.
     private static Path jrockDir()         { return workingDir.resolve("JRock"); }
     private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
