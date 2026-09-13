@@ -613,7 +613,67 @@ public class JRock {
             }
         });
 
+        // Ctrl+S: save a COPY of the current prompt to a file the user chooses.
+        // The persistent jrock-prompt.txt autosave is unaffected.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK), "jrock-save-prompt");
+        frame.getRootPane().getActionMap().put("jrock-save-prompt", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                savePromptAs(frame, input.getText());
+            }
+        });
+
+        // Ctrl+O: load a prompt from a file (read-only) into the input area, like
+        // passing a prompt file as a startup argument. Autosave then continues
+        // writing the loaded text to jrock-prompt.txt.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK), "jrock-load-prompt");
+        frame.getRootPane().getActionMap().put("jrock-load-prompt", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                loadPromptInto(frame, input, log);
+            }
+        });
+
         frame.setVisible(true);
+    }
+
+    // ---- Save / load prompt (Ctrl+S / Ctrl+O) ------------------------------
+    // Saves a copy of the given text to a user-chosen file. Does NOT touch the
+    // persistent jrock-prompt.txt; this is an extra export.
+    private static void savePromptAs(JFrame frame, String text) {
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        chooser.setDialogTitle("Save prompt as");
+        chooser.setSelectedFile(new java.io.File("prompt.txt"));
+        if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+
+        Path target = chooser.getSelectedFile().toPath();
+        try {
+            Files.write(target, text.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Could not save to " + target + ":\n" + ex.getMessage(),
+                    "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    // Loads a prompt from a user-chosen file (read-only) into the input area.
+    // The document listener then autosaves the loaded text to jrock-prompt.txt.
+    private static void loadPromptInto(JFrame frame, JTextArea input, LogView log) {
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        chooser.setDialogTitle("Load prompt");
+        if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+
+        Path source = chooser.getSelectedFile().toPath();
+        String loaded = readFileQuietly(source);
+        if (loaded == null) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Could not read " + source,
+                    "Load failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        input.setText(loaded);            // triggers autosave to jrock-prompt.txt
+        input.setCaretPosition(0);
+        if (log != null) log.gray("Loaded prompt from (read-only): " + source);
     }
 
     // ---- Move & Resize dialog (Ctrl+R) -------------------------------------
