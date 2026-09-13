@@ -71,20 +71,41 @@ import java.util.List;
 
 public class JRock {
 
-    // ---- Configuration -----------------------------------------------------
+    // Application version.
+    private static final String VERSION = "1.0.0";
+
+    // ---- Configuration (mutable: changed via the Configure dialog) ----------
     private static final String DEFAULT_REGION = "us-east-1";
-    private static final boolean REGION_IS_DEFAULT =
-            System.getenv("AWS_REGION") == null || System.getenv("AWS_REGION").isBlank();
-    private static final String REGION = envOr("AWS_REGION", DEFAULT_REGION);
-    private static final String MANTLE_HOST =
-            "https://bedrock-mantle." + REGION + ".api.aws";
-    private static final String OPENAI_BASE = MANTLE_HOST + "/openai/v1";
-    private static final String ENDPOINT = OPENAI_BASE + "/chat/completions";
-    private static final String MODELS_ENDPOINT = MANTLE_HOST + "/v1/models";
-    private static final String MODEL_ID = "xai.grok-4.3";
+    // Region/model start from env/defaults and can be overridden at runtime.
+    private static String REGION = envOr("AWS_REGION", DEFAULT_REGION);
+    private static boolean regionFromEnv =
+            System.getenv("AWS_REGION") != null && !System.getenv("AWS_REGION").isBlank();
+    private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello world";
-    // Persistent prompt file (crash recovery). Name contains "jrock" and ends .txt.
-    private static final Path PROMPT_FILE = Paths.get("jrock-prompt.txt");
+
+    // In-memory Bedrock API key override. Null means "use the BEDROCK_API_KEY env
+    // var". We never read/prefill the env value into the UI; the override is only
+    // set when the user explicitly types a new key in the Configure dialog.
+    private static String apiKeyOverride = null;
+
+    // Working directory for all persisted files. Defaults to the process CWD; the
+    // Configure dialog can point it elsewhere. All file paths resolve against it.
+    private static Path workingDir = Paths.get("").toAbsolutePath();
+
+    // Derived endpoints/paths (recomputed from the mutable config above).
+    private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
+    private static String endpoint()       { return mantleHost() + "/openai/v1/chat/completions"; }
+    private static String modelsEndpoint() { return mantleHost() + "/v1/models"; }
+    private static Path promptFile()       { return workingDir.resolve("jrock-prompt.txt"); }
+    private static Path logFile()          { return workingDir.resolve("jrock-log.txt"); }
+    private static Path logsDir()          { return workingDir.resolve("logs"); }
+
+    // Resolves the effective API key: the in-memory override if set, else the
+    // BEDROCK_API_KEY env var. Returns null/blank if neither is present.
+    private static String resolveApiKey() {
+        if (apiKeyOverride != null && !apiKeyOverride.isBlank()) return apiKeyOverride;
+        return System.getenv("BEDROCK_API_KEY");
+    }
 
     // ---- UI ----------------------------------------------------------------
     public static void main(String[] args) {
@@ -128,9 +149,8 @@ public class JRock {
     private static final String ROLE_HUMAN = "HUMAN OPERATOR";
     private static final String ROLE_ASSISTANT = "OPERATOR'S ASSISTANT";
 
-    // Filesystem layout for persistence.
-    private static final Path LOG_FILE = Paths.get("jrock-log.txt");     // main, rewritten atomically
-    private static final Path LOGS_DIR = Paths.get("logs");              // per-message files (append-only)
+    // Filesystem layout for persistence (resolved against workingDir via
+    // logFile() / logsDir(), so they follow the configured working directory).
     private static final DateTimeFormatter STAMP_FMT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
 
@@ -196,7 +216,7 @@ public class JRock {
             SwingUtilities.invokeLater(() -> {
                 entries.clear();
                 pane.setText("");
-                atomicWriteQuietly(LOG_FILE, "");  // overwrite main log with empty
+                atomicWriteQuietly(logFile(), "");  // overwrite main log with empty
             });
         }
 
@@ -232,7 +252,7 @@ public class JRock {
         // - including empty lines - is a plain gray line, reproduced as-is.
         private java.util.List<Entry> parseMainLog() {
             java.util.List<Entry> out = new ArrayList<>();
-            String content = readFileQuietly(LOG_FILE);
+            String content = readFileQuietly(logFile());
             if (content == null) return out;
             String[] lines = content.split("\n", -1);
             // A non-empty file is written as a sequence of "<line>\n"; split(-1)
@@ -324,21 +344,76 @@ public class JRock {
                     sb.append(e.text).append('\n');
                 }
             }
-            atomicWriteQuietly(LOG_FILE, sb.toString());
+            atomicWriteQuietly(logFile(), sb.toString());
         }
+    }
+
+    // Emits the session report into the log. Used at startup AND after the
+    // Configure dialog. The FIRST line is always the current working directory.
+    // promptSourceNote is logged only when non-null (startup); on reconfigure the
+    // prompt is untouched so it's omitted.
+    private static void initSession(LogView log, String promptSourceNote) {
+        // Recover any previous log from disk FIRST. loadFromDisk() replaces the
+        // entry list (rebuild -> setText), so it must run before we log anything
+        // for this session, otherwise those lines would be wiped.
+        boolean hadLog = Files.exists(logFile());
+        int restored = log.loadFromDisk();
+
+        // The session report begins here; the working directory is its first line.
+        if (restored > 0) log.gray("");
+        log.gray("Working directory: " + workingDir);
+        if (hadLog) {
+            log.gray("Loaded previous log from jrock-log.txt");
+        } else {
+            log.gray("New log file created: jrock-log.txt");
+        }
+        log.gray("Messages logged to jrock-log.txt and logs/ directory.");
+
+        if (regionFromEnv) {
+            log.gray("AWS region: " + REGION + " (from AWS_REGION env var)");
+        } else {
+            log.gray("AWS region: " + REGION);
+        }
+        log.gray("Configured model: " + MODEL_ID);
+        if (promptSourceNote != null) {
+            log.gray("Prompt source: " + promptSourceNote);
+        }
+        log.gray("Autosaving prompt to jrock-prompt.txt");
+        log.gray("Available models (mantle): loading...");
+
+        // Fetch the model list off the EDT so the window stays responsive.
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() {
+                return listAvailableModels();
+            }
+
+            @Override
+            protected void done() {
+                String models;
+                try {
+                    models = get();
+                } catch (Exception ex) {
+                    models = "(error: " + ex.getMessage() + ")";
+                }
+                log.gray("Available models (mantle): " + models);
+                log.gray("");
+                log.gray("Ready.");
+            }
+        }.execute();
     }
 
     // Calls GET /v1/models on the mantle endpoint and returns a compact,
     // comma-separated list of model ids. Never throws - returns a status
     // string on failure so startup logging is best-effort.
     private static String listAvailableModels() {
-        String apiKey = System.getenv("BEDROCK_API_KEY");
+        String apiKey = resolveApiKey();
         if (apiKey == null || apiKey.isBlank()) {
-            return "(skipped - BEDROCK_API_KEY env var not set)";
+            return "(skipped - no Bedrock API key set)";
         }
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(MODELS_ENDPOINT))
+                    .uri(URI.create(modelsEndpoint()))
                     .timeout(Duration.ofSeconds(30))
                     .header("Authorization", "Bearer " + apiKey.trim())
                     .GET()
@@ -348,7 +423,7 @@ public class JRock {
                     .build()
                     .send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
-                return "(HTTP " + resp.statusCode() + " from " + MODELS_ENDPOINT + ")";
+                return "(HTTP " + resp.statusCode() + " from " + modelsEndpoint() + ")";
             }
             List<String> ids = extractModelIds(resp.body());
             return ids.isEmpty() ? "(none parsed; raw: " + resp.body() + ")"
@@ -386,17 +461,28 @@ public class JRock {
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
         LogView log = new LogView(output);
 
-        // Top bar: [Dialog only] checkbox on the left of a right-aligned [Clear log].
+        // Top bar: [Configure] on the left; [Dialog only] + [Clear log] on the right.
+        JButton configure = new JButton("Configure");
+        configure.setToolTipText("Working directory, API key, region, model");
+        // (Listener wired below, once `input` exists.)
+
         javax.swing.JCheckBox dialogOnly = new javax.swing.JCheckBox("Dialog only");
         dialogOnly.setToolTipText("Show only the headers and dialog (hide gray system text)");
         dialogOnly.addActionListener(e -> log.setDialogOnly(dialogOnly.isSelected()));
         JButton clear = new JButton("Clear log");
         clear.addActionListener(e -> log.clear());
 
-        javax.swing.JPanel topBar = new javax.swing.JPanel(
+        javax.swing.JPanel topRight = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
-        topBar.add(dialogOnly);
-        topBar.add(clear);
+        topRight.add(dialogOnly);
+        topRight.add(clear);
+        javax.swing.JPanel topLeft = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 4));
+        topLeft.add(configure);
+
+        javax.swing.JPanel topBar = new javax.swing.JPanel(new BorderLayout());
+        topBar.add(topLeft, BorderLayout.WEST);
+        topBar.add(topRight, BorderLayout.EAST);
 
         // Resolve the initial prompt text:
         //   1. If a source file was given on the command line, load it read-only.
@@ -414,10 +500,10 @@ public class JRock {
                 promptSource = "default (could not read " + sourceArg + ")";
             }
         } else {
-            String fromPersist = readFileQuietly(PROMPT_FILE);
+            String fromPersist = readFileQuietly(promptFile());
             if (fromPersist != null) {
                 initialPrompt = fromPersist;
-                promptSource = "recovered persistent file: " + PROMPT_FILE.getFileName();
+                promptSource = "recovered persistent file: " + promptFile().getFileName();
             } else {
                 initialPrompt = PROMPT;
                 promptSource = "default";
@@ -446,50 +532,9 @@ public class JRock {
                 javax.swing.BorderFactory.createEmptyBorder(6, 6, 6, 6),
                 javax.swing.BorderFactory.createLineBorder(java.awt.Color.GRAY)));
 
-        // Recover any previous log from disk BEFORE emitting startup messages, so
-        // the restored history appears first, then the new session's messages.
-        boolean hadLog = Files.exists(LOG_FILE);
-        int restored = log.loadFromDisk();
-        if (hadLog) {
-            // Blank line to separate the restored history from this new session.
-            if (restored > 0) log.gray("");
-            log.gray("Loaded previous log from " + LOG_FILE);
-        } else {
-            log.gray("New log file created: " + LOG_FILE);
-        }
-
-        // Startup info goes to the text area (visible regardless of how the app
-        // is launched), not the console.
-        if (REGION_IS_DEFAULT) {
-            log.gray("AWS region: " + REGION + " (DEFAULT applied - AWS_REGION env var not set)");
-        } else {
-            log.gray("AWS region: " + REGION + " (from AWS_REGION env var)");
-        }
-        log.gray("Configured model: " + MODEL_ID);
-        log.gray("Prompt source: " + promptSource);
-        log.gray("Autosaving prompt to: " + PROMPT_FILE);
-        log.gray("Available models (mantle): loading...");
-
-        // Fetch the model list off the EDT so the window stays responsive.
-        new SwingWorker<String, Void>() {
-            @Override
-            protected String doInBackground() {
-                return listAvailableModels();
-            }
-
-            @Override
-            protected void done() {
-                String models;
-                try {
-                    models = get();
-                } catch (Exception ex) {
-                    models = "(error: " + ex.getMessage() + ")";
-                }
-                log.gray("Available models (mantle): " + models);
-                log.gray("");
-                log.gray("Ready.");
-            }
-        }.execute();
+        // Emit the startup session report (CWD, log recovery, region/model, model
+        // list, Ready). Reused verbatim after reconfiguration.
+        initSession(log, promptSource);
 
         // "Append" mode: when on, each send includes the full prior dialog so the
         // model sees a continuous conversation instead of a single message.
@@ -514,8 +559,8 @@ public class JRock {
             log.human(prompt);
             log.gray("");                        // blank line AFTER the input message
             log.gray(append
-                    ? "Calling " + ENDPOINT + " (append: " + history.size() + " prior turns) ..."
-                    : "Calling " + ENDPOINT + " ...");
+                    ? "Calling " + endpoint() + " (append: " + history.size() + " prior turns) ..."
+                    : "Calling " + endpoint() + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
                 protected String[] doInBackground() {
@@ -634,7 +679,127 @@ public class JRock {
             }
         });
 
+        // Configure button: opens the settings dialog, then re-runs the session
+        // report (CWD first, models loaded, ... Ready) exactly like startup.
+        configure.addActionListener(e -> {
+            if (showConfigureDialog(frame)) {
+                log.gray("");
+                log.gray("--- reconfigured ---");
+                initSession(log, null);   // no prompt-source line on reconfigure
+            }
+        });
+
         frame.setVisible(true);
+    }
+
+    // ---- Configure dialog --------------------------------------------------
+    // Shows working directory, API key (write-only override), region and model.
+    // Returns true if the user applied changes (so the caller re-inits the session).
+    private static boolean showConfigureDialog(JFrame frame) {
+        javax.swing.JTextField cwdF    = new javax.swing.JTextField(workingDir.toString(), 30);
+        javax.swing.JPasswordField keyF = new javax.swing.JPasswordField(24); // never prefilled
+        javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
+        javax.swing.JTextField modelF  = new javax.swing.JTextField(MODEL_ID, 24);
+
+        javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.insets = new java.awt.Insets(4, 4, 4, 4);
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        int row = 0;
+        addRow(fields, c, row++, "Working directory:", cwdF);
+        addRow(fields, c, row++, "BEDROCK_API_KEY:", keyF);
+        addRow(fields, c, row++, "AWS_REGION:", regionF);
+        addRow(fields, c, row++, "Model:", modelF);
+
+        javax.swing.JTextArea note = new javax.swing.JTextArea(
+            "The API key field is intentionally blank and write-only: leave it empty "
+          + "to keep the current key (env var or a previous override); type a value "
+          + "to override it for this session. The key is never displayed.\n\n"
+          + "Note: a true OS process chdir isn't possible from Java, so changing the "
+          + "working directory reroutes JRock's own files (prompt, log, logs/) to the "
+          + "new directory rather than changing the OS-level CWD of the process.");
+        note.setEditable(false);
+        note.setOpaque(false);
+        note.setLineWrap(true);
+        note.setWrapStyleWord(true);
+        note.setFont(javax.swing.UIManager.getFont("Label.font"));
+
+        javax.swing.JTextArea shortcuts = new javax.swing.JTextArea(
+            "Ctrl+S  Save prompt as (a copy)\n"
+          + "Ctrl+O  Load prompt from a file\n"
+          + "Ctrl+R  Move & resize the window\n"
+          + "Ctrl+Enter  Send");
+        shortcuts.setEditable(false);
+        shortcuts.setOpaque(false);
+        shortcuts.setFont(javax.swing.UIManager.getFont("Label.font"));
+        shortcuts.setBorder(javax.swing.BorderFactory.createTitledBorder("Shortcuts"));
+
+        // About line at the very top, like a mini about box.
+        javax.swing.JLabel about = new javax.swing.JLabel(
+                "JRock version " + VERSION + ", (c) 2026");
+        about.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 2, 8, 2));
+
+        javax.swing.JPanel north = new javax.swing.JPanel(new BorderLayout(8, 8));
+        north.add(about, BorderLayout.NORTH);
+        north.add(fields, BorderLayout.CENTER);
+        north.add(shortcuts, BorderLayout.SOUTH);
+
+        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
+        panel.add(north, BorderLayout.NORTH);
+        javax.swing.JScrollPane noteScroll = new javax.swing.JScrollPane(note);
+        noteScroll.setBorder(javax.swing.BorderFactory.createTitledBorder("Notes"));
+        noteScroll.setPreferredSize(new java.awt.Dimension(460, 120));
+        noteScroll.setHorizontalScrollBarPolicy(
+                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        panel.add(noteScroll, BorderLayout.CENTER);
+
+        int result = javax.swing.JOptionPane.showConfirmDialog(
+                frame, panel, "Configure",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.PLAIN_MESSAGE);
+        if (result != javax.swing.JOptionPane.OK_OPTION) return false;
+
+        // Working directory.
+        String cwdText = cwdF.getText().trim();
+        if (!cwdText.isEmpty()) {
+            Path newDir = Paths.get(cwdText).toAbsolutePath().normalize();
+            try {
+                Files.createDirectories(newDir);
+                workingDir = newDir;
+                // Best-effort: also update user.dir so relative paths elsewhere align.
+                System.setProperty("user.dir", newDir.toString());
+            } catch (IOException ex) {
+                javax.swing.JOptionPane.showMessageDialog(frame,
+                        "Could not use working directory " + newDir + ":\n" + ex.getMessage(),
+                        "Invalid directory", javax.swing.JOptionPane.WARNING_MESSAGE);
+            }
+        }
+
+        // API key override: only set if the user typed something. Never store the
+        // env value; an empty field means "keep whatever is already in effect".
+        char[] key = keyF.getPassword();
+        if (key.length > 0) {
+            apiKeyOverride = new String(key);
+        }
+        java.util.Arrays.fill(key, '\0');   // wipe the transient char[]
+
+        // Region + model (free text).
+        String r = regionF.getText().trim();
+        if (!r.isEmpty()) { REGION = r; regionFromEnv = false; }
+        String m = modelF.getText().trim();
+        if (!m.isEmpty()) { MODEL_ID = m; }
+
+        return true;
+    }
+
+    // Adds a "label: field" row to a GridBagLayout panel.
+    private static void addRow(javax.swing.JPanel p, java.awt.GridBagConstraints c,
+                               int row, String label, javax.swing.JComponent field) {
+        c.gridx = 0; c.gridy = row; c.weightx = 0;
+        p.add(new javax.swing.JLabel(label), c);
+        c.gridx = 1; c.weightx = 1;
+        p.add(field, c);
     }
 
     // ---- Save / load prompt (Ctrl+S / Ctrl+O) ------------------------------
@@ -814,14 +979,12 @@ public class JRock {
     // Only a successful reply is treated as dialog; failures are logged in gray.
     private static String[] callModel(String prompt, java.util.List<String[]> history)
             throws Exception {
-        String apiKey = System.getenv("BEDROCK_API_KEY");
+        String apiKey = resolveApiKey();
         if (apiKey == null || apiKey.isBlank()) {
             return new String[] {
                 "0",
-                "No BEDROCK_API_KEY found. Generate a Bedrock API key in the "
-                    + "console and set it, e.g.:\n\n"
-                    + "  $env:BEDROCK_API_KEY = \"<your key>\"\n\n"
-                    + "then relaunch: java JRock.java",
+                "No Bedrock API key set. Set the BEDROCK_API_KEY env var, or open "
+                    + "the Configure dialog (top-left button) and enter a key.",
                 null
             };
         }
@@ -854,7 +1017,7 @@ public class JRock {
         maskedRequestBody = maskFirst(maskedRequestBody, jsonEscape(prompt), "<input masked>");
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ENDPOINT))
+                .uri(URI.create(endpoint()))
                 .timeout(Duration.ofSeconds(60))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + apiKey.trim())
@@ -871,7 +1034,7 @@ public class JRock {
             return new String[] {
                 "0",
                 "HTTP " + resp.statusCode(),
-                "--- raw request ---\nPOST " + ENDPOINT + "\n" + maskedRequestBody
+                "--- raw request ---\nPOST " + endpoint() + "\n" + maskedRequestBody
                     + "\n\n--- raw response ---\n" + resp.body()
             };
         }
@@ -895,7 +1058,7 @@ public class JRock {
         // (it's already shown above). The request is already masked (all turns).
         String maskedResponse = maskFirst(resp.body(), jsonEscape(reply), "<output masked>");
 
-        String details = "--- raw request ---\n" + "POST " + ENDPOINT + "\n" + maskedRequestBody
+        String details = "--- raw request ---\n" + "POST " + endpoint() + "\n" + maskedRequestBody
                 + "\n\n--- raw response ---\n" + maskedResponse
                 + "\n\n--- stats ---"
                 + "\nInput symbols:  " + inputSymbols
@@ -1016,7 +1179,7 @@ public class JRock {
 
     // Rewrites the persistent prompt file (crash recovery for the input box).
     private static void savePromptQuietly(String text) {
-        atomicWriteQuietly(PROMPT_FILE, text);
+        atomicWriteQuietly(promptFile(), text);
     }
 
     // Atomically rewrites `target` with `text`: write to a temp file, then move it
@@ -1107,14 +1270,14 @@ public class JRock {
     // is ALWAYS a value we produced/validated (yyyyMMdd-HHmmss-SSS), never raw
     // user text, so the path can't escape logs/.
     private static Path messageFile(String role, String stamp) {
-        return LOGS_DIR.resolve(stamp + "-" + roleSlug(role) + ".txt");
+        return logsDir().resolve(stamp + "-" + roleSlug(role) + ".txt");
     }
 
     // Writes a dialog message body to its own file in logs/. Written once and
     // never modified afterwards. Best-effort.
     private static void writeMessageFile(String role, String stamp, String text) {
         try {
-            Files.createDirectories(LOGS_DIR);
+            Files.createDirectories(logsDir());
             Files.write(messageFile(role, stamp), text.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             // Best-effort; the on-screen log still shows the message.
@@ -1132,7 +1295,7 @@ public class JRock {
             String canonical = dt.format(STAMP_FMT);   // round-trip -> safe stamp
             Path file = messageFile(role, canonical);
             // Ensure the resolved path is actually inside logs/ (defense in depth).
-            Path base = LOGS_DIR.toAbsolutePath().normalize();
+            Path base = logsDir().toAbsolutePath().normalize();
             Path resolved = file.toAbsolutePath().normalize();
             if (!resolved.startsWith(base)) return null;
             return readFileQuietly(file);
