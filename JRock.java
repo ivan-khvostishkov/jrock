@@ -309,13 +309,15 @@ public class JRock {
             }
         }
 
-        // Renders exactly two lines: the branded header and the (possibly
-        // multi-line) body. The blank line after a message is NOT baked in here -
-        // it is emitted separately as an explicit gray "" entry so it round-trips
-        // like any other line. Nothing here adds or removes empty lines.
+        // Renders the branded header and the (possibly multi-line) body. In the
+        // normal view the blank line after a message comes from a separate gray ""
+        // entry. In "Dialog only" mode those gray separators are hidden, so we add
+        // one blank line here to keep messages visually separated. This affects
+        // only the on-screen view, never the stored entries or files.
         private void renderDialog(Entry e) {
             appendStyled("[" + e.role + "]", BRAND);
             appendStyled(e.text, java.awt.Color.BLACK);
+            if (dialogOnly) appendStyled("", java.awt.Color.BLACK);
         }
 
         private void renderGray(String text) { appendStyled(text, java.awt.Color.GRAY); }
@@ -735,10 +737,20 @@ public class JRock {
         addRow(fields, c, row++, "AWS_REGION:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
 
+        // A plain (non-bold) font derived from the default label font, reused for
+        // the notes, shortcuts and titled-border titles so nothing renders bold.
+        java.awt.Font base = javax.swing.UIManager.getFont("Label.font");
+        java.awt.Font plainFont = (base != null)
+                ? base.deriveFont(java.awt.Font.PLAIN)
+                : new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12);
+
         javax.swing.JTextArea note = new javax.swing.JTextArea(
             "The API key field is intentionally blank and write-only: leave it empty "
           + "to keep the current key (env var or a previous override); type a value "
           + "to override it for this session. The key is never displayed.\n\n"
+          + "Clearing the log only clears jrock-log.txt (and the window); the "
+          + "per-message files in JRock/messages/ are never deleted, so your inputs "
+          + "and outputs are preserved.\n\n"
           + "Note: a true OS process chdir isn't possible from Java, so changing the "
           + "working directory reroutes JRock's own files (a JRock/ subfolder holding "
           + "the prompt, log and messages/) to the new directory rather than changing "
@@ -747,25 +759,55 @@ public class JRock {
         note.setOpaque(false);
         note.setLineWrap(true);
         note.setWrapStyleWord(true);
-        note.setFont(javax.swing.UIManager.getFont("Label.font"));
+        note.setFont(plainFont);
 
-        javax.swing.JTextArea shortcuts = new javax.swing.JTextArea(
-            "Ctrl+S  Save prompt as (a copy)\n"
-          + "Ctrl+O  Load prompt from a file\n"
-          + "Ctrl+R  Move & resize the window\n"
-          + "Ctrl+Enter  Send");
-        shortcuts.setEditable(false);
-        shortcuts.setOpaque(false);
-        shortcuts.setFont(javax.swing.UIManager.getFont("Label.font"));
+        // Shortcuts as a 2-column grid so keys and descriptions align cleanly
+        // (no space-padding). The "Shortcuts" border title keeps the default bold.
+        String[][] keys = {
+            {"Ctrl+S", "Save prompt as (a copy)"},
+            {"Ctrl+O", "Load prompt from a file"},
+            {"Ctrl+R", "Move & resize the window"},
+            {"Ctrl+Enter", "Send"},
+        };
+        javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
         shortcuts.setBorder(javax.swing.BorderFactory.createTitledBorder("Shortcuts"));
+        java.awt.GridBagConstraints sc = new java.awt.GridBagConstraints();
+        sc.anchor = java.awt.GridBagConstraints.WEST;
+        sc.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        sc.insets = new java.awt.Insets(1, 4, 1, 4);
+        for (int r = 0; r < keys.length; r++) {
+            javax.swing.JLabel keyLbl = new javax.swing.JLabel(keys[r][0]);
+            keyLbl.setFont(plainFont);
+            javax.swing.JLabel descLbl = new javax.swing.JLabel(keys[r][1]);
+            descLbl.setFont(plainFont);
+            // Golden-ratio-ish column weights: key column narrow (~38%), desc wide.
+            sc.gridx = 0; sc.gridy = r; sc.weightx = 0.38;
+            shortcuts.add(keyLbl, sc);
+            sc.gridx = 1; sc.weightx = 0.62;
+            shortcuts.add(descLbl, sc);
+        }
 
-        // About line at the very top, like a mini about box.
+        // About line (bold, default L&F) + a short plain description.
         javax.swing.JLabel about = new javax.swing.JLabel(
                 "JRock version " + VERSION + " (c) 2026");
-        about.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 2, 8, 2));
+        javax.swing.JTextArea desc = new javax.swing.JTextArea(
+            "The Amazon Bedrock playground that just works: every prompt and session "
+          + "is saved to disk so nothing is ever lost, and your credentials stay put "
+          + "with no repeated sign-ins - so it keeps out of your way and lets you "
+          + "focus on the models.");
+        desc.setEditable(false);
+        desc.setOpaque(false);
+        desc.setLineWrap(true);
+        desc.setWrapStyleWord(true);
+        desc.setFont(plainFont);
+
+        javax.swing.JPanel aboutBox = new javax.swing.JPanel(new BorderLayout(0, 4));
+        aboutBox.add(about, BorderLayout.NORTH);
+        aboutBox.add(desc, BorderLayout.CENTER);
+        aboutBox.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 2, 8, 2));
 
         javax.swing.JPanel north = new javax.swing.JPanel(new BorderLayout(8, 8));
-        north.add(about, BorderLayout.NORTH);
+        north.add(aboutBox, BorderLayout.NORTH);
         north.add(fields, BorderLayout.CENTER);
         north.add(shortcuts, BorderLayout.SOUTH);
 
@@ -773,7 +815,7 @@ public class JRock {
         panel.add(north, BorderLayout.NORTH);
         javax.swing.JScrollPane noteScroll = new javax.swing.JScrollPane(note);
         noteScroll.setBorder(javax.swing.BorderFactory.createTitledBorder("Notes"));
-        noteScroll.setPreferredSize(new java.awt.Dimension(460, 120));
+        noteScroll.setPreferredSize(new java.awt.Dimension(460, 150));
         noteScroll.setHorizontalScrollBarPolicy(
                 javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         panel.add(noteScroll, BorderLayout.CENTER);
