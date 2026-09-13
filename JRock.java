@@ -191,6 +191,37 @@ public class JRock {
         String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html"; }
     }
 
+    // Shared traits of Anthropic Claude models on Bedrock. IMPORTANT: on
+    // bedrock-mantle, Claude is served through the Anthropic-native Messages API at
+    // /anthropic/v1/messages - NOT via the OpenAI Chat Completions surface. Their
+    // cards list Chat Completions among supported APIs generally, but the mantle
+    // Programmatic Access URL is the Messages endpoint. JRock currently sends
+    // OpenAI-style Chat Completions requests, which are NOT compatible with the
+    // Messages API, so selecting a Claude model here will not work until Messages
+    // support is added. These cards are included for their metadata.
+    private abstract static class AnthropicModelCard extends BedrockModelCard {
+        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] apisSupported()      { return new String[] { "Messages", "Responses", "Chat Completions", "Converse", "Invoke" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        // Documented mantle surface for Claude is the Anthropic Messages API.
+        @Override String mantleChatCompletionsPath() { return "/anthropic/v1/messages"; }
+    }
+
+    // Anthropic Claude Opus 5.
+    private static final class ClaudeOpus5Card extends AnthropicModelCard {
+        String modelId()     { return "anthropic.claude-opus-5"; }
+        String displayName() { return "Claude Opus 5"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5.html"; }
+    }
+
+    // Anthropic Claude Fable 5.1.
+    private static final class ClaudeFable51Card extends AnthropicModelCard {
+        String modelId()     { return "anthropic.claude-fable-5-1"; }
+        String displayName() { return "Claude Fable 5.1"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-fable-5-1.html"; }
+    }
+
     // DeepSeek-V3.1.
     // Mantle base per the model card is /v1, so Chat Completions is /v1/chat/completions.
     private static final class DeepSeekV31Card extends BedrockModelCard {
@@ -208,6 +239,7 @@ public class JRock {
     private static final BedrockModelCard[] MODEL_CARDS = {
         new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(),
         new Gpt54Card(), new Gpt6AstraCard(),
+        new ClaudeOpus5Card(), new ClaudeFable51Card(),
     };
 
     private static BedrockModelCard cardFor(String modelId) {
