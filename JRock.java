@@ -164,6 +164,33 @@ public class JRock {
         // Uses the mantle default /v1/chat/completions (inherited).
     }
 
+    // Shared traits of OpenAI GPT models on Bedrock. Per their model cards, on
+    // bedrock-mantle "both APIs use the /openai/v1 base path, not /v1", so Chat
+    // Completions lives at /openai/v1/chat/completions. They expose the same API
+    // set and Text/Image-in, Text-out modalities. Concrete subclasses supply only
+    // the model id, display name and card URL.
+    private abstract static class OpenAiModelCard extends BedrockModelCard {
+        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] apisSupported()      { return new String[] { "Messages", "Responses", "Chat Completions", "Converse", "Invoke" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
+        @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
+    }
+
+    // OpenAI GPT-5.4.
+    private static final class Gpt54Card extends OpenAiModelCard {
+        String modelId()     { return "openai.gpt-5.4"; }
+        String displayName() { return "GPT-5.4"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-54.html"; }
+    }
+
+    // OpenAI GPT-6 Astra.
+    private static final class Gpt6AstraCard extends OpenAiModelCard {
+        String modelId()     { return "openai.gpt-6-astra"; }
+        String displayName() { return "GPT-6 Astra"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html"; }
+    }
+
     // DeepSeek-V3.1.
     // Mantle base per the model card is /v1, so Chat Completions is /v1/chat/completions.
     private static final class DeepSeekV31Card extends BedrockModelCard {
@@ -180,6 +207,7 @@ public class JRock {
     // Registry of known model cards, and a lookup by model id.
     private static final BedrockModelCard[] MODEL_CARDS = {
         new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(),
+        new Gpt54Card(), new Gpt6AstraCard(),
     };
 
     private static BedrockModelCard cardFor(String modelId) {
