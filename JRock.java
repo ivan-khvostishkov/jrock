@@ -602,7 +602,148 @@ public class JRock {
         frame.add(topBar, BorderLayout.NORTH);
         frame.add(split, BorderLayout.CENTER);
         frame.add(buttonBar, BorderLayout.SOUTH);
+
+        // Hidden feature: Ctrl+R opens a Move & Resize dialog. Bound at the window
+        // level so it fires regardless of which component has focus.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK), "jrock-move-resize");
+        frame.getRootPane().getActionMap().put("jrock-move-resize", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showMoveResizeDialog(frame);
+            }
+        });
+
         frame.setVisible(true);
+    }
+
+    // ---- Move & Resize dialog (Ctrl+R) -------------------------------------
+    // Lets the user set the window size and on-screen position numerically, and
+    // shows which screen the window is on plus that screen's bounds. Useful for
+    // precise placement and moving the window across monitors without a mouse.
+    private static void showMoveResizeDialog(JFrame frame) {
+        java.awt.Rectangle win = frame.getBounds();
+        boolean maximized =
+                (frame.getExtendedState() & java.awt.Frame.MAXIMIZED_BOTH) == java.awt.Frame.MAXIMIZED_BOTH;
+
+        // When maximized, Windows places the frame slightly off-screen (e.g. -7,-7
+        // with oversized bounds) so its invisible borders sit outside the monitor.
+        // Showing those raw values is confusing, so prefill the fields with the
+        // clean visible bounds of the screen the window is on instead.
+        java.awt.Rectangle prefill = win;
+        if (maximized) {
+            java.awt.Rectangle screen = screenBoundsFor(win);
+            if (screen != null) prefill = screen;
+        }
+
+        javax.swing.JTextField widthF  = new javax.swing.JTextField(String.valueOf(prefill.width), 6);
+        javax.swing.JTextField heightF = new javax.swing.JTextField(String.valueOf(prefill.height), 6);
+        javax.swing.JTextField xF      = new javax.swing.JTextField(String.valueOf(prefill.x), 6);
+        javax.swing.JTextField yF      = new javax.swing.JTextField(String.valueOf(prefill.y), 6);
+
+        // Screen info: find the device whose bounds contain the window's center.
+        String header = maximized
+                ? "NOTE: window is MAXIMIZED (Windows reports it at " + win.x + "," + win.y
+                  + " size " + win.width + "x" + win.height + ").\nApplying will restore it "
+                  + "to normal and use the values above.\n\n"
+                : "";
+        javax.swing.JTextArea info = new javax.swing.JTextArea(header + describeScreens(win));
+        info.setEditable(false);
+        info.setOpaque(false);
+        info.setLineWrap(true);
+        info.setWrapStyleWord(true);
+        info.setFont(javax.swing.UIManager.getFont("Label.font"));
+
+        javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridLayout(4, 2, 6, 6));
+        fields.add(new javax.swing.JLabel("Width:"));      fields.add(widthF);
+        fields.add(new javax.swing.JLabel("Height:"));     fields.add(heightF);
+        fields.add(new javax.swing.JLabel("Position X:")); fields.add(xF);
+        fields.add(new javax.swing.JLabel("Position Y:")); fields.add(yF);
+
+        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
+        panel.add(fields, BorderLayout.NORTH);
+        javax.swing.JScrollPane infoScroll = new javax.swing.JScrollPane(info);
+        infoScroll.setBorder(javax.swing.BorderFactory.createTitledBorder("Screens"));
+        infoScroll.setPreferredSize(new java.awt.Dimension(480, 280));
+        // Wrapping handles width, so no horizontal scrollbar is ever needed.
+        infoScroll.setHorizontalScrollBarPolicy(
+                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        panel.add(infoScroll, BorderLayout.CENTER);
+
+        int result = javax.swing.JOptionPane.showConfirmDialog(
+                frame, panel, "Move & Resize (Ctrl+R)",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.PLAIN_MESSAGE);
+        if (result != javax.swing.JOptionPane.OK_OPTION) return;
+
+        try {
+            int w = Integer.parseInt(widthF.getText().trim());
+            int h = Integer.parseInt(heightF.getText().trim());
+            int x = Integer.parseInt(xF.getText().trim());
+            int y = Integer.parseInt(yF.getText().trim());
+            // Guard against degenerate sizes.
+            w = Math.max(200, w);
+            h = Math.max(150, h);
+            // If maximized, restore to normal first so setBounds actually applies.
+            if ((frame.getExtendedState() & java.awt.Frame.MAXIMIZED_BOTH) != 0) {
+                frame.setExtendedState(java.awt.Frame.NORMAL);
+            }
+            frame.setBounds(x, y, w, h);
+            // Moving to another monitor sometimes needs a revalidate to repaint.
+            frame.revalidate();
+            frame.repaint();
+        } catch (NumberFormatException ex) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Please enter whole numbers for width, height, X and Y.",
+                    "Invalid input", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    // Returns the bounds of the screen whose area contains the window's center,
+    // or the primary screen's bounds as a fallback, or null if none found.
+    private static java.awt.Rectangle screenBoundsFor(java.awt.Rectangle win) {
+        int cx = win.x + win.width / 2;
+        int cy = win.y + win.height / 2;
+        java.awt.GraphicsEnvironment ge = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment();
+        for (java.awt.GraphicsDevice dev : ge.getScreenDevices()) {
+            java.awt.Rectangle b = dev.getDefaultConfiguration().getBounds();
+            if (b.contains(cx, cy)) return b;
+        }
+        java.awt.GraphicsDevice primary = ge.getDefaultScreenDevice();
+        return primary == null ? null : primary.getDefaultConfiguration().getBounds();
+    }
+
+    // Builds a human-readable description of all screens and which one currently
+    // holds the window, with the window's position relative to that screen.
+    private static String describeScreens(java.awt.Rectangle win) {
+        StringBuilder sb = new StringBuilder();
+        int centerX = win.x + win.width / 2;
+        int centerY = win.y + win.height / 2;
+
+        java.awt.GraphicsDevice[] devices = java.awt.GraphicsEnvironment
+                .getLocalGraphicsEnvironment().getScreenDevices();
+        java.awt.GraphicsDevice primary = java.awt.GraphicsEnvironment
+                .getLocalGraphicsEnvironment().getDefaultScreenDevice();
+
+        for (int i = 0; i < devices.length; i++) {
+            java.awt.GraphicsDevice dev = devices[i];
+            java.awt.Rectangle b = dev.getDefaultConfiguration().getBounds();
+            boolean isPrimary = dev.equals(primary);
+            boolean hasWindow = b.contains(centerX, centerY);
+            sb.append(hasWindow ? "> " : "  ")
+              .append("Screen ").append(i + 1)
+              .append(isPrimary ? " (primary)" : "")
+              .append(": ").append(b.width).append("x").append(b.height)
+              .append(" at (").append(b.x).append(", ").append(b.y).append(")");
+            if (hasWindow) {
+                sb.append("\n    window here; position on this screen: (")
+                  .append(win.x - b.x).append(", ").append(win.y - b.y).append(")");
+            }
+            sb.append("\n");
+        }
+        sb.append("\nCoordinates X/Y are in the virtual desktop space\n")
+          .append("(primary screen's top-left is 0,0; screens to the\n")
+          .append("left/above have negative coordinates).");
+        return sb.toString();
     }
 
     // ---- Bedrock call ------------------------------------------------------
