@@ -681,10 +681,11 @@ public class JRock {
 
         // Configure button: opens the settings dialog, then re-runs the session
         // report (CWD first, models loaded, ... Ready) exactly like startup.
+        // initSession reloads the log from the (possibly new) working directory,
+        // fully replacing the window contents - so switching directories shows
+        // only the new directory's log, with nothing carried over from the old one.
         configure.addActionListener(e -> {
             if (showConfigureDialog(frame)) {
-                log.gray("");
-                log.gray("--- reconfigured ---");
                 initSession(log, null);   // no prompt-source line on reconfigure
             }
         });
