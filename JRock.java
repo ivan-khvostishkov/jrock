@@ -92,13 +92,19 @@ public class JRock {
     // Configure dialog can point it elsewhere. All file paths resolve against it.
     private static Path workingDir = Paths.get("").toAbsolutePath();
 
+    // Directory the Save/Load prompt choosers open in. Starts at workingDir on each
+    // (re)initialization, then follows wherever the user last browsed.
+    private static Path lastChooserDir = workingDir;
+
     // Derived endpoints/paths (recomputed from the mutable config above).
     private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
     private static String endpoint()       { return mantleHost() + "/openai/v1/chat/completions"; }
     private static String modelsEndpoint() { return mantleHost() + "/v1/models"; }
-    private static Path promptFile()       { return workingDir.resolve("jrock-prompt.txt"); }
-    private static Path logFile()          { return workingDir.resolve("jrock-log.txt"); }
-    private static Path logsDir()          { return workingDir.resolve("logs"); }
+    // All JRock files live under a "JRock" subfolder of the working directory.
+    private static Path jrockDir()         { return workingDir.resolve("JRock"); }
+    private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
+    private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
+    private static Path logsDir()          { return jrockDir().resolve("messages"); }
 
     // Resolves the effective API key: the in-memory override if set, else the
     // BEDROCK_API_KEY env var. Returns null/blank if neither is present.
@@ -353,6 +359,9 @@ public class JRock {
     // promptSourceNote is logged only when non-null (startup); on reconfigure the
     // prompt is untouched so it's omitted.
     private static void initSession(LogView log, String promptSourceNote) {
+        // File choosers start fresh in the (possibly new) working directory.
+        lastChooserDir = workingDir;
+
         // Recover any previous log from disk FIRST. loadFromDisk() replaces the
         // entry list (rebuild -> setText), so it must run before we log anything
         // for this session, otherwise those lines would be wiped.
@@ -698,6 +707,19 @@ public class JRock {
     // Returns true if the user applied changes (so the caller re-inits the session).
     private static boolean showConfigureDialog(JFrame frame) {
         javax.swing.JTextField cwdF    = new javax.swing.JTextField(workingDir.toString(), 30);
+        JButton browse = new JButton("Browse...");
+        browse.addActionListener(ev -> {
+            javax.swing.JFileChooser dc = new javax.swing.JFileChooser(cwdF.getText().trim());
+            dc.setDialogTitle("Choose working directory");
+            dc.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
+            if (dc.showOpenDialog(frame) == javax.swing.JFileChooser.APPROVE_OPTION
+                    && dc.getSelectedFile() != null) {
+                cwdF.setText(dc.getSelectedFile().getAbsolutePath());
+            }
+        });
+        javax.swing.JPanel cwdRow = new javax.swing.JPanel(new BorderLayout(4, 0));
+        cwdRow.add(cwdF, BorderLayout.CENTER);
+        cwdRow.add(browse, BorderLayout.EAST);
         javax.swing.JPasswordField keyF = new javax.swing.JPasswordField(24); // never prefilled
         javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
         javax.swing.JTextField modelF  = new javax.swing.JTextField(MODEL_ID, 24);
@@ -708,7 +730,7 @@ public class JRock {
         c.anchor = java.awt.GridBagConstraints.WEST;
         c.fill = java.awt.GridBagConstraints.HORIZONTAL;
         int row = 0;
-        addRow(fields, c, row++, "Working directory:", cwdF);
+        addRow(fields, c, row++, "Working directory:", cwdRow);
         addRow(fields, c, row++, "BEDROCK_API_KEY:", keyF);
         addRow(fields, c, row++, "AWS_REGION:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
@@ -718,8 +740,9 @@ public class JRock {
           + "to keep the current key (env var or a previous override); type a value "
           + "to override it for this session. The key is never displayed.\n\n"
           + "Note: a true OS process chdir isn't possible from Java, so changing the "
-          + "working directory reroutes JRock's own files (prompt, log, logs/) to the "
-          + "new directory rather than changing the OS-level CWD of the process.");
+          + "working directory reroutes JRock's own files (a JRock/ subfolder holding "
+          + "the prompt, log and messages/) to the new directory rather than changing "
+          + "the OS-level CWD of the process.");
         note.setEditable(false);
         note.setOpaque(false);
         note.setLineWrap(true);
@@ -804,13 +827,21 @@ public class JRock {
     }
 
     // ---- Save / load prompt (Ctrl+S / Ctrl+O) ------------------------------
+    // Remembers the directory the chooser ended in, so the next Save/Load opens
+    // there. Reset back to workingDir on each (re)initialization.
+    private static void rememberChooserDir(javax.swing.JFileChooser chooser) {
+        java.io.File dir = chooser.getCurrentDirectory();
+        if (dir != null) lastChooserDir = dir.toPath();
+    }
+
     // Saves a copy of the given text to a user-chosen file. Does NOT touch the
     // persistent jrock-prompt.txt; this is an extra export.
     private static void savePromptAs(JFrame frame, String text) {
-        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
         chooser.setDialogTitle("Save prompt as");
-        chooser.setSelectedFile(new java.io.File("prompt.txt"));
+        chooser.setSelectedFile(new java.io.File(lastChooserDir.toFile(), "prompt.txt"));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        rememberChooserDir(chooser);
 
         Path target = chooser.getSelectedFile().toPath();
         try {
@@ -825,9 +856,10 @@ public class JRock {
     // Loads a prompt from a user-chosen file (read-only) into the input area.
     // The document listener then autosaves the loaded text to jrock-prompt.txt.
     private static void loadPromptInto(JFrame frame, JTextArea input, LogView log) {
-        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
         chooser.setDialogTitle("Load prompt");
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        rememberChooserDir(chooser);
 
         Path source = chooser.getSelectedFile().toPath();
         String loaded = readFileQuietly(source);

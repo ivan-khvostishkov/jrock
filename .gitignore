@@ -23,10 +23,6 @@
 hs_err_pid*
 replay_pid*
 
-# Persisted JRock prompt
-jrock-prompt.txt
+# JRock runtime data (prompt, conversation log, per-message files, temp files)
+JRock/
 
-# Persisted JRock conversation log + per-message files
-jrock-log.txt
-jrock*.tmp
-logs/
