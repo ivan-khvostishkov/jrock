@@ -170,7 +170,7 @@ public class JRock {
     //                   log stores only a reference: the header line + "@<stamp>".
     //
     // "Dialog only" mode hides GRAY entries, leaving a clean transcript of just
-    // the headers + dialog, which matches `cat logs/*.txt`.
+    // the headers + dialog, which matches `cat JRock/messages/*.txt`.
     private static final class LogView {
         private static final class Entry {
             final boolean dialog;      // true = dialog message, false = gray inline
@@ -372,11 +372,11 @@ public class JRock {
         if (restored > 0) log.gray("");
         log.gray("Working directory: " + workingDir);
         if (hadLog) {
-            log.gray("Loaded previous log from jrock-log.txt");
+            log.gray("Loaded previous log from JRock/jrock-log.txt");
         } else {
-            log.gray("New log file created: jrock-log.txt");
+            log.gray("New log file created: JRock/jrock-log.txt");
         }
-        log.gray("Messages logged to jrock-log.txt and logs/ directory.");
+        log.gray("Messages also stored in JRock/messages/ directory.");
 
         if (regionFromEnv) {
             log.gray("AWS region: " + REGION + " (from AWS_REGION env var)");
@@ -387,7 +387,7 @@ public class JRock {
         if (promptSourceNote != null) {
             log.gray("Prompt source: " + promptSourceNote);
         }
-        log.gray("Autosaving prompt to jrock-prompt.txt");
+        log.gray("Autosaving prompt to JRock/jrock-prompt.txt");
         log.gray("Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
@@ -512,7 +512,7 @@ public class JRock {
             String fromPersist = readFileQuietly(promptFile());
             if (fromPersist != null) {
                 initialPrompt = fromPersist;
-                promptSource = "recovered persistent file: " + promptFile().getFileName();
+                promptSource = "recovered persistent file: JRock/jrock-prompt.txt";
             } else {
                 initialPrompt = PROMPT;
                 promptSource = "default";
@@ -1292,7 +1292,7 @@ public class JRock {
         }
     }
 
-    // ---- Message-file persistence (append-only logs/ directory) ------------
+    // ---- Message-file persistence (append-only JRock/messages/ directory) ---
     // Maps a role to a filename-safe slug. Kept explicit (no user text in the
     // name) so filenames are always predictable and injection-free.
     private static String roleSlug(String role) {
