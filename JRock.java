@@ -83,6 +83,10 @@ public class JRock {
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello world";
 
+    // Most recently fetched list of available model ids (from the /v1/models call).
+    // Empty until the first successful fetch; used to populate the Configure dropdown.
+    private static java.util.List<String> availableModels = new ArrayList<>();
+
     // In-memory Bedrock API key override. Null means "use the BEDROCK_API_KEY env
     // var". We never read/prefill the env value into the UI; the override is only
     // set when the user explicitly types a new key in the Configure dialog.
@@ -521,6 +525,7 @@ public class JRock {
                 return "(HTTP " + resp.statusCode() + " from " + modelsEndpoint() + ")";
             }
             List<String> ids = extractModelIds(resp.body());
+            if (!ids.isEmpty()) availableModels = ids;   // cache for the Configure dropdown
             return ids.isEmpty() ? "(none parsed; raw: " + resp.body() + ")"
                     : String.join(", ", ids);
         } catch (Exception ex) {
@@ -808,7 +813,15 @@ public class JRock {
         cwdRow.add(browse, BorderLayout.EAST);
         javax.swing.JPasswordField keyF = new javax.swing.JPasswordField(24); // never prefilled
         javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
-        javax.swing.JTextField modelF  = new javax.swing.JTextField(MODEL_ID, 24);
+        // Editable combo: free text, plus a dropdown of the most recently fetched
+        // available models (empty until the first successful /v1/models call).
+        javax.swing.JComboBox<String> modelF =
+                new javax.swing.JComboBox<>(availableModels.toArray(new String[0]));
+        modelF.setEditable(true);
+        modelF.setSelectedItem(MODEL_ID);   // shows current value; typeable
+        modelF.setFont(modelF.getFont().deriveFont(java.awt.Font.PLAIN));  // not bold
+        modelF.getEditor().getEditorComponent()
+                .setFont(modelF.getFont().deriveFont(java.awt.Font.PLAIN));
 
         javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
@@ -937,7 +950,8 @@ public class JRock {
         // Region + model (free text).
         String r = regionF.getText().trim();
         if (!r.isEmpty()) { REGION = r; regionFromEnv = false; }
-        String m = modelF.getText().trim();
+        Object selected = modelF.getEditor().getItem();  // typed or picked value
+        String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
 
         return true;
@@ -964,7 +978,7 @@ public class JRock {
     // persistent jrock-prompt.txt; this is an extra export.
     private static void savePromptAs(JFrame frame, String text) {
         javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
-        chooser.setDialogTitle("Save prompt as");
+        chooser.setDialogTitle("Save prompt copy as");
         chooser.setSelectedFile(new java.io.File(lastChooserDir.toFile(), "prompt.txt"));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         rememberChooserDir(chooser);
@@ -1054,7 +1068,7 @@ public class JRock {
         panel.add(infoScroll, BorderLayout.CENTER);
 
         int result = javax.swing.JOptionPane.showConfirmDialog(
-                frame, panel, "Move & Resize (Ctrl+R)",
+                frame, panel, "Move & Resize",
                 javax.swing.JOptionPane.OK_CANCEL_OPTION,
                 javax.swing.JOptionPane.PLAIN_MESSAGE);
         if (result != javax.swing.JOptionPane.OK_OPTION) return;
