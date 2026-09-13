@@ -235,9 +235,22 @@ public class JRock {
         // Uses the mantle default /v1/chat/completions (inherited).
     }
 
+    // Qwen3 32B.
+    // Mantle base per the model card is /v1, so Chat Completions is /v1/chat/completions.
+    private static final class Qwen332bCard extends BedrockModelCard {
+        String modelId()              { return "qwen.qwen3-32b"; }
+        String displayName()          { return "Qwen3 32B"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-qwen-qwen3-32b.html"; }
+        String[] inputModalities()    { return new String[] { "Text" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        // Uses the mantle default /v1/chat/completions (inherited).
+    }
+
     // Registry of known model cards, and a lookup by model id.
     private static final BedrockModelCard[] MODEL_CARDS = {
-        new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(),
+        new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(), new Qwen332bCard(),
         new Gpt54Card(), new Gpt6AstraCard(),
         new ClaudeOpus5Card(), new ClaudeFable51Card(),
     };
