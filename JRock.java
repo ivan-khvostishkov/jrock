@@ -761,7 +761,7 @@ public class JRock {
 
         // About line at the very top, like a mini about box.
         javax.swing.JLabel about = new javax.swing.JLabel(
-                "JRock version " + VERSION + ", (c) 2026");
+                "JRock version " + VERSION + " (c) 2026");
         about.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 2, 8, 2));
 
         javax.swing.JPanel north = new javax.swing.JPanel(new BorderLayout(8, 8));
