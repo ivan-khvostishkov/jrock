@@ -462,7 +462,7 @@ public class JRock {
     private static void createAndShowGui(String sourceArg) {
         JFrame frame = new JFrame("JRock - Bedrock (mantle)");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(560, 460);
+        frame.setSize(800, 600);
         frame.setLocationRelativeTo(null);
 
         JTextPane output = new JTextPane();
