@@ -1222,7 +1222,8 @@ public class JRock {
             "The Amazon Bedrock playground that just works: every prompt and session "
           + "is saved to disk so nothing is ever lost, and your credentials stay put "
           + "with no repeated sign-ins - so it keeps out of your way and lets you "
-          + "focus on the models.");
+          + "focus on the models.\n\n"
+          + "By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.");
         desc.setEditable(false);
         desc.setOpaque(false);
         desc.setLineWrap(true);
