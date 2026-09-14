@@ -34,6 +34,12 @@
 //   because it is the portable, multi-model surface: swap the model to change it.
 //     URL:  https://bedrock-mantle.{region}.api.aws/v1/chat/completions
 //
+//   Why bedrock-mantle: AWS recommends bedrock-runtime for new apps, and more
+//   families are available there (Amazon Nova, Meta Llama, etc.). But as of Sep
+//   2026 several frontier models still run on bedrock-mantle ONLY, so JRock
+//   prefers mantle - sacrificing those runtime-only families for the simplicity of
+//   a single API surface.
+//
 //   Why Chat Completions and NOT the Responses API: Responses is stateful - the
 //   backend retains conversation state (stored responses, previous_response_id,
 //   etc.) server-side. We deliberately avoid that. For security and transparency
@@ -124,32 +130,57 @@ public class JRock {
     // to the mantle default of /v1/chat/completions.
     private static String endpoint() {
         BedrockModelCard card = cardFor(MODEL_ID);
-        String path = (card != null)
-                ? card.mantleChatCompletionsPath()
-                : "/v1/chat/completions";
+        String path = (card != null) ? card.mantleChatCompletionsPath() : null;
+        // Null means the model has no Chat Completions path on mantle (e.g. Claude,
+        // Messages-only). We fall back to the mantle default so we never build a
+        // ".../null" URL; such a request will fail server-side, which is expected
+        // until a Messages implementation is added.
+        if (path == null) path = "/v1/chat/completions";
         return mantleHost() + path;
     }
 
     // ---- Bedrock model cards -----------------------------------------------
-    // Recorded from the AWS model-card pages: input/output modalities, supported
-    // APIs and endpoints. We currently implement only Chat Completions on the
-    // bedrock-mantle endpoint (all three models below support that), but the
-    // mantle URL path differs per model, which is what mantleChatCompletionsPath()
-    // captures.
+    // Recorded from the AWS model-card pages: input/output modalities and the
+    // per-endpoint API support (the cards list APIs SEPARATELY for bedrock-runtime
+    // and bedrock-mantle, and they differ - so we record each table exactly).
+    //
+    // Note on endpoint choice: AWS recommends bedrock-runtime for new apps, where
+    // additional families are available (Amazon Nova, Meta Llama, etc.). But as of
+    // Sep 2026 several frontier models still run on bedrock-mantle ONLY, so JRock
+    // gives preference to mantle - sacrificing those runtime-only families for the
+    // simplicity of a single API surface (Chat Completions on mantle).
+    //
+    // We currently implement ONLY Chat Completions on bedrock-mantle. A model is
+    // usable in JRock only if its mantle API set includes "Chat Completions"; the
+    // mantle URL path differs per model (mantleChatCompletionsPath()).
     private abstract static class BedrockModelCard {
         abstract String modelId();
         abstract String displayName();
         abstract String cardUrl();          // AWS model-card documentation page
-            // See: https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html
         abstract String[] inputModalities();
         abstract String[] outputModalities();
-        abstract String[] apisSupported();
         abstract String[] endpointsSupported();
+        abstract String[] apisOnRuntime();  // APIs supported on the bedrock-runtime endpoint
+        abstract String[] apisOnMantle();   // APIs supported on the bedrock-mantle endpoint
 
-        // Path (appended to the mantle host) for Chat Completions. Defaults to the
-        // mantle default of /v1; models served under the OpenAI-compatible base
-        // override this to /openai/v1.
+        // Path (appended to the mantle host) for Chat Completions, or null if the
+        // model isn't served via Chat Completions on mantle. Defaults to the mantle
+        // default /v1; models on the OpenAI-compatible base override to /openai/v1.
         String mantleChatCompletionsPath() { return "/v1/chat/completions"; }
+
+        // Path for the Anthropic Messages API on mantle, or null if not applicable.
+        // Only Anthropic models set this; JRock does not implement Messages yet
+        // (planned for the future), so this is metadata for now.
+        String mantleMessagesPath() { return null; }
+
+        // Whether this model exposes Chat Completions on mantle (i.e. usable by
+        // JRock's current single-API implementation).
+        boolean supportsMantleChatCompletions() {
+            for (String api : apisOnMantle()) {
+                if (api.equals("Chat Completions")) return true;
+            }
+            return false;
+        }
     }
 
     // xAI Grok 4.3.
@@ -160,10 +191,12 @@ public class JRock {
         String modelId()              { return "xai.grok-4.3"; }
         String displayName()          { return "Grok 4.3"; }
         String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-xai-grok-4-3.html"; }
-        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] inputModalities()    { return new String[] { "Image", "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
-        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
         String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] {}; }  // runtime not supported
+        String[] apisOnMantle()       { return new String[] { "Chat Completions", "Responses" }; }
+        // Card: served under the OpenAI-compatible base /openai/v1 on mantle.
         @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
     }
 
@@ -173,55 +206,63 @@ public class JRock {
         String modelId()              { return "moonshotai.kimi-k2.5"; }
         String displayName()          { return "Kimi K2.5"; }
         String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-moonshot-ai-kimi-k2-5.html"; }
-        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] inputModalities()    { return new String[] { "Image", "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
-        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
         String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        // Card lists Chat Completions, Invoke, Converse (Responses NOT supported).
+        String[] apisOnRuntime()      { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
+        String[] apisOnMantle()       { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
         // Uses the mantle default /v1/chat/completions (inherited).
     }
 
     // Shared traits of OpenAI GPT models on Bedrock. Per their model cards, on
     // bedrock-mantle "both APIs use the /openai/v1 base path, not /v1", so Chat
-    // Completions lives at /openai/v1/chat/completions. They expose the same API
-    // set and Text/Image-in, Text-out modalities. Concrete subclasses supply only
-    // the model id, display name and card URL.
+    // Completions lives at /openai/v1/chat/completions. Text/Image-in, Text-out.
+    // Per-endpoint API support differs per model, so subclasses supply it.
     private abstract static class OpenAiModelCard extends BedrockModelCard {
-        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] inputModalities()    { return new String[] { "Image", "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
-        String[] apisSupported()      { return new String[] { "Messages", "Responses", "Chat Completions", "Converse", "Invoke" }; }
-        String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
         @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
     }
 
-    // OpenAI GPT-5.4.
+    // OpenAI GPT-5.4. Card: bedrock-mantle only; mantle APIs = Responses + Chat Completions.
     private static final class Gpt54Card extends OpenAiModelCard {
         String modelId()     { return "openai.gpt-5.4"; }
         String displayName() { return "GPT-5.4"; }
         String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-54.html"; }
+        String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] {}; }  // runtime not supported
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
     }
 
-    // OpenAI GPT-6 Astra.
+    // OpenAI GPT-6 Astra. Card: both endpoints. Runtime = Responses/Chat Completions/
+    // Converse; mantle = Responses/Chat Completions.
     private static final class Gpt6AstraCard extends OpenAiModelCard {
         String modelId()     { return "openai.gpt-6-astra"; }
         String displayName() { return "GPT-6 Astra"; }
         String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html"; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse" }; }
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
     }
 
-    // Shared traits of Anthropic Claude models on Bedrock. IMPORTANT: on
-    // bedrock-mantle, Claude is served through the Anthropic-native Messages API at
-    // /anthropic/v1/messages - NOT via the OpenAI Chat Completions surface. Their
-    // cards list Chat Completions among supported APIs generally, but the mantle
-    // Programmatic Access URL is the Messages endpoint. JRock currently sends
-    // OpenAI-style Chat Completions requests, which are NOT compatible with the
-    // Messages API, so selecting a Claude model here will not work until Messages
-    // support is added. These cards are included for their metadata.
+    // Shared traits of Anthropic Claude models on Bedrock. IMPORTANT (corrected
+    // from the model cards): Claude does NOT support Chat Completions on either
+    // endpoint. On bedrock-runtime it supports Messages, Converse, Invoke; on
+    // bedrock-mantle it supports Messages ONLY, served at /anthropic/v1/messages.
+    // JRock only implements Chat Completions on mantle, so Claude models are NOT
+    // usable here (supportsMantleChatCompletions() returns false). These cards are
+    // included for their metadata.
     private abstract static class AnthropicModelCard extends BedrockModelCard {
-        String[] inputModalities()    { return new String[] { "Text", "Image" }; }
+        String[] inputModalities()    { return new String[] { "Image", "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
-        String[] apisSupported()      { return new String[] { "Messages", "Responses", "Chat Completions", "Converse", "Invoke" }; }
         String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
-        // Documented mantle surface for Claude is the Anthropic Messages API.
-        @Override String mantleChatCompletionsPath() { return "/anthropic/v1/messages"; }
+        String[] apisOnRuntime()      { return new String[] { "Messages", "Converse", "Invoke" }; }
+        String[] apisOnMantle()       { return new String[] { "Messages" }; }
+        // Claude is NOT served via Chat Completions on mantle - only the Anthropic
+        // Messages API at /anthropic/v1/messages (which JRock doesn't implement yet).
+        @Override String mantleChatCompletionsPath() { return null; }
+        @Override String mantleMessagesPath()        { return "/anthropic/v1/messages"; }
     }
 
     // Anthropic Claude Opus 5.
@@ -246,8 +287,9 @@ public class JRock {
         String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-deepseek-deepseek-v3-1.html"; }
         String[] inputModalities()    { return new String[] { "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
-        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
         String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
+        String[] apisOnMantle()       { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
         // Uses the mantle default /v1/chat/completions (inherited).
     }
 
@@ -259,8 +301,9 @@ public class JRock {
         String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-qwen-qwen3-32b.html"; }
         String[] inputModalities()    { return new String[] { "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
-        String[] apisSupported()      { return new String[] { "Chat Completions", "Responses", "Invoke", "Converse" }; }
         String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
+        String[] apisOnMantle()       { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
         // Uses the mantle default /v1/chat/completions (inherited).
     }
 
