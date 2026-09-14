@@ -5,14 +5,19 @@
 // Run directly with: java JRock.java
 //   Optionally: java JRock.java <initial-prompt-file>
 //
-// Prompt persistence (crash recovery):
-//   The prompt text is autosaved to "jrock-prompt.txt" on every keystroke (full
-//   rewrite via an atomic temp-file swap, so a crash can't corrupt it).
+// Persistence (crash recovery + full local history):
+//   Everything lives under a "JRock" subfolder of the working directory.
+//   - Prompt: autosaved to JRock/jrock-prompt.txt on every keystroke (full rewrite
+//     via an atomic temp-file swap, so a crash can't corrupt it).
+//   - Conversation log + dialog: the on-screen transcript is persisted to
+//     JRock/jrock-log.txt, and each human/assistant message is also written to its
+//     own append-only file in JRock/messages/. On startup the log is restored from
+//     disk so the whole session survives restarts.
 //   On startup the initial prompt is resolved as:
 //     1. If a file path is passed as the first CLI arg, load it READ-ONLY and use
 //        its contents; the original file is never modified. That text is then
 //        written to the persistent file, which continues to receive autosaves.
-//     2. Else if jrock-prompt.txt exists, recover the prompt from it.
+//     2. Else if JRock/jrock-prompt.txt exists, recover the prompt from it.
 //     3. Else use the built-in default prompt.
 //
 // Java version requirements:
@@ -25,9 +30,19 @@
 //   bedrock-mantle is the newer endpoint surface (same underlying Mantle inference
 //   engine as bedrock-runtime). It exposes the OpenAI-compatible Chat Completions
 //   and Responses APIs plus the Anthropic Messages API, across a broad model
-//   catalog (Claude, OpenAI-family, etc.). We use Chat Completions here
-//   because it is the portable, multi-model surface: swap MODEL_ID to change model.
+//   catalog (Grok, Claude, OpenAI-GPT, GLM, Kimi, etc.). We use Chat Completions
+//   because it is the portable, multi-model surface: swap the model to change it.
 //     URL:  https://bedrock-mantle.{region}.api.aws/v1/chat/completions
+//
+//   Why Chat Completions and NOT the Responses API: Responses is stateful - the
+//   backend retains conversation state (stored responses, previous_response_id,
+//   etc.) server-side. We deliberately avoid that. For security and transparency
+//   JRock stores NOTHING on the backend; all history lives ONLY locally, as plain
+//   visible files in the JRock/ folder that the user fully owns and controls. This
+//   is the opposite of a browser client, where session data can be squirreled away
+//   non-transparently in cookies, sessionStorage, IndexedDB, etc. Chat Completions
+//   is stateless: each request carries its own context (see "Append" mode), so
+//   nothing needs to be, or is, kept on the server between calls.
 //
 // Authentication:
 //   Bearer token = your Bedrock API key, read from the BEDROCK_API_KEY env var.
@@ -72,7 +87,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "1.0.0";
+    private static final String VERSION = "1.1.0";
 
     // ---- Configuration (mutable: changed via the Configure dialog) ----------
     private static final String DEFAULT_REGION = "us-east-1";
@@ -81,7 +96,7 @@ public class JRock {
     private static boolean regionFromEnv =
             System.getenv("AWS_REGION") != null && !System.getenv("AWS_REGION").isBlank();
     private static String MODEL_ID = "xai.grok-4.3";
-    private static final String PROMPT = "Hello world";
+    private static final String PROMPT = "Hello, assistant.";
 
     // Most recently fetched list of available model ids (from the /v1/models call).
     // Empty until the first successful fetch; used to populate the Configure dropdown.
@@ -125,6 +140,7 @@ public class JRock {
         abstract String modelId();
         abstract String displayName();
         abstract String cardUrl();          // AWS model-card documentation page
+            // See: https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html
         abstract String[] inputModalities();
         abstract String[] outputModalities();
         abstract String[] apisSupported();
@@ -534,6 +550,12 @@ public class JRock {
         // The session report begins here; the working directory is its first line.
         if (restored > 0) log.gray("");
         log.gray("Working directory: " + workingDir);
+        // App identity + local date/time in the user's locale/format.
+        String now = java.time.format.DateTimeFormatter
+                .ofLocalizedDateTime(java.time.format.FormatStyle.FULL, java.time.format.FormatStyle.MEDIUM)
+                .withLocale(java.util.Locale.getDefault())
+                .format(java.time.ZonedDateTime.now());
+        log.gray("JRock version " + VERSION + " - " + now);
         if (hadLog) {
             log.gray("Loaded previous log from JRock/jrock-log.txt");
         } else {
@@ -598,7 +620,10 @@ public class JRock {
                 return "(HTTP " + resp.statusCode() + " from " + modelsEndpoint() + ")";
             }
             List<String> ids = extractModelIds(resp.body());
-            if (!ids.isEmpty()) availableModels = ids;   // cache for the Configure dropdown
+            if (!ids.isEmpty()) {
+                java.util.Collections.sort(ids);         // alphabetical order
+                availableModels = ids;                   // cache for the Configure dropdown
+            }
             return ids.isEmpty() ? "(none parsed; raw: " + resp.body() + ")"
                     : String.join(", ", ids);
         } catch (Exception ex) {
