@@ -398,11 +398,33 @@ public class JRock {
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
 
-    // Resolves the effective API key: the in-memory override if set, else the
-    // BEDROCK_API_KEY env var. Returns null/blank if neither is present.
+    // Resolves the effective API key. Precedence: in-memory override, then the
+    // BEDROCK_API_KEY env var / -D property, then BEDROCK_API_KEY_HEX (a hex-
+    // encoded fallback). The hex form exists for browser hosts (CheerpJ) that
+    // inject the key via javaProperties as "-Dname=value": Bedrock keys often
+    // contain '=' (base64 padding), which is ambiguous in that "key=value" form,
+    // so the web page hex-encodes it and JRock decodes it here. Returns
+    // null/blank if none is present.
     private static String resolveApiKey() {
         if (apiKeyOverride != null && !apiKeyOverride.isBlank()) return apiKeyOverride;
-        return envOrProp("BEDROCK_API_KEY");
+        String plain = envOrProp("BEDROCK_API_KEY");
+        if (plain != null && !plain.isBlank()) return plain;
+        String hex = envOrProp("BEDROCK_API_KEY_HEX");
+        return (hex == null || hex.isBlank()) ? null : decodeHex(hex.trim());
+    }
+
+    // Decodes a hex string to a UTF-8 string; returns null on malformed input.
+    private static String decodeHex(String hex) {
+        int n = hex.length();
+        if ((n & 1) != 0) return null;
+        byte[] out = new byte[n / 2];
+        for (int i = 0; i < n; i += 2) {
+            int hi = Character.digit(hex.charAt(i), 16);
+            int lo = Character.digit(hex.charAt(i + 1), 16);
+            if (hi < 0 || lo < 0) return null;
+            out[i / 2] = (byte) ((hi << 4) | lo);
+        }
+        return new String(out, StandardCharsets.UTF_8);
     }
 
     // ---- UI ----------------------------------------------------------------

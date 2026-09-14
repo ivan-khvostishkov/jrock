@@ -206,6 +206,9 @@
         return s;
       }
 
+      // Hex-encode a string's UTF-8 bytes (for lossless transport as a -D value).
+      function toHex(str) { return hex(new TextEncoder().encode(str)); }
+
       // --- Fetch + checksum the jar (runtime download is deferred to Run). ---
       fetch(JAR_URL, { cache: "no-store" })
         .then(function (r) {
@@ -266,11 +269,13 @@
 
         try {
           // Inject region + key as JVM system properties; JRock reads AWS_REGION
-          // and BEDROCK_API_KEY from the environment or, as here, same-named -D
-          // properties.
+          // and BEDROCK_API_KEY(_HEX) from the environment or, as here, same-named
+          // -D properties. The key is hex-encoded because Bedrock keys often
+          // contain '=' (base64 padding), which is ambiguous in the "name=value"
+          // property form; JRock decodes BEDROCK_API_KEY_HEX back to the raw key.
           var props = [];
           if (region) props.push("AWS_REGION=" + region);
-          if (apiKey) props.push("BEDROCK_API_KEY=" + apiKey);
+          if (apiKey) props.push("BEDROCK_API_KEY_HEX=" + toHex(apiKey));
 
           log("Initialising CheerpJ (Java 11)" +
               (apiKey ? " with credentials for " + region : "") + " ...");
