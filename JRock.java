@@ -1661,37 +1661,55 @@ public class JRock {
     // otherwise an array of text/image_url parts. In the masked copy, included
     // text/image content is replaced by "<txt|img masked <hash>>" and ordinary
     // prompt text by "<input masked>".
-    private static void appendUserContent(StringBuilder sb, StringBuilder masked,
-                                          java.util.List<Part> parts) {
-        boolean singlePlainText = parts.size() == 1 && !parts.get(0).image
-                && parts.get(0).maskHash == null;
-        if (singlePlainText) {
+    // Appends the REAL "content" value for one user turn: a JSON string when it's
+    // a single plain-text part, otherwise an array of text/image_url parts.
+    private static void appendRealContent(StringBuilder sb, java.util.List<Part> parts) {
+        if (isSinglePlainText(parts)) {
             sb.append("\"").append(jsonEscape(parts.get(0).text)).append("\"");
-            masked.append("\"<input masked>\"");
             return;
         }
         sb.append("[");
-        masked.append("[");
         for (int i = 0; i < parts.size(); i++) {
             Part p = parts.get(i);
-            if (i > 0) { sb.append(","); masked.append(","); }
+            if (i > 0) sb.append(",");
             if (p.image) {
                 sb.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
                         .append(jsonEscape(p.dataUrl)).append("\"}}");
-                masked.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
-                        .append("<img masked ").append(p.maskHash).append(">").append("\"}}");
             } else {
                 sb.append("{\"type\":\"text\",\"text\":\"")
                         .append(jsonEscape(p.text)).append("\"}");
-                String maskTxt = (p.maskHash != null)
-                        ? "<txt masked " + p.maskHash + ">"
-                        : "<input masked>";
-                masked.append("{\"type\":\"text\",\"text\":\"")
-                        .append(maskTxt).append("\"}");
             }
         }
         sb.append("]");
-        masked.append("]");
+    }
+
+    // Appends the MASKED "content" value for one user turn, mirroring the real
+    // shape but replacing content: included text/image -> "<txt|img masked <hash>>",
+    // ordinary prompt text -> "<input masked>".
+    private static void appendMaskedContent(StringBuilder sb, java.util.List<Part> parts) {
+        if (isSinglePlainText(parts)) {
+            sb.append("\"<input masked>\"");
+            return;
+        }
+        sb.append("[");
+        for (int i = 0; i < parts.size(); i++) {
+            Part p = parts.get(i);
+            if (i > 0) sb.append(",");
+            if (p.image) {
+                sb.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
+                        .append("<img masked ").append(p.maskHash).append(">").append("\"}}");
+            } else {
+                String maskTxt = (p.maskHash != null)
+                        ? "<txt masked " + p.maskHash + ">"
+                        : "<input masked>";
+                sb.append("{\"type\":\"text\",\"text\":\"").append(maskTxt).append("\"}");
+            }
+        }
+        sb.append("]");
+    }
+
+    private static boolean isSinglePlainText(java.util.List<Part> parts) {
+        return parts.size() == 1 && !parts.get(0).image && parts.get(0).maskHash == null;
     }
 
     // ---- Bedrock call ------------------------------------------------------
@@ -1733,30 +1751,23 @@ public class JRock {
         // become image/text parts). verifyIncludes() has already run in the UI.
         java.util.List<Part> parts = buildParts(prompt);
 
-        // Build the messages array (REAL and MASKED in parallel). Human turns -
-        // both prior ones (extend mode) and the new turn - are expanded via
-        // buildParts so their @img/@txt tokens become image/text content parts.
-        // Assistant turns are always plain text.
+        // Build the real messages array. Human turns - both prior ones (extend
+        // mode) and the new turn - are expanded via buildParts so their @img/@txt
+        // tokens become image/text content parts. Assistant turns are plain text.
         StringBuilder messages = new StringBuilder("[");
-        StringBuilder maskedMessages = new StringBuilder("[");
         for (String[] turn : history) {
             if (ROLE_HUMAN.equals(turn[0])) {
                 messages.append("{\"role\":\"user\",\"content\":");
-                maskedMessages.append("{\"role\":\"user\",\"content\":");
-                appendUserContent(messages, maskedMessages, buildParts(turn[1]));
+                appendRealContent(messages, buildParts(turn[1]));
                 messages.append("},");
-                maskedMessages.append("},");
             } else {
-                String head = "{\"role\":\"assistant\",\"content\":\"";
-                messages.append(head).append(jsonEscape(turn[1])).append("\"},");
-                maskedMessages.append(head).append("<input masked>").append("\"},");
+                messages.append("{\"role\":\"assistant\",\"content\":\"")
+                        .append(jsonEscape(turn[1])).append("\"},");
             }
         }
         messages.append("{\"role\":\"user\",\"content\":");
-        maskedMessages.append("{\"role\":\"user\",\"content\":");
-        appendUserContent(messages, maskedMessages, parts);
+        appendRealContent(messages, parts);
         messages.append("}]");
-        maskedMessages.append("}]");
 
         // OpenAI Chat Completions request shape.
         String body = "{"
@@ -1765,12 +1776,9 @@ public class JRock {
                 + ",\"max_tokens\":2048"
                 + "}";
 
-        // Masked copy of the request for display (content already masked above).
-        String maskedRequestBody = "{"
-                + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
-                + "\"messages\":" + maskedMessages
-                + ",\"max_tokens\":2048"
-                + "}";
+        // Masked copy of the request for display - built independently from the
+        // same history + prompt parts.
+        String maskedRequestBody = maskRequest(history, parts);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint()))
@@ -1810,8 +1818,8 @@ public class JRock {
         long outputTokens = extractLong(resp.body(), "completion_tokens");
 
         // Mask the reply text inside the raw response so it isn't duplicated
-        // (it's already shown above). The request is already masked (all turns).
-        String maskedResponse = maskFirst(resp.body(), jsonEscape(reply), "<output masked>");
+        // (it's already shown above). The request was masked during assembly.
+        String maskedResponse = maskResponse(resp.body(), reply);
 
         String details = "--- raw request ---\n" + "POST " + endpoint() + "\n" + maskedRequestBody
                 + "\n\n--- raw response ---\n" + maskedResponse
@@ -1828,8 +1836,47 @@ public class JRock {
         return v < 0 ? "(not reported)" : Long.toString(v);
     }
 
-    // Replaces the first occurrence of `needle` in `haystack` with `placeholder`.
-    // Returns the haystack unchanged if the needle is empty or not found.
+    // ---- Masking for display -----------------------------------------------
+    // The raw request and raw response are shown in the log for debugging, but we
+    // strip the actual prompt/reply/attachment content so the transcript isn't a
+    // noisy duplicate (and included files stay referenced only by hash). These two
+    // methods are the request/response counterparts.
+
+    // Builds the displayed (masked) request body from the same inputs as the real
+    // request: prior turns plus the new prompt's content parts. Message content is
+    // replaced with masked placeholders (see appendMaskedContent) so the raw
+    // request shown in the log carries no prompt/reply/attachment content.
+    private static String maskRequest(java.util.List<String[]> history,
+                                      java.util.List<Part> parts) throws IOException {
+        StringBuilder masked = new StringBuilder("[");
+        for (String[] turn : history) {
+            if (ROLE_HUMAN.equals(turn[0])) {
+                masked.append("{\"role\":\"user\",\"content\":");
+                appendMaskedContent(masked, buildParts(turn[1]));
+                masked.append("},");
+            } else {
+                masked.append("{\"role\":\"assistant\",\"content\":\"")
+                        .append("<input masked>").append("\"},");
+            }
+        }
+        masked.append("{\"role\":\"user\",\"content\":");
+        appendMaskedContent(masked, parts);
+        masked.append("}]");
+
+        return "{"
+                + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
+                + "\"messages\":" + masked
+                + ",\"max_tokens\":2048"
+                + "}";
+    }
+
+    // Masks the assistant reply text inside the raw response body.
+    private static String maskResponse(String rawResponse, String reply) {
+        return maskFirst(rawResponse, jsonEscape(reply), "<output masked>");
+    }
+
+    // Low-level primitive: replaces the first occurrence of `needle` in `haystack`
+    // with `placeholder`. Returns the haystack unchanged if needle is empty/absent.
     private static String maskFirst(String haystack, String needle, String placeholder) {
         if (needle == null || needle.isEmpty()) return haystack;
         int at = haystack.indexOf(needle);
