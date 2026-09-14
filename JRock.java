@@ -47,7 +47,7 @@
 //   visible files in the JRock/ folder that the user fully owns and controls. This
 //   is the opposite of a browser client, where session data can be squirreled away
 //   non-transparently in cookies, sessionStorage, IndexedDB, etc. Chat Completions
-//   is stateless: each request carries its own context (see "Append" mode), so
+//   is stateless: each request carries its own context (see "Extend" mode), so
 //   nothing needs to be, or is, kept on the server between calls.
 //
 // Authentication:
@@ -451,7 +451,7 @@ public class JRock {
 
     // Human-readable local date/time in the user's locale (e.g.
     // "Monday, 14 September 2026, 10:01:34"). Used for the startup line and, in
-    // append mode, the dialog header timestamps.
+    // extend mode, the dialog header timestamps.
     private static String humanNow() {
         return java.time.format.DateTimeFormatter
                 .ofLocalizedDateTime(java.time.format.FormatStyle.FULL, java.time.format.FormatStyle.MEDIUM)
@@ -500,7 +500,7 @@ public class JRock {
             });
         }
 
-        // withTimestamp: in "append" (stateful-looking) mode we stamp the header
+        // withTimestamp: in "extend" (stateful-looking) mode we stamp the header
         // with a human-readable local time so the time order is visible.
         void human(String text, boolean withTimestamp)     { dialog(ROLE_HUMAN, text, withTimestamp); }
         void assistant(String text, boolean withTimestamp) { dialog(ROLE_ASSISTANT, text, withTimestamp); }
@@ -508,7 +508,7 @@ public class JRock {
         private void dialog(String role, String text, boolean withTimestamp) {
             SwingUtilities.invokeLater(() -> {
                 String stamp = LocalDateTime.now().format(STAMP_FMT);
-                String suffix = withTimestamp ? " " + humanNow() : "";
+                String suffix = withTimestamp ? " \u00B7 " + humanNow() : "";
                 Entry e = new Entry(true, role, stamp, text, suffix);
                 entries.add(e);
                 // Write the message body to its own append-only file in logs/.
@@ -533,7 +533,7 @@ public class JRock {
 
         // Returns the dialog turns so far, in order, as {role, text} pairs
         // (role is ROLE_HUMAN or ROLE_ASSISTANT). Used to build a multi-turn
-        // request in "append" mode. Gray entries are excluded.
+        // request in "extend" mode. Gray entries are excluded.
         java.util.List<String[]> dialogHistory() {
             java.util.List<String[]> out = new ArrayList<>();
             for (Entry e : entries) {
@@ -648,7 +648,7 @@ public class JRock {
         // a message is a separate gray "" entry, written like any other line.
         //   gray entry   -> "<text>\n"
         //   dialog entry -> "[<ROLE>]<headerSuffix>\n" + "@<stamp>\n"
-        //     (headerSuffix is "" normally, or " <localized time>" in append mode)
+        //     (headerSuffix is "" normally, or " <localized time>" in extend mode)
         private void persistMainLog() {
             StringBuilder sb = new StringBuilder();
             for (Entry e : entries) {
@@ -861,10 +861,10 @@ public class JRock {
         // list, Ready). Reused verbatim after reconfiguration.
         initSession(log, promptSource);
 
-        // "Append" mode: when on, each send includes the full prior dialog so the
-        // model sees a continuous conversation instead of a single message.
-        javax.swing.JCheckBox appendMode = new javax.swing.JCheckBox("Append conversation");
-        appendMode.setToolTipText("Send the whole prior dialog with each message (continuous chat)");
+        // "Extend conversation" mode: when on, each send includes the full prior
+        // dialog so the model sees a continuous conversation, not a single message.
+        javax.swing.JCheckBox extendMode = new javax.swing.JCheckBox("Extend conversation");
+        extendMode.setToolTipText("Send the whole prior dialog with each message (continuous chat)");
 
         JButton send = new JButton("Send (Ctrl-Enter)");
         send.addActionListener(e -> {
@@ -875,13 +875,13 @@ public class JRock {
                 return;
             }
             send.setEnabled(false);
-            // In append mode, capture the prior dialog turns BEFORE adding the new
+            // In "extend" mode, capture the prior dialog turns BEFORE adding the new
             // prompt, so the request is [history...] + [new prompt].
-            boolean append = appendMode.isSelected();
-            java.util.List<String[]> history = append
+            boolean extend = extendMode.isSelected();
+            java.util.List<String[]> history = extend
                     ? log.dialogHistory() : java.util.Collections.emptyList();
             log.gray("");                        // blank line BEFORE the input message
-            log.human(prompt, append);
+            log.human(prompt, extend);
             log.gray("");                        // blank line AFTER the input message
 
             // If the model isn't served via Chat Completions on mantle, don't even
@@ -899,8 +899,8 @@ public class JRock {
                 return;
             }
 
-            log.gray(append
-                    ? "Calling " + endpoint() + " (append: " + history.size() + " prior turns) ..."
+            log.gray(extend
+                    ? "Calling " + endpoint() + " (extend: " + history.size() + " prior turns) ..."
                     : "Calling " + endpoint() + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
@@ -929,7 +929,7 @@ public class JRock {
                             // and it's persisted to its own file in logs/. The blank
                             // lines around the message are separate gray "" entries.
                             log.gray("");        // blank line BEFORE the output message
-                            log.assistant(result[1], append);
+                            log.assistant(result[1], extend);
                             log.gray("");        // blank line AFTER the output message
                         } else {
                             // Failures are NOT dialog: log in gray so they don't
@@ -970,20 +970,20 @@ public class JRock {
         split.setContinuousLayout(true);
         split.setOneTouchExpandable(true);
 
-        // Bottom bar: Send on the left, Append checkbox on the right, same row.
+        // Bottom bar: Send on the left, Extend checkbox on the right, same row.
         javax.swing.JPanel sendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         sendSide.add(send);
-        javax.swing.JPanel appendSide = new javax.swing.JPanel(
+        javax.swing.JPanel extendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
-        appendSide.add(appendMode);
+        extendSide.add(extendMode);
 
         javax.swing.JPanel buttonBar = new javax.swing.JPanel(new BorderLayout());
         // Smaller top gap than bottom so the row visually groups with the text
         // area above it, while keeping clearance from the window's bottom edge.
         buttonBar.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 14, 12));
         buttonBar.add(sendSide, BorderLayout.WEST);
-        buttonBar.add(appendSide, BorderLayout.EAST);
+        buttonBar.add(extendSide, BorderLayout.EAST);
 
         frame.add(topBar, BorderLayout.NORTH);
         frame.add(split, BorderLayout.CENTER);
@@ -1018,6 +1018,22 @@ public class JRock {
             @Override public void actionPerformed(ActionEvent e) {
                 loadPromptInto(frame, input, log);
             }
+        });
+
+        // Ctrl+D toggles the "Dialog only" checkbox (doClick keeps the checkbox,
+        // its action listener and the view in sync).
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.CTRL_DOWN_MASK), "jrock-toggle-dialog-only");
+        frame.getRootPane().getActionMap().put("jrock-toggle-dialog-only", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { dialogOnly.doClick(); }
+        });
+
+        // Ctrl+E toggles "Extend conversation" (E = extend; avoids Ctrl+A/C and
+        // keeps Ctrl+P free for future PDF rendering).
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_E, InputEvent.CTRL_DOWN_MASK), "jrock-toggle-extend");
+        frame.getRootPane().getActionMap().put("jrock-toggle-extend", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { extendMode.doClick(); }
         });
 
         // Configure button: opens the settings dialog, then re-runs the session
@@ -1105,6 +1121,8 @@ public class JRock {
             {"Ctrl+S", "Save prompt as (a copy)"},
             {"Ctrl+O", "Load prompt from a file"},
             {"Ctrl+R", "Move & resize the window"},
+            {"Ctrl+D", "Toggle Dialog only"},
+            {"Ctrl+E", "Toggle Extend conversation"},
             {"Ctrl+Enter", "Send"},
         };
         javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
