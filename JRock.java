@@ -96,7 +96,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "1.1.0";
+    private static final String VERSION = "1.2.0";
 
     // ---- Configuration (mutable: changed via the Configure dialog) ----------
     private static final String DEFAULT_REGION = "us-east-1";
