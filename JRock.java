@@ -827,8 +827,17 @@ public class JRock {
     private static void createAndShowGui(String sourceArg) {
         JFrame frame = new JFrame("JRock - Bedrock (mantle)");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(800, 600);
-        frame.setLocationRelativeTo(null);
+
+        // Preferred window size; if the screen can't fit it in either dimension,
+        // start maximized, otherwise center it on screen.
+        final int WIN_W = 1050, WIN_H = 800;
+        frame.setSize(WIN_W, WIN_H);
+        java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+        if (screen.width < WIN_W || screen.height < WIN_H) {
+            frame.setExtendedState(frame.getExtendedState() | JFrame.MAXIMIZED_BOTH);
+        } else {
+            frame.setLocationRelativeTo(null);   // center on screen
+        }
 
         JTextPane output = new JTextPane();
         output.setEditable(false);
@@ -1058,10 +1067,11 @@ public class JRock {
         frame.add(split, BorderLayout.CENTER);
         frame.add(buttonBar, BorderLayout.SOUTH);
 
-        // Hidden feature: Ctrl+R opens a Move & Resize dialog. Bound at the window
-        // level so it fires regardless of which component has focus.
+        // Hidden feature: Ctrl+M opens a Move & resize dialog. Bound at the window
+        // level so it fires regardless of which component has focus. (Ctrl+M is
+        // used instead of Ctrl+R, which reloads the page in the browser build.)
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK), "jrock-move-resize");
+                KeyStroke.getKeyStroke(KeyEvent.VK_M, InputEvent.CTRL_DOWN_MASK), "jrock-move-resize");
         frame.getRootPane().getActionMap().put("jrock-move-resize", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
                 showMoveResizeDialog(frame);
@@ -1216,7 +1226,7 @@ public class JRock {
             {"Ctrl+S", "Save prompt as (a copy)"},
             {"Ctrl+O", "Load prompt from a file"},
             {"Ctrl+I", "Include a text or image file"},
-            {"Ctrl+R", "Move & resize the window"},
+            {"Ctrl+M", "Move & resize the window"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
             {"Ctrl+P", "Print log / save as PDF"},
@@ -1467,7 +1477,7 @@ public class JRock {
         input.requestFocusInWindow();
     }
 
-    // ---- Move & Resize dialog (Ctrl+R) -------------------------------------
+    // ---- Move & resize dialog (Ctrl+M) -------------------------------------
     // Lets the user set the window size and on-screen position numerically, and
     // shows which screen the window is on plus that screen's bounds. Useful for
     // precise placement and moving the window across monitors without a mouse.
@@ -1521,7 +1531,7 @@ public class JRock {
         panel.add(infoScroll, BorderLayout.CENTER);
 
         int result = javax.swing.JOptionPane.showConfirmDialog(
-                frame, panel, "Move & Resize",
+                frame, panel, "Move & resize",
                 javax.swing.JOptionPane.OK_CANCEL_OPTION,
                 javax.swing.JOptionPane.PLAIN_MESSAGE);
         if (result != javax.swing.JOptionPane.OK_OPTION) return;
