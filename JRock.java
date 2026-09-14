@@ -449,6 +449,16 @@ public class JRock {
     private static final DateTimeFormatter STAMP_FMT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
 
+    // Human-readable local date/time in the user's locale (e.g.
+    // "Monday, 14 September 2026, 10:01:34"). Used for the startup line and, in
+    // append mode, the dialog header timestamps.
+    private static String humanNow() {
+        return java.time.format.DateTimeFormatter
+                .ofLocalizedDateTime(java.time.format.FormatStyle.FULL, java.time.format.FormatStyle.MEDIUM)
+                .withLocale(java.util.Locale.getDefault())
+                .format(java.time.ZonedDateTime.now());
+    }
+
     // A styled, persisted log backed by an ordered list of entries so it can be
     // re-rendered on demand and rewritten to disk after every change.
     //
@@ -466,8 +476,11 @@ public class JRock {
             final String role;         // dialog: ROLE_* ; gray: null
             final String stamp;        // dialog: yyyyMMdd-HHmmss-SSS ; gray: null
             final String text;         // body text (dialog) or gray text
-            Entry(boolean dialog, String role, String stamp, String text) {
-                this.dialog = dialog; this.role = role; this.stamp = stamp; this.text = text;
+            final String headerSuffix; // dialog: text after "[role]" on the header
+                                       // line (e.g. " Monday, 14 Sep 2026, ..."), or ""
+            Entry(boolean dialog, String role, String stamp, String text, String headerSuffix) {
+                this.dialog = dialog; this.role = role; this.stamp = stamp;
+                this.text = text; this.headerSuffix = headerSuffix;
             }
         }
 
@@ -480,20 +493,23 @@ public class JRock {
         // ---- Public logging API --------------------------------------------
         void gray(String line) {
             SwingUtilities.invokeLater(() -> {
-                Entry e = new Entry(false, null, null, line);
+                Entry e = new Entry(false, null, null, line, "");
                 entries.add(e);
                 if (isVisible(e)) renderGray(e.text);
                 persistMainLog();
             });
         }
 
-        void human(String text)     { dialog(ROLE_HUMAN, text); }
-        void assistant(String text) { dialog(ROLE_ASSISTANT, text); }
+        // withTimestamp: in "append" (stateful-looking) mode we stamp the header
+        // with a human-readable local time so the time order is visible.
+        void human(String text, boolean withTimestamp)     { dialog(ROLE_HUMAN, text, withTimestamp); }
+        void assistant(String text, boolean withTimestamp) { dialog(ROLE_ASSISTANT, text, withTimestamp); }
 
-        private void dialog(String role, String text) {
+        private void dialog(String role, String text, boolean withTimestamp) {
             SwingUtilities.invokeLater(() -> {
                 String stamp = LocalDateTime.now().format(STAMP_FMT);
-                Entry e = new Entry(true, role, stamp, text);
+                String suffix = withTimestamp ? " " + humanNow() : "";
+                Entry e = new Entry(true, role, stamp, text, suffix);
                 entries.add(e);
                 // Write the message body to its own append-only file in logs/.
                 writeMessageFile(role, stamp, text);
@@ -564,26 +580,27 @@ public class JRock {
                     String stamp = lines[i + 1].substring(1).trim();
                     String body = resolveReference(role, stamp);
                     if (body != null) {
-                        // Header + expanded body. The blank line that follows in the
-                        // file is a normal gray "" entry and is handled by the loop -
-                        // we do NOT consume or synthesize any empty line here.
-                        out.add(new Entry(true, role, stamp, body));
+                        // Everything after "[role]" on the header line (e.g. a
+                        // localized timestamp) is preserved so it round-trips.
+                        String suffix = line.substring(("[" + role + "]").length());
+                        out.add(new Entry(true, role, stamp, body, suffix));
                         i += 2;
                         continue;
                     }
                     // Unresolvable reference: fall through and keep the header as a
                     // plain gray line so nothing is silently dropped.
                 }
-                out.add(new Entry(false, null, null, line));
+                out.add(new Entry(false, null, null, line, ""));
                 i++;
             }
             return out;
         }
 
-        // Returns the role if the line is exactly a role header, else null.
+        // Returns the role if the line STARTS WITH that role's header (ignoring any
+        // trailing text such as a timestamp), else null.
         private String headerRole(String line) {
-            if (line.equals("[" + ROLE_HUMAN + "]")) return ROLE_HUMAN;
-            if (line.equals("[" + ROLE_ASSISTANT + "]")) return ROLE_ASSISTANT;
+            if (line.startsWith("[" + ROLE_HUMAN + "]")) return ROLE_HUMAN;
+            if (line.startsWith("[" + ROLE_ASSISTANT + "]")) return ROLE_ASSISTANT;
             return null;
         }
 
@@ -604,7 +621,7 @@ public class JRock {
         // one blank line here to keep messages visually separated. This affects
         // only the on-screen view, never the stored entries or files.
         private void renderDialog(Entry e) {
-            appendStyled("[" + e.role + "]", BRAND);
+            appendStyled("[" + e.role + "]" + e.headerSuffix, BRAND);
             appendStyled(e.text, java.awt.Color.BLACK);
             if (dialogOnly) appendStyled("", java.awt.Color.BLACK);
         }
@@ -630,12 +647,13 @@ public class JRock {
         // own "<line>\n"; no extra blank lines are added. The blank line seen after
         // a message is a separate gray "" entry, written like any other line.
         //   gray entry   -> "<text>\n"
-        //   dialog entry -> "[<ROLE>]\n" + "@<stamp>\n"
+        //   dialog entry -> "[<ROLE>]<headerSuffix>\n" + "@<stamp>\n"
+        //     (headerSuffix is "" normally, or " <localized time>" in append mode)
         private void persistMainLog() {
             StringBuilder sb = new StringBuilder();
             for (Entry e : entries) {
                 if (e.dialog) {
-                    sb.append('[').append(e.role).append(']').append('\n');
+                    sb.append('[').append(e.role).append(']').append(e.headerSuffix).append('\n');
                     sb.append('@').append(e.stamp).append('\n');
                 } else {
                     sb.append(e.text).append('\n');
@@ -663,11 +681,7 @@ public class JRock {
         if (restored > 0) log.gray("");
         log.gray("Working directory: " + workingDir);
         // App identity + local date/time in the user's locale/format.
-        String now = java.time.format.DateTimeFormatter
-                .ofLocalizedDateTime(java.time.format.FormatStyle.FULL, java.time.format.FormatStyle.MEDIUM)
-                .withLocale(java.util.Locale.getDefault())
-                .format(java.time.ZonedDateTime.now());
-        log.gray("JRock version " + VERSION + " - " + now);
+        log.gray("JRock version " + VERSION + " - " + humanNow());
         if (hadLog) {
             log.gray("Loaded previous log from JRock/jrock-log.txt");
         } else {
@@ -867,7 +881,7 @@ public class JRock {
             java.util.List<String[]> history = append
                     ? log.dialogHistory() : java.util.Collections.emptyList();
             log.gray("");                        // blank line BEFORE the input message
-            log.human(prompt);
+            log.human(prompt, append);
             log.gray("");                        // blank line AFTER the input message
 
             // If the model isn't served via Chat Completions on mantle, don't even
@@ -915,7 +929,7 @@ public class JRock {
                             // and it's persisted to its own file in logs/. The blank
                             // lines around the message are separate gray "" entries.
                             log.gray("");        // blank line BEFORE the output message
-                            log.assistant(result[1]);
+                            log.assistant(result[1], append);
                             log.gray("");        // blank line AFTER the output message
                         } else {
                             // Failures are NOT dialog: log in gray so they don't
