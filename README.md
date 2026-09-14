@@ -205,8 +205,8 @@ build is reproducible, the `jrock.jar` inside all three archives is identical.
 Current build hashes:
 
 ```
-c9366a0019b51bd38aee758a9132204d684f79eb8b9da83c916f4ee252bdb060  jrock.jar
-c0b637dc6c2b5e6362acaad450fe85ac  jrock.jar
+ad79ac03618b28732bc942769ecc6eafb8491fa18f0f0c31ad45f71263bab545  jrock.jar
+109595592953716b41e695f8e42f6b88  jrock.jar
 ```
 
 To verify and run JRock from a build artifact, unzip it, then:
@@ -215,10 +215,10 @@ To verify and run JRock from a build artifact, unzip it, then:
 cd jrock-ubuntu-latest/
 
 md5sum jrock.jar
-# c0b637dc6c2b5e6362acaad450fe85ac *jrock.jar
+# 109595592953716b41e695f8e42f6b88 *jrock.jar
 
 sha256sum jrock.jar
-# c9366a0019b51bd38aee758a9132204d684f79eb8b9da83c916f4ee252bdb060 *jrock.jar
+# ad79ac03618b28732bc942769ecc6eafb8491fa18f0f0c31ad45f71263bab545 *jrock.jar
 
 java -jar jrock.jar
 ```
