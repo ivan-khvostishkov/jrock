@@ -1028,12 +1028,28 @@ public class JRock {
             @Override public void actionPerformed(ActionEvent e) { dialogOnly.doClick(); }
         });
 
-        // Ctrl+E toggles "Extend conversation" (E = extend; avoids Ctrl+A/C and
-        // keeps Ctrl+P free for future PDF rendering).
+        // Ctrl+E toggles "Extend conversation" (E = extend; avoids Ctrl+A/C).
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_E, InputEvent.CTRL_DOWN_MASK), "jrock-toggle-extend");
         frame.getRootPane().getActionMap().put("jrock-toggle-extend", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { extendMode.doClick(); }
+        });
+
+        // Ctrl+P opens the system print dialog for the log pane. JTextComponent.print()
+        // handles pagination and shows the native dialog, where the user can pick a
+        // printer (including "Microsoft Print to PDF" on Windows) or save to PDF.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_P, InputEvent.CTRL_DOWN_MASK), "jrock-print");
+        frame.getRootPane().getActionMap().put("jrock-print", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                try {
+                    output.print();   // shows the native print dialog; blocks until done
+                } catch (java.awt.print.PrinterException ex) {
+                    javax.swing.JOptionPane.showMessageDialog(frame,
+                            "Printing failed: " + ex.getMessage(),
+                            "Print", javax.swing.JOptionPane.WARNING_MESSAGE);
+                }
+            }
         });
 
         // Configure button: opens the settings dialog, then re-runs the session
@@ -1123,6 +1139,7 @@ public class JRock {
             {"Ctrl+R", "Move & resize the window"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
+            {"Ctrl+P", "Print log / save as PDF"},
             {"Ctrl+Enter", "Send"},
         };
         javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
