@@ -52,10 +52,13 @@
 //
 // Authentication:
 //   Bearer token = your Bedrock API key, read from the BEDROCK_API_KEY env var.
-//   Generate one in the Bedrock console (Amazon Bedrock API keys).
+//   A short-term (recommended) Bedrock API key can be generated from the AWS
+//   console at: https://console.aws.amazon.com/bedrock-mantle/api-keys
 //   Set it before launching, e.g. (PowerShell):
 //     $env:BEDROCK_API_KEY = "..."
 //     $env:AWS_REGION = "us-east-1"   # optional, defaults below
+//   Alternatively, configure the API key (and region/model) in the app itself via
+//   the Configure dialog (top-left button); no env var needed.
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
