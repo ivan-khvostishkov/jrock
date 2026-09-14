@@ -76,3 +76,26 @@ jobs:
             jrock.jar.md5
             jrock-src.zip
           if-no-files-found: error
+
+      # Assemble the CheerpJ web bundle for Amplify: a flat directory with
+      # index.html and jrock.jar at the root (no subdirectory). The page fetches
+      # ./jrock.jar over HTTP and verifies its SHA-256/MD5 in the browser.
+      # Built once (on Linux) since the jar is reproducible across all runners.
+      - name: Assemble jrock-web bundle
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          rm -rf jrock-web-dist
+          mkdir jrock-web-dist
+          cp jrock-web/index.html jrock-web-dist/index.html
+          cp jrock.jar            jrock-web-dist/jrock.jar
+
+      - name: Upload jrock-web bundle
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          # Downloading this artifact yields jrock-web.zip with index.html and
+          # jrock.jar at its root - ready to deploy to Amplify.
+          name: jrock-web
+          path: jrock-web-dist/
+          if-no-files-found: error

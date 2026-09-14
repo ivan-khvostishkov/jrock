@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>JRock in the browser (CheerpJ)</title>
 
-  <!-- CheerpJ runtime: compiles/runs unmodified JVM bytecode to WebAssembly+JS. -->
+  <!-- CheerpJ runtime: runs unmodified JVM bytecode as WebAssembly + JS. -->
   <script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
 
   <style>
@@ -36,23 +36,30 @@
     header .spacer { flex: 1; }
 
     .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    input[type="file"] { font-size: 13px; }
     button {
       font-size: 13px; padding: 6px 12px; cursor: pointer;
       border: 1px solid var(--border); border-radius: 6px;
       background: var(--brand); color: #fff;
     }
     button:disabled { opacity: 0.5; cursor: default; }
-    button.secondary { background: #fff; color: var(--text); }
-
-    #status {
-      font-size: 12px; color: var(--muted);
-      padding: 6px 16px; background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      white-space: pre-wrap; flex: 0 0 auto;
+    button.icon {
+      background: #fff; color: var(--text);
+      width: 34px; padding: 6px 0; font-size: 15px; line-height: 1;
     }
+    button.icon.set { border-color: var(--brand); color: var(--brand); }
 
-    /* CheerpJ mounts its Swing display into the element created by
+    #info {
+      font-size: 12px; color: var(--muted);
+      padding: 8px 16px; background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex: 0 0 auto;
+    }
+    #info .row { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
+    #info .k { color: var(--muted); min-width: 74px; flex: 0 0 auto; }
+    #info .v { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
+    #info a { color: var(--brand); }
+
+    /* CheerpJ mounts its Swing display into the element passed to
        cheerpjCreateDisplay(); we host it in this stretchy container. */
     #display-wrap {
       flex: 1 1 auto; position: relative; overflow: hidden;
@@ -64,12 +71,40 @@
       max-width: 560px; line-height: 1.5;
     }
 
+    /* Bottom bar: shows descriptive help on load, then the running log. */
     footer {
       font-size: 11px; color: var(--muted);
       padding: 6px 16px; background: var(--panel);
       border-top: 1px solid var(--border); flex: 0 0 auto;
     }
+    /* Only the running log wraps/scrolls and uses a monospace font. */
+    footer.log {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text); white-space: pre-wrap; max-height: 96px; overflow-y: auto;
+    }
     code { background: #eef1f2; padding: 1px 5px; border-radius: 4px; }
+
+    /* Minimalist modal for entering the Bedrock API key. */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+      display: none; align-items: center; justify-content: center; z-index: 10;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--panel); border-radius: 10px; padding: 18px;
+      width: min(460px, 92vw); box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+    }
+    .modal h2 { font-size: 15px; margin: 0 0 6px; }
+    .modal p { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
+    .modal p a { color: var(--brand); }
+    .modal .field-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .modal input {
+      width: 100%; font-size: 13px; padding: 8px 10px; margin-bottom: 12px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .modal .actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .modal .actions button.secondary { background: #fff; color: var(--text); }
   </style>
 </head>
 
@@ -78,99 +113,177 @@
     <h1><span class="brand">JRock</span> in the browser</h1>
     <span class="spacer"></span>
     <div class="controls">
-      <input type="file" id="jarFile" accept=".jar" />
-      <button id="runBtn" disabled>Run JAR</button>
+      <button id="keyBtn" class="icon" title="Enter Bedrock credentials">&#128274;</button>
+      <button id="runBtn" disabled>Run JRock</button>
     </div>
   </header>
 
-  <div id="status">Loading CheerpJ runtime...</div>
+  <div id="info">
+    <div class="row"><span class="k">JAR</span><span class="v"><a id="jarLink" href="jrock.jar" download>jrock.jar</a> <span id="jarSize"></span></span></div>
+    <div class="row"><span class="k">SHA-256</span><span class="v" id="sha">computing...</span></div>
+  </div>
 
   <div id="display-wrap">
     <div class="placeholder" id="placeholder">
-      Choose <code>jrock.jar</code> above, then press <b>Run JAR</b>.
-      The Swing UI will appear here.
+      Verify the checksum above (and optionally download the JAR to check it
+      yourself). Optionally set your Bedrock region and API key with the
+      &#128274; button, then press <b>Run JRock</b>.
     </div>
   </div>
 
-  <footer>
-    Runs unmodified Java bytecode in the browser via CheerpJ (WebAssembly + JS).
-    Must be served over HTTP (not opened as a <code>file://</code>).
-    Outbound Bedrock calls are subject to browser/CheerpJ network limits, so this page
-    is intended for testing the JRock UI locally.
-  </footer>
+  <footer id="bottom">Runs unmodified Java bytecode in the browser via CheerpJ (WebAssembly + JS). Must be served over HTTP (not opened as a file://). Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine. Outbound Bedrock calls are subject to browser/CheerpJ network limits.</footer>
+
+  <!-- API key modal -->
+  <div class="modal-backdrop" id="keyModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
+      <h2 id="keyTitle">Bedrock credentials</h2>
+      <p>
+        Passed to JRock as the <code>AWS_REGION</code> and <code>BEDROCK_API_KEY</code>
+        JVM properties when you press Run. They stay in this browser tab and are
+        never sent anywhere except directly to the Bedrock endpoint by JRock itself.
+        A short-term key (tied to its region) can be generated in the
+        <a href="https://console.aws.amazon.com/bedrock-mantle/api-keys" target="_blank" rel="noopener">AWS console</a>.
+      </p>
+      <label class="field-label" for="regionInput">AWS region</label>
+      <input id="regionInput" type="text" autocomplete="off" spellcheck="false"
+             list="regionList" placeholder="us-east-1" />
+      <datalist id="regionList">
+        <option value="us-east-1"></option>
+        <option value="us-east-2"></option>
+        <option value="us-west-2"></option>
+        <option value="eu-central-1"></option>
+        <option value="eu-west-1"></option>
+        <option value="eu-west-3"></option>
+        <option value="ap-northeast-1"></option>
+        <option value="ap-southeast-1"></option>
+        <option value="ap-southeast-2"></option>
+        <option value="ap-south-1"></option>
+      </datalist>
+      <label class="field-label" for="keyInput">Bedrock API key</label>
+      <input id="keyInput" type="password" autocomplete="off" spellcheck="false"
+             placeholder="Paste your Bedrock API key" />
+      <div class="actions">
+        <button class="secondary" id="keyClear" type="button">Clear</button>
+        <button id="keySave" type="button">Save</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     (function () {
       "use strict";
 
-      var statusEl = document.getElementById("status");
+      var JAR_URL  = "jrock.jar";        // served from this same directory
+      var JAR_PATH = "/str/jrock.jar";   // CheerpJ transient JS->Java mount
+
+      var keyBtn   = document.getElementById("keyBtn");
       var runBtn   = document.getElementById("runBtn");
-      var fileInput = document.getElementById("jarFile");
+      var infoEl   = document.getElementById("info");
+      var bottom   = document.getElementById("bottom");
+      var shaEl    = document.getElementById("sha");
+      var sizeEl   = document.getElementById("jarSize");
       var placeholder = document.getElementById("placeholder");
 
-      var cheerpjReady = false;
-      var displayCreated = false;
-      var selectedBytes = null;   // Uint8Array of the chosen jar
-      var selectedName = null;
+      var keyModal    = document.getElementById("keyModal");
+      var keyInput    = document.getElementById("keyInput");
+      var regionInput = document.getElementById("regionInput");
 
-      function setStatus(msg) { statusEl.textContent = msg; }
+      var jarBytes = null;          // Uint8Array of jrock.jar
+      var apiKey   = "";            // in-tab only; injected as a JVM property on Run
+      var region   = "us-east-1";   // AWS region; JRock's default
+      var started  = false;
 
-      function updateRunEnabled() {
-        runBtn.disabled = !(cheerpjReady && selectedBytes);
+      // On load the bottom bar is help text; once running it becomes the log.
+      function log(msg) {
+        if (!bottom.classList.contains("log")) { bottom.classList.add("log"); bottom.textContent = ""; }
+        bottom.textContent += (bottom.textContent ? "\n" : "") + msg;
+        bottom.scrollTop = bottom.scrollHeight;
       }
 
-      // 1) Initialise the CheerpJ runtime once at page load.
-      (async function initCheerpj() {
-        try {
-          // JRock is compiled with --release 11, so run CheerpJ in Java 11 mode
-          // (it otherwise defaults to Java 8 and rejects the classes).
-          await cheerpjInit({ version: 11 });
-          cheerpjReady = true;
-          setStatus("CheerpJ ready. Choose jrock.jar and press Run JAR.");
-          updateRunEnabled();
-        } catch (e) {
-          setStatus("Failed to initialise CheerpJ: " + e);
-        }
-      })();
+      function hex(buf) {
+        var b = new Uint8Array(buf), s = "";
+        for (var i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, "0");
+        return s;
+      }
 
-      // 2) Read the chosen .jar into memory as bytes.
-      fileInput.addEventListener("change", function () {
-        var f = fileInput.files && fileInput.files[0];
-        if (!f) { selectedBytes = null; selectedName = null; updateRunEnabled(); return; }
-        var reader = new FileReader();
-        reader.onload = function () {
-          selectedBytes = new Uint8Array(reader.result);
-          selectedName = f.name;
-          setStatus("Selected " + f.name + " (" + selectedBytes.length + " bytes). Press Run JAR.");
-          updateRunEnabled();
-        };
-        reader.onerror = function () { setStatus("Could not read the selected file."); };
-        reader.readAsArrayBuffer(f);
-      });
-
-      // 3) Write the jar into CheerpJ's /str/ mount (JS -> Java, transient) and run it.
-      runBtn.addEventListener("click", async function () {
-        if (!cheerpjReady || !selectedBytes) return;
-        runBtn.disabled = true;
-        try {
-          // Create the Swing display container once, filling the wrap area.
-          if (!displayCreated) {
-            if (placeholder) placeholder.remove();
-            // Width/height -1 makes CheerpJ fill its parent element.
-            cheerpjCreateDisplay(-1, -1, document.getElementById("display-wrap"));
-            displayCreated = true;
-          }
-
-          // /str/ is a JS-writable, Java-readable transient mount. Overwrites if present.
-          var path = "/str/" + (selectedName || "jrock.jar");
-          cheerpOSAddStringFile(path, selectedBytes);
-
-          setStatus("Running " + path + " ... (first run downloads the Java runtime; please wait)");
-          var code = await cheerpjRunJar(path);
-          setStatus("JAR exited with code " + code + ".");
-        } catch (e) {
-          setStatus("Error running JAR: " + e);
+      // --- Fetch + checksum the jar (runtime download is deferred to Run). ---
+      fetch(JAR_URL, { cache: "no-store" })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status + " fetching " + JAR_URL);
+          return r.arrayBuffer();
+        })
+        .then(async function (buf) {
+          jarBytes = new Uint8Array(buf);
+          sizeEl.textContent = "(" + jarBytes.length.toLocaleString() + " bytes)";
+          shaEl.textContent = hex(await crypto.subtle.digest("SHA-256", buf));  // Web Crypto
           runBtn.disabled = false;
+        })
+        .catch(function (e) {
+          shaEl.textContent = "-";
+          log("Could not load jrock.jar: " + e +
+            "\n(Serve this page over HTTP with jrock.jar in the same directory.)");
+        });
+
+      // --- Credentials modal (region = login, key = password) ---
+      function openKey() {
+        regionInput.value = region; keyInput.value = apiKey;
+        keyModal.classList.add("open"); regionInput.focus();
+      }
+      function closeKey() { keyModal.classList.remove("open"); }
+      keyBtn.addEventListener("click", openKey);
+      document.getElementById("keySave").addEventListener("click", function () {
+        region = regionInput.value.trim() || "us-east-1";
+        apiKey = keyInput.value.trim();
+        keyBtn.classList.toggle("set", !!apiKey);
+        keyBtn.title = apiKey
+          ? "Bedrock credentials set: " + region + " (click to change)"
+          : "Enter Bedrock credentials";
+        closeKey();
+      });
+      document.getElementById("keyClear").addEventListener("click", function () {
+        apiKey = ""; keyInput.value = "";
+        region = "us-east-1"; regionInput.value = "";
+        keyBtn.classList.remove("set");
+        keyBtn.title = "Enter Bedrock credentials";
+        closeKey();
+      });
+      keyModal.addEventListener("click", function (e) { if (e.target === keyModal) closeKey(); });
+      function modalKeydown(e) {
+        if (e.key === "Enter") document.getElementById("keySave").click();
+        else if (e.key === "Escape") closeKey();
+      }
+      regionInput.addEventListener("keydown", modalKeydown);
+      keyInput.addEventListener("keydown", modalKeydown);
+
+      // --- Run: init CheerpJ (with the key as a JVM property), then run the jar. ---
+      runBtn.addEventListener("click", async function () {
+        if (started || !jarBytes) return;
+        started = true;
+        runBtn.disabled = true;
+        keyBtn.disabled = true;
+        infoEl.style.display = "none";          // hide verification panel
+        if (placeholder) placeholder.remove();
+
+        try {
+          // Inject region + key as JVM system properties; JRock reads AWS_REGION
+          // and BEDROCK_API_KEY from the environment or, as here, same-named -D
+          // properties.
+          var props = [];
+          if (region) props.push("AWS_REGION=" + region);
+          if (apiKey) props.push("BEDROCK_API_KEY=" + apiKey);
+
+          log("Initialising CheerpJ (Java 11)" +
+              (apiKey ? " with credentials for " + region : "") + " ...");
+          await cheerpjInit({ version: 11, status: "splash", javaProperties: props });
+
+          cheerpjCreateDisplay(-1, -1, document.getElementById("display-wrap"));
+          cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
+
+          log("Running JRock ... (first run downloads the Java runtime; please wait)");
+          var code = await cheerpjRunJar(JAR_PATH);
+          log("JRock exited with code " + code + ".");
+        } catch (e) {
+          log("Error running JRock: " + e);
         }
       });
     })();

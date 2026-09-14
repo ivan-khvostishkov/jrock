@@ -59,6 +59,9 @@
 //     $env:AWS_REGION = "us-east-1"   # optional, defaults below
 //   Alternatively, configure the API key (and region/model) in the app itself via
 //   the Configure dialog (top-left button); no env var needed.
+//   BEDROCK_API_KEY and AWS_REGION are also read from same-named JVM system
+//   properties (-Dname=value) as a fallback, so hosts that cannot set OS env
+//   vars (e.g. CheerpJ in the browser) can still supply them.
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -102,8 +105,8 @@ public class JRock {
     private static final String DEFAULT_REGION = "us-east-1";
     // Region/model start from env/defaults and can be overridden at runtime.
     private static String REGION = envOr("AWS_REGION", DEFAULT_REGION);
-    private static boolean regionFromEnv =
-            System.getenv("AWS_REGION") != null && !System.getenv("AWS_REGION").isBlank();
+    private static boolean regionFromEnv = envOrProp("AWS_REGION") != null
+            && !envOrProp("AWS_REGION").isBlank();
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
@@ -399,7 +402,7 @@ public class JRock {
     // BEDROCK_API_KEY env var. Returns null/blank if neither is present.
     private static String resolveApiKey() {
         if (apiKeyOverride != null && !apiKeyOverride.isBlank()) return apiKeyOverride;
-        return System.getenv("BEDROCK_API_KEY");
+        return envOrProp("BEDROCK_API_KEY");
     }
 
     // ---- UI ----------------------------------------------------------------
@@ -1964,8 +1967,19 @@ public class JRock {
     }
 
     private static String envOr(String name, String fallback) {
-        String v = System.getenv(name);
+        String v = envOrProp(name);
         return (v == null || v.isBlank()) ? fallback : v;
+    }
+
+    // Reads a setting from the environment, falling back to a same-named JVM
+    // system property (-Dname=value). The property fallback exists so hosts that
+    // cannot set OS environment variables - notably CheerpJ in the browser, which
+    // injects values via cheerpjInit({ javaProperties: [...] }) - can still supply
+    // BEDROCK_API_KEY / AWS_REGION. Env takes precedence when both are set.
+    private static String envOrProp(String name) {
+        String v = System.getenv(name);
+        if (v != null && !v.isBlank()) return v;
+        return System.getProperty(name);
     }
 
     // ---- Prompt persistence (crash recovery) -------------------------------
