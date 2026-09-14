@@ -1,0 +1,70 @@
+name: Reproducible build
+
+# Builds JRock.java with a PINNED OpenJDK 11 patch into a byte-for-byte
+# reproducible JAR. The same source produces the same JAR (identical SHA-256 and
+# MD5) on any machine or OS, because BuildJar.java repacks the classes
+# deterministically (sorted entries, fixed timestamps, fixed compression, a
+# hand-written manifest). Everything is Java - no Python or shell packing.
+#
+# The job runs on Windows, macOS and Linux; every runner uploads its own
+# checksums, which must all match to prove reproducibility.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      # Pin the EXACT JDK 11 patch (Temurin 11.0.32+8, the latest LTS quarterly
+      # update). Reproducibility depends on the exact toolchain, so this is fixed
+      # rather than a floating "11".
+      - name: Set up OpenJDK 11.0.32+8 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11.0.32+8'
+
+      - name: Show Java version
+        run: javac -version
+
+      - name: Compile
+        run: javac -encoding UTF-8 -d out JRock.java
+
+      - name: Build reproducible JAR (+ checksums + source zip)
+        # Run from the repo root (default) so BuildJar's relative paths (out/,
+        # JRock.java, jrock.jar) resolve there; the tool source lives in .github/build.
+        run: java .github/build/BuildJar.java
+
+      - name: Show checksums (job summary)
+        shell: bash
+        run: |
+          {
+            echo "### Reproducible build on ${{ matrix.os }} (JDK 11.0.32+8)"
+            echo '```'
+            cat jrock.jar.sha256
+            cat jrock.jar.md5
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jrock-${{ matrix.os }}
+          # jar + its checksums side by side, plus the zipped source.
+          path: |
+            jrock.jar
+            jrock.jar.sha256
+            jrock.jar.md5
+            jrock-src.zip
+          if-no-files-found: error
