@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JRock in the browser (CheerpJ)</title>
+
+  <!-- CheerpJ runtime: compiles/runs unmodified JVM bytecode to WebAssembly+JS. -->
+  <script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
+
+  <style>
+    :root {
+      --brand: #0f8b8d;
+      --bg: #f4f6f7;
+      --panel: #ffffff;
+      --border: #d7dcde;
+      --text: #1c2224;
+      --muted: #667075;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      font-family: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text); background: var(--bg);
+    }
+    body { display: flex; flex-direction: column; }
+
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 16px; background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex: 0 0 auto;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    header .brand { color: var(--brand); }
+    header .spacer { flex: 1; }
+
+    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    input[type="file"] { font-size: 13px; }
+    button {
+      font-size: 13px; padding: 6px 12px; cursor: pointer;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--brand); color: #fff;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.secondary { background: #fff; color: var(--text); }
+
+    #status {
+      font-size: 12px; color: var(--muted);
+      padding: 6px 16px; background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      white-space: pre-wrap; flex: 0 0 auto;
+    }
+
+    /* CheerpJ mounts its Swing display into the element created by
+       cheerpjCreateDisplay(); we host it in this stretchy container. */
+    #display-wrap {
+      flex: 1 1 auto; position: relative; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      background: #23282b;
+    }
+    #display-wrap .placeholder {
+      color: #9aa4a8; font-size: 14px; text-align: center; padding: 24px;
+      max-width: 560px; line-height: 1.5;
+    }
+
+    footer {
+      font-size: 11px; color: var(--muted);
+      padding: 6px 16px; background: var(--panel);
+      border-top: 1px solid var(--border); flex: 0 0 auto;
+    }
+    code { background: #eef1f2; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1><span class="brand">JRock</span> in the browser</h1>
+    <span class="spacer"></span>
+    <div class="controls">
+      <input type="file" id="jarFile" accept=".jar" />
+      <button id="runBtn" disabled>Run JAR</button>
+    </div>
+  </header>
+
+  <div id="status">Loading CheerpJ runtime...</div>
+
+  <div id="display-wrap">
+    <div class="placeholder" id="placeholder">
+      Choose <code>jrock.jar</code> above, then press <b>Run JAR</b>.
+      The Swing UI will appear here.
+    </div>
+  </div>
+
+  <footer>
+    Runs unmodified Java bytecode in the browser via CheerpJ (WebAssembly + JS).
+    Must be served over HTTP (not opened as a <code>file://</code>).
+    Outbound Bedrock calls are subject to browser/CheerpJ network limits, so this page
+    is intended for testing the JRock UI locally.
+  </footer>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var statusEl = document.getElementById("status");
+      var runBtn   = document.getElementById("runBtn");
+      var fileInput = document.getElementById("jarFile");
+      var placeholder = document.getElementById("placeholder");
+
+      var cheerpjReady = false;
+      var displayCreated = false;
+      var selectedBytes = null;   // Uint8Array of the chosen jar
+      var selectedName = null;
+
+      function setStatus(msg) { statusEl.textContent = msg; }
+
+      function updateRunEnabled() {
+        runBtn.disabled = !(cheerpjReady && selectedBytes);
+      }
+
+      // 1) Initialise the CheerpJ runtime once at page load.
+      (async function initCheerpj() {
+        try {
+          // JRock is compiled with --release 11, so run CheerpJ in Java 11 mode
+          // (it otherwise defaults to Java 8 and rejects the classes).
+          await cheerpjInit({ version: 11 });
+          cheerpjReady = true;
+          setStatus("CheerpJ ready. Choose jrock.jar and press Run JAR.");
+          updateRunEnabled();
+        } catch (e) {
+          setStatus("Failed to initialise CheerpJ: " + e);
+        }
+      })();
+
+      // 2) Read the chosen .jar into memory as bytes.
+      fileInput.addEventListener("change", function () {
+        var f = fileInput.files && fileInput.files[0];
+        if (!f) { selectedBytes = null; selectedName = null; updateRunEnabled(); return; }
+        var reader = new FileReader();
+        reader.onload = function () {
+          selectedBytes = new Uint8Array(reader.result);
+          selectedName = f.name;
+          setStatus("Selected " + f.name + " (" + selectedBytes.length + " bytes). Press Run JAR.");
+          updateRunEnabled();
+        };
+        reader.onerror = function () { setStatus("Could not read the selected file."); };
+        reader.readAsArrayBuffer(f);
+      });
+
+      // 3) Write the jar into CheerpJ's /str/ mount (JS -> Java, transient) and run it.
+      runBtn.addEventListener("click", async function () {
+        if (!cheerpjReady || !selectedBytes) return;
+        runBtn.disabled = true;
+        try {
+          // Create the Swing display container once, filling the wrap area.
+          if (!displayCreated) {
+            if (placeholder) placeholder.remove();
+            // Width/height -1 makes CheerpJ fill its parent element.
+            cheerpjCreateDisplay(-1, -1, document.getElementById("display-wrap"));
+            displayCreated = true;
+          }
+
+          // /str/ is a JS-writable, Java-readable transient mount. Overwrites if present.
+          var path = "/str/" + (selectedName || "jrock.jar");
+          cheerpOSAddStringFile(path, selectedBytes);
+
+          setStatus("Running " + path + " ... (first run downloads the Java runtime; please wait)");
+          var code = await cheerpjRunJar(path);
+          setStatus("JAR exited with code " + code + ".");
+        } catch (e) {
+          setStatus("Error running JAR: " + e);
+          runBtn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
