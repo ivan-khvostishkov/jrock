@@ -185,6 +185,50 @@ to save the transcript to a PDF, or print to a physical printer.
 | Ctrl+P | Print log / save as PDF |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |
 
+## Reproducible builds
+
+CI compiles `JRock.java` with a **pinned OpenJDK 11 patch (Temurin 11.0.32+9)** and repacks
+the classes into a **byte-for-byte reproducible** `jrock.jar` (see `.github/build/BuildJar.java`:
+sorted entries, fixed timestamps, fixed compression, a hand-written manifest, no volatile
+metadata). The same source therefore yields the **same SHA-256 and MD5 on any machine or OS**.
+
+For robustness the build runs on **three operating systems** and publishes three artifacts:
+
+- `jrock-macos-latest.zip`
+- `jrock-ubuntu-latest.zip`
+- `jrock-windows-latest.zip`
+
+Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
+(`jrock.jar.sha256`, `jrock.jar.md5`) and the zipped source (`jrock-src.zip`). Because the
+build is reproducible, the `jrock.jar` inside all three archives is identical.
+
+Current build hashes:
+
+```
+b2b68245991f755653d57703e0d0ef58ac9996d7acc3b85bcf41195b295c220e  jrock.jar
+1b64669af18a42fd8b68351237c1c0a5  jrock.jar
+```
+
+To verify and run JRock from a build artifact, unzip it, then:
+
+```sh
+cd jrock-ubuntu-latest/
+
+md5sum jrock.jar
+# 1b64669af18a42fd8b68351237c1c0a5 *jrock.jar
+
+sha256sum jrock.jar
+# b2b68245991f755653d57703e0d0ef58ac9996d7acc3b85bcf41195b295c220e *jrock.jar
+
+java -jar jrock.jar
+```
+
+Or, if you want to modify the source and run it in place (no build step):
+
+```sh
+java JRock.java
+```
+
 ## Notes
 
 - All files created by the app are under `JRock/` and are git-ignored.
