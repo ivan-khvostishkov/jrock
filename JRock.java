@@ -128,18 +128,18 @@ public class JRock {
     private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
     private static String modelsEndpoint() { return mantleHost() + "/v1/models"; }
 
-    // Chat Completions URL for the currently configured model. The mantle path
-    // differs per model (see BedrockModelCard); unknown/free-text models fall back
-    // to the mantle default of /v1/chat/completions.
+    // Chat Completions URL for the currently configured model, or NULL if the
+    // model has no Chat Completions path on mantle (e.g. Anthropic/Messages-only).
+    //   - Known card with a chat path -> that URL (mantle default /v1, or /openai/v1).
+    //   - Known card with a null chat path -> null (NOT a faked default).
+    //   - No card (unknown/free-text)  -> the mantle default /v1/chat/completions.
     private static String endpoint() {
         BedrockModelCard card = cardFor(MODEL_ID);
-        String path = (card != null) ? card.mantleChatCompletionsPath() : null;
-        // Null means the model has no Chat Completions path on mantle (e.g. Claude,
-        // Messages-only). We fall back to the mantle default so we never build a
-        // ".../null" URL; such a request will fail server-side, which is expected
-        // until a Messages implementation is added.
-        if (path == null) path = "/v1/chat/completions";
-        return mantleHost() + path;
+        if (card == null) {
+            return mantleHost() + "/v1/chat/completions";   // unknown model: default
+        }
+        String path = card.mantleChatCompletionsPath();
+        return (path == null) ? null : mantleHost() + path;
     }
 
     // ---- Bedrock model cards -----------------------------------------------
@@ -175,6 +175,11 @@ public class JRock {
         // Only Anthropic models set this; JRock does not implement Messages yet
         // (planned for the future), so this is metadata for now.
         String mantleMessagesPath() { return null; }
+
+        // Vendor id prefix (e.g. "anthropic.", "openai."). Empty for cards that
+        // aren't tied to a vendor family. Used for partial ("starts with") matching
+        // when an exact model-id match isn't found.
+        String vendorPrefix() { return ""; }
 
         // Whether this model exposes Chat Completions on mantle (i.e. usable by
         // JRock's current single-API implementation).
@@ -221,10 +226,20 @@ public class JRock {
     // Shared traits of OpenAI GPT models on Bedrock. Per their model cards, on
     // bedrock-mantle "both APIs use the /openai/v1 base path, not /v1", so Chat
     // Completions lives at /openai/v1/chat/completions. Text/Image-in, Text-out.
-    // Per-endpoint API support differs per model, so subclasses supply it.
-    private abstract static class OpenAiModelCard extends BedrockModelCard {
+    //
+    // CONCRETE (not abstract): it doubles as a generic "any OpenAI model" card used
+    // for partial matches (model id starting with "openai."). Named subclasses
+    // override the specifics (id, display name, url, per-endpoint APIs).
+    private static class OpenAiModelCard extends BedrockModelCard {
+        String vendorPrefix()         { return "openai."; }
+        String modelId()              { return "openai."; }
+        String displayName()          { return "OpenAI (generic)"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html"; }
         String[] inputModalities()    { return new String[] { "Image", "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] {}; }
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
         @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
     }
 
@@ -256,7 +271,15 @@ public class JRock {
     // JRock only implements Chat Completions on mantle, so Claude models are NOT
     // usable here (supportsMantleChatCompletions() returns false). These cards are
     // included for their metadata.
-    private abstract static class AnthropicModelCard extends BedrockModelCard {
+    //
+    // CONCRETE (not abstract): it doubles as a generic "any Anthropic model" card
+    // used for partial matches (model id starting with "anthropic."). Named
+    // subclasses override only the identity fields.
+    private static class AnthropicModelCard extends BedrockModelCard {
+        String vendorPrefix()         { return "anthropic."; }
+        String modelId()              { return "anthropic."; }
+        String displayName()          { return "Anthropic Claude (generic)"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html"; }
         String[] inputModalities()    { return new String[] { "Image", "Text" }; }
         String[] outputModalities()   { return new String[] { "Text" }; }
         String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
@@ -317,10 +340,53 @@ public class JRock {
         new ClaudeOpus5Card(), new ClaudeFable51Card(),
     };
 
+    // Generic per-vendor cards, used as a fallback when no exact model-id match is
+    // found but the id starts with a known vendor prefix (e.g. any "anthropic.*"
+    // model routes to the Anthropic/Messages behavior).
+    private static final BedrockModelCard[] VENDOR_CARDS = {
+        new AnthropicModelCard(), new OpenAiModelCard(),
+    };
+
+    // Exact-match lookup by model id (pure; used to build endpoint URLs).
     private static BedrockModelCard cardFor(String modelId) {
+        BedrockModelCard exact = exactCard(modelId);
+        if (exact != null) return exact;
+        return vendorCard(modelId);   // may be null
+    }
+
+    private static BedrockModelCard exactCard(String modelId) {
         for (BedrockModelCard c : MODEL_CARDS) {
             if (c.modelId().equals(modelId)) return c;
         }
+        return null;
+    }
+
+    private static BedrockModelCard vendorCard(String modelId) {
+        if (modelId == null) return null;
+        for (BedrockModelCard v : VENDOR_CARDS) {
+            String prefix = v.vendorPrefix();
+            if (!prefix.isEmpty() && modelId.startsWith(prefix)) return v;
+        }
+        return null;
+    }
+
+    // Resolves the card for a model id and logs how it was matched:
+    //   - exact model-id match       -> "Model card: found matching model: <id>"
+    //   - partial (vendor prefix)     -> "Model card: found a partial match: <prefix>"
+    //   - no match                    -> "Model card: none - using default config"
+    // Returns the resolved card (or null when no match).
+    private static BedrockModelCard resolveAndLogCard(String modelId, LogView log) {
+        BedrockModelCard exact = exactCard(modelId);
+        if (exact != null) {
+            log.gray("Model card: found matching model: " + modelId);
+            return exact;
+        }
+        BedrockModelCard vendor = vendorCard(modelId);
+        if (vendor != null) {
+            log.gray("Model card: found a partial match: " + vendor.vendorPrefix());
+            return vendor;
+        }
+        log.gray("Model card: none - using default config (Chat Completions on /v1)");
         return null;
     }
     // All JRock files live under a "JRock" subfolder of the working directory.
@@ -615,6 +681,7 @@ public class JRock {
             log.gray("AWS region: " + REGION);
         }
         log.gray("Configured model: " + MODEL_ID);
+        resolveAndLogCard(MODEL_ID, log);
         if (promptSourceNote != null) {
             log.gray("Prompt source: " + promptSourceNote);
         }
@@ -802,6 +869,22 @@ public class JRock {
             log.gray("");                        // blank line BEFORE the input message
             log.human(prompt);
             log.gray("");                        // blank line AFTER the input message
+
+            // If the model isn't served via Chat Completions on mantle, don't even
+            // log "Calling ..." - report why and stop, without any HTTP request.
+            BedrockModelCard card = cardFor(MODEL_ID);
+            if (card != null && !card.supportsMantleChatCompletions()) {
+                String via = card.mantleMessagesPath() != null
+                        ? "the Anthropic Messages API (" + card.mantleMessagesPath() + ")"
+                        : "an API JRock does not implement";
+                log.gray("Model \"" + MODEL_ID + "\" is not served via Chat Completions on "
+                        + "bedrock-mantle; it uses " + via + ", which JRock does not implement "
+                        + "yet. Choose a Chat-Completions-capable model.");
+                log.gray("");
+                send.setEnabled(true);
+                return;
+            }
+
             log.gray(append
                     ? "Calling " + endpoint() + " (append: " + history.size() + " prior turns) ..."
                     : "Calling " + endpoint() + " ...");
@@ -1302,6 +1385,23 @@ public class JRock {
                 "0",
                 "No Bedrock API key set. Set the BEDROCK_API_KEY env var, or open "
                     + "the Configure dialog (top-left button) and enter a key.",
+                null
+            };
+        }
+
+        // If the resolved model card says this model isn't served via Chat
+        // Completions on mantle (e.g. any anthropic.* model, which uses the
+        // Messages API), don't send a Chat Completions request - it would fail.
+        BedrockModelCard card = cardFor(MODEL_ID);
+        if (card != null && !card.supportsMantleChatCompletions()) {
+            String via = card.mantleMessagesPath() != null
+                    ? "the Anthropic Messages API (" + card.mantleMessagesPath() + ")"
+                    : "an API JRock does not implement";
+            return new String[] {
+                "0",
+                "Model \"" + MODEL_ID + "\" is not served via Chat Completions on "
+                    + "bedrock-mantle; it uses " + via + ", which JRock does not "
+                    + "implement yet. Choose a Chat-Completions-capable model.",
                 null
             };
         }
