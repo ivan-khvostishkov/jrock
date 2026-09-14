@@ -66,7 +66,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: jrock-${{ matrix.os }}
           # jar + its checksums side by side, plus the zipped source.
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload jrock-web bundle
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           # Downloading this artifact yields jrock-web.zip with index.html and
           # jrock.jar at its root - ready to deploy to Amplify.
