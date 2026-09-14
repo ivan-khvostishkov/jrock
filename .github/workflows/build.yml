@@ -24,13 +24,13 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Pin the EXACT JDK 11 patch (Temurin 11.0.32+9, the latest LTS quarterly
       # update). Reproducibility depends on the exact toolchain, so this is fixed
       # rather than a floating "11".
       - name: Set up OpenJDK 11.0.32+9 (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '11.0.32+9'
@@ -66,7 +66,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jrock-${{ matrix.os }}
           # jar + its checksums side by side, plus the zipped source.
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload jrock-web bundle
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           # Downloading this artifact yields jrock-web.zip with index.html and
           # jrock.jar at its root - ready to deploy to Amplify.
