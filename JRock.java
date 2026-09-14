@@ -459,6 +459,30 @@ public class JRock {
                 .format(java.time.ZonedDateTime.now());
     }
 
+    // ---- Multimodal includes (Ctrl+I) --------------------------------------
+    // Non-persistent map of file hash -> path. Cleared on restart (users must
+    // re-include files to reuse them). Text and images share this map; the token
+    // kind (@img/@txt) in the prompt disambiguates how each is sent.
+    private static final java.util.Map<String, Path> INCLUDES = new java.util.HashMap<>();
+
+    // Prompt token that stands in for an included file: "@img <hash>" or "@txt <hash>".
+    // Hash is a hex SHA-256. Matched anywhere in the prompt.
+    private static final java.util.regex.Pattern INCLUDE_TOKEN =
+            java.util.regex.Pattern.compile("@(img|txt) ([0-9a-f]{64})");
+
+    // SHA-256 of a file's bytes, as lowercase hex. Null on read failure.
+    private static String hashFile(Path p) {
+        try {
+            byte[] bytes = Files.readAllBytes(p);
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     // A styled, persisted log backed by an ordered list of entries so it can be
     // re-rendered on demand and rewritten to disk after every change.
     //
@@ -884,6 +908,26 @@ public class JRock {
             log.human(prompt, extend);
             log.gray("");                        // blank line AFTER the input message
 
+            // Verify all @img/@txt includes are known and unchanged - in the new
+            // prompt AND in prior human turns (extend mode re-sends those, expanding
+            // their tokens too). On any problem, report it right after the
+            // [HUMAN OPERATOR] message and do not send.
+            String includeError = verifyIncludes(prompt);
+            if (includeError == null) {
+                for (String[] turn : history) {
+                    if (ROLE_HUMAN.equals(turn[0])) {
+                        includeError = verifyIncludes(turn[1]);
+                        if (includeError != null) break;
+                    }
+                }
+            }
+            if (includeError != null) {
+                log.gray(includeError);
+                log.gray("");
+                send.setEnabled(true);
+                return;
+            }
+
             // If the model isn't served via Chat Completions on mantle, don't even
             // log "Calling ..." - report why and stop, without any HTTP request.
             BedrockModelCard card = cardFor(MODEL_ID);
@@ -1052,6 +1096,16 @@ public class JRock {
             }
         });
 
+        // Ctrl+I includes a text or image file: hashes it, remembers hash -> path,
+        // and inserts an "@img <hash>" / "@txt <hash>" token at the prompt cursor.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "jrock-include");
+        frame.getRootPane().getActionMap().put("jrock-include", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showIncludeDialog(frame, input, log, extendMode.isSelected());
+            }
+        });
+
         // Configure button: opens the settings dialog, then re-runs the session
         // report (CWD first, models loaded, ... Ready) exactly like startup.
         // initSession reloads the log from the (possibly new) working directory,
@@ -1136,6 +1190,7 @@ public class JRock {
         String[][] keys = {
             {"Ctrl+S", "Save prompt as (a copy)"},
             {"Ctrl+O", "Load prompt from a file"},
+            {"Ctrl+I", "Include a text or image file"},
             {"Ctrl+R", "Move & resize the window"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
@@ -1274,6 +1329,10 @@ public class JRock {
     private static void loadPromptInto(JFrame frame, JTextArea input, LogView log) {
         javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
         chooser.setDialogTitle("Load prompt");
+        // Prompts are text - restrict to .txt so an image can't be loaded by mistake.
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "Text files (*.txt)", "txt"));
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         rememberChooserDir(chooser);
 
@@ -1285,9 +1344,101 @@ public class JRock {
                     "Load failed", javax.swing.JOptionPane.WARNING_MESSAGE);
             return;
         }
+        // Guard against loading binary (e.g. an image) as a prompt: that would put
+        // garbage into the text area. To attach an image, use Ctrl+I instead.
+        if (looksBinary(loaded)) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "That file doesn't look like text and was not loaded as a prompt.\n"
+                    + "To attach an image or file, use Ctrl+I (Include) instead.",
+                    "Not a text file", javax.swing.JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         input.setText(loaded);            // triggers autosave to jrock-prompt.txt
         input.setCaretPosition(0);
         if (log != null) log.gray("Loaded prompt from (read-only): " + source);
+    }
+
+    // ---- Include file (Ctrl+I) ---------------------------------------------
+    // Lets the user pick a text OR image file, hashes it, remembers hash -> path
+    // in the non-persistent INCLUDES map, logs the details (and image dimensions),
+    // and inserts an "@txt <hash>" / "@img <hash>" token at the prompt cursor.
+    private static void showIncludeDialog(JFrame frame, JTextArea input, LogView log,
+                                          boolean extend) {
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
+        chooser.setDialogTitle("Include file");
+        chooser.setAcceptAllFileFilterUsed(false);
+        javax.swing.filechooser.FileNameExtensionFilter imageFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "Image files (png, jpg, jpeg, gif, webp)", "png", "jpg", "jpeg", "gif", "webp");
+        javax.swing.filechooser.FileNameExtensionFilter textFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter("Text files (*.txt)", "txt");
+        chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
+        chooser.addChoosableFileFilter(textFilter);
+        chooser.setFileFilter(imageFilter);            // default selection = image
+
+        if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        rememberChooserDir(chooser);
+
+        Path file = chooser.getSelectedFile().toPath();
+        boolean isImage = chooser.getFileFilter() == imageFilter;
+        String kind = isImage ? "img" : "txt";
+
+        String hash = hashFile(file);
+        if (hash == null) {
+            log.gray("Include failed: could not read " + file);
+            return;
+        }
+        // Always (re)register the hash -> path mapping. After a restart this makes
+        // an existing "@kind <hash>" token in the (recovered) prompt valid again.
+        INCLUDES.put(hash, file);
+        log.gray("Included @" + kind + " " + hash + " from " + file);
+
+        // For images, also report dimensions and total pixel count (locale-formatted).
+        if (isImage) {
+            try {
+                java.awt.image.BufferedImage bi = javax.imageio.ImageIO.read(file.toFile());
+                if (bi != null) {
+                    long pixels = (long) bi.getWidth() * bi.getHeight();
+                    String pixelsFmt = java.text.NumberFormat.getIntegerInstance(
+                            java.util.Locale.getDefault()).format(pixels);
+                    log.gray("Image: " + bi.getWidth() + " x " + bi.getHeight()
+                            + ", " + pixelsFmt + " pixels");
+                } else {
+                    log.gray("Image: (could not decode dimensions)");
+                }
+            } catch (IOException ex) {
+                log.gray("Image: (could not read dimensions: " + ex.getMessage() + ")");
+            }
+        }
+
+        // Dedup: if this exact token is already in the prompt (or, in extend mode,
+        // in any prior human turn), don't insert a duplicate - just keep the
+        // re-registered mapping above. This avoids duplicate tags after a restart
+        // when the user reattaches files.
+        String token = "@" + kind + " " + hash;
+        boolean alreadyPresent = input.getText().contains(token);
+        if (!alreadyPresent && extend) {
+            for (String[] turn : log.dialogHistory()) {
+                if (ROLE_HUMAN.equals(turn[0]) && turn[1].contains(token)) {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+        }
+        if (alreadyPresent) {
+            log.gray("Already referenced (@" + kind + " " + hash + "); token not duplicated.");
+            input.requestFocusInWindow();
+            return;
+        }
+
+        // Insert "@kind <hash>\n" at the cursor (no leading newline).
+        int pos = input.getCaretPosition();
+        try {
+            input.getDocument().insertString(pos, token + "\n", null);
+        } catch (BadLocationException ex) {
+            input.append(token + "\n");   // fallback: append at end
+        }
+        input.requestFocusInWindow();
     }
 
     // ---- Move & Resize dialog (Ctrl+R) -------------------------------------
@@ -1420,6 +1571,129 @@ public class JRock {
         return sb.toString();
     }
 
+    // ---- Multimodal include verification & content assembly ----------------
+    // Checks every @img/@txt token in the prompt: the hash must be known (in
+    // INCLUDES) AND the file must still hash to the same value (unchanged). Returns
+    // null if all good, else a human-readable error describing the first problem.
+    private static String verifyIncludes(String prompt) {
+        java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(prompt);
+        while (m.find()) {
+            String kind = m.group(1);
+            String hash = m.group(2);
+            Path path = INCLUDES.get(hash);
+            if (path == null) {
+                return "Included @" + kind + " " + hash + " is not known (re-include the "
+                        + "file with Ctrl+I; includes are not kept across restarts).";
+            }
+            if (!Files.exists(path)) {
+                return "Included file is missing: " + path + " (@" + kind + " " + hash + ").";
+            }
+            String current = hashFile(path);
+            if (current == null) {
+                return "Could not read included file: " + path + " (@" + kind + " " + hash + ").";
+            }
+            if (!current.equals(hash)) {
+                return "Included file has changed since it was added: " + path
+                        + " (@" + kind + " " + hash + "). Re-include it with Ctrl+I.";
+            }
+        }
+        return null;
+    }
+
+    // A content part destined for the OpenAI multimodal "content" array.
+    private static final class Part {
+        final boolean image;      // true = image_url part, false = text part
+        final String text;        // text part: the literal text
+        final String dataUrl;     // image part: "data:<mime>;base64,<...>"
+        final String maskHash;    // image/text include hash for masking, or null
+        Part(boolean image, String text, String dataUrl, String maskHash) {
+            this.image = image; this.text = text; this.dataUrl = dataUrl; this.maskHash = maskHash;
+        }
+        static Part text(String t)                  { return new Part(false, t, null, null); }
+        static Part includedText(String t, String h){ return new Part(false, t, null, h); }
+        static Part image(String url, String h)     { return new Part(true, null, url, h); }
+    }
+
+    // Splits the prompt into ordered content parts, expanding @img/@txt tokens.
+    // Plain text between tokens becomes text parts (empty segments skipped, so a
+    // token at the very start/end yields no empty neighbour). Assumes verifyIncludes
+    // already passed. May throw on file read.
+    private static java.util.List<Part> buildParts(String prompt) throws IOException {
+        java.util.List<Part> parts = new ArrayList<>();
+        java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(prompt);
+        int last = 0;
+        while (m.find()) {
+            if (m.start() > last) {
+                String seg = prompt.substring(last, m.start());
+                if (!seg.isEmpty()) parts.add(Part.text(seg));
+            }
+            String kind = m.group(1);
+            String hash = m.group(2);
+            Path path = INCLUDES.get(hash);
+            if (kind.equals("img")) {
+                byte[] bytes = Files.readAllBytes(path);
+                String b64 = java.util.Base64.getEncoder().encodeToString(bytes);
+                String mime = imageMime(path);
+                parts.add(Part.image("data:" + mime + ";base64," + b64, hash));
+            } else {
+                String content = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+                parts.add(Part.includedText(content, hash));
+            }
+            last = m.end();
+        }
+        if (last < prompt.length()) {
+            String seg = prompt.substring(last);
+            if (!seg.isEmpty()) parts.add(Part.text(seg));
+        }
+        return parts;
+    }
+
+    private static String imageMime(Path p) {
+        String n = p.getFileName().toString().toLowerCase();
+        if (n.endsWith(".png"))  return "image/png";
+        if (n.endsWith(".gif"))  return "image/gif";
+        if (n.endsWith(".webp")) return "image/webp";
+        return "image/jpeg";   // jpg/jpeg and default
+    }
+
+    // Emits the OpenAI "content" value for one user turn into the real (sb) and
+    // masked (masked) builders: a JSON string when it's a single plain-text part,
+    // otherwise an array of text/image_url parts. In the masked copy, included
+    // text/image content is replaced by "<txt|img masked <hash>>" and ordinary
+    // prompt text by "<input masked>".
+    private static void appendUserContent(StringBuilder sb, StringBuilder masked,
+                                          java.util.List<Part> parts) {
+        boolean singlePlainText = parts.size() == 1 && !parts.get(0).image
+                && parts.get(0).maskHash == null;
+        if (singlePlainText) {
+            sb.append("\"").append(jsonEscape(parts.get(0).text)).append("\"");
+            masked.append("\"<input masked>\"");
+            return;
+        }
+        sb.append("[");
+        masked.append("[");
+        for (int i = 0; i < parts.size(); i++) {
+            Part p = parts.get(i);
+            if (i > 0) { sb.append(","); masked.append(","); }
+            if (p.image) {
+                sb.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
+                        .append(jsonEscape(p.dataUrl)).append("\"}}");
+                masked.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
+                        .append("<img masked ").append(p.maskHash).append(">").append("\"}}");
+            } else {
+                sb.append("{\"type\":\"text\",\"text\":\"")
+                        .append(jsonEscape(p.text)).append("\"}");
+                String maskTxt = (p.maskHash != null)
+                        ? "<txt masked " + p.maskHash + ">"
+                        : "<input masked>";
+                masked.append("{\"type\":\"text\",\"text\":\"")
+                        .append(maskTxt).append("\"}");
+            }
+        }
+        sb.append("]");
+        masked.append("]");
+    }
+
     // ---- Bedrock call ------------------------------------------------------
     // Returns a 3-element array:
     //   [0] = "1" on success, "0" on failure.
@@ -1455,16 +1729,34 @@ public class JRock {
             };
         }
 
-        // Build the messages array. In single-message mode `history` is empty, so
-        // this is just the new user turn. In append mode it is the full prior
-        // dialog (mapped to OpenAI roles) followed by the new user turn.
+        // Expand the new prompt into multimodal content parts (@img/@txt tokens
+        // become image/text parts). verifyIncludes() has already run in the UI.
+        java.util.List<Part> parts = buildParts(prompt);
+
+        // Build the messages array (REAL and MASKED in parallel). Human turns -
+        // both prior ones (extend mode) and the new turn - are expanded via
+        // buildParts so their @img/@txt tokens become image/text content parts.
+        // Assistant turns are always plain text.
         StringBuilder messages = new StringBuilder("[");
+        StringBuilder maskedMessages = new StringBuilder("[");
         for (String[] turn : history) {
-            String openaiRole = ROLE_HUMAN.equals(turn[0]) ? "user" : "assistant";
-            messages.append("{\"role\":\"").append(openaiRole).append("\",\"content\":\"")
-                    .append(jsonEscape(turn[1])).append("\"},");
+            if (ROLE_HUMAN.equals(turn[0])) {
+                messages.append("{\"role\":\"user\",\"content\":");
+                maskedMessages.append("{\"role\":\"user\",\"content\":");
+                appendUserContent(messages, maskedMessages, buildParts(turn[1]));
+                messages.append("},");
+                maskedMessages.append("},");
+            } else {
+                String head = "{\"role\":\"assistant\",\"content\":\"";
+                messages.append(head).append(jsonEscape(turn[1])).append("\"},");
+                maskedMessages.append(head).append("<input masked>").append("\"},");
+            }
         }
-        messages.append("{\"role\":\"user\",\"content\":\"").append(jsonEscape(prompt)).append("\"}]");
+        messages.append("{\"role\":\"user\",\"content\":");
+        maskedMessages.append("{\"role\":\"user\",\"content\":");
+        appendUserContent(messages, maskedMessages, parts);
+        messages.append("}]");
+        maskedMessages.append("}]");
 
         // OpenAI Chat Completions request shape.
         String body = "{"
@@ -1473,14 +1765,12 @@ public class JRock {
                 + ",\"max_tokens\":2048"
                 + "}";
 
-        // Masked copy of the request for display: every message content (all
-        // history turns AND the new prompt) is replaced with <input masked> so
-        // the raw request isn't a noisy duplicate of the dialog.
-        String maskedRequestBody = body;
-        for (String[] turn : history) {
-            maskedRequestBody = maskFirst(maskedRequestBody, jsonEscape(turn[1]), "<input masked>");
-        }
-        maskedRequestBody = maskFirst(maskedRequestBody, jsonEscape(prompt), "<input masked>");
+        // Masked copy of the request for display (content already masked above).
+        String maskedRequestBody = "{"
+                + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
+                + "\"messages\":" + maskedMessages
+                + ",\"max_tokens\":2048"
+                + "}";
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint()))
@@ -1507,9 +1797,8 @@ public class JRock {
 
         String reply = extractContent(resp.body());
 
-        // Symbol (character) counts are computed locally. Input counts the ENTIRE
-        // input sent to the model: all prior turns (append mode) plus the new
-        // prompt - matching what prompt_tokens measures.
+        // Text-symbol counts are computed locally. Input counts the prompt text
+        // plus all prior turns (extend mode). Images don't contribute text symbols.
         int inputSymbols = prompt.length();
         for (String[] turn : history) {
             inputSymbols += turn[1].length();
@@ -1527,8 +1816,8 @@ public class JRock {
         String details = "--- raw request ---\n" + "POST " + endpoint() + "\n" + maskedRequestBody
                 + "\n\n--- raw response ---\n" + maskedResponse
                 + "\n\n--- stats ---"
-                + "\nInput symbols:  " + inputSymbols
-                + "\nOutput symbols: " + outputSymbols
+                + "\nInput text symbols:  " + inputSymbols
+                + "\nOutput text symbols: " + outputSymbols
                 + "\nInput tokens:   " + tokenStr(inputTokens)
                 + "\nOutput tokens:  " + tokenStr(outputTokens);
 
@@ -1641,6 +1930,20 @@ public class JRock {
         } catch (IOException ex) {
             return null;
         }
+    }
+
+    // Heuristic: treat text containing a NUL or an unusual amount of other C0
+    // control characters (excluding tab/newline/carriage return) as binary. Used
+    // to avoid loading an image/binary file into the prompt as garbage.
+    private static boolean looksBinary(String s) {
+        if (s.indexOf('\0') >= 0) return true;
+        int controls = 0, n = Math.min(s.length(), 4096);
+        for (int i = 0; i < n; i++) {
+            char c = s.charAt(i);
+            if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') controls++;
+            else if (c == '\uFFFD') controls++;   // UTF-8 replacement char = decode failure
+        }
+        return n > 0 && controls * 100 / n >= 5;   // >= 5% control/invalid chars
     }
 
     // Rewrites the persistent prompt file (crash recovery for the input box).
