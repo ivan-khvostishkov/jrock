@@ -26,20 +26,28 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      # Pin the EXACT JDK 11 patch (Temurin 11.0.32+8, the latest LTS quarterly
+      # Pin the EXACT JDK 11 patch (Temurin 11.0.32+9, the latest LTS quarterly
       # update). Reproducibility depends on the exact toolchain, so this is fixed
       # rather than a floating "11".
-      - name: Set up OpenJDK 11.0.32+8 (Temurin)
+      - name: Set up OpenJDK 11.0.32+9 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '11.0.32+8'
+          java-version: '11.0.32+9'
 
       - name: Show Java version
         run: javac -version
 
       - name: Compile
-        run: javac -encoding UTF-8 -d out JRock.java
+        # -encoding UTF-8   : fixed source charset (no platform-default variance).
+        # --release 11      : pins the target class-file version + platform API,
+        #                     independent of the running JDK's default.
+        # -g:source,lines,vars : pin the debug attributes emitted (all source-
+        #                     derived, so deterministic) instead of relying on the
+        #                     compiler's default -g level.
+        # javac itself embeds no timestamps or paths, so with a pinned JDK the
+        # resulting .class bytes are identical on any machine/OS.
+        run: javac -encoding UTF-8 --release 11 -g:source,lines,vars -d out JRock.java
 
       - name: Build reproducible JAR (+ checksums + source zip)
         # Run from the repo root (default) so BuildJar's relative paths (out/,
@@ -50,7 +58,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Reproducible build on ${{ matrix.os }} (JDK 11.0.32+8)"
+            echo "### Reproducible build on ${{ matrix.os }} (JDK 11.0.32+9)"
             echo '```'
             cat jrock.jar.sha256
             cat jrock.jar.md5
