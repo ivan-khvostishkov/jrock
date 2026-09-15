@@ -31,12 +31,23 @@
       border-bottom: 1px solid var(--border);
       flex: 0 0 auto;
     }
-    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    header h1 {
+      font-size: 16px; margin: 0; font-weight: 600;
+      /* Let the title shrink/truncate instead of pushing controls to a new line. */
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     header .brand { color: var(--brand); text-decoration: none; }
     header a.brand:hover { text-decoration: underline; }
     header .spacer { flex: 1; }
 
-    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    /* Keep the key button and Run button together on one line (no wrapping). */
+    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; flex: 0 0 auto; }
+
+    /* Narrow screens: smaller title so the single-line header fits comfortably. */
+    @media (max-width: 520px) {
+      header { gap: 8px; padding: 10px 12px; }
+      header h1 { font-size: 14px; }
+    }
     button {
       font-size: 13px; padding: 6px 12px; cursor: pointer;
       border: 1px solid var(--border); border-radius: 6px;
