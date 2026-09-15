@@ -1,13 +1,13 @@
 # JRock
 
-A minimal, dependency-free Swing desktop client (playground) for **Amazon Bedrock**,
+A minimal, dependency-free Swing GUI desktop client (playground) for **Amazon Bedrock**,
 built as a single Java source file. It calls the OpenAI-compatible **Chat Completions
 API** on the **`bedrock-mantle`** endpoint using a lightweight **Bedrock API key**, and
 keeps every prompt and conversation only on your local disk, as plain, visible files.
 
-> The Amazon Bedrock playground that just works: every prompt and session is saved to
-> disk so nothing is ever lost, and your credentials stay put with no repeated sign-ins,
-> so it keeps out of your way and lets you focus on the models.
+> The Amazon Bedrock desktop GUI playground in Java that just works: every prompt and 
+> session is saved to disk so nothing is ever lost, and your credentials stay put with no
+> repeated sign-ins, so it keeps out of your way and lets you focus on the models.
 
 By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 

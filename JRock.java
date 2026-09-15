@@ -1340,7 +1340,7 @@ public class JRock {
         javax.swing.JLabel about = new javax.swing.JLabel(
                 "JRock version " + VERSION + " (c) 2026");
         javax.swing.JTextArea desc = new javax.swing.JTextArea(
-            "The Amazon Bedrock playground that just works: every prompt and session "
+            "The Amazon Bedrock desktop GUI client in Java that just works: every prompt and session "
           + "is saved to disk so nothing is ever lost, and your credentials stay put "
           + "with no repeated sign-ins - so it keeps out of your way and lets you "
           + "focus on the models.\n\n"
