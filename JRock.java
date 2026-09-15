@@ -101,6 +101,9 @@ public class JRock {
     // Application version.
     private static final String VERSION = "1.3.1";
 
+    // Project home page (linked from the About line in the Configure dialog).
+    private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
+
     // ---- Configuration (mutable: changed via the Configure dialog) ----------
     private static final String DEFAULT_REGION = "us-east-1";
     // Region/model start from env/defaults and can be overridden at runtime.
@@ -1384,8 +1387,17 @@ public class JRock {
         }
 
         // About line (bold, default L&F) + a short plain description.
+        // "JRock" is a hyperlink to the project on GitHub. Swing labels render
+        // HTML for the link look but don't open URLs themselves, so a click
+        // handler (below) opens the default browser.
         javax.swing.JLabel about = new javax.swing.JLabel(
-                "JRock version " + VERSION + " (c) 2026");
+                "<html><a href=\"" + GITHUB_URL + "\">JRock</a> version "
+                + VERSION + " (c) 2026</html>");
+        about.setToolTipText(GITHUB_URL);
+        about.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        about.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) { openUrl(GITHUB_URL); }
+        });
         javax.swing.JTextArea desc = new javax.swing.JTextArea(
             "The Amazon Bedrock desktop GUI client in Java that just works: every prompt and session "
           + "is saved to disk so nothing is ever lost, and your credentials stay put "
@@ -1516,6 +1528,21 @@ public class JRock {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Could not save to " + target + ":\n" + ex.getMessage(),
                     "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    // Opens a URL in the user's default browser, if the platform supports it.
+    // Best-effort: failures are ignored (the tooltip still shows the address).
+    private static void openUrl(String url) {
+        try {
+            if (java.awt.Desktop.isDesktopSupported()) {
+                java.awt.Desktop d = java.awt.Desktop.getDesktop();
+                if (d.isSupported(java.awt.Desktop.Action.BROWSE)) {
+                    d.browse(java.net.URI.create(url));
+                }
+            }
+        } catch (Exception ignore) {
+            // No browser available (e.g. headless/sandboxed); nothing to do.
         }
     }
 
