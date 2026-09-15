@@ -1887,9 +1887,11 @@ public class JRock {
     }
 
     // ---- Include file (Ctrl+I) ---------------------------------------------
-    // Lets the user pick a text OR image file, hashes it, remembers hash -> path
-    // in the non-persistent INCLUDES map, logs the details (and image dimensions),
-    // and inserts an "@txt <hash>" / "@img <hash>" token at the prompt cursor.
+    // Lets the user pick a text or image file, or a PDF to convert (via
+    // Ghostscript) into per-page text or per-page images. Each included file is
+    // hashed, remembered as hash -> path in the non-persistent INCLUDES map,
+    // logged (with image dimensions where applicable), and gets an
+    // "@txt <hash>" / "@img <hash>" token inserted at the prompt cursor.
     private static void showIncludeDialog(JFrame frame, JTextArea input, LogView log,
                                           boolean extend) {
         javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
@@ -1900,21 +1902,42 @@ public class JRock {
                         "Image files (png, jpg, jpeg, gif, webp)", "png", "jpg", "jpeg", "gif", "webp");
         javax.swing.filechooser.FileNameExtensionFilter textFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter("Text files (*.txt)", "txt");
+        javax.swing.filechooser.FileNameExtensionFilter pdfTextFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter("PDF as text pages (*.pdf)", "pdf");
+        javax.swing.filechooser.FileNameExtensionFilter pdfImageFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter("PDF as page images (*.pdf)", "pdf");
         chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
         chooser.addChoosableFileFilter(textFilter);
+        chooser.addChoosableFileFilter(pdfTextFilter);
+        chooser.addChoosableFileFilter(pdfImageFilter);
         chooser.setFileFilter(imageFilter);            // default selection = image
 
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         rememberChooserDir(chooser);
 
         Path file = chooser.getSelectedFile().toPath();
-        boolean isImage = chooser.getFileFilter() == imageFilter;
-        String kind = isImage ? "img" : "txt";
+        javax.swing.filechooser.FileFilter chosen = chooser.getFileFilter();
 
+        if (chosen == pdfTextFilter || chosen == pdfImageFilter) {
+            includePdf(frame, input, log, extend, file, chosen == pdfImageFilter);
+            return;
+        }
+
+        boolean isImage = chosen == imageFilter;
+        includeOne(input, log, extend, file, isImage ? "img" : "txt", isImage);
+        input.requestFocusInWindow();
+    }
+
+    // Registers one file as an include (hash -> path), logs it (with image
+    // dimensions when applicable), and inserts its "@kind <hash>" token at the
+    // cursor unless already referenced (dedup, also across prior turns in extend
+    // mode). Returns true if a token was inserted.
+    private static boolean includeOne(JTextArea input, LogView log, boolean extend,
+                                      Path file, String kind, boolean isImage) {
         String hash = hashFile(file);
         if (hash == null) {
             log.gray("Include failed: could not read " + file);
-            return;
+            return false;
         }
         // Always (re)register the hash -> path mapping. After a restart this makes
         // an existing "@kind <hash>" token in the (recovered) prompt valid again.
@@ -1955,8 +1978,7 @@ public class JRock {
         }
         if (alreadyPresent) {
             log.gray("Already referenced (@" + kind + " " + hash + "); token not duplicated.");
-            input.requestFocusInWindow();
-            return;
+            return false;
         }
 
         // Insert "@kind <hash>\n" at the cursor (no leading newline).
@@ -1966,7 +1988,118 @@ public class JRock {
         } catch (BadLocationException ex) {
             input.append(token + "\n");   // fallback: append at end
         }
+        return true;
+    }
+
+    // Converts a PDF to per-page files with Ghostscript (gswin64c), then includes
+    // each produced page. asImages=false -> text pages (txtwrite), true -> PNG
+    // page images. Output files sit next to the source, named
+    // "<file>.gs.NNN.txt" / "<file>.gs.NNN.png". If Ghostscript isn't on PATH,
+    // points the user to the download page and does nothing else.
+    private static void includePdf(JFrame frame, JTextArea input, LogView log,
+                                   boolean extend, Path pdf, boolean asImages) {
+        String gs = findGhostscript();
+        if (gs == null) {
+            log.gray("Ghostscript (gswin64c) was not found on PATH. Install it from "
+                    + "https://ghostscript.com/ to convert PDFs, then try again.");
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Ghostscript (gswin64c) is required to convert PDFs but was not found "
+                        + "on your PATH.\n\nInstall it from https://ghostscript.com/ and "
+                        + "restart JRock (or your shell) so gswin64c is on PATH.",
+                    "Ghostscript not found", javax.swing.JOptionPane.WARNING_MESSAGE);
+            openUrl("https://ghostscript.com/");
+            return;
+        }
+
+        String ext = asImages ? "png" : "txt";
+        String device = asImages ? "png16m" : "txtwrite";
+        // Ghostscript expands %03d in the output path to the page number.
+        String outPattern = pdf.toAbsolutePath() + ".gs.%03d." + ext;
+
+        java.util.List<String> cmd = new java.util.ArrayList<>();
+        cmd.add(gs);
+        cmd.add("-q"); cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
+        cmd.add("-sDEVICE=" + device);
+        if (asImages) { cmd.add("-r150"); }   // 150 dpi page raster
+        cmd.add("-o"); cmd.add(outPattern);
+        cmd.add(pdf.toAbsolutePath().toString());
+
+        log.gray("Converting PDF with Ghostscript: " + String.join(" ", cmd));
+        int code;
+        try {
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            // Drain output so the process can't block, and echo it to the log.
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (!line.isBlank()) log.gray("gs: " + line.trim());
+                }
+            }
+            code = p.waitFor();
+        } catch (IOException | InterruptedException ex) {
+            log.gray("Ghostscript failed to run: " + ex.getMessage());
+            return;
+        }
+        if (code != 0) {
+            log.gray("Ghostscript exited with code " + code + "; no pages included.");
+            return;
+        }
+
+        // Collect the produced page files in order and include each one.
+        String prefix = pdf.getFileName() + ".gs.";
+        String suffix = "." + ext;
+        Path dir = pdf.toAbsolutePath().getParent();
+        java.util.List<Path> pages = new java.util.ArrayList<>();
+        if (dir != null) {
+            try (java.util.stream.Stream<Path> s = Files.list(dir)) {
+                s.filter(pp -> {
+                        String n = pp.getFileName().toString();
+                        return n.startsWith(prefix) && n.endsWith(suffix);
+                    })
+                    .sorted(java.util.Comparator.comparing(pp -> pp.getFileName().toString()))
+                    .forEach(pages::add);
+            } catch (IOException ex) {
+                log.gray("Could not list produced pages: " + ex.getMessage());
+                return;
+            }
+        }
+        if (pages.isEmpty()) {
+            log.gray("Ghostscript produced no pages for " + pdf.getFileName() + ".");
+            return;
+        }
+
+        log.gray("Ghostscript produced " + pages.size() + " page file(s); including them.");
+        int inserted = 0;
+        for (Path page : pages) {
+            if (includeOne(input, log, extend, page, asImages ? "img" : "txt", asImages)) inserted++;
+        }
+        log.gray("Inserted " + inserted + " new @" + (asImages ? "img" : "txt")
+                + " token(s) for " + pdf.getFileName() + ".");
         input.requestFocusInWindow();
+    }
+
+    // Finds the Ghostscript console executable on PATH (gswin64c/gswin32c on
+    // Windows, "gs" elsewhere). Returns the command to run, or null if not found.
+    private static String findGhostscript() {
+        String[] names = isWindows()
+                ? new String[] { "gswin64c", "gswin32c", "gs" }
+                : new String[] { "gs" };
+        String path = System.getenv("PATH");
+        String[] dirs = path == null ? new String[0] : path.split(java.io.File.pathSeparator);
+        for (String name : names) {
+            String exe = isWindows() ? name + ".exe" : name;
+            for (String d : dirs) {
+                if (d.isBlank()) continue;
+                try {
+                    Path candidate = Paths.get(d.trim(), exe);
+                    if (Files.isRegularFile(candidate)) return candidate.toAbsolutePath().toString();
+                } catch (RuntimeException ignore) { /* skip malformed PATH entry */ }
+            }
+        }
+        return null;
     }
 
     // ---- Move & resize dialog (Ctrl+M) -------------------------------------
