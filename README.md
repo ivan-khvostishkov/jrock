@@ -52,6 +52,22 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
 4. Type a prompt and press **Ctrl+Enter** (or the **Send** button).
 
+## JRock Web (browser demo)
+
+A deployable demo runs in your browser at **https://jrock-demo.nosocial.net/** — no locally
+installed JVM required. It loads the same unmodified `jrock.jar` and runs it entirely
+**locally in your browser** via [CheerpJ](https://cheerpj.com/) (which executes JVM bytecode
+as WebAssembly), so nothing runs on a server.
+
+- **Entering your API key is safe here.** The page shows the jar's SHA-256 so you can confirm
+  it matches the reproducible build before typing anything, and the key stays inside the
+  browser sandbox — it's passed only to the in-browser JVM, never to any backend.
+- **It will not make real Bedrock calls.** The same browser sandbox blocks the outbound
+  networking JRock needs (CheerpJ has no native socket layer, so `HttpClient`'s
+  `sun.nio.ch.EPoll` is unavailable and throws `UnsatisfiedLinkError`). The demo only gives
+  you an impression of the interface; use the desktop jar for live calls.
+- **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
+
 ## Endpoint & API design
 
 - Uses the **`bedrock-mantle`** endpoint. AWS recommends `bedrock-runtime` for new apps
@@ -160,7 +176,7 @@ Applying re-runs the session init (working directory reported first, then models
 ending with `Ready.`). Changing the working directory reloads the log from the new folder,
 so nothing carries over from the old one.
 
-## Window move & resize (Ctrl+R)
+## Window move & resize (Ctrl+M)
 
 A dialog to set the window **width/height** and **on-screen X/Y** numerically, plus info
 about the screens (which monitor holds the window, each screen's bounds). Handy for precise
@@ -171,17 +187,26 @@ placement or moving across monitors without the mouse. Handles the maximized sta
 Opens the native print dialog for the log. On Windows you can pick "Microsoft Print to PDF"
 to save the transcript to a PDF, or print to a physical printer.
 
+## Context menus (right-click / long tap)
+
+Right-clicking (or long-tapping on touch devices) opens a context menu:
+
+- **Log pane** — Save log copy as..., Print...
+- **Prompt area** — Include text or image file..., Load prompt from file..., Save prompt copy as...
+- **Top bar (empty area)** — Move & resize window...
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
 |---|---|
 | Ctrl+Enter | Send |
 | Ctrl+S | Save prompt as (a copy) |
+| Ctrl+L | Save log as (a copy) |
 | Ctrl+O | Load prompt from a file (text only) |
 | Ctrl+I | Include a text or image file |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle Extend conversation |
-| Ctrl+R | Move & resize the window |
+| Ctrl+M | Move & resize the window |
 | Ctrl+P | Print log / save as PDF |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |
 
