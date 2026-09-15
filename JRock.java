@@ -1181,15 +1181,7 @@ public class JRock {
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_P, InputEvent.CTRL_DOWN_MASK), "jrock-print");
         frame.getRootPane().getActionMap().put("jrock-print", new AbstractAction() {
-            @Override public void actionPerformed(ActionEvent e) {
-                try {
-                    output.print();   // shows the native print dialog; blocks until done
-                } catch (java.awt.print.PrinterException ex) {
-                    javax.swing.JOptionPane.showMessageDialog(frame,
-                            "Printing failed: " + ex.getMessage(),
-                            "Print", javax.swing.JOptionPane.WARNING_MESSAGE);
-                }
-            }
+            @Override public void actionPerformed(ActionEvent e) { printLog(frame, output); }
         });
 
         // Ctrl+I includes a text or image file: hashes it, remembers hash -> path,
@@ -1213,7 +1205,40 @@ public class JRock {
             }
         });
 
+        // ---- Right-click context menus -------------------------------------
+        // setComponentPopupMenu wires the platform-appropriate popup trigger.
+        // Each item calls the same handler as its keyboard shortcut / button.
+
+        // Log pane: Save log copy as... / Print...
+        javax.swing.JPopupMenu logMenu = new javax.swing.JPopupMenu();
+        addMenuItem(logMenu, "Save log copy as...", () -> saveLogAs(frame, log));
+        addMenuItem(logMenu, "Print...",            () -> printLog(frame, output));
+        output.setComponentPopupMenu(logMenu);
+
+        // Prompt area: Include... / Load prompt... / Save prompt copy...
+        javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
+        addMenuItem(promptMenu, "Include text or image file...",
+                () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
+        addMenuItem(promptMenu, "Load prompt from file...",
+                () -> loadPromptInto(frame, input, log));
+        addMenuItem(promptMenu, "Save prompt copy as...",
+                () -> savePromptAs(frame, input.getText()));
+        input.setComponentPopupMenu(promptMenu);
+
+        // Window chrome (empty area of the top bar, e.g. right of Configure):
+        // Move & resize window...
+        javax.swing.JPopupMenu windowMenu = new javax.swing.JPopupMenu();
+        addMenuItem(windowMenu, "Move & resize window...", () -> showMoveResizeDialog(frame));
+        topBar.setComponentPopupMenu(windowMenu);
+
         frame.setVisible(true);
+    }
+
+    // Adds a JMenuItem running the given action to a popup menu.
+    private static void addMenuItem(javax.swing.JPopupMenu menu, String label, Runnable action) {
+        javax.swing.JMenuItem item = new javax.swing.JMenuItem(label);
+        item.addActionListener(e -> action.run());
+        menu.add(item);
     }
 
     // ---- Configure dialog --------------------------------------------------
@@ -1284,7 +1309,7 @@ public class JRock {
         // Shortcuts as a 2-column grid so keys and descriptions align cleanly
         // (no space-padding). The "Shortcuts" border title keeps the default bold.
         String[][] keys = {
-            {"Ctrl+Enter", "Send"},
+            {"Ctrl+Enter", "Send message (call a Bedrock model)"},
             {"Ctrl+I", "Include a text or image file"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
@@ -1444,6 +1469,19 @@ public class JRock {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Could not save to " + target + ":\n" + ex.getMessage(),
                     "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    // Opens the native print dialog for the log pane. JTextComponent.print()
+    // paginates and shows the dialog, where the user can pick a printer (including
+    // "Microsoft Print to PDF" on Windows) or save to PDF.
+    private static void printLog(JFrame frame, JTextPane output) {
+        try {
+            output.print();   // shows the native print dialog; blocks until done
+        } catch (java.awt.print.PrinterException ex) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Printing failed: " + ex.getMessage(),
+                    "Print", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
     }
 
