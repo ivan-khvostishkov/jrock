@@ -131,35 +131,12 @@ public class JRock {
     // set when the user explicitly types a new key in the Configure dialog.
     private static String apiKeyOverride = null;
 
-    // Working directory for all persisted files. Defaults to the process CWD,
-    // unless the -Djrock.workdir=<path> property is set (used by the Windows
-    // "Open JRock here" context menu, which passes the clicked folder so no cmd
-    // window is needed to chdir). The Configure dialog can point it elsewhere.
-    // True when the working directory came from a valid -Djrock.workdir (the
-    // "JRock here!" launch). Used to label the window/icon with the folder so
-    // multiple JRock instances in different folders are distinguishable in
-    // Alt-Tab / the taskbar. Declared BEFORE workingDir so it's set first (static
-    // initializers run top-to-bottom).
-    private static final boolean workdirFromProperty = validWorkdirProperty() != null;
-
-    private static Path workingDir = initialWorkingDir();
-
-    // The -Djrock.workdir path if set and pointing at a real directory, else null.
-    private static Path validWorkdirProperty() {
-        String wd = System.getProperty("jrock.workdir");
-        if (wd == null || wd.isBlank()) return null;
-        try {
-            Path p = Paths.get(wd.trim()).toAbsolutePath().normalize();
-            return Files.isDirectory(p) ? p : null;
-        } catch (RuntimeException ignore) {
-            return null;
-        }
-    }
-
-    private static Path initialWorkingDir() {
-        Path p = validWorkdirProperty();
-        return p != null ? p : Paths.get("").toAbsolutePath();
-    }
+    // Working directory = the process current directory. When JRock is launched
+    // from the "JRock here!" context menu, Explorer starts it in the clicked
+    // folder, so the CWD is already correct with no extra flags. The window
+    // title/icon reflect this folder so multiple instances in different folders
+    // are distinguishable in Alt-Tab / the taskbar.
+    private static Path workingDir = Paths.get("").toAbsolutePath();
 
     // Directory the Save/Load prompt choosers open in. Starts at workingDir on each
     // (re)initialization, then follows wherever the user last browsed.
@@ -898,10 +875,12 @@ public class JRock {
     }
 
     private static void createAndShowGui(String sourceArg) {
-        // When launched into a specific folder (via "JRock here!" / -Djrock.workdir),
-        // put that folder name FIRST in the title so it stays visible even when
-        // Alt-Tab truncates ("myproj - JRock ..." instead of "JRock - Bedro...").
-        String folder = workdirFromProperty ? workingDir.getFileName().toString() : null;
+        // Put the working-directory folder name FIRST in the title so it stays
+        // visible even when Alt-Tab truncates ("myproj - JRock" rather than
+        // "JRock - Bedro..."), so instances in different folders are
+        // distinguishable. Falls back to a plain title at a filesystem root.
+        Path folderPath = workingDir.getFileName();
+        String folder = folderPath != null ? folderPath.toString() : null;
         String title = (folder != null && !folder.isBlank())
                 ? folder + " - JRock"
                 : "JRock - Bedrock (mantle)";
@@ -1653,11 +1632,10 @@ public class JRock {
     }
 
     // ---- Windows "JRock here!" folder context menu -------------------------
-    // A right-click entry in Windows Explorer that launches JRock with its
-    // working directory set to the folder you clicked, so JRock's JRock/ folder
-    // is created there. Installed per-user (HKCU, no admin, reversible). The
-    // launch passes the folder via -Djrock.workdir=<path> and uses javaw (no
-    // console), so no cmd window ever appears.
+    // A right-click entry in Windows Explorer that launches JRock in the folder
+    // you clicked (Explorer sets the new process's current directory to it), so
+    // JRock's JRock/ folder is created there. Installed per-user (HKCU, no admin,
+    // reversible). Uses javaw (no console), so no cmd window ever appears.
 
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
@@ -1685,7 +1663,7 @@ public class JRock {
                 showCtxError(frame, log, "Could not find javaw.exe next to the running JVM.");
                 return;
             }
-            String folderLaunch = buildCtxLaunch(javaw);   // "JRock here!" (%V -> -Djrock.workdir)
+            String folderLaunch = buildCtxLaunch(javaw);   // "JRock here!" (runs in the clicked folder)
             String txtLaunch = buildTxtLaunch(javaw);       // .txt verb (%1 -> prompt file)
             if (folderLaunch == null || txtLaunch == null) {
                 showCtxError(frame, log, "Could not locate jrock.jar or JRock.java to launch. "
@@ -1776,13 +1754,14 @@ public class JRock {
         return Files.isRegularFile(javaw) ? javaw.toAbsolutePath().toString() : null;
     }
 
-    // The launch command for the verb: javaw with the clicked folder (%V) passed
-    // as -Djrock.workdir so JRock roots its files there - no cmd, no console.
-    // Prefers this running jar; falls back to the JRock.java source file.
+    // The launch command for the folder verb: just javaw + JRock. Explorer starts
+    // the process with its current directory set to the clicked folder, so JRock
+    // roots its files there with no extra flag. No cmd, no console. Prefers this
+    // running jar; falls back to the JRock.java source file.
     private static String buildCtxLaunch(String javaw) {
         Path self = ownJarOrSource();
         if (self == null) return null;
-        String base = "\"" + javaw + "\" \"-Djrock.workdir=%V\" ";
+        String base = "\"" + javaw + "\" ";
         if (self.toString().toLowerCase().endsWith(".jar")) {
             return base + "-jar \"" + self + "\"";
         }
@@ -1790,8 +1769,8 @@ public class JRock {
     }
 
     // The launch command for the .txt verb: javaw passing the clicked file (%1)
-    // as JRock's prompt-source argument. No -Djrock.workdir, so JRock uses its
-    // default working directory. No cmd, no console.
+    // as JRock's prompt-source argument. JRock uses whatever current directory
+    // Explorer starts it in (typically the file's folder). No cmd, no console.
     private static String buildTxtLaunch(String javaw) {
         Path self = ownJarOrSource();
         if (self == null) return null;
