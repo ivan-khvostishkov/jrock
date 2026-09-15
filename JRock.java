@@ -131,9 +131,22 @@ public class JRock {
     // set when the user explicitly types a new key in the Configure dialog.
     private static String apiKeyOverride = null;
 
-    // Working directory for all persisted files. Defaults to the process CWD; the
-    // Configure dialog can point it elsewhere. All file paths resolve against it.
-    private static Path workingDir = Paths.get("").toAbsolutePath();
+    // Working directory for all persisted files. Defaults to the process CWD,
+    // unless the -Djrock.workdir=<path> property is set (used by the Windows
+    // "Open JRock here" context menu, which passes the clicked folder so no cmd
+    // window is needed to chdir). The Configure dialog can point it elsewhere.
+    private static Path workingDir = initialWorkingDir();
+
+    private static Path initialWorkingDir() {
+        String wd = System.getProperty("jrock.workdir");
+        if (wd != null && !wd.isBlank()) {
+            try {
+                Path p = Paths.get(wd.trim()).toAbsolutePath().normalize();
+                if (Files.isDirectory(p)) return p;
+            } catch (RuntimeException ignore) { /* fall through to CWD */ }
+        }
+        return Paths.get("").toAbsolutePath();
+    }
 
     // Directory the Save/Load prompt choosers open in. Starts at workingDir on each
     // (re)initialization, then follows wherever the user last browsed.
@@ -1229,9 +1242,17 @@ public class JRock {
         attachPopup(input, promptMenu);
 
         // Window chrome (empty area of the top bar, e.g. right of Configure):
-        // Move & resize window...
+        // Move & resize window...; on Windows, also install/uninstall the
+        // "Open JRock here" folder context-menu entry.
         javax.swing.JPopupMenu windowMenu = new javax.swing.JPopupMenu();
         addMenuItem(windowMenu, "Move & resize window...", () -> showMoveResizeDialog(frame));
+        if (isWindows()) {
+            windowMenu.addSeparator();
+            addMenuItem(windowMenu, "Install \"JRock here!\" (Explorer menu)...",
+                    () -> installContextMenu(frame, log));
+            addMenuItem(windowMenu, "Uninstall \"JRock here!\" (Explorer menu)...",
+                    () -> uninstallContextMenu(frame, log));
+        }
         attachPopup(topBar, windowMenu);
 
         frame.setVisible(true);
@@ -1544,6 +1565,161 @@ public class JRock {
         } catch (Exception ignore) {
             // No browser available (e.g. headless/sandboxed); nothing to do.
         }
+    }
+
+    // ---- Windows "JRock here!" folder context menu -------------------------
+    // A right-click entry in Windows Explorer that launches JRock with its
+    // working directory set to the folder you clicked, so JRock's JRock/ folder
+    // is created there. Installed per-user (HKCU, no admin, reversible). The
+    // launch passes the folder via -Djrock.workdir=<path> and uses javaw (no
+    // console), so no cmd window ever appears.
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
+    // Distinct key name so uninstall removes exactly what we created.
+    private static final String CTX_KEY = "OpenJRockHere";
+    private static final String CTX_LABEL = "JRock here!";
+    private static final String[] CTX_SHELL_ROOTS = {
+        "Software\\Classes\\Directory\\Background\\shell",  // right-click empty space in a folder
+        "Software\\Classes\\Directory\\shell",              // right-click on a folder icon
+    };
+
+    private static void installContextMenu(JFrame frame, LogView log) {
+        try {
+            String javaw = findJavaw();
+            if (javaw == null) {
+                showCtxError(frame, log, "Could not find javaw.exe next to the running JVM.");
+                return;
+            }
+            String launch = buildCtxLaunch(javaw);
+            if (launch == null) {
+                showCtxError(frame, log, "Could not locate jrock.jar or JRock.java to launch. "
+                        + "Run JRock from its own folder, or build jrock.jar first.");
+                return;
+            }
+            StringBuilder reg = new StringBuilder("Windows Registry Editor Version 5.00\r\n\r\n");
+            for (String root : CTX_SHELL_ROOTS) {
+                String base = "HKEY_CURRENT_USER\\" + root + "\\" + CTX_KEY;
+                reg.append('[').append(base).append("]\r\n");
+                reg.append("@=").append(regString(CTX_LABEL)).append("\r\n");
+                reg.append("\"Icon\"=").append(regString(javaw)).append("\r\n\r\n");
+                reg.append('[').append(base).append("\\command]\r\n");
+                reg.append("@=").append(regString(launch)).append("\r\n\r\n");
+            }
+            // Keep the .reg under JRock/ so the user can inspect exactly what was
+            // applied (and re-run or delete it manually).
+            Files.createDirectories(jrockDir());
+            Path regFile = jrockDir().resolve("jrock-context-menu-install.reg");
+            importReg(reg.toString(), regFile);
+            // Record it in the log so there's a visible, persisted trace.
+            log.gray("Installed the \"" + CTX_LABEL + "\" Explorer right-click menu.");
+            log.gray("Launch: " + launch);
+            log.gray("Applied registry file kept at: " + regFile);
+            log.gray("");
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Installed the \"" + CTX_LABEL + "\" right-click menu.\n\n"
+                        + "Right-click inside or on a folder in Explorer to launch JRock there.\n"
+                        + "(On Windows 11 it may appear under \"Show more options\".)\n\n"
+                        + "The applied registry file was kept for your inspection at:\n"
+                        + regFile,
+                    CTX_LABEL, javax.swing.JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception ex) {
+            showCtxError(frame, log, ex.getMessage());
+        }
+    }
+
+    private static void uninstallContextMenu(JFrame frame, LogView log) {
+        try {
+            StringBuilder reg = new StringBuilder("Windows Registry Editor Version 5.00\r\n\r\n");
+            for (String root : CTX_SHELL_ROOTS) {
+                reg.append("[-HKEY_CURRENT_USER\\").append(root).append('\\').append(CTX_KEY).append("]\r\n\r\n");
+            }
+            Files.createDirectories(jrockDir());
+            Path regFile = jrockDir().resolve("jrock-context-menu-uninstall.reg");
+            importReg(reg.toString(), regFile);
+            log.gray("Removed the \"" + CTX_LABEL + "\" Explorer right-click menu (if it was present).");
+            log.gray("Applied registry file kept at: " + regFile);
+            log.gray("");
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Removed the \"" + CTX_LABEL + "\" right-click menu (if it was present).\n\n"
+                        + "The applied registry file was kept for your inspection at:\n"
+                        + regFile,
+                    CTX_LABEL, javax.swing.JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception ex) {
+            showCtxError(frame, log, ex.getMessage());
+        }
+    }
+
+    private static void showCtxError(JFrame frame, LogView log, String msg) {
+        log.gray("Context menu update failed: " + msg);
+        log.gray("");
+        javax.swing.JOptionPane.showMessageDialog(frame,
+                "Could not update the context menu:\n" + msg,
+                CTX_LABEL, javax.swing.JOptionPane.WARNING_MESSAGE);
+    }
+
+    // javaw.exe next to the JVM currently running JRock.
+    private static String findJavaw() {
+        String home = System.getProperty("java.home");
+        if (home == null) return null;
+        Path javaw = Paths.get(home, "bin", "javaw.exe");
+        return Files.isRegularFile(javaw) ? javaw.toAbsolutePath().toString() : null;
+    }
+
+    // The launch command for the verb: javaw with the clicked folder (%V) passed
+    // as -Djrock.workdir so JRock roots its files there - no cmd, no console.
+    // Prefers this running jar; falls back to the JRock.java source file.
+    private static String buildCtxLaunch(String javaw) {
+        Path self = ownJarOrSource();
+        if (self == null) return null;
+        String base = "\"" + javaw + "\" \"-Djrock.workdir=%V\" ";
+        if (self.toString().toLowerCase().endsWith(".jar")) {
+            return base + "-jar \"" + self + "\"";
+        }
+        return base + "\"" + self + "\"";   // single-file source launch (JDK 11+)
+    }
+
+    // Locates JRock's own artifact: the jar it's running from (via CodeSource),
+    // else a jrock.jar / JRock.java near the current directory.
+    private static Path ownJarOrSource() {
+        try {
+            java.net.URL loc = JRock.class.getProtectionDomain().getCodeSource().getLocation();
+            Path p = Paths.get(loc.toURI());
+            if (Files.isRegularFile(p) && p.toString().toLowerCase().endsWith(".jar")) {
+                return p.toAbsolutePath().normalize();
+            }
+        } catch (Exception ignore) { /* source launch: CodeSource is a temp dir */ }
+        Path[] candidates = {
+            Paths.get("jrock.jar"), Paths.get("..", "jrock.jar"),
+            Paths.get("JRock.java"), Paths.get("..", "JRock.java"),
+        };
+        for (Path c : candidates) {
+            if (Files.isRegularFile(c)) return c.toAbsolutePath().normalize();
+        }
+        return null;
+    }
+
+    // Quotes/escapes a string as a .reg REG_SZ value (backslashes and quotes).
+    private static String regString(String s) {
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    // Writes .reg content to regFile (kept for the user to inspect) and applies
+    // it via `reg import`. .reg files must be UTF-16LE with a BOM for reg.exe.
+    private static void importReg(String content, Path regFile) throws IOException, InterruptedException {
+        byte[] text = content.getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
+        byte[] withBom = new byte[text.length + 2];
+        withBom[0] = (byte) 0xFF; withBom[1] = (byte) 0xFE;   // UTF-16LE BOM
+        System.arraycopy(text, 0, withBom, 2, text.length);
+
+        Files.write(regFile, withBom);   // kept on disk (not a temp file)
+        ProcessBuilder pb = new ProcessBuilder("reg.exe", "import", regFile.toString());
+        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+        int code = pb.start().waitFor();
+        if (code != 0) throw new IOException("reg import failed (exit " + code + ")");
     }
 
     // Opens the native print dialog for the log pane. JTextComponent.print()

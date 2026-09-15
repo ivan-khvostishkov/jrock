@@ -193,7 +193,36 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
 
 - **Log pane** — Save log copy as..., Print...
 - **Prompt area** — Include text or image file..., Load prompt from file..., Save prompt copy as...
-- **Top bar (empty area)** — Move & resize window...
+- **Top bar (empty area)** — Move & resize window...; on **Windows**, also Install /
+  Uninstall the "JRock here!" Explorer entry (see below).
+
+## Windows: "JRock here!" (right-click in Explorer)
+
+On Windows, the top-bar context menu (right-click the empty area of the top bar) offers
+**Install "JRock here!" (Explorer menu)...** and **Uninstall "JRock here!" (Explorer
+menu)...**. These items appear only on Windows.
+
+Installing adds a Windows Explorer right-click entry so you can open JRock rooted at any
+folder: right-click **inside** a folder's empty space, or **on** a folder icon, and choose
+*JRock here!*. JRock launches with its working directory set to that folder, so its
+`JRock/` files (prompt, log, messages) are created right there.
+
+- **Per-user and reversible.** The entry is written under `HKEY_CURRENT_USER` (no admin
+  needed) for both `Directory\Background\shell` and `Directory\shell`. Uninstall removes it.
+- **No console window.** It launches `javaw.exe` directly (not through `cmd`), passing the
+  clicked folder as `-Djrock.workdir=<path>` rather than changing the process directory, so
+  nothing flashes on screen.
+- **Self-configuring.** It uses the `javaw.exe` of the JVM currently running JRock, and
+  launches JRock's own `jrock.jar` (or, if running from source, the `JRock.java` file) — no
+  paths to edit.
+- On **Windows 11** the entry may appear under **"Show more options"** (a limitation of
+  classic registry verbs).
+
+You can also set the working directory at launch yourself with the same property, e.g.:
+
+```powershell
+javaw -Djrock.workdir="C:\path\to\folder" -jar jrock.jar
+```
 
 ## Keyboard shortcuts
 
