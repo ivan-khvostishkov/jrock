@@ -206,6 +206,72 @@
       var region   = "us-east-1";   // AWS region; JRock's default
       var started  = false;
 
+      // Touch long-press -> synthetic right-click, for CheerpJ's Swing display.
+      //
+      // On mobile the browser emits mouse-compatibility events only on touchend
+      // for a quick tap, and none during a sustained hold - so Swing never sees a
+      // "button held" and a Java-side long-press timer can't run. Instead we
+      // detect the long-press in JS from raw touch events and replay the exact
+      // event sequence CheerpJ listens for: it binds POINTER events (not mouse
+      // events) plus contextmenu on the canvas's PARENT element. So we dispatch
+      // pointerdown/pointerup with button:2 followed by contextmenu at the finger
+      // coordinates; CheerpJ turns that into a Swing popup trigger and JRock's
+      // existing right-click menus fire - no Java changes, no native bridge.
+      var LP_MS = 500, LP_SLOP = 12;   // hold threshold (ms) and move tolerance (px)
+      function installTouchRightClick(container) {
+        var timer = null, sx = 0, sy = 0, fired = false;
+
+        function clear() { if (timer) { clearTimeout(timer); timer = null; } }
+
+        // CheerpJ's pointer/contextmenu listeners live on the canvas's parent.
+        function cheerpjTarget() {
+          var cv = container.querySelector("canvas");
+          return cv ? cv.parentElement : container;
+        }
+
+        function rightClickAt(x, y) {
+          var target = cheerpjTarget();
+          function pe(type, extra) {
+            var init = {
+              bubbles: true, cancelable: true, view: window,
+              pointerId: 1, pointerType: "mouse", isPrimary: true,
+              clientX: x, clientY: y
+            };
+            for (var k in extra) init[k] = extra[k];
+            return new PointerEvent(type, init);
+          }
+          target.dispatchEvent(pe("pointerdown", { button: 2, buttons: 2 }));
+          target.dispatchEvent(pe("pointerup",   { button: 2, buttons: 0 }));
+          target.dispatchEvent(new MouseEvent("contextmenu", {
+            bubbles: true, cancelable: true, view: window,
+            button: 2, clientX: x, clientY: y
+          }));
+        }
+
+        container.addEventListener("touchstart", function (e) {
+          if (e.touches.length !== 1) { clear(); return; }
+          var t = e.touches[0];
+          sx = t.clientX; sy = t.clientY; fired = false;
+          clear();
+          timer = setTimeout(function () { fired = true; rightClickAt(sx, sy); }, LP_MS);
+        }, { passive: true });
+
+        container.addEventListener("touchmove", function (e) {
+          var t = e.touches[0];
+          if (t && Math.hypot(t.clientX - sx, t.clientY - sy) > LP_SLOP) clear();
+        }, { passive: true });
+
+        container.addEventListener("touchend", function (e) {
+          clear();
+          // If the long-press fired, swallow the trailing emulated tap so it
+          // doesn't dismiss the menu we just opened.
+          if (fired) { e.preventDefault(); fired = false; }
+        });
+
+        // Never show the browser's own context menu over the Swing one.
+        container.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+      }
+
       // Hide the header + footer to give the Swing display all the space. The
       // flex layout reflows and the CheerpJ display fills the freed area.
       function hideChrome() {
@@ -303,7 +369,9 @@
               (apiKey ? " with credentials for " + region : "") + " ...");
           await cheerpjInit({ version: 11, status: "splash", javaProperties: props });
 
-          cheerpjCreateDisplay(-1, -1, document.getElementById("display-wrap"));
+          var displayWrap = document.getElementById("display-wrap");
+          cheerpjCreateDisplay(-1, -1, displayWrap);
+          installTouchRightClick(displayWrap);   // long-press -> synthetic right-click
           cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
 
           log("Running JRock ... (first run downloads the Java runtime; please wait)");
