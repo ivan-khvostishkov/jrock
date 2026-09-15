@@ -524,6 +524,11 @@ public class JRock {
         }
     }
 
+    // Formats an integer with the current locale's grouping (e.g. 123,123,123).
+    private static String fmtNum(long n) {
+        return java.text.NumberFormat.getIntegerInstance(java.util.Locale.getDefault()).format(n);
+    }
+
     // A styled, persisted log backed by an ordered list of entries so it can be
     // re-rendered on demand and rewritten to disk after every change.
     //
@@ -1952,21 +1957,38 @@ public class JRock {
         INCLUDES.put(hash, file);
         log.gray("Included @" + kind + " " + hash + " from " + file);
 
-        // For images, also report dimensions and total pixel count (locale-formatted).
+        long fileBytes = -1;
+        try { fileBytes = Files.size(file); } catch (IOException ignore) { /* best-effort */ }
+
         if (isImage) {
+            // Dimensions + total pixel count + file size (all locale-formatted).
             try {
                 java.awt.image.BufferedImage bi = javax.imageio.ImageIO.read(file.toFile());
                 if (bi != null) {
                     long pixels = (long) bi.getWidth() * bi.getHeight();
-                    String pixelsFmt = java.text.NumberFormat.getIntegerInstance(
-                            java.util.Locale.getDefault()).format(pixels);
                     log.gray("Image: " + bi.getWidth() + " x " + bi.getHeight()
-                            + ", " + pixelsFmt + " pixels");
+                            + ", " + fmtNum(pixels) + " pixels"
+                            + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
                 } else {
-                    log.gray("Image: (could not decode dimensions)");
+                    log.gray("Image: (could not decode dimensions)"
+                            + (fileBytes >= 0 ? "; " + fmtNum(fileBytes) + " bytes" : ""));
                 }
             } catch (IOException ex) {
                 log.gray("Image: (could not read dimensions: " + ex.getMessage() + ")");
+            }
+        } else {
+            // Text: symbol count (Unicode code points) + byte count.
+            try {
+                String content = readFileQuietly(file);
+                if (content != null) {
+                    int symbols = content.codePointCount(0, content.length());
+                    log.gray("Text: " + fmtNum(symbols) + " symbols"
+                            + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
+                } else if (fileBytes >= 0) {
+                    log.gray("Text: " + fmtNum(fileBytes) + " bytes (symbols unavailable)");
+                }
+            } catch (RuntimeException ex) {
+                log.gray("Text: (could not read stats: " + ex.getMessage() + ")");
             }
         }
 
