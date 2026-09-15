@@ -135,17 +135,30 @@ public class JRock {
     // unless the -Djrock.workdir=<path> property is set (used by the Windows
     // "Open JRock here" context menu, which passes the clicked folder so no cmd
     // window is needed to chdir). The Configure dialog can point it elsewhere.
+    // True when the working directory came from a valid -Djrock.workdir (the
+    // "JRock here!" launch). Used to label the window/icon with the folder so
+    // multiple JRock instances in different folders are distinguishable in
+    // Alt-Tab / the taskbar. Declared BEFORE workingDir so it's set first (static
+    // initializers run top-to-bottom).
+    private static final boolean workdirFromProperty = validWorkdirProperty() != null;
+
     private static Path workingDir = initialWorkingDir();
 
-    private static Path initialWorkingDir() {
+    // The -Djrock.workdir path if set and pointing at a real directory, else null.
+    private static Path validWorkdirProperty() {
         String wd = System.getProperty("jrock.workdir");
-        if (wd != null && !wd.isBlank()) {
-            try {
-                Path p = Paths.get(wd.trim()).toAbsolutePath().normalize();
-                if (Files.isDirectory(p)) return p;
-            } catch (RuntimeException ignore) { /* fall through to CWD */ }
+        if (wd == null || wd.isBlank()) return null;
+        try {
+            Path p = Paths.get(wd.trim()).toAbsolutePath().normalize();
+            return Files.isDirectory(p) ? p : null;
+        } catch (RuntimeException ignore) {
+            return null;
         }
-        return Paths.get("").toAbsolutePath();
+    }
+
+    private static Path initialWorkingDir() {
+        Path p = validWorkdirProperty();
+        return p != null ? p : Paths.get("").toAbsolutePath();
     }
 
     // Directory the Save/Load prompt choosers open in. Starts at workingDir on each
@@ -885,8 +898,18 @@ public class JRock {
     }
 
     private static void createAndShowGui(String sourceArg) {
-        JFrame frame = new JFrame("JRock - Bedrock (mantle)");
+        // When launched into a specific folder (via "JRock here!" / -Djrock.workdir),
+        // put that folder name FIRST in the title so it stays visible even when
+        // Alt-Tab truncates ("myproj - JRock ..." instead of "JRock - Bedro...").
+        String folder = workdirFromProperty ? workingDir.getFileName().toString() : null;
+        String title = (folder != null && !folder.isBlank())
+                ? folder + " - JRock"
+                : "JRock - Bedrock (mantle)";
+        JFrame frame = new JFrame(title);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        // App icon; when launched into a folder, overlay a short abbreviation so
+        // each instance is visually distinct in the taskbar / Alt-Tab.
+        frame.setIconImages(makeAppIcons(folder));
 
         // Preferred window size; if the screen can't fit it in either dimension,
         // start maximized, otherwise center it on screen.
@@ -1550,6 +1573,68 @@ public class JRock {
                     "Could not save to " + target + ":\n" + ex.getMessage(),
                     "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    // Builds app icons (several sizes) for the window/taskbar. The base is a
+    // rounded teal "JR" tile; when a folder name is given, a short 2-3 letter
+    // abbreviation of it is drawn instead, so multiple instances launched in
+    // different folders are distinguishable at a glance.
+    private static java.util.List<java.awt.Image> makeAppIcons(String folder) {
+        String label = (folder == null || folder.isBlank()) ? "JR" : abbreviate(folder);
+        java.util.List<java.awt.Image> icons = new ArrayList<>();
+        for (int size : new int[] { 16, 32, 48, 64, 128 }) {
+            icons.add(makeIcon(size, label));
+        }
+        return icons;
+    }
+
+    // A 2-3 char uppercase abbreviation of a folder name: initials of the first
+    // words (split on space/-/_/.), else the first letters of the name.
+    private static String abbreviate(String name) {
+        String[] parts = name.trim().split("[\\s._-]+");
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) {
+            if (!p.isEmpty()) sb.append(Character.toUpperCase(p.charAt(0)));
+            if (sb.length() >= 3) break;
+        }
+        if (sb.length() <= 1) {   // single word: take its first up-to-3 letters
+            String s = name.trim();
+            sb.setLength(0);
+            sb.append(s, 0, Math.min(3, s.length()));
+        }
+        return sb.toString().toUpperCase();
+    }
+
+    private static java.awt.Image makeIcon(int size, String label) {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+                size, size, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        // Rounded brand-colored tile.
+        int arc = Math.max(3, size / 4);
+        g.setColor(BRAND);
+        g.fillRoundRect(0, 0, size, size, arc, arc);
+        // Label, shrunk to fit the tile width.
+        g.setColor(java.awt.Color.WHITE);
+        int fontSize = size;   // start large, shrink until it fits
+        java.awt.Font font;
+        java.awt.FontMetrics fm;
+        int textW;
+        do {
+            font = new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, fontSize);
+            fm = g.getFontMetrics(font);
+            textW = fm.stringWidth(label);
+            fontSize--;
+        } while (textW > size * 0.82 && fontSize > 5);
+        g.setFont(font);
+        int x = (size - textW) / 2;
+        int y = (size - fm.getHeight()) / 2 + fm.getAscent();
+        g.drawString(label, x, y);
+        g.dispose();
+        return img;
     }
 
     // Opens a URL in the user's default browser, if the platform supports it.
