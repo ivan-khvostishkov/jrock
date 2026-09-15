@@ -202,25 +202,22 @@ Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum fil
 (`jrock.jar.sha256`, `jrock.jar.md5`) and the zipped source (`jrock-src.zip`). Because the
 build is reproducible, the `jrock.jar` inside all three archives is identical.
 
-Current build hashes:
-
-```
-4cab22c2e4944931d33779b3244a64baf42db13398334101353c302443257f89  jrock.jar
-90f917265af04bbb8f4807b168f87c46  jrock.jar
-```
-
 To verify and run JRock from a build artifact, unzip it, then:
 
 ```sh
 cd jrock-ubuntu-latest/
 
-md5sum jrock.jar
-# 90f917265af04bbb8f4807b168f87c46 *jrock.jar
-
 sha256sum jrock.jar
-# 4cab22c2e4944931d33779b3244a64baf42db13398334101353c302443257f89 *jrock.jar
+md5sum jrock.jar
 
 java -jar jrock.jar
+```
+
+Current build hashes:
+
+```
+4cab22c2e4944931d33779b3244a64baf42db13398334101353c302443257f89  jrock.jar
+90f917265af04bbb8f4807b168f87c46  jrock.jar
 ```
 
 Or, if you want to modify the source and run it in place (no build step):
