@@ -279,6 +279,25 @@
         if (bottom)   bottom.style.display = "none";
       }
 
+      // Keep the layout height in sync with the VISUAL viewport so the on-screen
+      // keyboard doesn't cover the prompt. When the mobile keyboard opens it
+      // shrinks visualViewport (but not the layout viewport / 100%), so we pin
+      // body height to visualViewport.height; the flex column - and therefore the
+      // CheerpJ display - reflows to the visible area, keeping the prompt above
+      // the keyboard. No-op on desktop / browsers without VisualViewport.
+      function installKeyboardResize() {
+        var vv = window.visualViewport;
+        if (!vv) return;
+        function apply() {
+          document.body.style.height = vv.height + "px";
+          // Nudge Swing to relayout to the new display size.
+          window.dispatchEvent(new Event("resize"));
+        }
+        vv.addEventListener("resize", apply);
+        vv.addEventListener("scroll", apply);
+        apply();
+      }
+
       // On load the bottom bar is help text; once running it becomes the log.
       function log(msg) {
         if (!bottom.classList.contains("log")) { bottom.classList.add("log"); bottom.textContent = ""; }
@@ -372,6 +391,7 @@
           var displayWrap = document.getElementById("display-wrap");
           cheerpjCreateDisplay(-1, -1, displayWrap);
           installTouchRightClick(displayWrap);   // long-press -> synthetic right-click
+          installKeyboardResize();               // shrink display when keyboard opens
           cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
 
           log("Running JRock ... (first run downloads the Java runtime; please wait)");
