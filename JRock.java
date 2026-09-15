@@ -2451,7 +2451,7 @@ public class JRock {
         String body = "{"
                 + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
                 + "\"messages\":" + messages
-                + ",\"max_tokens\":2048"
+                + ",\"max_tokens\":8192"
                 + "}";
 
         // Masked copy of the request for display - built independently from the
