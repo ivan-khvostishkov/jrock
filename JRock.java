@@ -1213,7 +1213,7 @@ public class JRock {
         javax.swing.JPopupMenu logMenu = new javax.swing.JPopupMenu();
         addMenuItem(logMenu, "Save log copy as...", () -> saveLogAs(frame, log));
         addMenuItem(logMenu, "Print...",            () -> printLog(frame, output));
-        output.setComponentPopupMenu(logMenu);
+        attachPopup(output, logMenu);
 
         // Prompt area: Include... / Load prompt... / Save prompt copy...
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
@@ -1223,13 +1223,13 @@ public class JRock {
                 () -> loadPromptInto(frame, input, log));
         addMenuItem(promptMenu, "Save prompt copy as...",
                 () -> savePromptAs(frame, input.getText()));
-        input.setComponentPopupMenu(promptMenu);
+        attachPopup(input, promptMenu);
 
         // Window chrome (empty area of the top bar, e.g. right of Configure):
         // Move & resize window...
         javax.swing.JPopupMenu windowMenu = new javax.swing.JPopupMenu();
         addMenuItem(windowMenu, "Move & resize window...", () -> showMoveResizeDialog(frame));
-        topBar.setComponentPopupMenu(windowMenu);
+        attachPopup(topBar, windowMenu);
 
         frame.setVisible(true);
     }
@@ -1239,6 +1239,53 @@ public class JRock {
         javax.swing.JMenuItem item = new javax.swing.JMenuItem(label);
         item.addActionListener(e -> action.run());
         menu.add(item);
+    }
+
+    // Shows a popup menu on a native right-click (desktop) OR a long-press
+    // (touch). We can't use setComponentPopupMenu alone because CheerpJ on mobile
+    // delivers a touch as a plain left-click, never a Swing popup-trigger event,
+    // so a press-and-hold timer synthesizes the popup for touchscreens. The timer
+    // is cancelled if the pointer is released early or dragged away, so it won't
+    // fire during scrolling or text selection.
+    private static final int LONG_PRESS_MS = 500;   // press-and-hold threshold
+    private static final int LONG_PRESS_SLOP = 12;   // px of movement that cancels it
+    private static void attachPopup(javax.swing.JComponent comp, javax.swing.JPopupMenu menu) {
+        java.awt.event.MouseAdapter h = new java.awt.event.MouseAdapter() {
+            private javax.swing.Timer timer;
+            private java.awt.Point origin;
+
+            private void showAt(int x, int y) { menu.show(comp, x, y); }
+
+            private void cancel() {
+                if (timer != null) { timer.stop(); timer = null; }
+                origin = null;
+            }
+
+            @Override public void mousePressed(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger()) { showAt(e.getX(), e.getY()); return; }   // desktop right-click
+                // Otherwise arm a long-press timer for touch/left-press.
+                cancel();
+                origin = e.getPoint();
+                final int x = e.getX(), y = e.getY();
+                timer = new javax.swing.Timer(LONG_PRESS_MS, ev -> { cancel(); showAt(x, y); });
+                timer.setRepeats(false);
+                timer.start();
+            }
+
+            @Override public void mouseReleased(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger()) { cancel(); showAt(e.getX(), e.getY()); return; }
+                cancel();   // released before the threshold: normal click, no menu
+            }
+
+            @Override public void mouseDragged(java.awt.event.MouseEvent e) {
+                // Moving too far (scroll/select) cancels the pending long-press.
+                if (origin != null && origin.distance(e.getPoint()) > LONG_PRESS_SLOP) cancel();
+            }
+
+            @Override public void mouseExited(java.awt.event.MouseEvent e) { cancel(); }
+        };
+        comp.addMouseListener(h);
+        comp.addMouseMotionListener(h);
     }
 
     // ---- Configure dialog --------------------------------------------------
