@@ -412,6 +412,7 @@ public class JRock {
     private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
+    private static Path gsPdfDir()         { return jrockDir().resolve("gs-pdf"); }
 
     // Resolves the effective API key. Precedence: in-memory override, then the
     // BEDROCK_API_KEY env var / -D property, then BEDROCK_API_KEY_HEX (a hex-
@@ -1911,20 +1912,27 @@ public class JRock {
         chooser.addChoosableFileFilter(pdfTextFilter);
         chooser.addChoosableFileFilter(pdfImageFilter);
         chooser.setFileFilter(imageFilter);            // default selection = image
+        chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         rememberChooserDir(chooser);
 
-        Path file = chooser.getSelectedFile().toPath();
+        java.io.File[] selected = chooser.getSelectedFiles();
+        if (selected == null || selected.length == 0) return;
         javax.swing.filechooser.FileFilter chosen = chooser.getFileFilter();
-
-        if (chosen == pdfTextFilter || chosen == pdfImageFilter) {
-            includePdf(frame, input, log, extend, file, chosen == pdfImageFilter);
-            return;
-        }
-
+        boolean asImages = chosen == pdfImageFilter;
+        boolean pdf = chosen == pdfTextFilter || chosen == pdfImageFilter;
         boolean isImage = chosen == imageFilter;
-        includeOne(input, log, extend, file, isImage ? "img" : "txt", isImage);
+
+        // Process each chosen file in turn, all under the selected filter's kind.
+        for (java.io.File f : selected) {
+            Path file = f.toPath();
+            if (pdf) {
+                includePdf(frame, input, log, extend, file, asImages);
+            } else {
+                includeOne(input, log, extend, file, isImage ? "img" : "txt", isImage);
+            }
+        }
         input.requestFocusInWindow();
     }
 
@@ -1993,9 +2001,9 @@ public class JRock {
 
     // Converts a PDF to per-page files with Ghostscript (gswin64c), then includes
     // each produced page. asImages=false -> text pages (txtwrite), true -> PNG
-    // page images. Output files sit next to the source, named
-    // "<file>.gs.NNN.txt" / "<file>.gs.NNN.png". If Ghostscript isn't on PATH,
-    // points the user to the download page and does nothing else.
+    // page images. Output files are written under JRock/gs-pdf/, named
+    // "<pdfname>.gs.NNN.txt" / "<pdfname>.gs.NNN.png". If Ghostscript isn't on
+    // PATH, points the user to the download page and does nothing else.
     private static void includePdf(JFrame frame, JTextArea input, LogView log,
                                    boolean extend, Path pdf, boolean asImages) {
         String gs = findGhostscript();
@@ -2013,8 +2021,21 @@ public class JRock {
 
         String ext = asImages ? "png" : "txt";
         String device = asImages ? "png16m" : "txtwrite";
+
+        // Output goes to JRock/gs-pdf/. Page files are named "<pdfname>.gs.NNN.<ext>"
+        // (pdf name kept as a prefix so pages from different PDFs don't collide).
+        Path outDir = gsPdfDir();
+        try {
+            Files.createDirectories(outDir);
+        } catch (IOException ex) {
+            log.gray("Could not create " + outDir + ": " + ex.getMessage());
+            return;
+        }
+        String base = pdf.getFileName().toString();
+        String prefix = base + ".gs.";
+        String suffix = "." + ext;
         // Ghostscript expands %03d in the output path to the page number.
-        String outPattern = pdf.toAbsolutePath() + ".gs.%03d." + ext;
+        String outPattern = outDir.resolve(prefix + "%03d" + suffix).toString();
 
         java.util.List<String> cmd = new java.util.ArrayList<>();
         cmd.add(gs);
@@ -2048,23 +2069,19 @@ public class JRock {
             return;
         }
 
-        // Collect the produced page files in order and include each one.
-        String prefix = pdf.getFileName() + ".gs.";
-        String suffix = "." + ext;
-        Path dir = pdf.toAbsolutePath().getParent();
+        // Collect the produced page files (in JRock/gs-pdf/) in order, matching
+        // this PDF's prefix, and include each one.
         java.util.List<Path> pages = new java.util.ArrayList<>();
-        if (dir != null) {
-            try (java.util.stream.Stream<Path> s = Files.list(dir)) {
-                s.filter(pp -> {
-                        String n = pp.getFileName().toString();
-                        return n.startsWith(prefix) && n.endsWith(suffix);
-                    })
-                    .sorted(java.util.Comparator.comparing(pp -> pp.getFileName().toString()))
-                    .forEach(pages::add);
-            } catch (IOException ex) {
-                log.gray("Could not list produced pages: " + ex.getMessage());
-                return;
-            }
+        try (java.util.stream.Stream<Path> s = Files.list(outDir)) {
+            s.filter(pp -> {
+                    String n = pp.getFileName().toString();
+                    return n.startsWith(prefix) && n.endsWith(suffix);
+                })
+                .sorted(java.util.Comparator.comparing(pp -> pp.getFileName().toString()))
+                .forEach(pages::add);
+        } catch (IOException ex) {
+            log.gray("Could not list produced pages: " + ex.getMessage());
+            return;
         }
         if (pages.isEmpty()) {
             log.gray("Ghostscript produced no pages for " + pdf.getFileName() + ".");
