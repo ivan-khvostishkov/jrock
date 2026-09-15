@@ -113,6 +113,9 @@ public class JRock {
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
+    // Upper bound on tokens the model may generate in a response.
+    private static final int MAX_TOKENS = 8192;
+
     // Shown after an UnsatisfiedLinkError from the networking stack. Kept in sync
     // with the jrock-web page footer, which warns about the same limitation.
     private static final String SANDBOX_NETWORK_HINT =
@@ -2470,11 +2473,7 @@ public class JRock {
         messages.append("}]");
 
         // OpenAI Chat Completions request shape.
-        String body = "{"
-                + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
-                + "\"messages\":" + messages
-                + ",\"max_tokens\":8192"
-                + "}";
+        String body = chatRequestBody(messages);
 
         // Masked copy of the request for display - built independently from the
         // same history + prompt parts.
@@ -2563,11 +2562,7 @@ public class JRock {
         appendMaskedContent(masked, parts);
         masked.append("}]");
 
-        return "{"
-                + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
-                + "\"messages\":" + masked
-                + ",\"max_tokens\":2048"
-                + "}";
+        return chatRequestBody(masked);
     }
 
     // Masks the assistant reply text inside the raw response body.
@@ -2637,6 +2632,18 @@ public class JRock {
     }
 
     // ---- Helpers -----------------------------------------------------------
+
+    // Builds the OpenAI Chat Completions request JSON around a messages array.
+    // Used for both the real request and its masked display copy, so they stay
+    // in lockstep (same model and max_tokens).
+    private static String chatRequestBody(CharSequence messagesJson) {
+        return "{"
+                + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
+                + "\"messages\":" + messagesJson
+                + ",\"max_tokens\":" + MAX_TOKENS
+                + "}";
+    }
+
     private static String jsonEscape(String s) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < s.length(); i++) {
