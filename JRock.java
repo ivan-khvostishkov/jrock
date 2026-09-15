@@ -1663,13 +1663,20 @@ public class JRock {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
-    // Distinct key name so uninstall removes exactly what we created.
+    // Distinct key names so uninstall removes exactly what we created.
     private static final String CTX_KEY = "OpenJRockHere";
     private static final String CTX_LABEL = "JRock here!";
     private static final String[] CTX_SHELL_ROOTS = {
         "Software\\Classes\\Directory\\Background\\shell",  // right-click empty space in a folder
         "Software\\Classes\\Directory\\shell",              // right-click on a folder icon
     };
+
+    // Right-click verb on .txt files: "Open as prompt with JRock" (no workdir).
+    private static final String TXT_KEY = "OpenAsJRockPrompt";
+    private static final String TXT_LABEL = "Open as prompt with JRock";
+    // Adds a verb to .txt without changing the default open action.
+    private static final String TXT_SHELL_ROOT =
+        "Software\\Classes\\SystemFileAssociations\\.txt\\shell";
 
     private static void installContextMenu(JFrame frame, LogView log) {
         try {
@@ -1678,35 +1685,48 @@ public class JRock {
                 showCtxError(frame, log, "Could not find javaw.exe next to the running JVM.");
                 return;
             }
-            String launch = buildCtxLaunch(javaw);
-            if (launch == null) {
+            String folderLaunch = buildCtxLaunch(javaw);   // "JRock here!" (%V -> -Djrock.workdir)
+            String txtLaunch = buildTxtLaunch(javaw);       // .txt verb (%1 -> prompt file)
+            if (folderLaunch == null || txtLaunch == null) {
                 showCtxError(frame, log, "Could not locate jrock.jar or JRock.java to launch. "
                         + "Run JRock from its own folder, or build jrock.jar first.");
                 return;
             }
             StringBuilder reg = new StringBuilder("Windows Registry Editor Version 5.00\r\n\r\n");
+            // Folder verbs: "JRock here!"
             for (String root : CTX_SHELL_ROOTS) {
                 String base = "HKEY_CURRENT_USER\\" + root + "\\" + CTX_KEY;
                 reg.append('[').append(base).append("]\r\n");
                 reg.append("@=").append(regString(CTX_LABEL)).append("\r\n");
                 reg.append("\"Icon\"=").append(regString(javaw)).append("\r\n\r\n");
                 reg.append('[').append(base).append("\\command]\r\n");
-                reg.append("@=").append(regString(launch)).append("\r\n\r\n");
+                reg.append("@=").append(regString(folderLaunch)).append("\r\n\r\n");
             }
+            // .txt verb: "Open as prompt with JRock" (passes the file as the prompt).
+            String txtBase = "HKEY_CURRENT_USER\\" + TXT_SHELL_ROOT + "\\" + TXT_KEY;
+            reg.append('[').append(txtBase).append("]\r\n");
+            reg.append("@=").append(regString(TXT_LABEL)).append("\r\n");
+            reg.append("\"Icon\"=").append(regString(javaw)).append("\r\n\r\n");
+            reg.append('[').append(txtBase).append("\\command]\r\n");
+            reg.append("@=").append(regString(txtLaunch)).append("\r\n\r\n");
+
             // Keep the .reg under JRock/ so the user can inspect exactly what was
             // applied (and re-run or delete it manually).
             Files.createDirectories(jrockDir());
             Path regFile = jrockDir().resolve("jrock-context-menu-install.reg");
             importReg(reg.toString(), regFile);
             // Record it in the log so there's a visible, persisted trace.
-            log.gray("Installed the \"" + CTX_LABEL + "\" Explorer right-click menu.");
-            log.gray("Launch: " + launch);
+            log.gray("Installed the \"" + CTX_LABEL + "\" (folders) and \"" + TXT_LABEL
+                    + "\" (.txt) Explorer right-click menus.");
+            log.gray("Folder launch: " + folderLaunch);
+            log.gray(".txt launch:   " + txtLaunch);
             log.gray("Applied registry file kept at: " + regFile);
             log.gray("");
             javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Installed the \"" + CTX_LABEL + "\" right-click menu.\n\n"
-                        + "Right-click inside or on a folder in Explorer to launch JRock there.\n"
-                        + "(On Windows 11 it may appear under \"Show more options\".)\n\n"
+                    "Installed two Explorer right-click entries:\n"
+                        + "  \u2022 \"" + CTX_LABEL + "\" - inside or on a folder, launches JRock there.\n"
+                        + "  \u2022 \"" + TXT_LABEL + "\" - on a .txt file, opens it as the prompt.\n\n"
+                        + "(On Windows 11 they may appear under \"Show more options\".)\n\n"
                         + "The applied registry file was kept for your inspection at:\n"
                         + regFile,
                     CTX_LABEL, javax.swing.JOptionPane.INFORMATION_MESSAGE);
@@ -1721,14 +1741,17 @@ public class JRock {
             for (String root : CTX_SHELL_ROOTS) {
                 reg.append("[-HKEY_CURRENT_USER\\").append(root).append('\\').append(CTX_KEY).append("]\r\n\r\n");
             }
+            reg.append("[-HKEY_CURRENT_USER\\").append(TXT_SHELL_ROOT).append('\\').append(TXT_KEY).append("]\r\n\r\n");
             Files.createDirectories(jrockDir());
             Path regFile = jrockDir().resolve("jrock-context-menu-uninstall.reg");
             importReg(reg.toString(), regFile);
-            log.gray("Removed the \"" + CTX_LABEL + "\" Explorer right-click menu (if it was present).");
+            log.gray("Removed the \"" + CTX_LABEL + "\" and \"" + TXT_LABEL
+                    + "\" Explorer right-click menus (if present).");
             log.gray("Applied registry file kept at: " + regFile);
             log.gray("");
             javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Removed the \"" + CTX_LABEL + "\" right-click menu (if it was present).\n\n"
+                    "Removed the \"" + CTX_LABEL + "\" and \"" + TXT_LABEL
+                        + "\" right-click entries (if present).\n\n"
                         + "The applied registry file was kept for your inspection at:\n"
                         + regFile,
                     CTX_LABEL, javax.swing.JOptionPane.INFORMATION_MESSAGE);
@@ -1764,6 +1787,19 @@ public class JRock {
             return base + "-jar \"" + self + "\"";
         }
         return base + "\"" + self + "\"";   // single-file source launch (JDK 11+)
+    }
+
+    // The launch command for the .txt verb: javaw passing the clicked file (%1)
+    // as JRock's prompt-source argument. No -Djrock.workdir, so JRock uses its
+    // default working directory. No cmd, no console.
+    private static String buildTxtLaunch(String javaw) {
+        Path self = ownJarOrSource();
+        if (self == null) return null;
+        String base = "\"" + javaw + "\" ";
+        if (self.toString().toLowerCase().endsWith(".jar")) {
+            return base + "-jar \"" + self + "\" \"%1\"";
+        }
+        return base + "\"" + self + "\" \"%1\"";   // single-file source launch (JDK 11+)
     }
 
     // Locates JRock's own artifact: the jar it's running from (via CodeSource),
