@@ -546,6 +546,11 @@ public class JRock {
         private final java.util.List<Entry> entries = new ArrayList<>();
         private boolean dialogOnly = false;
 
+        // Tracks whether the log has been exported (Ctrl+L) since it last changed.
+        // An empty/just-cleared log counts as "saved" (nothing worth keeping). Set
+        // false on any new entry; set true after a successful Save log copy.
+        private boolean logCopySaved = true;
+
         LogView(JTextPane pane) { this.pane = pane; }
 
         // ---- Public logging API --------------------------------------------
@@ -553,6 +558,7 @@ public class JRock {
             SwingUtilities.invokeLater(() -> {
                 Entry e = new Entry(false, null, null, line, "");
                 entries.add(e);
+                logCopySaved = false;
                 if (isVisible(e)) renderGray(e.text);
                 persistMainLog();
             });
@@ -569,6 +575,7 @@ public class JRock {
                 String suffix = withTimestamp ? " \u00B7 " + humanNow() : "";
                 Entry e = new Entry(true, role, stamp, text, suffix);
                 entries.add(e);
+                logCopySaved = false;
                 // Write the message body to its own append-only file in logs/.
                 writeMessageFile(role, stamp, text);
                 renderDialog(e);        // dialog is always visible
@@ -585,8 +592,35 @@ public class JRock {
             SwingUtilities.invokeLater(() -> {
                 entries.clear();
                 pane.setText("");
+                logCopySaved = true;   // nothing left to save
                 atomicWriteQuietly(logFile(), "");  // overwrite main log with empty
             });
+        }
+
+        // Whether the log has been exported since it last changed (see the field).
+        boolean isLogCopySaved() { return logCopySaved; }
+
+        // Marks the log as exported; call after a successful Save log copy.
+        void markLogCopySaved() { logCopySaved = true; }
+
+        // Whether there is any content at all (an empty log needs no save prompt).
+        boolean isEmpty() { return entries.isEmpty(); }
+
+        // Serializes the FULL log (all entries, regardless of "Dialog only" view)
+        // to plain text for export: each dialog entry as its "[role]<suffix>"
+        // header line followed by its body, gray entries as their line. This is
+        // the on-screen transcript, not the on-disk @<stamp> reference form.
+        String fullText() {
+            StringBuilder sb = new StringBuilder();
+            for (Entry e : entries) {
+                if (e.dialog) {
+                    sb.append('[').append(e.role).append(']').append(e.headerSuffix).append('\n');
+                    sb.append(e.text).append('\n');
+                } else {
+                    sb.append(e.text).append('\n');
+                }
+            }
+            return sb.toString();
         }
 
         // Returns the dialog turns so far, in order, as {role, text} pairs
@@ -608,6 +642,7 @@ public class JRock {
             SwingUtilities.invokeLater(() -> {
                 entries.clear();
                 entries.addAll(loaded);
+                logCopySaved = true;   // just loaded from disk; no unsaved changes
                 rebuild();
             });
             return loaded.size();
@@ -862,7 +897,7 @@ public class JRock {
         dialogOnly.setToolTipText("Show only the headers and dialog (hide gray system text)");
         dialogOnly.addActionListener(e -> log.setDialogOnly(dialogOnly.isSelected()));
         JButton clear = new JButton("Clear log");
-        clear.addActionListener(e -> log.clear());
+        clear.addActionListener(e -> clearLogConfirmed(frame, log));
 
         javax.swing.JPanel topRight = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
@@ -1103,6 +1138,17 @@ public class JRock {
             }
         });
 
+        // Ctrl+L: save a COPY of the current log to a file the user chooses
+        // (symmetric to Ctrl+S for the prompt). Marks the log as exported so
+        // Clear log won't warn about unsaved changes.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.CTRL_DOWN_MASK), "jrock-save-log");
+        frame.getRootPane().getActionMap().put("jrock-save-log", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                saveLogAs(frame, log);
+            }
+        });
+
         // Ctrl+O: load a prompt from a file (read-only) into the input area, like
         // passing a prompt file as a startup argument. Autosave then continues
         // writing the loaded text to jrock-prompt.txt.
@@ -1238,14 +1284,14 @@ public class JRock {
         // Shortcuts as a 2-column grid so keys and descriptions align cleanly
         // (no space-padding). The "Shortcuts" border title keeps the default bold.
         String[][] keys = {
-            {"Ctrl+S", "Save prompt as (a copy)"},
-            {"Ctrl+O", "Load prompt from a file"},
+            {"Ctrl+Enter", "Send"},
             {"Ctrl+I", "Include a text or image file"},
-            {"Ctrl+M", "Move & resize the window"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
+            {"Ctrl+S", "Save prompt as (a copy)"},
+            {"Ctrl+O", "Load prompt from a file"},
+            {"Ctrl+L", "Save log as (a copy)"},
             {"Ctrl+P", "Print log / save as PDF"},
-            {"Ctrl+Enter", "Send"},
         };
         javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
         shortcuts.setBorder(javax.swing.BorderFactory.createTitledBorder("Shortcuts"));
@@ -1361,7 +1407,7 @@ public class JRock {
     private static void savePromptAs(JFrame frame, String text) {
         javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
         chooser.setDialogTitle("Save prompt copy as");
-        chooser.setSelectedFile(new java.io.File(lastChooserDir.toFile(), "prompt.txt"));
+        chooser.setSelectedFile(new java.io.File(lastChooserDir.toFile(), "jrock-prompt-copy.txt"));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         rememberChooserDir(chooser);
 
@@ -1373,6 +1419,49 @@ public class JRock {
                     "Could not save to " + target + ":\n" + ex.getMessage(),
                     "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    // Saves a copy of the full on-screen log to a user-chosen file (symmetric to
+    // savePromptAs). On success, marks the log as exported so Clear log won't warn.
+    private static void saveLogAs(JFrame frame, LogView log) {
+        if (log.isEmpty()) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "The log is empty - nothing to save.",
+                    "Save log copy", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
+        chooser.setDialogTitle("Save log copy as");
+        chooser.setSelectedFile(new java.io.File(lastChooserDir.toFile(), "jrock-log-copy.txt"));
+        if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        rememberChooserDir(chooser);
+
+        Path target = chooser.getSelectedFile().toPath();
+        try {
+            Files.write(target, log.fullText().getBytes(StandardCharsets.UTF_8));
+            log.markLogCopySaved();
+        } catch (IOException ex) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Could not save to " + target + ":\n" + ex.getMessage(),
+                    "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    // Clears the log after confirming when there are unsaved changes. If the log
+    // hasn't been exported (Ctrl+L) since it last changed, warns and advises the
+    // user to cancel and save first; only clears on explicit confirmation.
+    private static void clearLogConfirmed(JFrame frame, LogView log) {
+        if (!log.isEmpty() && !log.isLogCopySaved()) {
+            int choice = javax.swing.JOptionPane.showConfirmDialog(frame,
+                    "The log has changed since it was last saved.\n\n"
+                        + "Clear it anyway? To keep a copy, cancel and save the log "
+                        + "first with Ctrl+L.",
+                    "Clear log without saving?",
+                    javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                    javax.swing.JOptionPane.WARNING_MESSAGE);
+            if (choice != javax.swing.JOptionPane.OK_OPTION) return;
+        }
+        log.clear();
     }
 
     // Loads a prompt from a user-chosen file (read-only) into the input area.
