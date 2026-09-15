@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>JRock in the browser (CheerpJ)</title>
+  <title>JRock in the browser (demo)</title>
 
   <!-- CheerpJ runtime: runs unmodified JVM bytecode as WebAssembly + JS. -->
   <script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
@@ -32,7 +32,8 @@
       flex: 0 0 auto;
     }
     header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-    header .brand { color: var(--brand); }
+    header .brand { color: var(--brand); text-decoration: none; }
+    header a.brand:hover { text-decoration: underline; }
     header .spacer { flex: 1; }
 
     .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -110,7 +111,7 @@
 
 <body>
   <header>
-    <h1><span class="brand">JRock</span> in the browser</h1>
+    <h1><a class="brand" href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock</a> in the browser (demo)</h1>
     <span class="spacer"></span>
     <div class="controls">
       <button id="keyBtn" class="icon" title="Enter Bedrock credentials">&#128274;</button>
@@ -131,7 +132,7 @@
     </div>
   </div>
 
-  <footer id="bottom">Runs unmodified Java bytecode in the browser via CheerpJ (WebAssembly + JS). Must be served over HTTP (not opened as a file://). Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine. Outbound Bedrock calls are subject to browser/CheerpJ network limits.</footer>
+  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine. Outbound Bedrock calls will almost certainly fail in a standard browser: CheerpJ has no native socket layer, so HttpClient's networking (sun.nio.ch.EPoll) is unavailable and throws UnsatisfiedLinkError. Run the desktop jar for live Bedrock calls.</footer>
 
   <!-- API key modal -->
   <div class="modal-backdrop" id="keyModal">
@@ -176,6 +177,7 @@
       var JAR_URL  = "jrock.jar";        // served from this same directory
       var JAR_PATH = "/str/jrock.jar";   // CheerpJ transient JS->Java mount
 
+      var headerEl = document.querySelector("header");
       var keyBtn   = document.getElementById("keyBtn");
       var runBtn   = document.getElementById("runBtn");
       var infoEl   = document.getElementById("info");
@@ -192,6 +194,13 @@
       var apiKey   = "";            // in-tab only; injected as a JVM property on Run
       var region   = "us-east-1";   // AWS region; JRock's default
       var started  = false;
+
+      // Hide the header + footer to give the Swing display all the space. The
+      // flex layout reflows and the CheerpJ display fills the freed area.
+      function hideChrome() {
+        if (headerEl) headerEl.style.display = "none";
+        if (bottom)   bottom.style.display = "none";
+      }
 
       // On load the bottom bar is help text; once running it becomes the log.
       function log(msg) {
@@ -250,7 +259,9 @@
         keyBtn.title = "Enter Bedrock credentials";
         closeKey();
       });
-      keyModal.addEventListener("click", function (e) { if (e.target === keyModal) closeKey(); });
+      // Note: intentionally NO backdrop-click handler - the dialog closes only
+      // via its buttons (Save/Clear) or the Escape key, so a stray click or
+      // click-drag ending on the backdrop won't dismiss it.
       function modalKeydown(e) {
         if (e.key === "Enter") document.getElementById("keySave").click();
         else if (e.key === "Escape") closeKey();
@@ -285,6 +296,9 @@
           cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
 
           log("Running JRock ... (first run downloads the Java runtime; please wait)");
+          // Once the app is up, hide the header + footer after 5s to give the
+          // Swing display all the space (the display reflows to fill).
+          setTimeout(hideChrome, 5000);
           var code = await cheerpjRunJar(JAR_PATH);
           log("JRock exited with code " + code + ".");
         } catch (e) {

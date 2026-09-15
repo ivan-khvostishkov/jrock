@@ -110,6 +110,15 @@ public class JRock {
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
+    // Shown after an UnsatisfiedLinkError from the networking stack. Kept in sync
+    // with the jrock-web page footer, which warns about the same limitation.
+    private static final String SANDBOX_NETWORK_HINT =
+            "If you're running JRock on a custom/sandboxed JVM such as CheerpJ in "
+          + "the browser, this is almost certainly the cause: it has no native "
+          + "socket layer, so HttpClient's networking (sun.nio.ch.EPoll) is "
+          + "unavailable and outbound calls will fail. Run the desktop jar for "
+          + "live Bedrock calls.";
+
     // Most recently fetched list of available model ids (from the /v1/models call).
     // Empty until the first successful fetch; used to populate the Configure dropdown.
     private static java.util.List<String> availableModels = new ArrayList<>();
@@ -985,12 +994,18 @@ public class JRock {
                 protected String[] doInBackground() {
                     try {
                         return callModel(prompt, history);
-                    } catch (Exception ex) {
-                        return new String[] {
-                            "0", // failure
-                            "ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage(),
-                            null
-                        };
+                    } catch (Throwable ex) {
+                        // Catch Throwable, not just Exception: a sandboxed JVM
+                        // without a real socket layer (e.g. CheerpJ in the browser)
+                        // throws UnsatisfiedLinkError from the HttpClient native
+                        // networking code (Java_sun_nio_ch_EPoll_*), which is an
+                        // Error. Print the exception as-is, then add a hint.
+                        String msg = "ERROR: " + ex.getClass().getSimpleName()
+                                + ": " + ex.getMessage();
+                        if (ex instanceof UnsatisfiedLinkError) {
+                            msg += "\n" + SANDBOX_NETWORK_HINT;
+                        }
+                        return new String[] { "0", msg, null };
                     }
                 }
 
