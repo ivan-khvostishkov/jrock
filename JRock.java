@@ -99,7 +99,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "1.3.1";
+    private static final String VERSION = "1.3.2-dev";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
