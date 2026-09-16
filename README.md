@@ -21,7 +21,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Everything local & transparent.** No server-side session state; all history lives in
   plain files under a `JRock/` folder you own and can inspect.
 - **Crash-safe persistence** of the prompt and the full conversation.
-- **Multimodal includes** (text and image files) referenced by hash.
+- **Multimodal includes** (text and image files, plus PDF-to-text/PDF-to-images via
+  Ghostscript) referenced by hash; multi-select supported.
 - **Keyboard-driven**, with a Configure dialog for API key, region, model and working directory.
 
 ## Requirements
@@ -135,25 +136,47 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
 - `JRock/messages/` — one **append-only** file per human/assistant message. These are never
   modified or deleted (not even by Clear log). `cat`-ing them in order reproduces the
   dialog-only transcript.
+- `JRock/gs-pdf/` — per-page text/image files produced when a PDF is included via Ghostscript
+  (see Multimodal includes).
 
 The main log uses a simple, robust format: a bit-perfect copy of the pane, except each role
 header is followed by an `@<datetime>` include-style reference to the message's own file. The
 reference carries **only a validated datetime**, so no arbitrary paths can be injected.
 
 **Clear log** empties `jrock-log.txt` and the window but never touches `JRock/messages/`, so
-paid-for inputs/outputs are preserved.
+paid-for inputs/outputs are preserved. If the log has changed since it was last exported with
+**Ctrl+L** (Save log as a copy), Clear log first asks for confirmation and suggests saving.
 
 ## Multimodal includes (Ctrl+I)
 
-Attach a **text or image** file to a prompt:
+Attach **text or image** files to a prompt (and convert **PDFs** to either):
 
-1. **Ctrl+I** opens a file picker.
-2. The file is hashed (SHA-256). The hash → path mapping is kept **in memory only**
+1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
+   once, and the dropdown offers four kinds:
+   - **Image files** (png, jpg, jpeg, gif, webp)
+   - **Text files** (*.txt)
+   - **PDF as text pages** — converts the PDF to one text file per page
+   - **PDF as page images** — converts the PDF to one PNG per page
+2. Each file is hashed (SHA-256). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart you must re-include files to reuse them.
-3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor. Duplicate tokens for
-   the same file are not added again (also checked across prior turns in Extend mode).
-4. The log records the include (and, for images, dimensions and total pixel count formatted
-   for your locale).
+3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor (one per file / per PDF
+   page). Duplicate tokens for the same file are not added again (also checked across prior
+   turns in Extend mode).
+4. The log records each include with stats (locale-formatted numbers):
+   - **Images**: dimensions, total pixel count, and file size in bytes.
+   - **Text**: symbol count (Unicode code points) and file size in bytes.
+
+### PDF conversion (Ghostscript)
+
+Selecting a PDF filter runs **Ghostscript** (`gswin64c`) to convert the PDF, one file per
+page, then includes each produced page:
+
+- Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.txt` (text pages via
+  the `txtwrite` device) or `<pdfname>.gs.NNN.png` (page images at 150 dpi).
+- The exact Ghostscript command and its output are echoed to the log.
+- If `gswin64c` isn't found on your PATH, JRock logs a note, shows a dialog, and opens
+  https://ghostscript.com/ so you can install it. (Text extraction quality depends on the
+  PDF; for an LLM, page-image includes are a reliable fallback for tricky PDFs.)
 
 On send, every referenced include is verified (known hash **and** the file still hashes the
 same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid
@@ -176,6 +199,9 @@ Applying re-runs the session init (working directory reported first, then models
 ending with `Ready.`). Changing the working directory reloads the log from the new folder,
 so nothing carries over from the old one.
 
+The dialog also shows an **About** line with the version and a **JRock** link to the project
+on GitHub, a short description, keyboard shortcuts, and authorship.
+
 ## Window move & resize (Ctrl+M)
 
 A dialog to set the window **width/height** and **on-screen X/Y** numerically, plus info
@@ -192,37 +218,50 @@ to save the transcript to a PDF, or print to a physical printer.
 Right-clicking (or long-tapping on touch devices) opens a context menu:
 
 - **Log pane** — Save log copy as..., Print...
-- **Prompt area** — Include text or image file..., Load prompt from file..., Save prompt copy as...
+- **Prompt area** — Include text or image file... (also PDFs, multi-select), Load prompt from
+  file..., Save prompt copy as...
 - **Top bar (empty area)** — Move & resize window...; on **Windows**, also Install /
   Uninstall the "JRock here!" Explorer entry (see below).
 
-## Windows: "JRock here!" (right-click in Explorer)
+## Windows: Explorer right-click integration
 
 On Windows, the top-bar context menu (right-click the empty area of the top bar) offers
 **Install "JRock here!" (Explorer menu)...** and **Uninstall "JRock here!" (Explorer
-menu)...**. These items appear only on Windows.
+menu)...**. These items appear only on Windows. Installing adds two Explorer right-click
+entries at once:
 
-Installing adds a Windows Explorer right-click entry so you can open JRock rooted at any
-folder: right-click **inside** a folder's empty space, or **on** a folder icon, and choose
-*JRock here!*. JRock launches with its working directory set to that folder, so its
-`JRock/` files (prompt, log, messages) are created right there.
+- **"JRock here!"** — on a folder's empty space or on a folder icon. Launches JRock in that
+  folder, so its `JRock/` files (prompt, log, messages) are created right there. Explorer
+  starts the process with its current directory set to the clicked folder, so no path
+  argument is needed.
+- **"Open as prompt with JRock"** — on a **`.txt`** file. Launches JRock with that file loaded
+  as the initial (read-only) prompt. This adds a verb without changing the default open action
+  for `.txt`.
 
-- **Per-user and reversible.** The entry is written under `HKEY_CURRENT_USER` (no admin
-  needed) for both `Directory\Background\shell` and `Directory\shell`. Uninstall removes it.
-- **No console window.** It launches `javaw.exe` directly (not through `cmd`), passing the
-  clicked folder as `-Djrock.workdir=<path>` rather than changing the process directory, so
-  nothing flashes on screen.
-- **Self-configuring.** It uses the `javaw.exe` of the JVM currently running JRock, and
-  launches JRock's own `jrock.jar` (or, if running from source, the `JRock.java` file) — no
-  paths to edit.
-- On **Windows 11** the entry may appear under **"Show more options"** (a limitation of
+Details:
+
+- **Per-user and reversible.** Entries are written under `HKEY_CURRENT_USER` (no admin needed):
+  `Directory\Background\shell` and `Directory\shell` for the folder verb, and
+  `SystemFileAssociations\.txt\shell` for the text verb. Uninstall removes all of them.
+- **No console window.** Both launch `javaw.exe` directly (not through `cmd`), so nothing
+  flashes on screen.
+- **Self-configuring.** They use the `javaw.exe` of the JVM currently running JRock, and launch
+  JRock's own `jrock.jar` (or, if running from source, the `JRock.java` file) — no paths to edit.
+- **Inspectable.** The applied registry file is kept for your inspection under `JRock/`
+  (`jrock-context-menu-install.reg` / `jrock-context-menu-uninstall.reg`), and each action is
+  recorded in the log.
+- On **Windows 11** the entries may appear under **"Show more options"** (a limitation of
   classic registry verbs).
 
-You can also set the working directory at launch yourself with the same property, e.g.:
+## Per-folder window title & icon
 
-```powershell
-javaw -Djrock.workdir="C:\path\to\folder" -jar jrock.jar
-```
+The window title and taskbar/Alt-Tab icon reflect the **working directory** so multiple JRock
+windows opened in different folders are easy to tell apart:
+
+- The title is `<folder> - JRock` (folder name first, so it stays visible even when Alt-Tab
+  truncates the text).
+- The app icon is a generated teal tile badged with a short abbreviation of the folder name
+  (e.g. `my-cool-project` → `MCP`, `research` → `RES`).
 
 ## Keyboard shortcuts
 
@@ -232,7 +271,7 @@ javaw -Djrock.workdir="C:\path\to\folder" -jar jrock.jar
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+L | Save log as (a copy) |
 | Ctrl+O | Load prompt from a file (text only) |
-| Ctrl+I | Include a text or image file |
+| Ctrl+I | Include text/image files or a PDF (multi-select) |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle Extend conversation |
 | Ctrl+M | Move & resize the window |
