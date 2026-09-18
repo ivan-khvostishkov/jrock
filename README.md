@@ -207,13 +207,14 @@ Attach **text or image** files to a prompt (and convert **PDFs** to either):
 
 ### PDF conversion (Ghostscript)
 
-Selecting a PDF filter runs **Ghostscript** (`gswin64c`) to convert the PDF, one file per
-page, then includes each produced page:
+Selecting a PDF filter runs **Ghostscript** to convert the PDF, one file per page, then
+includes each produced page. The console executable is looked up on your PATH:
+`gswin64c` (then `gswin32c`, then `gs`) on Windows, `gs` on macOS and Linux.
 
 - Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.txt` (text pages via
   the `txtwrite` device) or `<pdfname>.gs.NNN.png` (page images at 150 dpi).
 - The exact Ghostscript command and its output are echoed to the log.
-- If `gswin64c` isn't found on your PATH, JRock logs a note, shows a dialog, and opens
+- If Ghostscript isn't found on your PATH, JRock logs a note, shows a dialog, and opens
   https://ghostscript.com/ so you can install it. (Text extraction quality depends on the
   PDF; for an LLM, page-image includes are a reliable fallback for tricky PDFs.)
 

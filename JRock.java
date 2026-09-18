@@ -2152,7 +2152,7 @@ public class JRock {
         return true;
     }
 
-    // Converts a PDF to per-page files with Ghostscript (gswin64c), then includes
+    // Converts a PDF to per-page files with Ghostscript, then includes
     // each produced page. asImages=false -> text pages (txtwrite), true -> PNG
     // page images. Output files are written under JRock/gs-pdf/, named
     // "<pdfname>.gs.NNN.txt" / "<pdfname>.gs.NNN.png". If Ghostscript isn't on
@@ -2161,12 +2161,14 @@ public class JRock {
                                    boolean extend, Path pdf, boolean asImages) {
         String gs = findGhostscript();
         if (gs == null) {
-            log.gray("Ghostscript (gswin64c) was not found on PATH. Install it from "
+            // Name the executable the current platform actually looks for.
+            String exe = isWindows() ? "gswin64c" : "gs";
+            log.gray("Ghostscript (" + exe + ") was not found on PATH. Install it from "
                     + "https://ghostscript.com/ to convert PDFs, then try again.");
             javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Ghostscript (gswin64c) is required to convert PDFs but was not found "
+                    "Ghostscript (" + exe + ") is required to convert PDFs but was not found "
                         + "on your PATH.\n\nInstall it from https://ghostscript.com/ and "
-                        + "restart JRock (or your shell) so gswin64c is on PATH.",
+                        + "restart JRock (or your shell) so " + exe + " is on PATH.",
                     "Ghostscript not found", javax.swing.JOptionPane.WARNING_MESSAGE);
             openUrl("https://ghostscript.com/");
             return;
