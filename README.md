@@ -350,8 +350,8 @@ java -jar jrock.jar
 Current build hashes:
 
 ```
-8b0801f7b4cc82f4b43402a63c04133b0cda75921a1c29c28f76c984cb1440d0  jrock.jar
-533935e2ae53ee091093d8b7c5e055d9  jrock.jar
+af53b6b68423f45b6ae66bdf5295b34afe2e60ef09af81604e4cd5bfff2d0462  jrock.jar
+5bab3854f211aac77b0f4b8de6812cb1  jrock.jar
 ```
 
 Or, if you want to modify the source and run it in place (no build step):
