@@ -55,7 +55,7 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
 ## JRock Web (in the browser)
 
-JRock also runs in your browser at **https://jrock-demo.nosocial.net/** — no locally
+JRock also runs in your browser at **https://jrock.nosocial.net/** — no locally
 installed JVM required. It loads the same unmodified `jrock.jar` and runs it entirely
 **locally in your browser** via [CheerpJ](https://cheerpj.com/) (which executes JVM bytecode
 as WebAssembly), so nothing runs on a server.
