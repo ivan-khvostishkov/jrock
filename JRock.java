@@ -155,9 +155,33 @@ public class JRock {
     // are distinguishable in Alt-Tab / the taskbar.
     private static Path workingDir = Paths.get("").toAbsolutePath();
 
-    // Directory the Save/Load prompt choosers open in. Starts at workingDir on each
-    // (re)initialization, then follows wherever the user last browsed.
-    private static Path lastChooserDir = workingDir;
+    // Remembers where a file chooser last browsed, so the next dialog of the same
+    // kind opens there. One instance PER PURPOSE, because these files live in
+    // different places in practice: prompts in a prompt folder, included documents
+    // and images wherever the source material is, exported logs somewhere else
+    // again. A single shared memory meant that including a file dropped the user in
+    // the prompt folder (and vice versa) - a directory away from what they wanted.
+    private static final class ChooserDir {
+        private Path dir = workingDir;
+
+        // Directory the next chooser of this kind should open in.
+        java.io.File start() { return dir.toFile(); }
+
+        // Same directory, with a default file name pre-filled (for Save dialogs).
+        java.io.File startFile(String name) { return new java.io.File(dir.toFile(), name); }
+
+        // Records where the user ended up, once they've confirmed the dialog.
+        void remember(javax.swing.JFileChooser chooser) {
+            java.io.File current = chooser.getCurrentDirectory();
+            if (current != null) dir = current.toPath();
+        }
+
+        // Back to the (possibly new) working directory; see initSession().
+        void reset() { dir = workingDir; }
+    }
+    private static final ChooserDir promptChooserDir  = new ChooserDir();  // Save/Load prompt
+    private static final ChooserDir includeChooserDir = new ChooserDir();  // Include file
+    private static final ChooserDir logChooserDir     = new ChooserDir();  // Save log copy
 
     // Derived endpoints/paths (recomputed from the mutable config above).
     private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
@@ -774,8 +798,10 @@ public class JRock {
     // promptSourceNote is logged only when non-null (startup); on reconfigure the
     // prompt is untouched so it's omitted.
     private static void initSession(LogView log, String promptSourceNote) {
-        // File choosers start fresh in the (possibly new) working directory.
-        lastChooserDir = workingDir;
+        // Every file chooser starts fresh in the (possibly new) working directory.
+        promptChooserDir.reset();
+        includeChooserDir.reset();
+        logChooserDir.reset();
 
         // Recover any previous log from disk FIRST. loadFromDisk() replaces the
         // entry list (rebuild -> setText), so it must run before we log anything
@@ -1531,21 +1557,15 @@ public class JRock {
     }
 
     // ---- Save / load prompt (Ctrl+S / Ctrl+O) ------------------------------
-    // Remembers the directory the chooser ended in, so the next Save/Load opens
-    // there. Reset back to workingDir on each (re)initialization.
-    private static void rememberChooserDir(javax.swing.JFileChooser chooser) {
-        java.io.File dir = chooser.getCurrentDirectory();
-        if (dir != null) lastChooserDir = dir.toPath();
-    }
-
     // Saves a copy of the given text to a user-chosen file. Does NOT touch the
     // persistent jrock-prompt.txt; this is an extra export.
     private static void savePromptAs(JFrame frame, String text) {
-        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(promptChooserDir.start());
         chooser.setDialogTitle("Save prompt copy as");
-        chooser.setSelectedFile(new java.io.File(lastChooserDir.toFile(), "jrock-prompt-copy.txt"));
+        chooser.setSelectedFile(promptChooserDir.startFile("jrock-prompt-copy.txt"));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        rememberChooserDir(chooser);
+        promptChooserDir.remember(chooser);
 
         Path target = chooser.getSelectedFile().toPath();
         try {
@@ -1566,11 +1586,12 @@ public class JRock {
                     "Save log copy", javax.swing.JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(logChooserDir.start());
         chooser.setDialogTitle("Save log copy as");
-        chooser.setSelectedFile(new java.io.File(lastChooserDir.toFile(), "jrock-log-copy.txt"));
+        chooser.setSelectedFile(logChooserDir.startFile("jrock-log-copy.txt"));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        rememberChooserDir(chooser);
+        logChooserDir.remember(chooser);
 
         Path target = chooser.getSelectedFile().toPath();
         try {
@@ -1884,14 +1905,15 @@ public class JRock {
     // Loads a prompt from a user-chosen file (read-only) into the input area.
     // The document listener then autosaves the loaded text to jrock-prompt.txt.
     private static void loadPromptInto(JFrame frame, JTextArea input, LogView log) {
-        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(promptChooserDir.start());
         chooser.setDialogTitle("Load prompt");
         // Prompts are text - restrict to .txt so an image can't be loaded by mistake.
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 "Text files (*.txt)", "txt"));
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        rememberChooserDir(chooser);
+        promptChooserDir.remember(chooser);
 
         Path source = chooser.getSelectedFile().toPath();
         String loaded = readFileQuietly(source);
@@ -1923,7 +1945,8 @@ public class JRock {
     // "@txt <hash>" / "@img <hash>" token inserted at the prompt cursor.
     private static void showIncludeDialog(JFrame frame, JTextArea input, LogView log,
                                           boolean extend) {
-        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(lastChooserDir.toFile());
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(includeChooserDir.start());
         chooser.setDialogTitle("Include file");
         chooser.setAcceptAllFileFilterUsed(false);
         javax.swing.filechooser.FileNameExtensionFilter imageFilter =
@@ -1943,7 +1966,7 @@ public class JRock {
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        rememberChooserDir(chooser);
+        includeChooserDir.remember(chooser);
 
         java.io.File[] selected = chooser.getSelectedFiles();
         if (selected == null || selected.length == 0) return;
