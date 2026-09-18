@@ -927,7 +927,12 @@ public class JRock {
         // visible even when Alt-Tab truncates ("myproj - JRock" rather than
         // "JRock - Bedro..."), so instances in different folders are
         // distinguishable. Falls back to a plain title at a filesystem root.
-        Path folderPath = workingDir.getFileName();
+        //
+        // Not in the browser: there is only ever one instance, and the directory is
+        // CheerpJ's own virtual mount (so the title read "file - JRock" and the icon
+        // said "FIL") - a folder name the user never chose and cannot act on. The
+        // plain title and the plain "JR" icon are the right answer there.
+        Path folderPath = isCheerpJ() ? null : workingDir.getFileName();
         String folder = folderPath != null ? folderPath.toString() : null;
         String title = (folder != null && !folder.isBlank())
                 ? folder + " - JRock"

@@ -309,6 +309,9 @@ windows opened in different folders are easy to tell apart:
 - The app icon is a generated teal tile badged with a short abbreviation of the folder name
   (e.g. `my-cool-project` → `MCP`, `research` → `RES`).
 
+In the browser this is switched off (plain title, plain `JR` icon): there's a single instance
+and the directory is CheerpJ's own virtual mount, so naming it would say nothing useful.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
