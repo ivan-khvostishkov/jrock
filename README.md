@@ -175,10 +175,6 @@ Built-in cards include:
 - The **raw request and raw response** are shown for debugging, but prompt/reply/attachment
   content is **masked** (shown by hash/placeholder) so the transcript isn't a noisy duplicate
   and included files stay referenced only by hash.
-- Long gray lines — above all the single-line request/response JSON — are **wrapped after the
-  next `,` or `:`** once they run past 100 characters, so each piece still reads as JSON instead
-  of breaking mid-token wherever the pane happens to run out of width. Wrapping only inserts
-  newlines, and dialog text is never wrapped.
 
 ![Two timestamped turns with Extend conversation and Dialog only both on](images/extend-dialog-only.png)
 
