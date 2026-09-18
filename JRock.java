@@ -26,6 +26,13 @@
 //   Maximum: none    - only core JDK APIs (javax.swing, java.net.http). No external
 //                       jars. Runs on the latest JDK.
 //
+// HTTP transport:
+//   On any normal JVM, requests go out over java.net.http.HttpClient. In the
+//   browser (CheerpJ, which runs this bytecode as WebAssembly) there is no native
+//   socket layer, so HttpClient cannot work at all; JRock then routes its two
+//   Bedrock calls through the hosting page's JavaScript HTTP client instead. See
+//   the "HTTP transport" section below and jrock-web/index.html.
+//
 // Endpoint / API:
 //   bedrock-mantle is the newer endpoint surface (same underlying Mantle inference
 //   engine as bedrock-runtime). It exposes the OpenAI-compatible Chat Completions
@@ -59,9 +66,8 @@
 //     $env:AWS_REGION = "us-east-1"   # optional, defaults below
 //   Alternatively, configure the API key (and region/model) in the app itself via
 //   the Configure dialog (top-left button); no env var needed.
-//   BEDROCK_API_KEY and AWS_REGION are also read from same-named JVM system
-//   properties (-Dname=value) as a fallback, so hosts that cannot set OS env
-//   vars (e.g. CheerpJ in the browser) can still supply them.
+//   In the browser the key never reaches the JVM at all: the page's JavaScript
+//   HTTP client holds it and signs each request itself (see "HTTP transport").
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -99,7 +105,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "1.3.2-dev";
+    private static final String VERSION = "1.4-dev";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -108,22 +114,33 @@ public class JRock {
     private static final String DEFAULT_REGION = "us-east-1";
     // Region/model start from env/defaults and can be overridden at runtime.
     private static String REGION = envOr("AWS_REGION", DEFAULT_REGION);
-    private static boolean regionFromEnv = envOrProp("AWS_REGION") != null
-            && !envOrProp("AWS_REGION").isBlank();
+    // Where REGION came from, phrased for the startup log; null for the built-in
+    // default and once the user sets it in the Configure dialog.
+    private static String regionSource =
+            (env("AWS_REGION") == null) ? null : "from the AWS_REGION env var";
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
     // Upper bound on tokens the model may generate in a response.
     private static final int MAX_TOKENS = 8192;
 
-    // Shown after an UnsatisfiedLinkError from the networking stack. Kept in sync
-    // with the jrock-web page footer, which warns about the same limitation.
-    private static final String SANDBOX_NETWORK_HINT =
-            "If you're running JRock on a custom/sandboxed JVM such as CheerpJ in "
-          + "the browser, this is almost certainly the cause: it has no native "
-          + "socket layer, so HttpClient's networking (sun.nio.ch.EPoll) is "
-          + "unavailable and outbound calls will fail. Run the desktop jar for "
-          + "live Bedrock calls.";
+    // Request timeouts (seconds). The model list is a quick metadata call; a
+    // completion can legitimately take much longer.
+    private static final int MODELS_TIMEOUT_SECONDS  = 30;
+    private static final int CHAT_TIMEOUT_SECONDS    = 60;
+    private static final int CONNECT_TIMEOUT_SECONDS = 30;
+
+    // Shown after an UnsatisfiedLinkError from the networking stack. That can only
+    // really happen in one situation: JRock is running on CheerpJ in the browser
+    // (no native socket layer, so HttpClient's sun.nio.ch.EPoll is unavailable)
+    // and the hosting page never installed the browser HTTP bridge, so there was
+    // no working transport to fall back to.
+    private static final String NO_TRANSPORT_HINT =
+            "This JVM has no working socket layer - it is almost certainly CheerpJ "
+          + "in the browser - and the hosting page did not install JRock's browser "
+          + "HTTP bridge, so there is no transport to send the request over. The "
+          + "page must pass natives: { Java_JRock_browserHttpInfo, "
+          + "Java_JRock_browserHttpSend } to cheerpjInit(); see jrock-web/index.html.";
 
     // Most recently fetched list of available model ids (from the /v1/models call).
     // Empty until the first successful fetch; used to populate the Configure dropdown.
@@ -417,37 +434,21 @@ public class JRock {
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
     private static Path gsPdfDir()         { return jrockDir().resolve("gs-pdf"); }
 
-    // Resolves the effective API key. Precedence: in-memory override, then the
-    // BEDROCK_API_KEY env var / -D property, then BEDROCK_API_KEY_HEX (a hex-
-    // encoded fallback). The hex form exists for browser hosts (CheerpJ) that
-    // inject the key via javaProperties as "-Dname=value": Bedrock keys often
-    // contain '=' (base64 padding), which is ambiguous in that "key=value" form,
-    // so the web page hex-encodes it and JRock decodes it here. Returns
-    // null/blank if none is present.
+    // Resolves the effective API key: the in-memory override from the Configure
+    // dialog first, then the BEDROCK_API_KEY env var. Returns null when neither is
+    // set - which is normal in the browser, where the key stays in the page and
+    // the JVM never sees it (see HttpTransport.hostHoldsCredentials()).
     private static String resolveApiKey() {
         if (apiKeyOverride != null && !apiKeyOverride.isBlank()) return apiKeyOverride;
-        String plain = envOrProp("BEDROCK_API_KEY");
-        if (plain != null && !plain.isBlank()) return plain;
-        String hex = envOrProp("BEDROCK_API_KEY_HEX");
-        return (hex == null || hex.isBlank()) ? null : decodeHex(hex.trim());
-    }
-
-    // Decodes a hex string to a UTF-8 string; returns null on malformed input.
-    private static String decodeHex(String hex) {
-        int n = hex.length();
-        if ((n & 1) != 0) return null;
-        byte[] out = new byte[n / 2];
-        for (int i = 0; i < n; i += 2) {
-            int hi = Character.digit(hex.charAt(i), 16);
-            int lo = Character.digit(hex.charAt(i + 1), 16);
-            if (hi < 0 || lo < 0) return null;
-            out[i / 2] = (byte) ((hi << 4) | lo);
-        }
-        return new String(out, StandardCharsets.UTF_8);
+        return env("BEDROCK_API_KEY");
     }
 
     // ---- UI ----------------------------------------------------------------
     public static void main(String[] args) {
+        // Settle the HTTP transport before anything is shown: in the browser this
+        // also adopts the region configured by the hosting page, which the startup
+        // log and the Configure dialog then report.
+        http();
         // Optional first arg: a file to load the initial prompt from (read-only).
         String sourceArg = (args.length > 0 && !args[0].isBlank()) ? args[0].trim() : null;
         SwingUtilities.invokeLater(() -> createAndShowGui(sourceArg));
@@ -797,8 +798,13 @@ public class JRock {
         }
         log.gray("Messages also stored in JRock/messages/ directory.");
 
-        if (regionFromEnv) {
-            log.gray("AWS region: " + REGION + " (from AWS_REGION env var)");
+        log.gray("HTTP transport: " + http().describe()
+                + (isCheerpJ() ? " (CheerpJ browser runtime)" : ""));
+        if (http().hostHoldsCredentials()) {
+            log.gray("Bedrock API key: held by the hosting page, not by JRock");
+        }
+        if (regionSource != null) {
+            log.gray("AWS region: " + REGION + " (" + regionSource + ")");
         } else {
             log.gray("AWS region: " + REGION);
         }
@@ -836,32 +842,32 @@ public class JRock {
     // comma-separated list of model ids. Never throws - returns a status
     // string on failure so startup logging is best-effort.
     private static String listAvailableModels() {
+        HttpTransport http = http();
         String apiKey = resolveApiKey();
-        if (apiKey == null || apiKey.isBlank()) {
+        boolean haveKey = apiKey != null && !apiKey.isBlank();
+        if (!haveKey && !http.hostHoldsCredentials()) {
             return "(skipped - no Bedrock API key set)";
         }
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(modelsEndpoint()))
-                    .timeout(Duration.ofSeconds(30))
-                    .header("Authorization", "Bearer " + apiKey.trim())
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(15))
-                    .build()
-                    .send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                return "(HTTP " + resp.statusCode() + " from " + modelsEndpoint() + ")";
+            List<String[]> headers = new ArrayList<>();
+            if (haveKey) {
+                headers.add(new String[] { "Authorization", "Bearer " + apiKey.trim() });
             }
-            List<String> ids = extractModelIds(resp.body());
+            HttpReply resp = http.send("GET", modelsEndpoint(), headers,
+                    null, MODELS_TIMEOUT_SECONDS);
+            if (resp.status != 200) {
+                return "(HTTP " + resp.status + " from " + modelsEndpoint() + ")";
+            }
+            List<String> ids = extractModelIds(resp.body);
             if (!ids.isEmpty()) {
                 java.util.Collections.sort(ids);         // alphabetical order
                 availableModels = ids;                   // cache for the Configure dropdown
             }
-            return ids.isEmpty() ? "(none parsed; raw: " + resp.body() + ")"
+            return ids.isEmpty() ? "(none parsed; raw: " + resp.body + ")"
                     : String.join(", ", ids);
-        } catch (Exception ex) {
+        } catch (Throwable ex) {
+            // Throwable, not Exception: a JVM without a socket layer fails with an
+            // Error (UnsatisfiedLinkError) rather than an exception.
             return "(error: " + ex.getClass().getSimpleName() + ": " + ex.getMessage() + ")";
         }
     }
@@ -1057,15 +1063,16 @@ public class JRock {
                     try {
                         return callModel(prompt, history);
                     } catch (Throwable ex) {
-                        // Catch Throwable, not just Exception: a sandboxed JVM
-                        // without a real socket layer (e.g. CheerpJ in the browser)
-                        // throws UnsatisfiedLinkError from the HttpClient native
-                        // networking code (Java_sun_nio_ch_EPoll_*), which is an
-                        // Error. Print the exception as-is, then add a hint.
+                        // Catch Throwable, not just Exception: a JVM without a real
+                        // socket layer (CheerpJ in the browser, with no page-side
+                        // HTTP bridge installed) fails inside HttpClient's native
+                        // networking code (Java_sun_nio_ch_EPoll_*) with an
+                        // UnsatisfiedLinkError, which is an Error. Print the
+                        // failure as-is, then add a hint for that case.
                         String msg = "ERROR: " + ex.getClass().getSimpleName()
                                 + ": " + ex.getMessage();
                         if (ex instanceof UnsatisfiedLinkError) {
-                            msg += "\n" + SANDBOX_NETWORK_HINT;
+                            msg += "\n" + NO_TRANSPORT_HINT;
                         }
                         return new String[] { "0", msg, null };
                     }
@@ -1343,6 +1350,10 @@ public class JRock {
         cwdRow.add(browse, BorderLayout.EAST);
         javax.swing.JPasswordField keyF = new javax.swing.JPasswordField(24); // never prefilled
         javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
+        // In the browser the API key belongs to the hosting page, so JRock has no
+        // key to show or set: the row is left out entirely rather than offered as a
+        // field that would have no effect.
+        boolean hostKey = http().hostHoldsCredentials();
         // Editable combo: free text, plus a dropdown of the most recently fetched
         // available models (empty until the first successful /v1/models call).
         javax.swing.JComboBox<String> modelF =
@@ -1360,7 +1371,9 @@ public class JRock {
         c.fill = java.awt.GridBagConstraints.HORIZONTAL;
         int row = 0;
         addRow(fields, c, row++, "Working directory:", cwdRow);
-        addRow(fields, c, row++, "BEDROCK_API_KEY:", keyF);
+        if (!hostKey) {
+            addRow(fields, c, row++, "BEDROCK_API_KEY:", keyF);
+        }
         addRow(fields, c, row++, "AWS_REGION:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
 
@@ -1371,10 +1384,17 @@ public class JRock {
                 ? base.deriveFont(java.awt.Font.PLAIN)
                 : new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12);
 
+        String keyNote = hostKey
+            ? "There is no API key field here: in the browser the Bedrock API key "
+            + "belongs to the hosting page, which holds it in JavaScript and adds it "
+            + "to each request itself - so it is never handed to the JVM. Change it "
+            + "on the page.\n\n"
+            : "The API key field is intentionally blank and write-only: leave it empty "
+            + "to keep the current key (env var or a previous override); type a value "
+            + "to override it for this session. The key is never displayed.\n\n";
+
         javax.swing.JTextArea note = new javax.swing.JTextArea(
-            "The API key field is intentionally blank and write-only: leave it empty "
-          + "to keep the current key (env var or a previous override); type a value "
-          + "to override it for this session. The key is never displayed.\n\n"
+            keyNote
           + "Clearing the log only clears jrock-log.txt (and the window); the "
           + "per-message files in JRock/messages/ are never deleted, so your inputs "
           + "and outputs are preserved.\n\n"
@@ -1485,15 +1505,18 @@ public class JRock {
 
         // API key override: only set if the user typed something. Never store the
         // env value; an empty field means "keep whatever is already in effect".
-        char[] key = keyF.getPassword();
-        if (key.length > 0) {
-            apiKeyOverride = new String(key);
+        // Skipped when the host holds the key - the field wasn't even shown.
+        if (!hostKey) {
+            char[] key = keyF.getPassword();
+            if (key.length > 0) {
+                apiKeyOverride = new String(key);
+            }
+            java.util.Arrays.fill(key, '\0');   // wipe the transient char[]
         }
-        java.util.Arrays.fill(key, '\0');   // wipe the transient char[]
 
         // Region + model (free text).
         String r = regionF.getText().trim();
-        if (!r.isEmpty()) { REGION = r; regionFromEnv = false; }
+        if (!r.isEmpty()) { REGION = r; regionSource = null; }
         Object selected = modelF.getEditor().getItem();  // typed or picked value
         String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
@@ -2415,6 +2438,225 @@ public class JRock {
         return parts.size() == 1 && !parts.get(0).image && parts.get(0).maskHash == null;
     }
 
+    // ---- HTTP transport ----------------------------------------------------
+    // JRock makes exactly two kinds of request (GET /v1/models and POST
+    // /v1/chat/completions), so the whole transport surface is one send() method.
+    // There are two implementations because the browser has no sockets:
+    //
+    //   JdkHttpTransport     - java.net.http.HttpClient. Used on every normal JVM.
+    //   BrowserHttpTransport - the hosting page's JavaScript HTTP client, called
+    //                          through CheerpJ's JNI-in-JavaScript bridge. Used
+    //                          when JRock runs as WebAssembly in the browser,
+    //                          where HttpClient cannot work at all: there is no
+    //                          native socket layer, so its networking
+    //                          (sun.nio.ch.EPoll) is unavailable and throws
+    //                          UnsatisfiedLinkError. The browser's own fetch()
+    //                          performs the request instead, and the page - not
+    //                          JRock - holds the Bedrock credentials.
+    //
+    // The choice is made once, on first use, by probing for the bridge; see http().
+
+    // One response: HTTP status plus the body as text. Transport-level failures
+    // are thrown instead of being represented here.
+    private static final class HttpReply {
+        final int status;
+        final String body;
+        HttpReply(int status, String body) { this.status = status; this.body = body; }
+    }
+
+    private interface HttpTransport {
+        // Sends one request and returns its status + body. A null body means no
+        // request body. Throws on any transport-level failure.
+        HttpReply send(String method, String url, List<String[]> headers,
+                       String body, int timeoutSeconds) throws Exception;
+
+        // True when the HOST holds the Bedrock credentials and adds the
+        // Authorization header itself. That is the browser case: the API key is
+        // typed into the page and stays in JavaScript, so JRock has no key of its
+        // own and must not treat "no key set" as an error.
+        boolean hostHoldsCredentials();
+
+        // Short description of the transport, for the startup log.
+        String describe();
+    }
+
+    // The ordinary JVM transport: java.net.http.HttpClient.
+    private static final class JdkHttpTransport implements HttpTransport {
+        @Override
+        public HttpReply send(String method, String url, List<String[]> headers,
+                              String body, int timeoutSeconds) throws Exception {
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(timeoutSeconds));
+            for (String[] header : headers) {
+                builder.header(header[0], header[1]);
+            }
+            builder.method(method, body == null
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                    .build();
+            HttpResponse<String> resp =
+                    client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            return new HttpReply(resp.statusCode(), resp.body());
+        }
+
+        @Override public boolean hostHoldsCredentials() { return false; }
+        @Override public String describe() { return "java.net.http.HttpClient"; }
+    }
+
+    // ---- Browser bridge (JavaScript side of the transport) -------------------
+    // CheerpJ resolves a Java native method to a JavaScript function named
+    // Java_<mangled class>_<method>, which the hosting page registers with
+    // cheerpjInit({ natives: { ... } }). Those functions may be async: CheerpJ
+    // suspends the calling Java thread until the promise settles, which is what
+    // makes a blocking, synchronous-looking send() on top of fetch() possible.
+    // On any other JVM these methods are unlinked and calling one throws
+    // UnsatisfiedLinkError - which is exactly how http() detects the bridge.
+    //
+    // The wire format is deliberately trivial, so neither side needs a JSON parser
+    // it doesn't already have:
+    //   browserHttpInfo() -> a small flat JSON object describing the page's client
+    //                        ({"transport":...,"region":...}).
+    //   browserHttpSend() -> "<status>\n<body>". Status 0 means the request never
+    //                        completed and the body is the reason, ready to show.
+    // Request headers travel in the other direction as a flat JSON object. The
+    // Authorization header is NOT among them: the page's client adds it, because
+    // the API key lives only in the page.
+    static native String browserHttpInfo();
+    static native String browserHttpSend(String method, String url,
+                                         String headersJson, String body,
+                                         int timeoutSeconds);
+
+    // The browser transport: hands each request to the page's JavaScript client.
+    private static final class BrowserHttpTransport implements HttpTransport {
+        private final String label;
+
+        BrowserHttpTransport(String info) {
+            String reported = jsonStringField(info, "transport");
+            this.label = (reported == null || reported.isBlank())
+                    ? "browser HTTP bridge" : reported;
+        }
+
+        @Override
+        public HttpReply send(String method, String url, List<String[]> headers,
+                              String body, int timeoutSeconds) throws Exception {
+            StringBuilder headersJson = new StringBuilder("{");
+            for (int i = 0; i < headers.size(); i++) {
+                String[] header = headers.get(i);
+                if (i > 0) headersJson.append(",");
+                headersJson.append("\"").append(jsonEscape(header[0])).append("\":\"")
+                        .append(jsonEscape(header[1])).append("\"");
+            }
+            headersJson.append("}");
+
+            String framed;
+            try {
+                framed = browserHttpSend(method, url, headersJson.toString(),
+                        body, timeoutSeconds);
+            } catch (Throwable ex) {
+                // The bridge itself failed (rather than reporting a failed
+                // request), e.g. the page's client threw something unexpected.
+                throw new IOException("Browser HTTP bridge failed: "
+                        + ex.getClass().getSimpleName() + ": " + ex.getMessage(), ex);
+            }
+            if (framed == null || framed.isEmpty()) {
+                throw new IOException("Browser HTTP bridge returned an empty reply.");
+            }
+
+            int nl = framed.indexOf('\n');
+            String statusText = (nl < 0 ? framed : framed.substring(0, nl)).trim();
+            String bodyText = (nl < 0) ? "" : framed.substring(nl + 1);
+            int status;
+            try {
+                status = Integer.parseInt(statusText);
+            } catch (NumberFormatException ex) {
+                throw new IOException("Browser HTTP bridge returned a malformed reply: "
+                        + framed);
+            }
+            if (status == 0) {
+                // The request never reached a response; the body is the reason.
+                throw new IOException(bodyText.isBlank()
+                        ? "Browser HTTP request failed (no reason reported)." : bodyText);
+            }
+            return new HttpReply(status, bodyText);
+        }
+
+        @Override public boolean hostHoldsCredentials() { return true; }
+        @Override public String describe() { return label; }
+    }
+
+    // The transport in use, chosen once by http().
+    private static HttpTransport transport;
+
+    // Returns the transport, picking it on first call. The bridge is detected by
+    // calling it: on a normal JVM the native method is unlinked and throws, so
+    // "the bridge answered" is the same thing as "the bridge works" - no runtime
+    // sniffing that could disagree with reality. When the page reports a region,
+    // JRock adopts it, so the endpoints it logs and calls match the page's key.
+    private static synchronized HttpTransport http() {
+        if (transport != null) return transport;
+        String info;
+        try {
+            info = browserHttpInfo();
+        } catch (Throwable ignored) {
+            info = null;                     // no bridge here: ordinary JVM
+        }
+        if (info == null) {
+            transport = new JdkHttpTransport();
+            return transport;
+        }
+        transport = new BrowserHttpTransport(info);
+        String hostRegion = jsonStringField(info, "region");
+        if (hostRegion != null && !hostRegion.isBlank()) {
+            REGION = hostRegion.trim();
+            regionSource = "from the hosting page";
+        }
+        return transport;
+    }
+
+    // True when running on CheerpJ, the WebAssembly JVM in the browser. Used only
+    // for reporting - the transport itself is chosen by probing the bridge.
+    //
+    // A live browser bridge is proof on its own. Failing that (a CheerpJ page that
+    // never installed the bridge, where every call is doomed and the log should say
+    // why) we look for CheerpJ's own runtime classes, which no other JVM has, then
+    // at how the VM names itself.
+    private static boolean isCheerpJ() {
+        if (transport instanceof BrowserHttpTransport) return true;
+        String[] markers = {
+            "com.leaningtech.client.Global",
+            "com.leaningtech.cheerpj.CJ",
+            "org.cheerpj.CS",
+        };
+        for (String marker : markers) {
+            try {
+                Class.forName(marker);
+                return true;
+            } catch (Throwable ignored) { /* not this marker; try the next */ }
+        }
+        String vm = (System.getProperty("java.vm.name", "") + " "
+                + System.getProperty("java.vendor", "")).toLowerCase();
+        return vm.contains("cheerpj") || vm.contains("leaningtech");
+    }
+
+    // Best-effort read of a string field ("region":"us-east-1") from a small flat
+    // JSON object. Escapes are not decoded - the bridge only reports plain
+    // identifier-like values. Returns null when the field isn't there.
+    private static String jsonStringField(String json, String key) {
+        if (json == null) return null;
+        int k = json.indexOf("\"" + key + "\"");
+        if (k < 0) return null;
+        int colon = json.indexOf(':', k);
+        if (colon < 0) return null;
+        int q1 = json.indexOf('"', colon + 1);
+        int q2 = (q1 < 0) ? -1 : json.indexOf('"', q1 + 1);
+        if (q1 < 0 || q2 < 0) return null;
+        return json.substring(q1 + 1, q2);
+    }
+
     // ---- Bedrock call ------------------------------------------------------
     // Returns a 3-element array:
     //   [0] = "1" on success, "0" on failure.
@@ -2423,8 +2665,11 @@ public class JRock {
     // Only a successful reply is treated as dialog; failures are logged in gray.
     private static String[] callModel(String prompt, java.util.List<String[]> history)
             throws Exception {
+        HttpTransport http = http();
         String apiKey = resolveApiKey();
-        if (apiKey == null || apiKey.isBlank()) {
+        boolean haveKey = apiKey != null && !apiKey.isBlank();
+        // No key needed when the host holds the credentials (the browser case).
+        if (!haveKey && !http.hostHoldsCredentials()) {
             return new String[] {
                 "0",
                 "No Bedrock API key set. Set the BEDROCK_API_KEY env var, or open "
@@ -2479,30 +2724,24 @@ public class JRock {
         // same history + prompt parts.
         String maskedRequestBody = maskRequest(history, parts);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint()))
-                .timeout(Duration.ofSeconds(60))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey.trim())
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                .build();
+        List<String[]> headers = new ArrayList<>();
+        headers.add(new String[] { "Content-Type", "application/json" });
+        if (haveKey) {
+            headers.add(new String[] { "Authorization", "Bearer " + apiKey.trim() });
+        }
 
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .build();
-        HttpResponse<String> resp =
-                client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpReply resp = http.send("POST", endpoint(), headers, body, CHAT_TIMEOUT_SECONDS);
 
-        if (resp.statusCode() != 200) {
+        if (resp.status != 200) {
             return new String[] {
                 "0",
-                "HTTP " + resp.statusCode(),
+                "HTTP " + resp.status,
                 "--- raw request ---\nPOST " + endpoint() + "\n" + maskedRequestBody
-                    + "\n\n--- raw response ---\n" + resp.body()
+                    + "\n\n--- raw response ---\n" + resp.body
             };
         }
 
-        String reply = extractContent(resp.body());
+        String reply = extractContent(resp.body);
 
         // Text-symbol counts are computed locally. Input counts the prompt text
         // plus all prior turns (extend mode). Images don't contribute text symbols.
@@ -2513,12 +2752,12 @@ public class JRock {
         int outputSymbols = reply.length();
 
         // Token counts come from the API's "usage" object (best-effort parse).
-        long inputTokens = extractLong(resp.body(), "prompt_tokens");
-        long outputTokens = extractLong(resp.body(), "completion_tokens");
+        long inputTokens = extractLong(resp.body, "prompt_tokens");
+        long outputTokens = extractLong(resp.body, "completion_tokens");
 
         // Mask the reply text inside the raw response so it isn't duplicated
         // (it's already shown above). The request was masked during assembly.
-        String maskedResponse = maskResponse(resp.body(), reply);
+        String maskedResponse = maskResponse(resp.body, reply);
 
         String details = "--- raw request ---\n" + "POST " + endpoint() + "\n" + maskedRequestBody
                 + "\n\n--- raw response ---\n" + maskedResponse
@@ -2599,7 +2838,8 @@ public class JRock {
     }
 
     // Best-effort extraction of choices[0].message.content from an OpenAI Chat
-    // Completions reply. Good enough for a demo; use a JSON library for production.
+    // Completions reply. Deliberately hand-rolled: pulling in a JSON library would
+    // cost JRock its "single file, zero dependencies" property for one field.
     private static String extractContent(String json) {
         int msg = json.indexOf("\"message\"");
         int from = msg >= 0 ? msg : 0;
@@ -2640,7 +2880,7 @@ public class JRock {
         return "{"
                 + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
                 + "\"messages\":" + messagesJson
-                + ",\"max_tokens\":" + MAX_TOKENS
+                //+ ",\"max_tokens\":" + MAX_TOKENS
                 + "}";
     }
 
@@ -2670,19 +2910,19 @@ public class JRock {
     }
 
     private static String envOr(String name, String fallback) {
-        String v = envOrProp(name);
-        return (v == null || v.isBlank()) ? fallback : v;
+        String v = env(name);
+        return (v == null) ? fallback : v;
     }
 
-    // Reads a setting from the environment, falling back to a same-named JVM
-    // system property (-Dname=value). The property fallback exists so hosts that
-    // cannot set OS environment variables - notably CheerpJ in the browser, which
-    // injects values via cheerpjInit({ javaProperties: [...] }) - can still supply
-    // BEDROCK_API_KEY / AWS_REGION. Env takes precedence when both are set.
-    private static String envOrProp(String name) {
+    // Reads a setting from the OS environment; returns null (never blank) when it
+    // isn't set. Settings are NOT read from JVM system properties: credentials
+    // must not be passable on a command line (-Dname=value), where they end up in
+    // shell history and process listings. Hosts that cannot set environment
+    // variables - CheerpJ in the browser - supply credentials through their own
+    // HTTP client instead (see the HTTP transport section).
+    private static String env(String name) {
         String v = System.getenv(name);
-        if (v != null && !v.isBlank()) return v;
-        return System.getProperty(name);
+        return (v == null || v.isBlank()) ? null : v;
     }
 
     // ---- Prompt persistence (crash recovery) -------------------------------

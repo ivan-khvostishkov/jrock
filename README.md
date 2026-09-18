@@ -53,20 +53,22 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
 4. Type a prompt and press **Ctrl+Enter** (or the **Send** button).
 
-## JRock Web (browser demo)
+## JRock Web (in the browser)
 
-A deployable demo runs in your browser at **https://jrock-demo.nosocial.net/** — no locally
+JRock also runs in your browser at **https://jrock-demo.nosocial.net/** — no locally
 installed JVM required. It loads the same unmodified `jrock.jar` and runs it entirely
 **locally in your browser** via [CheerpJ](https://cheerpj.com/) (which executes JVM bytecode
 as WebAssembly), so nothing runs on a server.
 
+- **Real Bedrock calls work.** The browser has no socket layer, so `java.net.http.HttpClient`
+  cannot work there at all (its `sun.nio.ch.EPoll` networking is unavailable). JRock detects
+  the browser runtime and sends its requests through the page's own `fetch()` instead — see
+  [HTTP transport](#http-transport).
 - **Entering your API key is safe here.** The page shows the jar's SHA-256 so you can confirm
-  it matches the reproducible build before typing anything, and the key stays inside the
-  browser sandbox — it's passed only to the in-browser JVM, never to any backend.
-- **It will not make real Bedrock calls.** The same browser sandbox blocks the outbound
-  networking JRock needs (CheerpJ has no native socket layer, so `HttpClient`'s
-  `sun.nio.ch.EPoll` is unavailable and throws `UnsatisfiedLinkError`). The demo only gives
-  you an impression of the interface; use the desktop jar for live calls.
+  it matches the reproducible build before typing anything. The region and key stay in the
+  page's JavaScript (`window.myBrowserHttp`): they are never passed to the in-browser JVM and
+  never sent anywhere but the Bedrock endpoint. You can change the key at any time — a
+  missing or rejected one reopens the credentials dialog by itself.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
 
 ## Endpoint & API design
@@ -80,6 +82,43 @@ as WebAssembly), so nothing runs on a server.
   backend. All history stays local, unlike a browser client where session data can hide
   non-transparently in cookies / sessionStorage / IndexedDB. Chat Completions is stateless,
   so each request carries its own context.
+
+## HTTP transport
+
+JRock issues exactly two kinds of request (`GET /v1/models` and `POST /v1/chat/completions`),
+so its whole transport surface is one `send()` method with two implementations. Which one is in
+use is decided once at startup and reported in the log:
+
+| Runtime | Transport | Credentials |
+|---|---|---|
+| Any normal JVM | `java.net.http.HttpClient` | `BEDROCK_API_KEY` env var, or the Configure dialog |
+| CheerpJ (browser) | the page's `window.myBrowserHttp.fetch` | held by the page; never passed to the JVM |
+
+In the browser, `HttpClient` cannot work at all — there is no native socket layer, so its
+`sun.nio.ch.EPoll` networking is unavailable. JRock therefore declares two `native` methods and
+the hosting page implements them in JavaScript. CheerpJ resolves a native method to the
+`Java_<class>_<method>` function given to `cheerpjInit`, and awaits it if it is `async`,
+suspending the calling Java thread until the promise settles — which is what allows a blocking
+Java call to sit on top of `fetch()`:
+
+```js
+cheerpjInit({
+  version: 11,
+  natives: { Java_JRock_browserHttpInfo, Java_JRock_browserHttpSend }
+});
+```
+
+The bridge is detected by *calling* it: on a JVM without it, the unlinked native method throws
+`UnsatisfiedLinkError` and JRock uses `HttpClient`. So "the bridge answered" and "the bridge
+works" are the same thing. The page's client also reports the region it holds a key for, and
+JRock adopts it at startup.
+
+Any host page can serve JRock by providing `window.myBrowserHttp.fetch(url, options)` resolving
+to `{ status, body }`; `jrock-web/index.html` is the reference implementation. It attaches the
+`Authorization` header itself, so the API key never reaches the JVM.
+
+Credentials are deliberately **not** read from JVM system properties (`-Dname=value`): a key
+passed on a command line leaks into shell history and process listings.
 
 ## Models
 
@@ -192,6 +231,8 @@ expanded too.
   rather than the process working directory.)
 - **BEDROCK_API_KEY** — write-only: left blank, it keeps the current key; type a value to
   override for the session. The key is never displayed or stored beyond the running process.
+  In the browser this row is absent: the key belongs to the page (see
+  [HTTP transport](#http-transport)) and is changed there.
 - **AWS_REGION** — free text.
 - **Model** — free text with a dropdown of recently fetched models.
 

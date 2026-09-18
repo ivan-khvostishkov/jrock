@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>JRock in the browser (demo)</title>
+  <title>JRock in the browser</title>
 
   <!-- CheerpJ runtime: runs unmodified JVM bytecode as WebAssembly + JS. -->
   <script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
@@ -122,7 +122,7 @@
 
 <body>
   <header>
-    <h1><a class="brand" href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock</a> in the browser (demo)</h1>
+    <h1><a class="brand" href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock</a> in the browser</h1>
     <span class="spacer"></span>
     <div class="controls">
       <button id="keyBtn" class="icon" title="Enter Bedrock credentials">&#128274;</button>
@@ -138,22 +138,25 @@
   <div id="display-wrap">
     <div class="placeholder" id="placeholder">
       Verify the checksum above (and optionally download the JAR to check it
-      yourself). Optionally set your Bedrock region and API key with the
-      &#128274; button, then press <b>Run JRock</b>.
+      yourself). Set your Bedrock region and API key with the &#128274; button -
+      they stay in this tab - then press <b>Run JRock</b>.
     </div>
   </div>
 
-  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine. Outbound Bedrock calls will almost certainly fail in a standard browser: CheerpJ has no native socket layer, so HttpClient's networking (sun.nio.ch.EPoll) is unavailable and throws UnsatisfiedLinkError. Run the desktop jar for live Bedrock calls.</footer>
+  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own <code>fetch()</code>, because CheerpJ has no native socket layer for Java's HttpClient: your region and API key stay in this tab's JavaScript (<code>window.myBrowserHttp</code>) and are sent only to the Bedrock endpoint. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
 
   <!-- API key modal -->
   <div class="modal-backdrop" id="keyModal">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
       <h2 id="keyTitle">Bedrock credentials</h2>
       <p>
-        Passed to JRock as the <code>AWS_REGION</code> and <code>BEDROCK_API_KEY</code>
-        JVM properties when you press Run. They stay in this browser tab and are
-        never sent anywhere except directly to the Bedrock endpoint by JRock itself.
-        A short-term key (tied to its region) can be generated in the
+        Held by this page's HTTP client (<code>window.myBrowserHttp</code>), which
+        performs JRock's requests and adds the <code>Authorization</code> header
+        itself - the key is never handed to the in-browser JVM, and never sent
+        anywhere except directly to the Bedrock endpoint. You can change the key at
+        any time; the region is picked up by JRock when it starts, and after that
+        can be changed in JRock's own Configure dialog. A short-term key (tied to
+        its region) can be generated in the
         <a href="https://console.aws.amazon.com/bedrock-mantle/api-keys" target="_blank" rel="noopener">AWS console</a>.
       </p>
       <label class="field-label" for="regionInput">AWS region</label>
@@ -202,9 +205,45 @@
       var regionInput = document.getElementById("regionInput");
 
       var jarBytes = null;          // Uint8Array of jrock.jar
-      var apiKey   = "";            // in-tab only; injected as a JVM property on Run
-      var region   = "us-east-1";   // AWS region; JRock's default
       var started  = false;
+
+      // --- The browser HTTP client JRock calls (window.myBrowserHttp) ---------
+      //
+      // In the browser there is no socket layer, so java.net.http.HttpClient
+      // cannot work: JRock detects that it is running under CheerpJ and routes its
+      // Bedrock requests here instead (see the JNI bridge further down).
+      //
+      // This object owns the credentials. The region and API key live ONLY here, in
+      // this tab's JavaScript - they are never passed to the JVM (not as JVM
+      // properties, not as anything else), and JRock never sees the key: the fetch
+      // below attaches the Authorization header itself.
+      //
+      // Replace `fetch` to change how requests are made - a different HTTP stack,
+      // extra headers, a proxy - as long as it resolves to { status, body }. That
+      // is all JRock needs.
+      window.myBrowserHttp = {
+        region: "us-east-1",        // AWS region; JRock's default
+        apiKey: "",                 // set via the page's credentials dialog
+
+        // Performs one request. `url` is the endpoint JRock built, `options` is a
+        // fetch()-style object (method, headers, body, signal). Resolves to
+        // { status, body }; throwing reports that the request never happened.
+        //
+        // Credentials are this object's business, not JRock's: the key is attached
+        // here, and a missing or rejected one reopens the page's dialog - the only
+        // place it can be fixed.
+        fetch: async function (url, options) {
+          if (!this.apiKey) {
+            openKey();
+            throw new Error("No Bedrock API key set in this page. Enter one in the "
+              + "credentials dialog, then send again.");
+          }
+          options.headers["Authorization"] = "Bearer " + this.apiKey;
+          var resp = await window.fetch(url, options);
+          if (resp.status === 401 || resp.status === 403) openKey();
+          return { status: resp.status, body: await resp.text() };
+        }
+      };
 
       // Touch long-press -> synthetic right-click, for CheerpJ's Swing display.
       //
@@ -311,9 +350,6 @@
         return s;
       }
 
-      // Hex-encode a string's UTF-8 bytes (for lossless transport as a -D value).
-      function toHex(str) { return hex(new TextEncoder().encode(str)); }
-
       // --- Fetch + checksum the jar (runtime download is deferred to Run). ---
       fetch(JAR_URL, { cache: "no-store" })
         .then(function (r) {
@@ -333,24 +369,30 @@
         });
 
       // --- Credentials modal (region = login, key = password) ---
+      // Reads and writes window.myBrowserHttp directly: that object is the single
+      // place the credentials live, and the running JVM picks up a new key on its
+      // next request (the modal stays usable after the page chrome is hidden).
       function openKey() {
-        regionInput.value = region; keyInput.value = apiKey;
+        var http = window.myBrowserHttp;
+        regionInput.value = http.region; keyInput.value = http.apiKey;
         keyModal.classList.add("open"); regionInput.focus();
       }
       function closeKey() { keyModal.classList.remove("open"); }
       keyBtn.addEventListener("click", openKey);
       document.getElementById("keySave").addEventListener("click", function () {
-        region = regionInput.value.trim() || "us-east-1";
-        apiKey = keyInput.value.trim();
-        keyBtn.classList.toggle("set", !!apiKey);
-        keyBtn.title = apiKey
-          ? "Bedrock credentials set: " + region + " (click to change)"
+        var http = window.myBrowserHttp;
+        http.region = regionInput.value.trim() || "us-east-1";
+        http.apiKey = keyInput.value.trim();
+        keyBtn.classList.toggle("set", !!http.apiKey);
+        keyBtn.title = http.apiKey
+          ? "Bedrock credentials set: " + http.region + " (click to change)"
           : "Enter Bedrock credentials";
         closeKey();
       });
       document.getElementById("keyClear").addEventListener("click", function () {
-        apiKey = ""; keyInput.value = "";
-        region = "us-east-1"; regionInput.value = "";
+        var http = window.myBrowserHttp;
+        http.apiKey = ""; keyInput.value = "";
+        http.region = "us-east-1"; regionInput.value = "";
         keyBtn.classList.remove("set");
         keyBtn.title = "Enter Bedrock credentials";
         closeKey();
@@ -365,28 +407,104 @@
       regionInput.addEventListener("keydown", modalKeydown);
       keyInput.addEventListener("keydown", modalKeydown);
 
-      // --- Run: init CheerpJ (with the key as a JVM property), then run the jar. ---
+      // --- JNI bridge: JRock's native HTTP methods, implemented here ------------
+      //
+      // CheerpJ resolves a Java native method to the JS function registered under
+      // Java_<class>_<method>, and awaits it if it is async - which is what lets a
+      // blocking Java call sit on top of an asynchronous fetch(). Both functions
+      // receive CheerpJ's library handle as their first argument (`lib`), then the
+      // Java arguments; strings and ints are converted automatically.
+      //
+      // The wire format keeps both sides parser-free:
+      //   info -> a small JSON object;  send -> "<status>\n<body>", where status 0
+      //   means the request never completed and the body is the reason to show.
+
+      async function Java_JRock_browserHttpInfo(lib) {
+        var http = window.myBrowserHttp || {};
+        return JSON.stringify({
+          transport: "window.myBrowserHttp (browser fetch)",
+          region: http.region || ""
+        });
+      }
+
+      async function Java_JRock_browserHttpSend(lib, method, url, headersJson,
+                                                body, timeoutSeconds) {
+        var http = window.myBrowserHttp;
+        if (!http || typeof http.fetch !== "function") {
+          return "0\nThis page provides no window.myBrowserHttp.fetch to send the "
+               + "request with.";
+        }
+
+        var headers;
+        try {
+          headers = headersJson ? JSON.parse(headersJson) : {};
+        } catch (e) {
+          return "0\nJRock sent malformed request headers: " + e;
+        }
+
+        // A browser fetch has no timeout of its own; JRock's per-request timeout
+        // becomes an AbortController deadline.
+        var secs = timeoutSeconds > 0 ? timeoutSeconds : 60;
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, secs * 1000);
+
+        try {
+          var reply = await http.fetch(url, {
+            method: method || "GET",
+            headers: headers,
+            body: (body === null || body === undefined) ? undefined : body,
+            mode: "cors",
+            cache: "no-store",
+            credentials: "omit",              // never attach cookies to Bedrock
+            redirect: "follow",
+            signal: controller.signal
+          });
+          var status = (reply && typeof reply.status === "number") ? reply.status : 0;
+          if (!status) {
+            return "0\nThe page's HTTP client returned no status for " + url + ".";
+          }
+          log(method + " " + url + " -> " + status);
+          return status + "\n" + ((reply.body === null || reply.body === undefined)
+              ? "" : String(reply.body));
+        } catch (e) {
+          var why;
+          if (e && e.name === "AbortError") {
+            why = "The request timed out after " + secs + "s.";
+          } else {
+            why = (e && e.message) ? e.message : String(e);
+            // A fetch() that never reached the server rejects with a bare
+            // TypeError carrying no detail, so label what kind of failure it is.
+            if (e instanceof TypeError) {
+              why = "The browser could not reach the endpoint (" + why + ").";
+            }
+          }
+          log(method + " " + url + " -> failed: " + why);
+          return "0\n" + why;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
       runBtn.addEventListener("click", async function () {
         if (started || !jarBytes) return;
         started = true;
         runBtn.disabled = true;
-        keyBtn.disabled = true;
         infoEl.style.display = "none";          // hide verification panel
         if (placeholder) placeholder.remove();
 
         try {
-          // Inject region + key as JVM system properties; JRock reads AWS_REGION
-          // and BEDROCK_API_KEY(_HEX) from the environment or, as here, same-named
-          // -D properties. The key is hex-encoded because Bedrock keys often
-          // contain '=' (base64 padding), which is ambiguous in the "name=value"
-          // property form; JRock decodes BEDROCK_API_KEY_HEX back to the raw key.
-          var props = [];
-          if (region) props.push("AWS_REGION=" + region);
-          if (apiKey) props.push("BEDROCK_API_KEY_HEX=" + toHex(apiKey));
-
-          log("Initialising CheerpJ (Java 11)" +
-              (apiKey ? " with credentials for " + region : "") + " ...");
-          await cheerpjInit({ version: 11, status: "splash", javaProperties: props });
+          log("Initialising CheerpJ (Java 11) with the browser HTTP bridge ...");
+          // No javaProperties: the region and API key stay in this page's
+          // JavaScript (window.myBrowserHttp) and are never passed to the JVM.
+          await cheerpjInit({
+            version: 11,
+            status: "splash",
+            natives: {
+              Java_JRock_browserHttpInfo: Java_JRock_browserHttpInfo,
+              Java_JRock_browserHttpSend: Java_JRock_browserHttpSend
+            }
+          });
 
           var displayWrap = document.getElementById("display-wrap");
           cheerpjCreateDisplay(-1, -1, displayWrap);
