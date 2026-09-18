@@ -193,7 +193,7 @@ Attach **text or image** files to a prompt (and convert **PDFs** to either):
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
    once, and the dropdown offers four kinds:
    - **Image files** (png, jpg, jpeg, gif, webp)
-   - **Text files** (*.txt)
+   - **Text files** (txt, csv, html, java)
    - **PDF as text pages** — converts the PDF to one text file per page
    - **PDF as page images** — converts the PDF to one PNG per page
 2. Each file is hashed (SHA-256). The hash → path mapping is kept **in memory only**
@@ -252,13 +252,18 @@ placement or moving across monitors without the mouse. Handles the maximized sta
 ## Printing / PDF (Ctrl+P)
 
 Opens the native print dialog for the log. On Windows you can pick "Microsoft Print to PDF"
-to save the transcript to a PDF, or print to a physical printer.
+to save the transcript to a PDF, or print to a physical printer. If text is selected in the
+log pane, only the selection is printed (with its colors), so a single answer can be printed
+without the surrounding transcript.
 
 ## Context menus (right-click / long tap)
 
 Right-clicking (or long-tapping on touch devices) opens a context menu:
 
-- **Log pane** — Save log copy as..., Print...
+- **Log pane** — Save log copy as..., Print... When text is selected in the log, both act
+  on the **selection only**, and the menu says so (*Save selected text as...*, *Print
+  selected text...*). A partial export doesn't count as saving the log, so Clear log still
+  warns about unsaved changes.
 - **Prompt area** — Include text or image file... (also PDFs, multi-select), Load prompt from
   file..., Save prompt copy as...
 - **Top bar (empty area)** — Move & resize window...; on **Windows**, also Install /
@@ -310,13 +315,13 @@ windows opened in different folders are easy to tell apart:
 |---|---|
 | Ctrl+Enter | Send |
 | Ctrl+S | Save prompt as (a copy) |
-| Ctrl+L | Save log as (a copy) |
+| Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (text only) |
 | Ctrl+I | Include text/image files or a PDF (multi-select) |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle Extend conversation |
 | Ctrl+M | Move & resize the window |
-| Ctrl+P | Print log / save as PDF |
+| Ctrl+P | Print log (or the selected text) / save as PDF |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |
 
 ## Reproducible builds

@@ -643,6 +643,16 @@ public class JRock {
         // Whether there is any content at all (an empty log needs no save prompt).
         boolean isEmpty() { return entries.isEmpty(); }
 
+        // The text the user has highlighted in the log pane, or null when nothing
+        // is selected. Save log copy and Print narrow themselves to this when it is
+        // present, so an excerpt can be exported without the whole transcript. It
+        // is the text AS SHOWN (so in "Dialog only" mode the hidden gray lines are
+        // absent), which is what the user selected and therefore expects to get.
+        String selectedText() {
+            String sel = pane.getSelectedText();
+            return (sel == null || sel.isEmpty()) ? null : sel;
+        }
+
         // Serializes the FULL log (all entries, regardless of "Dialog only" view)
         // to plain text for export: each dialog entry as its "[role]<suffix>"
         // header line followed by its body, gray entries as their line. This is
@@ -1266,10 +1276,23 @@ public class JRock {
         // setComponentPopupMenu wires the platform-appropriate popup trigger.
         // Each item calls the same handler as its keyboard shortcut / button.
 
-        // Log pane: Save log copy as... / Print...
+        // Log pane: Save log copy as... / Print... - both of which act on the
+        // SELECTION when text is selected, so the labels are rewritten each time the
+        // menu opens to name what will actually be saved or printed.
         javax.swing.JPopupMenu logMenu = new javax.swing.JPopupMenu();
-        addMenuItem(logMenu, "Save log copy as...", () -> saveLogAs(frame, log));
-        addMenuItem(logMenu, "Print...",            () -> printLog(frame, output));
+        javax.swing.JMenuItem saveLogItem =
+                addMenuItem(logMenu, "Save log copy as...", () -> saveLogAs(frame, log));
+        javax.swing.JMenuItem printLogItem =
+                addMenuItem(logMenu, "Print...",            () -> printLog(frame, output));
+        logMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
+                boolean selected = log.selectedText() != null;
+                saveLogItem.setText(selected ? "Save selected text as..." : "Save log copy as...");
+                printLogItem.setText(selected ? "Print selected text..."  : "Print...");
+            }
+            @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) { }
+            @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) { }
+        });
         attachPopup(output, logMenu);
 
         // Prompt area: Include... / Load prompt... / Save prompt copy...
@@ -1299,11 +1322,14 @@ public class JRock {
         frame.setVisible(true);
     }
 
-    // Adds a JMenuItem running the given action to a popup menu.
-    private static void addMenuItem(javax.swing.JPopupMenu menu, String label, Runnable action) {
+    // Adds a JMenuItem running the given action to a popup menu, and returns it for
+    // callers that relabel it later (see the log pane's selection-aware items).
+    private static javax.swing.JMenuItem addMenuItem(javax.swing.JPopupMenu menu,
+                                                     String label, Runnable action) {
         javax.swing.JMenuItem item = new javax.swing.JMenuItem(label);
         item.addActionListener(e -> action.run());
         menu.add(item);
+        return item;
     }
 
     // Shows a popup menu on a native right-click (desktop) OR a long-press
@@ -1440,8 +1466,8 @@ public class JRock {
             {"Ctrl+E", "Toggle Extend conversation"},
             {"Ctrl+S", "Save prompt as (a copy)"},
             {"Ctrl+O", "Load prompt from a file"},
-            {"Ctrl+L", "Save log as (a copy)"},
-            {"Ctrl+P", "Print log / save as PDF"},
+            {"Ctrl+L", "Save log as (a copy, or just the selected text)"},
+            {"Ctrl+P", "Print log (or the selected text) / save as PDF"},
         };
         javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
         shortcuts.setBorder(javax.swing.BorderFactory.createTitledBorder("Shortcuts"));
@@ -1577,10 +1603,15 @@ public class JRock {
         }
     }
 
-    // Saves a copy of the full on-screen log to a user-chosen file (symmetric to
-    // savePromptAs). On success, marks the log as exported so Clear log won't warn.
+    // Saves a copy of the on-screen log to a user-chosen file (symmetric to
+    // savePromptAs). If text is selected in the log pane, only that selection is
+    // written - saving an excerpt is the common case for a long transcript, and the
+    // selection is right there on screen saying which part. On success the log is
+    // marked as exported so Clear log won't warn - but ONLY for a full save: a
+    // partial export is not a copy of the log.
     private static void saveLogAs(JFrame frame, LogView log) {
-        if (log.isEmpty()) {
+        String selection = log.selectedText();
+        if (selection == null && log.isEmpty()) {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "The log is empty - nothing to save.",
                     "Save log copy", javax.swing.JOptionPane.INFORMATION_MESSAGE);
@@ -1588,15 +1619,20 @@ public class JRock {
         }
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(logChooserDir.start());
-        chooser.setDialogTitle("Save log copy as");
-        chooser.setSelectedFile(logChooserDir.startFile("jrock-log-copy.txt"));
+        chooser.setDialogTitle(selection != null ? "Save selected text as" : "Save log copy as");
+        chooser.setSelectedFile(logChooserDir.startFile(
+                selection != null ? "jrock-log-selection.txt" : "jrock-log-copy.txt"));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         logChooserDir.remember(chooser);
 
         Path target = chooser.getSelectedFile().toPath();
+        // A selection usually ends mid-line; terminate it, like every other line.
+        String text = (selection != null)
+                ? (selection.endsWith("\n") ? selection : selection + "\n")
+                : log.fullText();
         try {
-            Files.write(target, log.fullText().getBytes(StandardCharsets.UTF_8));
-            log.markLogCopySaved();
+            Files.write(target, text.getBytes(StandardCharsets.UTF_8));
+            if (selection == null) log.markLogCopySaved();
         } catch (IOException ex) {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Could not save to " + target + ":\n" + ex.getMessage(),
@@ -1875,14 +1911,49 @@ public class JRock {
     // Opens the native print dialog for the log pane. JTextComponent.print()
     // paginates and shows the dialog, where the user can pick a printer (including
     // "Microsoft Print to PDF" on Windows) or save to PDF.
+    //
+    // If text is selected in the log pane, only the selection is printed. print()
+    // always prints the whole document, so the selected part is copied into an
+    // off-screen pane (colors and all) and that pane is printed instead.
     private static void printLog(JFrame frame, JTextPane output) {
+        JTextPane toPrint = output;
         try {
-            output.print();   // shows the native print dialog; blocks until done
+            if (output.getSelectedText() != null && !output.getSelectedText().isEmpty()) {
+                toPrint = selectionPane(output);
+            }
+        } catch (BadLocationException ex) {
+            toPrint = output;   // can't isolate the selection: print the whole log
+        }
+        try {
+            toPrint.print();   // shows the native print dialog; blocks until done
         } catch (java.awt.print.PrinterException ex) {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Printing failed: " + ex.getMessage(),
                     "Print", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    // An off-screen JTextPane holding a copy of the source pane's selected text,
+    // with its character styling (the teal headers, gray system lines) preserved by
+    // copying each styled run with its own attributes. Used for printing only.
+    private static JTextPane selectionPane(JTextPane source) throws BadLocationException {
+        javax.swing.text.StyledDocument src = source.getStyledDocument();
+        JTextPane copy = new JTextPane();
+        copy.setFont(source.getFont());
+        javax.swing.text.StyledDocument dst = copy.getStyledDocument();
+        int end = source.getSelectionEnd();
+        int pos = source.getSelectionStart();
+        while (pos < end) {
+            javax.swing.text.Element run = src.getCharacterElement(pos);
+            int runEnd = Math.min(run.getEndOffset(), end);
+            if (runEnd <= pos) break;   // defensive: never spin on a zero-length run
+            dst.insertString(dst.getLength(), src.getText(pos, runEnd - pos), run.getAttributes());
+            pos = runEnd;
+        }
+        // Never displayed; printing re-lays the text out to the page width anyway,
+        // but give it the source pane's size so it is never a zero-sized component.
+        copy.setSize(Math.max(source.getWidth(), 100), Math.max(source.getHeight(), 100));
+        return copy;
     }
 
     // Clears the log after confirming when there are unsaved changes. If the log
@@ -1902,16 +1973,24 @@ public class JRock {
         log.clear();
     }
 
+    // What "text file" means in the Load prompt and Include dialogs: .txt plus the
+    // plain-text formats people actually reach for. A .csv, .html or .java file is
+    // text like any other, and having to rename it to .txt to load or include it was
+    // pure friction. (Any file still has to pass the looksBinary check on load.)
+    private static final String[] TEXT_EXTENSIONS = { "txt", "csv", "html", "java" };
+    private static final String TEXT_FILTER_LABEL = "Text files (*.txt, *.csv, *.html, *.java)";
+
     // Loads a prompt from a user-chosen file (read-only) into the input area.
     // The document listener then autosaves the loaded text to jrock-prompt.txt.
     private static void loadPromptInto(JFrame frame, JTextArea input, LogView log) {
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(promptChooserDir.start());
         chooser.setDialogTitle("Load prompt");
-        // Prompts are text - restrict to .txt so an image can't be loaded by mistake.
+        // Prompts are text - restrict to text types so an image can't be loaded by
+        // mistake.
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                "Text files (*.txt)", "txt"));
+                TEXT_FILTER_LABEL, TEXT_EXTENSIONS));
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         promptChooserDir.remember(chooser);
 
@@ -1953,7 +2032,8 @@ public class JRock {
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         "Image files (png, jpg, jpeg, gif, webp)", "png", "jpg", "jpeg", "gif", "webp");
         javax.swing.filechooser.FileNameExtensionFilter textFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter("Text files (*.txt)", "txt");
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        TEXT_FILTER_LABEL, TEXT_EXTENSIONS);
         javax.swing.filechooser.FileNameExtensionFilter pdfTextFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter("PDF as text pages (*.pdf)", "pdf");
         javax.swing.filechooser.FileNameExtensionFilter pdfImageFilter =
