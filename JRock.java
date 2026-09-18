@@ -593,7 +593,7 @@ public class JRock {
         // ---- Public logging API --------------------------------------------
         void gray(String line) {
             SwingUtilities.invokeLater(() -> {
-                Entry e = new Entry(false, null, null, addWrapPoints(line), "");
+                Entry e = new Entry(false, null, null, line, "");
                 entries.add(e);
                 logCopySaved = false;
                 if (isVisible(e)) renderGray(e.text);
@@ -766,7 +766,7 @@ public class JRock {
             if (dialogOnly) appendStyled("", java.awt.Color.BLACK);
         }
 
-        private void renderGray(String text) { appendStyled(text, java.awt.Color.GRAY); }
+        private void renderGray(String text) { appendStyled(addWrapPoints(text), java.awt.Color.GRAY); }
 
         private void appendStyled(String line, java.awt.Color color) {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
@@ -810,6 +810,9 @@ public class JRock {
     // single-line JSON with almost none. So once a run has gone this long without
     // whitespace, insert a space after its next "," or ":" and let Swing wrap: such a
     // space is insignificant in JSON, and the line stays one line.
+    //
+    // This is a view-only transformation, applied on the way into the pane. The stored
+    // entries, the on-disk log and the exports keep the original text.
     private static String addWrapPoints(String text) {
         if (text == null || text.length() <= GRAY_RUN_MAX) return text;
         StringBuilder out = new StringBuilder(text.length() + 64);
