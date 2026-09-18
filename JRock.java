@@ -121,9 +121,6 @@ public class JRock {
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
-    // Upper bound on tokens the model may generate in a response.
-    private static final int MAX_TOKENS = 8192;
-
     // Request timeouts (seconds). The model list is a quick metadata call; a
     // completion can legitimately take much longer.
     private static final int MODELS_TIMEOUT_SECONDS  = 30;
@@ -2875,12 +2872,15 @@ public class JRock {
 
     // Builds the OpenAI Chat Completions request JSON around a messages array.
     // Used for both the real request and its masked display copy, so they stay
-    // in lockstep (same model and max_tokens).
+    // in lockstep (same model, same fields).
+    //
+    // No max_tokens: the request deliberately carries no output cap, so each model
+    // applies its own default. Capping it here would silently truncate long replies
+    // from models whose useful output is longer than any number JRock could guess.
     private static String chatRequestBody(CharSequence messagesJson) {
         return "{"
                 + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
                 + "\"messages\":" + messagesJson
-                //+ ",\"max_tokens\":" + MAX_TOKENS
                 + "}";
     }
 
