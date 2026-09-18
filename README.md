@@ -315,6 +315,11 @@ entries at once:
   as the initial (read-only) prompt. This adds a verb without changing the default open action
   for `.txt`.
 
+![The Explorer context menu for a folder, with a "JRock here!" entry among the other shell verbs](images/explorer-jrock-here.png)
+
+*The installed entry, sitting with the other developer verbs and carrying JRock's own icon.
+Clicking it starts JRock in that folder — no path argument, no console window.*
+
 Details:
 
 - **Per-user and reversible.** Entries are written under `HKEY_CURRENT_USER` (no admin needed):
