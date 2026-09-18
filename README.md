@@ -9,6 +9,12 @@ keeps every prompt and conversation only on your local disk, as plain, visible f
 > session is saved to disk so nothing is ever lost, and your credentials stay put with no
 > repeated sign-ins, so it keeps out of your way and lets you focus on the models.
 
+![A fresh JRock session: the startup report, one prompt, and one reply from xai.grok-4.3](images/simple-request.png)
+
+*A fresh session in `C:\demo\bedrock-api-lab`, which is also where the window title and its `BAL`
+icon come from. Everything before the first prompt is JRock reporting what it configured and where
+it put your files.*
+
 By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
 ---
@@ -70,6 +76,12 @@ as WebAssembly), so nothing runs on a server.
   never sent anywhere but the Bedrock endpoint. You can change the key at any time — a
   missing or rejected one reopens the credentials dialog by itself.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
+
+![JRock running in a browser tab, saving just the selected reply to the downloads folder](images/web-save-selection.png)
+
+*The same jar in a browser tab — a Swing window, its own file chooser and all. Only the reply is
+selected, so the context menu offers **Save selected text as...**; saving into `downloads` hands the
+file to the browser as a download.*
 
 ## Endpoint & API design
 
@@ -164,9 +176,16 @@ Built-in cards include:
   content is **masked** (shown by hash/placeholder) so the transcript isn't a noisy duplicate
   and included files stay referenced only by hash.
 - Long gray lines — above all the single-line request/response JSON — are **wrapped after the
-  next `,` or `:`** once they run past 100 characters, so the log pane doesn't scroll
-  horizontally and each piece usually still reads as JSON. Wrapping only inserts newlines, and
-  dialog text is never wrapped.
+  next `,` or `:`** once they run past 100 characters, so each piece still reads as JSON instead
+  of breaking mid-token wherever the pane happens to run out of width. Wrapping only inserts
+  newlines, and dialog text is never wrapped.
+
+![Two timestamped turns with Extend conversation and Dialog only both on](images/extend-dialog-only.png)
+
+*Extend conversation (Ctrl+E) with Dialog only (Ctrl+D): the second question says "that risk" and
+is answered correctly, because the whole prior dialog was resent. Every gray line is hidden, so
+what's left is a clean, copy-pastable transcript — and the header timestamps keep the order of
+these stateless turns visible.*
 
 ## Persistence (crash recovery + full local history)
 
@@ -221,6 +240,13 @@ includes each produced page. The console executable is looked up on your PATH:
 - If Ghostscript isn't found on your PATH, JRock logs a note, shows a dialog, and opens
   https://ghostscript.com/ so you can install it. (Text extraction quality depends on the
   PDF; for an LLM, page-image includes are a reliable fallback for tricky PDFs.)
+
+![A PDF converted to two page images, attached by hash, and read back by the model](images/pdf-page-images.png)
+
+*A transcript printed to PDF with Ctrl+P and included straight back as page images: the exact
+Ghostscript command, both pages with their dimensions and byte counts, and the `@img` hash tokens
+still sitting in the prompt. The model then reads its own transcript and answers from the image
+alone. Below it, the masked raw request and response, and the token stats.*
 
 On send, every referenced include is verified (known hash **and** the file still hashes the
 same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid

@@ -810,14 +810,16 @@ public class JRock {
 
     // Wraps over-long gray (system) lines after a "," or ":".
     //
-    // The raw request and raw response are single-line JSON, so without this they
-    // are one enormous line: the log pane grows a horizontal scrollbar, and Swing
-    // stops wrapping the WHOLE pane while it does (JEditorPane's
-    // getScrollableTracksViewportWidth reports false once the content's minimum
-    // width exceeds the viewport). Once a line runs past GRAY_LINE_MAX it is broken
-    // at the next "," or ":", which JSON has plenty of, so the pieces usually still
-    // read as JSON. A line with neither is simply left long: this is debug output,
-    // and a rule that always fits would have to cut mid-token.
+    // The raw request and raw response are single-line JSON, so without this each is
+    // one enormous line. The pane does wrap it, but only where it runs out of width:
+    // breaks land mid-token, even mid-hash, and the structure is lost. (A run too
+    // wide to break at all is worse - Swing then stops wrapping the WHOLE pane and
+    // scrolls horizontally instead, because JEditorPane's
+    // getScrollableTracksViewportWidth reports false once the content's minimum width
+    // exceeds the viewport.) So once a line runs past GRAY_LINE_MAX it is broken at
+    // the next "," or ":", which JSON has plenty of, and the pieces usually still read
+    // as JSON. A line with neither is left long: this is debug output, and a rule that
+    // always fits would have to cut mid-token itself.
     //
     // Wrapping only ever INSERTS newlines, so no text is lost or moved, and the
     // pane, the log file, an exported copy and a printout all hold the same wrapped
