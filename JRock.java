@@ -591,9 +591,11 @@ public class JRock {
         LogView(JTextPane pane) { this.pane = pane; }
 
         // ---- Public logging API --------------------------------------------
+        // Gray (system) text is wrapped at delimiters first - see wrapLongLines for
+        // why. Dialog text is never touched: it is the transcript.
         void gray(String line) {
             SwingUtilities.invokeLater(() -> {
-                Entry e = new Entry(false, null, null, line, "");
+                Entry e = new Entry(false, null, null, wrapLongLines(line), "");
                 entries.add(e);
                 logCopySaved = false;
                 if (isVisible(e)) renderGray(e.text);
@@ -801,6 +803,43 @@ public class JRock {
             }
             atomicWriteQuietly(logFile(), sb.toString());
         }
+    }
+
+    // Length past which a gray line looks for somewhere to break.
+    private static final int GRAY_LINE_MAX = 100;
+
+    // Wraps over-long gray (system) lines after a "," or ":".
+    //
+    // The raw request and raw response are single-line JSON, so without this they
+    // are one enormous line: the log pane grows a horizontal scrollbar, and Swing
+    // stops wrapping the WHOLE pane while it does (JEditorPane's
+    // getScrollableTracksViewportWidth reports false once the content's minimum
+    // width exceeds the viewport). Once a line runs past GRAY_LINE_MAX it is broken
+    // at the next "," or ":", which JSON has plenty of, so the pieces usually still
+    // read as JSON. A line with neither is simply left long: this is debug output,
+    // and a rule that always fits would have to cut mid-token.
+    //
+    // Wrapping only ever INSERTS newlines, so no text is lost or moved, and the
+    // pane, the log file, an exported copy and a printout all hold the same wrapped
+    // text (see persistMainLog).
+    private static String wrapLongLines(String text) {
+        if (text == null || text.length() <= GRAY_LINE_MAX) return text;
+        StringBuilder out = new StringBuilder(text.length() + 64);
+        int len = 0;                        // length of the line being built
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            out.append(c);
+            if (c == '\n') { len = 0; continue; }
+            len++;
+            // Never break at a delimiter that already ends its line: that would
+            // just insert a blank one (and re-wrapping is then a no-op).
+            boolean lineEndsHere = i + 1 == text.length() || text.charAt(i + 1) == '\n';
+            if (len > GRAY_LINE_MAX && (c == ',' || c == ':') && !lineEndsHere) {
+                out.append('\n');
+                len = 0;
+            }
+        }
+        return out.toString();
     }
 
     // Emits the session report into the log. Used at startup AND after the
