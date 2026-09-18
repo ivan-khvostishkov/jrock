@@ -66,9 +66,8 @@ installed JVM required. It loads the same unmodified `jrock.jar` and runs it ent
 **locally in your browser** via [CheerpJ](https://cheerpj.com/) (which executes JVM bytecode
 as WebAssembly), so nothing runs on a server.
 
-- **Real Bedrock calls work.** The browser has no socket layer, so `java.net.http.HttpClient`
-  cannot work there at all (its `sun.nio.ch.EPoll` networking is unavailable). JRock detects
-  the browser runtime and sends its requests through the page's own `fetch()` instead — see
+- **Real Bedrock calls work.** The browser has no socket layer, so JRock detects the browser
+  runtime and sends its requests through the page's own `fetch()` instead — see
   [HTTP transport](#http-transport).
 - **Entering your API key is safe here.** The page shows the jar's SHA-256 so you can confirm
   it matches the reproducible build before typing anything. The region and key stay in the
@@ -97,37 +96,20 @@ file to the browser as a download.*
 
 ## HTTP transport
 
-JRock issues exactly two kinds of request (`GET /v1/models` and `POST /v1/chat/completions`),
-so its whole transport surface is one `send()` method with two implementations. Which one is in
-use is decided once at startup and reported in the log:
+JRock issues exactly two kinds of request (`GET /v1/models` and `POST /v1/chat/completions`).
+Which transport carries them is decided once at startup and reported in the log:
 
 | Runtime | Transport | Credentials |
 |---|---|---|
 | Any normal JVM | `java.net.http.HttpClient` | `BEDROCK_API_KEY` env var, or the Configure dialog |
 | CheerpJ (browser) | the page's `window.myBrowserHttp.fetch` | held by the page; never passed to the JVM |
 
-In the browser, `HttpClient` cannot work at all — there is no native socket layer, so its
-`sun.nio.ch.EPoll` networking is unavailable. JRock therefore declares two `native` methods and
-the hosting page implements them in JavaScript. CheerpJ resolves a native method to the
-`Java_<class>_<method>` function given to `cheerpjInit`, and awaits it if it is `async`,
-suspending the calling Java thread until the promise settles — which is what allows a blocking
-Java call to sit on top of `fetch()`:
-
-```js
-cheerpjInit({
-  version: 11,
-  natives: { Java_JRock_browserHttpInfo, Java_JRock_browserHttpSend }
-});
-```
-
-The bridge is detected by *calling* it: on a JVM without it, the unlinked native method throws
-`UnsatisfiedLinkError` and JRock uses `HttpClient`. So "the bridge answered" and "the bridge
-works" are the same thing. The page's client also reports the region it holds a key for, and
-JRock adopts it at startup.
-
-Any host page can serve JRock by providing `window.myBrowserHttp.fetch(url, options)` resolving
-to `{ status, body }`; `jrock-web/index.html` is the reference implementation. It attaches the
-`Authorization` header itself, so the API key never reaches the JVM.
+In the browser there is no socket layer, so `HttpClient` cannot work at all and the hosting page
+provides the transport instead. Any host page can serve JRock by providing
+`window.myBrowserHttp.fetch(url, options)` resolving to `{ status, body }`;
+`jrock-web/index.html` is the reference implementation. It attaches the `Authorization` header
+itself, so the API key never reaches the JVM, and it reports the region it holds a key for, which
+JRock adopts at startup.
 
 Credentials are deliberately **not** read from JVM system properties (`-Dname=value`): a key
 passed on a command line leaks into shell history and process listings.
@@ -197,9 +179,8 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
 - `JRock/gs-pdf/` — per-page text/image files produced when a PDF is included via Ghostscript
   (see Multimodal includes).
 
-The main log uses a simple, robust format: a bit-perfect copy of the pane, except each role
-header is followed by an `@<datetime>` include-style reference to the message's own file. The
-reference carries **only a validated datetime**, so no arbitrary paths can be injected.
+The main log is a bit-perfect copy of the pane, except that each role header is followed by an
+`@<datetime>` include-style reference to the message's own file under `JRock/messages/`.
 
 **Clear log** empties `jrock-log.txt` and the window but never touches `JRock/messages/`, so
 paid-for inputs/outputs are preserved. If the log has changed since it was last exported with
@@ -227,8 +208,8 @@ Attach **text or image** files to a prompt (and convert **PDFs** to either):
 ### PDF conversion (Ghostscript)
 
 Selecting a PDF filter runs **Ghostscript** to convert the PDF, one file per page, then
-includes each produced page. The console executable is looked up on your PATH:
-`gswin64c` (then `gswin32c`, then `gs`) on Windows, `gs` on macOS and Linux.
+includes each produced page. Ghostscript must be on your PATH: `gswin64c` on Windows, `gs` on
+macOS and Linux.
 
 - Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.txt` (text pages via
   the `txtwrite` device) or `<pdfname>.gs.NNN.png` (page images at 150 dpi).
@@ -247,15 +228,13 @@ alone. Below it, the masked raw request and response, and the token stats.*
 On send, every referenced include is verified (known hash **and** the file still hashes the
 same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid
 includes are expanded into a **multi-part message**: text segments become text parts, `@img`
-becomes a base64 image part, `@txt` becomes a text part with the file's contents. Base64 is
-built on the fly and not retained in memory. In Extend mode, includes in prior turns are
-expanded too.
+becomes a base64 image part, `@txt` becomes a text part with the file's contents. In Extend mode,
+includes in prior turns are expanded too.
 
 ## Configure dialog (top-left button)
 
 - **Working directory** (with a Browse button) — reroutes JRock's own files to the chosen
-  folder. (Note: Java can't change the OS-level process CWD, so this reroutes JRock's files
-  rather than the process working directory.)
+  folder. The OS-level process working directory is unchanged.
 - **BEDROCK_API_KEY** — write-only: left blank, it keeps the current key; type a value to
   override for the session. The key is never displayed or stored beyond the running process.
   In the browser this row is absent: the key belongs to the page (see
@@ -274,7 +253,7 @@ on GitHub, a short description, keyboard shortcuts, and authorship.
 
 A dialog to set the window **width/height** and **on-screen X/Y** numerically, plus info
 about the screens (which monitor holds the window, each screen's bounds). Handy for precise
-placement or moving across monitors without the mouse. Handles the maximized state on Windows.
+placement or moving across monitors without the mouse.
 
 ## Printing / PDF (Ctrl+P)
 
@@ -318,18 +297,15 @@ Clicking it starts JRock in that folder — no path argument, no console window.
 
 Details:
 
-- **Per-user and reversible.** Entries are written under `HKEY_CURRENT_USER` (no admin needed):
-  `Directory\Background\shell` and `Directory\shell` for the folder verb, and
-  `SystemFileAssociations\.txt\shell` for the text verb. Uninstall removes all of them.
-- **No console window.** Both launch `javaw.exe` directly (not through `cmd`), so nothing
-  flashes on screen.
+- **Per-user and reversible.** Entries are written under `HKEY_CURRENT_USER`, so no admin rights
+  are needed, and Uninstall removes all of them.
+- **No console window.** Both launch `javaw.exe`, so nothing flashes on screen.
 - **Self-configuring.** They use the `javaw.exe` of the JVM currently running JRock, and launch
-  JRock's own `jrock.jar` (or, if running from source, the `JRock.java` file) — no paths to edit.
-- **Inspectable.** The applied registry file is kept for your inspection under `JRock/`
+  JRock's own `jrock.jar` (or the `JRock.java` file when running from source) — no paths to edit.
+- **Inspectable.** The applied registry file is kept under `JRock/`
   (`jrock-context-menu-install.reg` / `jrock-context-menu-uninstall.reg`), and each action is
   recorded in the log.
-- On **Windows 11** the entries may appear under **"Show more options"** (a limitation of
-  classic registry verbs).
+- On **Windows 11** the entries may appear under **"Show more options"**.
 
 ## Per-folder window title & icon
 
@@ -362,9 +338,8 @@ and the directory is CheerpJ's own virtual mount, so naming it would say nothing
 ## Reproducible builds
 
 CI compiles `JRock.java` with a **pinned OpenJDK 11 patch (Temurin 11.0.32+9)** and repacks
-the classes into a **byte-for-byte reproducible** `jrock.jar` (see `.github/build/BuildJar.java`:
-sorted entries, fixed timestamps, fixed compression, a hand-written manifest, no volatile
-metadata). The same source therefore yields the **same SHA-256 and MD5 on any machine or OS**.
+the classes into a **byte-for-byte reproducible** `jrock.jar` (see `.github/build/BuildJar.java`).
+The same source therefore yields the **same SHA-256 and MD5 on any machine or OS**.
 
 For robustness the build runs on **three operating systems** and publishes three artifacts:
 
@@ -403,5 +378,4 @@ java JRock.java
 ## Notes
 
 - All files created by the app are under `JRock/` and are git-ignored.
-- File writes are atomic and best-effort with retries (to survive transient Windows file
-  locks from antivirus/indexers) and never lose data silently.
+- File writes are atomic, so a crash or a failed write never leaves a truncated file.
