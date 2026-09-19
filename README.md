@@ -386,17 +386,24 @@ java JRock.java
 
 GUI tests live in **`tests/`** and run on **JUnit 5** with
 [AssertJ-Swing](https://github.com/assertj/assertj-swing) (the maintained descendant of
-FEST-Swing) driving the real widgets through `java.awt.Robot`. The test starts the actual
-application via `JRock.main(...)`, finds its window, and waits for the log pane to report
-`Ready.` among the rest of the session report.
+FEST-Swing) driving the real widgets through `java.awt.Robot`. Each test starts the actual
+application via `JRock.main(...)` and then works its window like a person would:
+
+- **`JRockStartupTest`** waits for the log pane to report `Ready.` among the rest of the
+  session report.
+- **`JRockConfigureTest`** opens the Configure dialog, types an API key, applies it, waits
+  for the session report to run again, and reopens the dialog to check the key is **not
+  shown back** — the field is write-only, and the failure mode is a credential appearing on
+  screen. It also checks the key never reaches the log.
 
 ```sh
 cd tests/
 mvn test
 ```
 
-Nothing is stubbed and no credentials are needed: the test runs with `BEDROCK_API_KEY`
-blank, so JRock skips its startup model-list fetch and never touches the network.
+Nothing is stubbed and no credentials are needed: tests run with `BEDROCK_API_KEY` blank, so
+JRock skips its startup model-list fetch. No test contacts AWS — the one case that does set a
+key points the region at a host that doesn't resolve, so the fetch fails at DNS.
 
 `JRock.java` is compiled **in place** from the repository root — the root keeps its single
 Java file, and nothing is copied. Maven writes everything to `tests/target/`, which is
