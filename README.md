@@ -55,9 +55,30 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
    java JRock.java
    # optionally load a prompt file on startup (read-only):
    java JRock.java path\to\prompt.txt
+   # point Load/Save prompt (Ctrl+O / Ctrl+S) at a prompt library:
+   java JRock.java --prompts-dir D:\prompts
+   # ...and then name a prompt in it directly:
+   java JRock.java --prompts-dir D:\prompts review.txt
    ```
 
 4. Type a prompt and press **Ctrl+Enter** (or the **Send** button).
+
+### `--prompts-dir`
+
+Prompts tend to live together in one folder, while the working directory is wherever
+today's work is. `--prompts-dir <dir>` separates the two:
+
+- **Ctrl+O / Ctrl+S** open in `<dir>` instead of the working directory. As always, the
+  chooser then remembers wherever you last browsed; reconfiguring returns it to `<dir>`.
+- The **initial-prompt-file argument** is resolved relative to `<dir>`, so it can be a bare
+  file name. Absolute paths are unaffected.
+- **Include (Ctrl+I)** and log exports are deliberately *not* affected — those files live
+  wherever the source material is.
+
+`--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file.
+Without the flag, everything follows the working directory exactly as before. The resolved
+directory is reported in the startup log, including when the path isn't usable — in which
+case it's reported and ignored rather than silently applied.
 
 ## JRock Web (in the browser)
 

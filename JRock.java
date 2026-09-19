@@ -4,6 +4,11 @@
 //
 // Run directly with: java JRock.java
 //   Optionally: java JRock.java <initial-prompt-file>
+//   Prompt library: java JRock.java --prompts-dir <dir> [<initial-prompt-file>]
+//     --prompts-dir makes <dir> the directory Load/Save prompt (Ctrl+O / Ctrl+S)
+//     opens in, and the initial-prompt-file argument is then resolved relative to
+//     it - so it can be a bare file name. Absolute paths are unaffected. Without
+//     the flag, both follow the working directory exactly as before.
 //
 // Persistence (crash recovery + full local history):
 //   Everything lives under a "JRock" subfolder of the working directory.
@@ -14,9 +19,10 @@
 //     own append-only file in JRock/messages/. On startup the log is restored from
 //     disk so the whole session survives restarts.
 //   On startup the initial prompt is resolved as:
-//     1. If a file path is passed as the first CLI arg, load it READ-ONLY and use
-//        its contents; the original file is never modified. That text is then
-//        written to the persistent file, which continues to receive autosaves.
+//     1. If a file path is passed as a CLI arg, load it READ-ONLY and use its
+//        contents; the original file is never modified. That text is then written
+//        to the persistent file, which continues to receive autosaves. A relative
+//        path resolves against --prompts-dir when that was given.
 //     2. Else if JRock/jrock-prompt.txt exists, recover the prompt from it.
 //     3. Else use the built-in default prompt.
 //
@@ -155,6 +161,21 @@ public class JRock {
     // are distinguishable in Alt-Tab / the taskbar.
     private static Path workingDir = Paths.get("").toAbsolutePath();
 
+    // Where prompts live, from --prompts-dir on the command line. NULL means "follow
+    // the working directory", which is what happens without the flag - so a plain
+    // launch behaves exactly as before.
+    //
+    // This is deliberately separate from workingDir: a collection of prompts is
+    // reference material that tends to sit in one place, while the working directory
+    // is wherever today's work is. Keeping prompts out of it means Ctrl+O opens in
+    // the library rather than in whichever folder JRock was started from.
+    private static Path promptsDir = null;
+
+    // What to print for --prompts-dir in the session report, including a complaint
+    // when the path wasn't usable. Held as a string because the command line is
+    // parsed before the log exists. Null when the flag wasn't given.
+    private static String promptsDirNote = null;
+
     // Remembers where a file chooser last browsed, so the next dialog of the same
     // kind opens there. One instance PER PURPOSE, because these files live in
     // different places in practice: prompts in a prompt folder, included documents
@@ -162,7 +183,17 @@ public class JRock {
     // again. A single shared memory meant that including a file dropped the user in
     // the prompt folder (and vice versa) - a directory away from what they wanted.
     private static final class ChooserDir {
-        private Path dir = workingDir;
+        // Where this chooser goes when it has nothing remembered. A supplier, not a
+        // Path, because both of the directories these resolve against are mutable:
+        // workingDir changes via the Configure dialog, and promptsDir is set from the
+        // command line AFTER this class is initialized.
+        private final java.util.function.Supplier<Path> home;
+        private Path dir;
+
+        ChooserDir(java.util.function.Supplier<Path> home) {
+            this.home = home;
+            this.dir = home.get();
+        }
 
         // Directory the next chooser of this kind should open in.
         java.io.File start() { return dir.toFile(); }
@@ -176,12 +207,16 @@ public class JRock {
             if (current != null) dir = current.toPath();
         }
 
-        // Back to the (possibly new) working directory; see initSession().
-        void reset() { dir = workingDir; }
+        // Back to this chooser's home directory; see initSession(). Called on startup
+        // too, which is what lets --prompts-dir take effect: the flag is parsed after
+        // these fields are initialized.
+        void reset() { dir = home.get(); }
     }
-    private static final ChooserDir promptChooserDir  = new ChooserDir();  // Save/Load prompt
-    private static final ChooserDir includeChooserDir = new ChooserDir();  // Include file
-    private static final ChooserDir logChooserDir     = new ChooserDir();  // Save log copy
+    // Save/Load prompt: the prompts directory when one was given, else the working one.
+    private static final ChooserDir promptChooserDir  =
+            new ChooserDir(() -> promptsDir != null ? promptsDir : workingDir);
+    private static final ChooserDir includeChooserDir = new ChooserDir(() -> workingDir);
+    private static final ChooserDir logChooserDir     = new ChooserDir(() -> workingDir);
 
     // Derived endpoints/paths (recomputed from the mutable config above).
     private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
@@ -480,9 +515,65 @@ public class JRock {
         // also adopts the region configured by the hosting page, which the startup
         // log and the Configure dialog then report.
         http();
-        // Optional first arg: a file to load the initial prompt from (read-only).
-        String sourceArg = (args.length > 0 && !args[0].isBlank()) ? args[0].trim() : null;
+        // Command line:  [--prompts-dir <dir>] [<initial-prompt-file>]
+        String sourceArg = parseArgs(args);
         SwingUtilities.invokeLater(() -> createAndShowGui(sourceArg));
+    }
+
+    private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
+
+    // Reads the command line, applying --prompts-dir as a side effect and returning
+    // the initial-prompt file argument (null when none was given). Flags may appear
+    // on either side of that argument; the first thing that isn't a flag is the file.
+    private static String parseArgs(String[] args) {
+        String sourceArg = null;
+        for (int i = 0; i < args.length; i++) {
+            String arg = (args[i] == null) ? "" : args[i].trim();
+            if (arg.isEmpty()) continue;
+
+            // Both spellings, because both are habitual: "--prompts-dir=X" and
+            // "--prompts-dir X".
+            if (arg.startsWith(PROMPTS_DIR_FLAG + "=")) {
+                setPromptsDir(arg.substring(PROMPTS_DIR_FLAG.length() + 1).trim());
+            } else if (arg.equals(PROMPTS_DIR_FLAG)) {
+                if (i + 1 < args.length) {
+                    setPromptsDir(args[++i] == null ? "" : args[i].trim());
+                } else {
+                    promptsDirNote = "(none given after " + PROMPTS_DIR_FLAG + ")";
+                }
+            } else if (sourceArg == null) {
+                sourceArg = arg;
+            }
+        }
+        return sourceArg;
+    }
+
+    // Validates the --prompts-dir value now, while there is still a command line to
+    // blame it on, and records what the session report should say. A path that isn't
+    // a directory is reported and then ignored, rather than handed to a file chooser
+    // that would silently open somewhere else entirely.
+    private static void setPromptsDir(String value) {
+        if (value.isEmpty()) {
+            promptsDirNote = "(empty " + PROMPTS_DIR_FLAG + " ignored)";
+            return;
+        }
+        Path candidate = Paths.get(value).toAbsolutePath().normalize();
+        if (Files.isDirectory(candidate)) {
+            promptsDir = candidate;
+            promptsDirNote = candidate.toString();
+        } else {
+            promptsDirNote = candidate + " (not a directory - using the working directory)";
+        }
+    }
+
+    // Resolves the initial-prompt file argument. An absolute path is used as given;
+    // a relative one is resolved against --prompts-dir when that was supplied, so the
+    // flag can name the directory and the argument just name a file inside it.
+    // Without the flag this is the process working directory, as it always was.
+    private static Path resolvePromptArg(String arg) {
+        Path given = Paths.get(arg);
+        if (given.isAbsolute() || promptsDir == null) return given;
+        return promptsDir.resolve(given);
     }
 
     // Wires undo/redo into a text component: Ctrl+Z undo, Ctrl+Y (and Ctrl+Shift+Z)
@@ -898,6 +989,11 @@ public class JRock {
         // The session report begins here; the working directory is its first line.
         // A restored log already ends with its own trailing blank line.
         log.gray("Working directory: " + workingDir);
+        // Only when --prompts-dir was given: without it, prompts follow the working
+        // directory and there is nothing to report.
+        if (promptsDirNote != null) {
+            log.gray("Prompts directory: " + promptsDirNote);
+        }
         // App identity + local date/time in the user's locale/format.
         log.gray("JRock version " + VERSION + " - " + humanNow());
         if (hadLog) {
@@ -1070,13 +1166,17 @@ public class JRock {
         String initialPrompt;
         String promptSource;
         if (sourceArg != null) {
-            String fromArg = readFileQuietly(Paths.get(sourceArg));
+            // Resolved, not raw: with --prompts-dir the argument can be a bare file
+            // name, and the full path is what makes the line useful when it didn't
+            // load.
+            Path argPath = resolvePromptArg(sourceArg);
+            String fromArg = readFileQuietly(argPath);
             if (fromArg != null) {
                 initialPrompt = fromArg;
-                promptSource = "command-line file (read-only): " + sourceArg;
+                promptSource = "command-line file (read-only): " + argPath;
             } else {
                 initialPrompt = PROMPT;
-                promptSource = "default (could not read " + sourceArg + ")";
+                promptSource = "default (could not read " + argPath + ")";
             }
         } else {
             String fromPersist = readFileQuietly(promptFile());
