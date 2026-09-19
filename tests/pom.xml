@@ -87,6 +87,13 @@
                against the process working directory - and keeps it inside the
                git-ignored target/ rather than in the repo. -->
           <workingDirectory>${project.build.directory}</workingDirectory>
+          <!-- Put each test's @DisplayName in the XML report's name attribute
+               instead of the bare method name, so the CI summary built from those
+               reports reads as sentences. -->
+          <statelessTestsetReporter
+              implementation="org.apache.maven.plugin.surefire.extensions.junit5.JUnit5Xml30StatelessReporter">
+            <usePhrasedTestCaseMethodName>true</usePhrasedTestCaseMethodName>
+          </statelessTestsetReporter>
           <environmentVariables>
             <!-- Blank, so the startup model-list fetch reports "(skipped - no
                  Bedrock API key set)" and the test needs no network and no
