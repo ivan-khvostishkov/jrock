@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Test build for JRock.
+
+  JRock itself has no build file and no dependencies: it is one source file, run
+  with "java JRock.java" and packaged by .github/build/BuildJar.java. That stays
+  true. This POM exists only to give the tests a classpath (JUnit + AssertJ-Swing)
+  and lives here, under tests/, so the repository root keeps exactly one Java file
+  and no build descriptor.
+
+  The application is compiled IN PLACE from the parent directory - JRock.java is
+  never copied - by pointing sourceDirectory at the repo root and then narrowing
+  the compiler to that single file, so the recursive scan doesn't also pick up
+  .github/build/BuildJar.java or the tests themselves.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>net.nosocial.jrock</groupId>
+  <artifactId>jrock-tests</artifactId>
+  <version>1.4.1-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>JRock tests</name>
+  <description>GUI tests for JRock, driven through AssertJ-Swing.</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- JRock's stated minimum, so the tests also prove it still compiles there. -->
+    <maven.compiler.release>11</maven.compiler.release>
+
+    <junit.version>5.11.4</junit.version>
+    <!-- AssertJ-Swing is the maintained descendant of FEST-Swing: the same model as
+         WindowLicker (drive the real widgets through java.awt.Robot, then poll until
+         a condition holds), but still published and still working on modern JDKs. -->
+    <assertj-swing.version>3.17.1</assertj-swing.version>
+
+    <surefire.version>3.5.2</surefire.version>
+    <compiler.version>3.13.0</compiler.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-swing</artifactId>
+      <version>${assertj-swing.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <!-- The repo root. Combined with the compiler <includes> below this compiles
+         exactly one file, JRock.java, straight from where it lives. -->
+    <sourceDirectory>${project.basedir}/..</sourceDirectory>
+    <testSourceDirectory>${project.basedir}/src/test/java</testSourceDirectory>
+
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${compiler.version}</version>
+        <configuration>
+          <!-- Only the top-level JRock.java: the pattern is relative to
+               sourceDirectory and has no wildcard, so nothing in any subdirectory
+               matches. -->
+          <includes>
+            <include>JRock.java</include>
+          </includes>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${surefire.version}</version>
+        <configuration>
+          <!-- Belt and braces. The test points the app at a throwaway directory of
+               its own, so this only catches anything that still resolves a path
+               against the process working directory - and keeps it inside the
+               git-ignored target/ rather than in the repo. -->
+          <workingDirectory>${project.build.directory}</workingDirectory>
+          <environmentVariables>
+            <!-- Blank, so the startup model-list fetch reports "(skipped - no
+                 Bedrock API key set)" and the test needs no network and no
+                 credentials. JRock reads a blank environment variable as unset.
+                 This also stops a developer's real key from being used by a test. -->
+            <BEDROCK_API_KEY></BEDROCK_API_KEY>
+          </environmentVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

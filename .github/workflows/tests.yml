@@ -1,0 +1,49 @@
+name: Tests
+
+# Runs the GUI tests in tests/, which start the real application and read its log
+# pane through AssertJ-Swing (java.awt.Robot). That needs a display, so the whole
+# Maven run is wrapped in xvfb-run: GitHub's Linux runners are headless.
+#
+# Separate from the "Reproducible build" workflow on purpose - that one pins an
+# exact JDK patch because the JAR's bytes depend on it, which has nothing to do
+# with running tests.
+#
+# No credentials are needed or used: with BEDROCK_API_KEY blank (set in the POM)
+# JRock skips its startup model-list fetch, so the test never touches the network.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gui-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      # JDK 11 is JRock's documented minimum, so the tests also keep that honest.
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Run the GUI tests under a virtual display
+        working-directory: tests
+        # The virtual screen is bigger than JRock's preferred 1050x800 window, so it
+        # starts centred rather than maximized - the same layout a person would see.
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" mvn -B --no-transfer-progress test
+
+      # The reports name the failing assertion and, for this test, dump every line
+      # the log pane held - which is most of what you need to diagnose a failure.
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: surefire-reports
+          path: tests/target/surefire-reports/
+          if-no-files-found: warn

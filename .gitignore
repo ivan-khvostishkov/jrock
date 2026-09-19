@@ -26,3 +26,7 @@ replay_pid*
 # JRock runtime data (prompt, conversation log, per-message files, temp files)
 JRock/
 
+# Maven output for the tests in tests/ (also holds the JRock/ folder a test run
+# creates, since surefire runs the app with its working directory in here)
+target/
+

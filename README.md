@@ -380,6 +380,29 @@ Or, if you want to modify the source and run it in place (no build step):
 java JRock.java
 ```
 
+## Tests
+
+GUI tests live in **`tests/`** and run on **JUnit 5** with
+[AssertJ-Swing](https://github.com/assertj/assertj-swing) (the maintained descendant of
+FEST-Swing) driving the real widgets through `java.awt.Robot`. The test starts the actual
+application via `JRock.main(...)`, finds its window, and waits for the log pane to report
+`Ready.` among the rest of the session report.
+
+```sh
+cd tests/
+mvn test
+```
+
+Nothing is stubbed and no credentials are needed: the test runs with `BEDROCK_API_KEY`
+blank, so JRock skips its startup model-list fetch and never touches the network.
+
+`JRock.java` is compiled **in place** from the repository root — the root keeps its single
+Java file, and nothing is copied. Maven writes everything to `tests/target/`, which is
+git-ignored, and that's also where the app's own `JRock/` folder goes during a test run.
+
+CI runs this on every push (`.github/workflows/tests.yml`), under `xvfb` since the Linux
+runners are headless, on JDK 11 — the minimum JRock supports.
+
 ## Notes
 
 - All files created by the app are under `JRock/` and are git-ignored.
