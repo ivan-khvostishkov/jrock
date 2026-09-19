@@ -32,6 +32,16 @@ jobs:
           java-version: '11'
           cache: maven
 
+      # One test includes a real PDF as page images, which JRock does by running
+      # Ghostscript. Installed explicitly rather than relying on the runner image
+      # happening to carry it, and the version is printed so a failure caused by a
+      # Ghostscript change is obvious in the log.
+      - name: Install Ghostscript
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ghostscript
+          gs --version
+
       - name: Run the GUI tests under a virtual display
         working-directory: tests
         # The virtual screen is bigger than JRock's preferred 1050x800 window, so it

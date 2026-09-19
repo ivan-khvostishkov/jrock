@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import javax.swing.JButton;
 import javax.swing.JFrame;
+import javax.swing.JTextArea;
 import javax.swing.JTextPane;
 
 import org.assertj.swing.core.BasicRobot;
@@ -20,8 +22,10 @@ import org.assertj.swing.core.GenericTypeMatcher;
 import org.assertj.swing.core.Robot;
 import org.assertj.swing.edt.GuiActionRunner;
 import org.assertj.swing.edt.GuiTask;
+import org.assertj.swing.finder.JOptionPaneFinder;
 import org.assertj.swing.finder.WindowFinder;
 import org.assertj.swing.fixture.FrameFixture;
+import org.assertj.swing.fixture.JOptionPaneFixture;
 import org.assertj.swing.fixture.JTextComponentFixture;
 import org.assertj.swing.timing.Condition;
 import org.junit.jupiter.api.AfterEach;
@@ -51,6 +55,9 @@ abstract class JRockGuiFixture {
      */
     private static final long READY_TIMEOUT_SECONDS = 90;
 
+    /** How long to wait for a dialog JRock was just asked to open. */
+    protected static final long DIALOG_TIMEOUT_MS = 30_000;
+
     /**
      * The mutable statics the application keeps its configuration in.
      * <p>
@@ -61,7 +68,7 @@ abstract class JRockGuiFixture {
      */
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
             "workingDir", "apiKeyOverride", "REGION", "regionSource", "MODEL_ID",
-            "availableModels");
+            "availableModels", "pdfDpi");
 
     private final Map<String, Object> savedConfig = new LinkedHashMap<>();
 
@@ -112,6 +119,7 @@ abstract class JRockGuiFixture {
             // persists the log must write into the throwaway directory, not into the
             // real working directory this puts back.
             restoreConfiguration();
+            forgetIncludes();
             deleteThrowawayHome();
         }
     }
@@ -144,6 +152,19 @@ abstract class JRockGuiFixture {
             field(saved.getKey()).set(null, saved.getValue());
         }
         savedConfig.clear();
+    }
+
+    /**
+     * Empties the hash -&gt; path map of included files.
+     * <p>
+     * Same reason as {@link #CONFIG_FIELDS}, but the map is final so it is cleared
+     * rather than put back: entries left behind point into a throwaway directory
+     * that is about to be deleted, and a later test asking "is this hash a known
+     * include?" should not get yes from a previous test's answer.
+     */
+    @SuppressWarnings("unchecked")
+    private void forgetIncludes() throws Exception {
+        ((Map<String, Path>) field("INCLUDES").get(null)).clear();
     }
 
     /** Removes only the directory this fixture created itself, contents and all. */
@@ -181,6 +202,32 @@ abstract class JRockGuiFixture {
                 return !pane.isEditable();
             }
         });
+    }
+
+    /** The prompt: the window's one editable text area. */
+    protected JTextComponentFixture promptArea() {
+        return window.textBox(new GenericTypeMatcher<JTextArea>(JTextArea.class) {
+            @Override
+            protected boolean isMatching(JTextArea area) {
+                return area.isEditable();
+            }
+        });
+    }
+
+    /** The throwaway directory the application is keeping its JRock/ folder in. */
+    protected Path workingDirectory() {
+        return throwawayHome;
+    }
+
+    /** Clicks Configure and returns the dialog it opens. */
+    protected JOptionPaneFixture openConfigure() {
+        window.button(new GenericTypeMatcher<JButton>(JButton.class) {
+            @Override
+            protected boolean isMatching(JButton button) {
+                return "Configure".equals(button.getText());
+            }
+        }).click();
+        return JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
     }
 
     /**

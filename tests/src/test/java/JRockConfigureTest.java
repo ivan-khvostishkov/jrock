@@ -1,10 +1,8 @@
 import static org.assertj.core.api.Assertions.assertThat;
 
-import javax.swing.JButton;
 import javax.swing.JPasswordField;
 
 import org.assertj.swing.core.GenericTypeMatcher;
-import org.assertj.swing.finder.JOptionPaneFinder;
 import org.assertj.swing.fixture.JOptionPaneFixture;
 import org.assertj.swing.fixture.JTextComponentFixture;
 import org.junit.jupiter.api.DisplayName;
@@ -36,8 +34,6 @@ class JRockConfigureTest extends JRockGuiFixture {
      * unknown region really is NXDOMAIN rather than something that resolves.
      */
     private static final String UNROUTABLE_REGION = "moon-9";
-
-    private static final long DIALOG_TIMEOUT_MS = 30_000;
 
     @Test
     @DisplayName("the Configure dialog accepts an API key and never shows it back")
@@ -74,16 +70,6 @@ class JRockConfigureTest extends JRockGuiFixture {
         assertThat(logPane().text())
                 .describedAs("the log pane's text")
                 .doesNotContain(FAKE_API_KEY);
-    }
-
-    private JOptionPaneFixture openConfigure() {
-        window.button(new GenericTypeMatcher<JButton>(JButton.class) {
-            @Override
-            protected boolean isMatching(JButton button) {
-                return "Configure".equals(button.getText());
-            }
-        }).click();
-        return JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
     }
 
     /** The dialog's one JPasswordField: the BEDROCK_API_KEY row. */

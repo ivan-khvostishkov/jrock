@@ -439,6 +439,12 @@ application via `JRock.main(...)` and then works its window like a person would:
   for the session report to run again, and reopens the dialog to check the key is **not
   shown back** — the field is write-only, and the failure mode is a credential appearing on
   screen. It also checks the key never reaches the log.
+- **`JRockPdfIncludeTest`** sets **PDF image DPI** to 300 in the Configure dialog, then
+  includes a two-page A4 PDF through the real include dialog with the *PDF as page images*
+  filter — and checks Ghostscript was asked for `-r300`, that two pages came back, that the
+  prompt gained **two `@img` tokens**, and that both PNGs really are **2480 × 3508 px**. The
+  PDF is written by hand (`A4Pdf`) so its page box is exactly A4: `gs -sPAPERSIZE=a4` is the
+  rounded 595 × 842 pt, which would rasterise one pixel narrower.
 
 ```sh
 cd tests/
@@ -448,6 +454,10 @@ mvn test
 Nothing is stubbed and no credentials are needed: tests run with `BEDROCK_API_KEY` blank, so
 JRock skips its startup model-list fetch. No test contacts AWS — the one case that does set a
 key points the region at a host that doesn't resolve, so the fetch fails at DNS.
+
+One external program is needed: **Ghostscript on `PATH`** (`gs`, or `gswin64c` on Windows),
+for the PDF test — which converts a real PDF rather than pretending to. CI installs it; the
+test fails with that as its message if it's missing.
 
 `JRock.java` is compiled **in place** from the repository root — the root keeps its single
 Java file, and nothing is copied. Maven writes everything to `tests/target/`, which is
