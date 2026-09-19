@@ -75,6 +75,11 @@ as WebAssembly), so nothing runs on a server.
   never sent anywhere but the Bedrock endpoint. You can change the key at any time — a
   missing or rejected one reopens the credentials dialog by itself.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
+- **Copy and paste reach other apps.** CheerpJ gives the JVM a clipboard of its own that
+  nothing else can see, so JRock goes through the browser's clipboard instead: text moves
+  between JRock and your mail or notes, by Ctrl+C/X/V or from the context menus. A browser
+  may ask permission the first time a page reads the clipboard, and some refuse reads
+  outright — paste then falls back to whatever was last copied inside JRock, and says so.
 
 ![JRock running in a browser tab, saving just the selected reply to the downloads folder](images/web-save-selection.png)
 

@@ -427,6 +427,50 @@
         });
       }
 
+      // Clipboard. CheerpJ's JVM has a clipboard of its own that no other app can
+      // see, so JRock asks this page for the real one. Both calls arrive while the
+      // tap or key press that triggered them still counts as a user gesture, which
+      // the clipboard APIs require.
+      async function Java_JRock_browserClipboardRead(lib) {
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.readText) {
+            return "0\nthis browser does not let a page read the clipboard";
+          }
+          var text = await navigator.clipboard.readText();
+          return "1\n" + (text || "");
+        } catch (e) {
+          // Typically a denied permission, or no user gesture left to spend.
+          return "0\n" + ((e && e.message) ? e.message : e);
+        }
+      }
+
+      async function Java_JRock_browserClipboardWrite(lib, text) {
+        var s = (text === null || text === undefined) ? "" : String(text);
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(s);
+            return "1\n";
+          }
+        } catch (e) {
+          // Fall through to the legacy path below rather than giving up here.
+        }
+        // Older browsers, and any context where the async API is unavailable.
+        try {
+          var ta = document.createElement("textarea");
+          ta.value = s;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "fixed";
+          ta.style.top = "-1000px";
+          document.body.appendChild(ta);
+          ta.select();
+          var ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+          return ok ? "1\n" : "0\nthe browser refused the copy";
+        } catch (e2) {
+          return "0\n" + ((e2 && e2.message) ? e2.message : e2);
+        }
+      }
+
       async function Java_JRock_browserHttpSend(lib, method, url, headersJson,
                                                 body, timeoutSeconds) {
         var http = window.myBrowserHttp;
@@ -502,7 +546,9 @@
             status: "splash",
             natives: {
               Java_JRock_browserHttpInfo: Java_JRock_browserHttpInfo,
-              Java_JRock_browserHttpSend: Java_JRock_browserHttpSend
+              Java_JRock_browserHttpSend: Java_JRock_browserHttpSend,
+              Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
+              Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite
             }
           });
 

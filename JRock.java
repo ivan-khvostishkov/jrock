@@ -1348,7 +1348,8 @@ public class JRock {
                 addMenuItem(logMenu, "Print...",            () -> printLog(frame, output));
         // The log pane is read-only, so Copy is the only clipboard verb it needs.
         logMenu.addSeparator();
-        javax.swing.JMenuItem copyLogItem = addEditItem(logMenu, "Copy", output, output::copy);
+        javax.swing.JMenuItem copyLogItem = addEditItem(logMenu, "Copy", output,
+                () -> clipboardCopy(output.getSelectedText(), log));
         logMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
                 boolean selected = log.selectedText() != null;
@@ -1374,9 +1375,11 @@ public class JRock {
         // harmless no-op, and asking for its contents just to grey out an item can
         // fail when another process owns it.
         promptMenu.addSeparator();
-        javax.swing.JMenuItem cutItem   = addEditItem(promptMenu, "Cut",   input, input::cut);
-        javax.swing.JMenuItem copyItem  = addEditItem(promptMenu, "Copy",  input, input::copy);
-        addEditItem(promptMenu, "Paste", input, input::paste);
+        javax.swing.JMenuItem cutItem   = addEditItem(promptMenu, "Cut",   input,
+                () -> clipboardCut(input, log));
+        javax.swing.JMenuItem copyItem  = addEditItem(promptMenu, "Copy",  input,
+                () -> clipboardCopy(input.getSelectedText(), log));
+        addEditItem(promptMenu, "Paste", input, () -> clipboardPaste(input, log));
         javax.swing.JMenuItem undoItem  = addEditItem(promptMenu, "Undo",  input,
                 () -> { if (promptUndo.canUndo()) promptUndo.undo(); });
         javax.swing.JMenuItem redoItem  = addEditItem(promptMenu, "Redo",  input,
@@ -1393,6 +1396,11 @@ public class JRock {
             @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) { }
         });
         attachPopup(input, promptMenu);
+
+        // In the browser, point Ctrl+C/X/V at the page's clipboard too, so the
+        // keyboard and the menu reach the same place.
+        useBrowserClipboard(output, log, false);   // read-only: copy only
+        useBrowserClipboard(input, log, true);
 
         // Window chrome (empty area of the top bar, e.g. right of Configure):
         // Move & resize window...; on Windows, also install/uninstall the
@@ -1431,6 +1439,90 @@ public class JRock {
             action.run();
             comp.requestFocusInWindow();
         });
+    }
+
+    // ---- Clipboard ---------------------------------------------------------
+    // On a normal JVM Swing's clipboard IS the OS clipboard and the default
+    // cut/copy/paste need no help. In the browser they are two different things,
+    // so everything here routes through the page instead (see the clipboard
+    // bridge). Calls happen straight from the menu item or keystroke, while the
+    // browser still counts the tap or key press as a user gesture - the clipboard
+    // APIs refuse to run outside one.
+
+    // Splits a bridge reply of "<ok>\n<rest>" into { ok, rest }.
+    private static String[] bridgeReply(String reply) {
+        if (reply == null) return new String[] { "0", "the bridge returned nothing" };
+        int nl = reply.indexOf('\n');
+        return nl < 0 ? new String[] { reply.trim(), "" }
+                      : new String[] { reply.substring(0, nl).trim(), reply.substring(nl + 1) };
+    }
+
+    // Copies to BOTH clipboards: the browser's is the one other apps read, and
+    // Swing's keeps paste working inside JRock even where the browser blocks reads.
+    private static void clipboardCopy(String text, LogView log) {
+        if (text == null || text.isEmpty()) return;
+        try {
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .setContents(new java.awt.datatransfer.StringSelection(text), null);
+        } catch (Throwable ignored) {
+            // No usable JVM clipboard; the page's is the one that matters here.
+        }
+        if (!isCheerpJ()) return;
+        try {
+            String[] r = bridgeReply(browserClipboardWrite(text));
+            if (!"1".equals(r[0])) {
+                log.gray("Copied inside JRock only - the browser refused the clipboard: " + r[1]);
+            }
+        } catch (Throwable ex) {
+            log.gray("Copied inside JRock only - no clipboard bridge on this page: " + ex);
+        }
+    }
+
+    private static void clipboardCut(javax.swing.text.JTextComponent comp, LogView log) {
+        String sel = comp.getSelectedText();
+        if (sel == null || sel.isEmpty()) return;
+        clipboardCopy(sel, log);      // always reaches Swing's, so the text is never lost
+        comp.replaceSelection("");
+    }
+
+    private static void clipboardPaste(javax.swing.text.JTextComponent comp, LogView log) {
+        if (!isCheerpJ()) { comp.paste(); return; }
+        try {
+            String[] r = bridgeReply(browserClipboardRead());
+            if ("1".equals(r[0])) {
+                comp.replaceSelection(r[1]);   // "" is a genuinely empty clipboard
+                return;
+            }
+            log.gray("Could not read the browser clipboard (" + r[1]
+                    + "). Pasting what was last copied inside JRock instead.");
+        } catch (Throwable ex) {
+            log.gray("No clipboard bridge on this page (" + ex
+                    + "). Pasting what was last copied inside JRock instead.");
+        }
+        comp.paste();
+    }
+
+    // Points a component's own cut/copy/paste actions at the page's clipboard, so
+    // Ctrl+C/X/V behave like the menu items. Only needed in the browser; elsewhere
+    // the defaults already talk to the OS. editable=false wires copy alone.
+    private static void useBrowserClipboard(javax.swing.text.JTextComponent comp,
+                                            LogView log, boolean editable) {
+        if (!isCheerpJ()) return;
+        comp.getActionMap().put(javax.swing.text.DefaultEditorKit.copyAction,
+                new AbstractAction() {
+                    @Override public void actionPerformed(ActionEvent e) {
+                        clipboardCopy(comp.getSelectedText(), log);
+                    }
+                });
+        if (!editable) return;
+        comp.getActionMap().put(javax.swing.text.DefaultEditorKit.cutAction,
+                new AbstractAction() {
+                    @Override public void actionPerformed(ActionEvent e) { clipboardCut(comp, log); }
+                });
+        comp.getActionMap().put(javax.swing.text.DefaultEditorKit.pasteAction,
+                new AbstractAction() {
+                    @Override public void actionPerformed(ActionEvent e) { clipboardPaste(comp, log); }
+                });
     }
 
     // Shows a popup menu on a native right-click (desktop) OR a long-press
@@ -2733,6 +2825,15 @@ public class JRock {
     static native String browserHttpSend(String method, String url,
                                          String headersJson, String body,
                                          int timeoutSeconds);
+
+    // Clipboard, over the same bridge and the same "<ok>\n<rest>" wire format.
+    // CheerpJ gives the JVM a clipboard of its own, private to the tab's Java
+    // world, so without this a copy in JRock cannot be pasted into an email and
+    // text copied from one cannot get in. The page has the real one.
+    //   browserClipboardRead()  -> "1\n<text>", or "0\n<reason it was refused>".
+    //   browserClipboardWrite() -> "1\n", or "0\n<reason>".
+    static native String browserClipboardRead();
+    static native String browserClipboardWrite(String text);
 
     // The browser transport: hands each request to the page's JavaScript client.
     private static final class BrowserHttpTransport implements HttpTransport {
