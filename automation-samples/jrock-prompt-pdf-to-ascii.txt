@@ -1,0 +1,8 @@
+Produce me the plain text version of the document, formatted and indented with spaces and ASCII-graphics, i.e. for table use ----- , if text aligned to the right side of the page, align it to the right too to the fixed width column, like --->120 or ---->90. If text is centered, center around the middle column, etc. Assume a fixed-width font on the terminal. Separate pages with ------------------------------------------------------------------------------------- separator.
+
+The text and/or image version of the document, one file per page, is attached below.
+
+@txt
+@txt
+@img
+@img

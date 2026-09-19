@@ -1,0 +1,3 @@
+I am a private person. I am doing inventory of my docs, and renaming the files into the unique meaningful ones following the pattern -> date - counterparty (company/and/or/personname) - few words content summary or title - document number (if mentioned) , e.g. 2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890 (DO NOT append any file extension).  Follow the rules: regardless the content language, give title in Latin1 in English (translate if needed). Counterparty is also in Latin1, make it shortcut common name or abbreviation, often can be taken from their official website, e.g. instead of Beitragsservice -> GEZ, Apple Inc. -> Apple, Bayerische Landesbank -> BayernLB, etc. The document content goes below:
+
+@txt

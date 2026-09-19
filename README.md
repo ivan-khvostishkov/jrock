@@ -29,6 +29,9 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text and image files, plus PDF-to-text/PDF-to-images via
   Ghostscript) referenced by hash; multi-select supported.
+- **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
+  workflow, which is Bedrock Prompt management and Flows without the cloud
+  ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)).
 - **Keyboard-driven**, with a Configure dialog for API key, region, model and working directory.
 
 ## Requirements
@@ -90,6 +93,10 @@ directory is in effect at that moment — but only if it differs from the workin
 since otherwise the flag would pin every future launch to today's folder. So the library
 follows you into every folder; see
 [Explorer right-click integration](#windows-explorer-right-click-integration).
+
+For a ready-made one, point it at **`automation-samples/`** in this repository — two prompts
+that chain into a document-archiving workflow, and a template for a library of your own. See
+[Prompt library and chaining](#prompt-library-and-chaining-automation-samples).
 
 `--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file. The
 directory is reported in the startup log whenever it isn't just the working directory —
@@ -302,6 +309,92 @@ same, i.e. unchanged); on any problem the message is not sent and the reason is 
 includes are expanded into a **multi-part message**: text segments become text parts, `@img`
 becomes a base64 image part, `@txt` becomes a text part with the file's contents. In Extend mode,
 includes in prior turns are expanded too.
+
+## Prompt library and chaining (`automation-samples/`)
+
+Bedrock has a managed answer to reusable prompts:
+[Prompt management](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-management.html)
+stores prompts as AWS resources with *variables*, *variants* and immutable *versions*, edited in
+a console *prompt builder*; [Flows](https://docs.aws.amazon.com/bedrock/latest/userguide/flows.html)
+chains them by wiring one node's output into another's input, then publishes a version, points
+an *alias* at it, and runs it with `InvokeFlow`.
+
+JRock does the same thing with **plain text files in a folder you own**. A prompt is a `.txt`
+file; the library is a directory ([the prompts directory](#the-prompts-directory)); a variable
+is an [`@txt` / `@img` include token](#multimodal-includes-ctrli); and chaining is you —
+**Ctrl+L** the part of the reply you want, **Ctrl+I** it into the next prompt.
+
+| Bedrock | JRock |
+|---|---|
+| Prompt, stored as an AWS resource in one region | a `.txt` file in your prompts directory |
+| Variable, filled in at invoke time | an `@txt` / `@img` token, filled in by Ctrl+I |
+| Version / variant (immutable snapshot) | a file copy — or whatever your version control already does |
+| Prompt builder in the console | the prompt pane, and any text editor |
+| Flow: prompt nodes wired output → input, version + alias, `InvokeFlow` | Ctrl+L the output, Ctrl+I it into the next prompt |
+| IAM permissions, service quotas, per-node billing | files |
+
+Nothing to deploy, nothing to keep in sync with a region, and the whole workflow is
+greppable. What you give up is automation: a flow runs itself, whereas this is two keystrokes
+between the steps — which is also where you get to read the intermediate result before it
+becomes the next prompt's input.
+
+### The samples
+
+`automation-samples/` holds two prompts that chain, and doubles as a template for a prompts
+directory of your own:
+
+- **`jrock-prompt-pdf-to-ascii.txt`** — turn a scanned or printed PDF into plain text that
+  keeps its layout: ASCII rules for tables, right-aligned text kept right-aligned to a fixed
+  column, centred text centred, one separator line per page.
+- **`jrock-prompt-doc-inventory.txt`** — read a document and answer with **nothing but a file
+  name**, following one convention:
+  `<date>-<counterparty>-<what it is>-<document number>`, e.g.
+  `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890`. Titles and counterparties are
+  normalised to English and Latin-1 and shortened to the name people actually use
+  (*Beitragsservice* → `GEZ`, *Bayerische Landesbank* → `BayernLB`).
+
+Both end in bare `@img` / `@txt` lines. Those are **placeholders, not tokens** — a real include
+token carries a 12-hex-digit hash, so a bare one is only ever sent as the text it is. They mark
+where the attachments belong: put the cursor on that line and press Ctrl+I.
+
+### The scenario: a PDF you can find again
+
+The point of chaining these two is an archive whose file names mean something, plus a text copy
+of every document for reading and further automation.
+
+1. **Ctrl+O** → `jrock-prompt-pdf-to-ascii.txt`.
+2. **Ctrl+I** → the PDF, with the **PDF as page images** filter. Ghostscript rasterises it, one
+   PNG per page, and each page's `@img` token lands in the prompt. Page images rather than
+   `txtwrite` text because layout is the whole question here, and a scan has no text layer at
+   all.
+3. **Ctrl+Enter**. The reply is the document as plain text.
+4. **Select that reply in the log and press Ctrl+L** — with a selection, Ctrl+L saves *just the
+   selection* ("Save selected text as"), so you get the document and not the transcript around
+   it. Save it next to the PDF.
+5. **Ctrl+O** → `jrock-prompt-doc-inventory.txt`. Ctrl+O always opens back in the prompts
+   directory, so step 5 is the same two keystrokes as step 1 even though step 4 just saved a
+   file somewhere else entirely.
+6. **Ctrl+I** → the `.txt` you just saved, with the **Text files** filter. One `@txt` token.
+7. **Ctrl+Enter**. The reply is a base file name.
+8. **Rename both files to it** — `<name>.pdf` and `<name>.txt`.
+
+The result is a PDF you can identify from the file listing alone, and a text twin of it that
+`grep` can read. Repeat per document; the prompts don't change.
+
+### Using them
+
+Point JRock's prompts directory at the folder — `--prompts-dir` on the command line, or the
+**Prompts directory** row in [Configure](#configure-dialog-top-left-button) — and both prompts
+are two keystrokes away from any working directory. On Windows, installing the
+["JRock here!" entries](#windows-explorer-right-click-integration) with it set bakes it in, so
+the library follows you into whichever folder you right-click.
+
+These two are worth reading before they're worth running: the useful part is not the wording but
+the shape — one prompt per step, the step's input left as an include token at the bottom, and
+an output narrow enough to be the next step's input. Copy the folder and rewrite the contents
+for your own documents. The `jrock-prompt-*.txt` names are only a convention, matching the
+`jrock-prompt.txt` autosave and the `jrock-prompt-copy.txt` that Ctrl+S offers; JRock loads any
+text file.
 
 ## Configure dialog (top-left button)
 
