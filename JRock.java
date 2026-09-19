@@ -914,6 +914,9 @@ public class JRock {
                     models = "(error: " + ex.getMessage() + ")";
                 }
                 log.gray("Available models (mantle): " + models);
+                // The one blank line that precedes its text, so "Ready." stands out
+                // at the end of the session report rather than trailing the last line.
+                log.gray("");
                 log.gray("Ready.");
                 log.gray("");
             }
