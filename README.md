@@ -196,7 +196,7 @@ Attach **text or image** files to a prompt (and convert **PDFs** to either):
    - **Text files** (txt, csv, html, java)
    - **PDF as text pages** — converts the PDF to one text file per page
    - **PDF as page images** — converts the PDF to one PNG per page
-2. Each file is hashed (SHA-256). The hash → path mapping is kept **in memory only**
+2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart you must re-include files to reuse them.
 3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor (one per file / per PDF
    page). Duplicate tokens for the same file are not added again (also checked across prior

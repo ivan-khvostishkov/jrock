@@ -201,6 +201,16 @@ public class JRock {
         return (path == null) ? null : mantleHost() + path;
     }
 
+    // The path part of a mantle URL. Request lines log the path alone: the host is
+    // reported once during session init, which keeps those lines narrow enough to
+    // read on a phone without scrolling sideways.
+    private static String pathOf(String url) {
+        if (url == null) return null;
+        int scheme = url.indexOf("://");
+        int slash = url.indexOf('/', scheme < 0 ? 0 : scheme + 3);
+        return slash < 0 ? "/" : url.substring(slash);
+    }
+
     // ---- Bedrock model cards -----------------------------------------------
     // Recorded from the AWS model-card pages: input/output modalities and the
     // per-endpoint API support (the cards list APIs SEPARATELY for bedrock-runtime
@@ -531,19 +541,28 @@ public class JRock {
     // kind (@img/@txt) in the prompt disambiguates how each is sent.
     private static final java.util.Map<String, Path> INCLUDES = new java.util.HashMap<>();
 
-    // Prompt token that stands in for an included file: "@img <hash>" or "@txt <hash>".
-    // Hash is a hex SHA-256. Matched anywhere in the prompt.
-    private static final java.util.regex.Pattern INCLUDE_TOKEN =
-            java.util.regex.Pattern.compile("@(img|txt) ([0-9a-f]{64})");
+    // Hex digits kept from a file's SHA-256. Enough to identify a handful of
+    // attachments per session without the token dominating the prompt and the log.
+    private static final int HASH_LEN = 12;
 
-    // SHA-256 of a file's bytes, as lowercase hex. Null on read failure.
+    // Prompt token that stands in for an included file: "@img <hash>" or "@txt <hash>".
+    // Hash is a shortened hex SHA-256. Matched anywhere in the prompt. The trailing
+    // lookahead requires the hash to end there, so a longer hex run isn't read as a
+    // token plus leftover text.
+    private static final java.util.regex.Pattern INCLUDE_TOKEN =
+            java.util.regex.Pattern.compile("@(img|txt) ([0-9a-f]{" + HASH_LEN + "})(?![0-9a-f])");
+
+    // The first HASH_LEN hex digits of a file's SHA-256. Null on read failure.
     private static String hashFile(Path p) {
         try {
             byte[] bytes = Files.readAllBytes(p);
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
-            StringBuilder sb = new StringBuilder(digest.length * 2);
-            for (byte b : digest) sb.append(String.format("%02x", b));
-            return sb.toString();
+            StringBuilder sb = new StringBuilder(HASH_LEN);
+            for (byte b : digest) {
+                if (sb.length() >= HASH_LEN) break;
+                sb.append(String.format("%02x", b));
+            }
+            return sb.substring(0, HASH_LEN);
         } catch (Exception ex) {
             return null;
         }
@@ -848,7 +867,7 @@ public class JRock {
         int restored = log.loadFromDisk();
 
         // The session report begins here; the working directory is its first line.
-        if (restored > 0) log.gray("");
+        // A restored log already ends with its own trailing blank line.
         log.gray("Working directory: " + workingDir);
         // App identity + local date/time in the user's locale/format.
         log.gray("JRock version " + VERSION + " - " + humanNow());
@@ -869,6 +888,8 @@ public class JRock {
         } else {
             log.gray("AWS region: " + REGION);
         }
+        // The one place the host is spelled out; later request lines log paths only.
+        log.gray("Bedrock endpoint: " + mantleHost());
         log.gray("Configured model: " + MODEL_ID);
         resolveAndLogCard(MODEL_ID, log);
         if (promptSourceNote != null) {
@@ -893,8 +914,8 @@ public class JRock {
                     models = "(error: " + ex.getMessage() + ")";
                 }
                 log.gray("Available models (mantle): " + models);
-                log.gray("");
                 log.gray("Ready.");
+                log.gray("");
             }
         }.execute();
     }
@@ -917,7 +938,7 @@ public class JRock {
             HttpReply resp = http.send("GET", modelsEndpoint(), headers,
                     null, MODELS_TIMEOUT_SECONDS);
             if (resp.status != 200) {
-                return "(HTTP " + resp.status + " from " + modelsEndpoint() + ")";
+                return "(HTTP " + resp.status + " from " + pathOf(modelsEndpoint()) + ")";
             }
             List<String> ids = extractModelIds(resp.body);
             if (!ids.isEmpty()) {
@@ -1071,8 +1092,8 @@ public class JRock {
         send.addActionListener(e -> {
             String prompt = input.getText().trim();
             if (prompt.isEmpty()) {
-                log.gray("");
                 log.gray("Nothing to send - type a prompt first...");
+                log.gray("");
                 return;
             }
             send.setEnabled(false);
@@ -1081,9 +1102,8 @@ public class JRock {
             boolean extend = extendMode.isSelected();
             java.util.List<String[]> history = extend
                     ? log.dialogHistory() : java.util.Collections.emptyList();
-            log.gray("");                        // blank line BEFORE the input message
             log.human(prompt, extend);
-            log.gray("");                        // blank line AFTER the input message
+            log.gray("");                        // closes the input message block
 
             // Verify all @img/@txt includes are known and unchanged - in the new
             // prompt AND in prior human turns (extend mode re-sends those, expanding
@@ -1121,8 +1141,8 @@ public class JRock {
             }
 
             log.gray(extend
-                    ? "Calling " + endpoint() + " (extend: " + history.size() + " prior turns) ..."
-                    : "Calling " + endpoint() + " ...");
+                    ? "Calling " + pathOf(endpoint()) + " (extend: " + history.size() + " prior turns) ..."
+                    : "Calling " + pathOf(endpoint()) + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
                 protected String[] doInBackground() {
@@ -1153,23 +1173,27 @@ public class JRock {
                         // result[2] = raw request/response/stats -> always gray, or null.
                         boolean ok = "1".equals(result[0]);
                         if (ok) {
-                            // A real reply is dialog: branded header + black text,
-                            // and it's persisted to its own file in logs/. The blank
-                            // lines around the message are separate gray "" entries.
-                            log.gray("");        // blank line BEFORE the output message
+                            // The reply is its own block, so the blank line here
+                            // closes the "Calling ..." one. A real reply is dialog:
+                            // branded header + black text, persisted to its own file.
+                            log.gray("");        // closes the "Calling ..." block
                             log.assistant(result[1], extend);
-                            log.gray("");        // blank line AFTER the output message
+                            log.gray("");        // closes the reply block
                         } else {
                             // Failures are NOT dialog: log in gray so they don't
-                            // pollute the transcript or "Dialog only" view.
+                            // pollute the transcript or "Dialog only" view. The reason
+                            // is the outcome of the "Calling ..." block, so it goes in
+                            // that block and the blank line closes them together.
                             log.gray(result[1]);
                             log.gray("");
                         }
                         if (result[2] != null) {
                             log.gray(result[2]);
+                            log.gray("");        // closes the raw request/response/stats block
                         }
                     } catch (Exception ex) {
                         log.gray("ERROR: " + ex.getMessage());
+                        log.gray("");
                     }
                     send.setEnabled(true);
                 }
@@ -2097,6 +2121,7 @@ public class JRock {
                 includeOne(input, log, extend, file, isImage ? "img" : "txt", isImage);
             }
         }
+        log.gray("");   // closes the include block (one per Ctrl+I, however many files)
         input.requestFocusInWindow();
     }
 
@@ -2871,8 +2896,8 @@ public class JRock {
             return new String[] {
                 "0",
                 "HTTP " + resp.status,
-                "--- raw request ---\nPOST " + endpoint() + "\n" + maskedRequestBody
-                    + "\n\n--- raw response ---\n" + resp.body
+                // Nothing to mask in the body: there is no reply, only an error.
+                rawDump(maskedRequestBody, resp.body)
             };
         }
 
@@ -2894,8 +2919,7 @@ public class JRock {
         // (it's already shown above). The request was masked during assembly.
         String maskedResponse = maskResponse(resp.body, reply);
 
-        String details = "--- raw request ---\n" + "POST " + endpoint() + "\n" + maskedRequestBody
-                + "\n\n--- raw response ---\n" + maskedResponse
+        String details = rawDump(maskedRequestBody, maskedResponse)
                 + "\n\n--- stats ---"
                 + "\nInput text symbols:  " + inputSymbols
                 + "\nOutput text symbols: " + outputSymbols
@@ -2903,6 +2927,14 @@ public class JRock {
                 + "\nOutput tokens:  " + tokenStr(outputTokens);
 
         return new String[] { "1", reply, details };
+    }
+
+    // The raw request/response dump logged after a call, for either outcome. The
+    // response body is the caller's choice: masked on success (the reply is already
+    // shown above), verbatim on failure. A success then appends its stats block.
+    private static String rawDump(String maskedRequestBody, String responseBody) {
+        return "--- raw request ---\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
+                + "\n\n--- raw response ---\n" + responseBody;
     }
 
     private static String tokenStr(long v) {
