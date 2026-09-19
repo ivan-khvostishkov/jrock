@@ -3090,8 +3090,13 @@ public class JRock {
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
                     .build();
-            HttpResponse<String> resp =
-                    client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            // UTF-8 spelled out, rather than ofString()'s "whatever the response's
+            // Content-Type says": JSON is UTF-8 by RFC 8259, and a gateway that
+            // mislabels it (charset=ISO-8859-1 is the classic) would otherwise turn
+            // every accented character into two - "für" into "fÃ¼r" - with no way
+            // to tell from the text that the transport was what broke it.
+            HttpResponse<String> resp = client.send(builder.build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             return new HttpReply(resp.statusCode(), resp.body());
         }
 
@@ -3509,6 +3514,20 @@ public class JRock {
                     case '"': sb.append('"'); break;
                     case '\\': sb.append('\\'); break;
                     case '/': sb.append('/'); break;
+                    case 'u':
+                        // JSON's numeric escape, which a server may use for any
+                        // non-ASCII character - so without this, "ü" reached the
+                        // pane as the literal text u00fc, and a Cyrillic or emoji
+                        // reply became a wall of u04xx. A character outside the BMP
+                        // arrives as a surrogate PAIR of these escapes, and appending
+                        // each unit in turn is what puts it back together.
+                        if (i + 4 < json.length() && isHex4(json, i + 1)) {
+                            sb.append((char) Integer.parseInt(json.substring(i + 1, i + 5), 16));
+                            i += 4;
+                        } else {
+                            sb.append(n);   // not a real escape; keep it as it came
+                        }
+                        break;
                     default: sb.append(n);
                 }
             } else if (ch == '"') {
@@ -3518,6 +3537,15 @@ public class JRock {
             }
         }
         return sb.toString();
+    }
+
+    // Whether four hex digits start at `at`. Integer.parseInt would accept a sign or
+    // whitespace, which JSON does not, so the digits are checked first.
+    private static boolean isHex4(String s, int at) {
+        for (int i = at; i < at + 4; i++) {
+            if (Character.digit(s.charAt(i), 16) < 0) return false;
+        }
+        return true;
     }
 
     // ---- Helpers -----------------------------------------------------------

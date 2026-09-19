@@ -428,10 +428,10 @@ java JRock.java
 
 ## Tests
 
-GUI tests live in **`tests/`** and run on **JUnit 5** with
+Tests live in **`tests/`** and run on **JUnit 5**. Most are GUI tests, using
 [AssertJ-Swing](https://github.com/assertj/assertj-swing) (the maintained descendant of
-FEST-Swing) driving the real widgets through `java.awt.Robot`. Each test starts the actual
-application via `JRock.main(...)` and then works its window like a person would:
+FEST-Swing) to drive the real widgets through `java.awt.Robot`: each one starts the actual
+application via `JRock.main(...)` and then works its window like a person would.
 
 - **`JRockStartupTest`** waits for the log pane to report `Ready.` among the rest of the
   session report.
@@ -445,6 +445,9 @@ application via `JRock.main(...)` and then works its window like a person would:
   prompt gained **two `@img` tokens**, and that both PNGs really are **2480 × 3508 px**. The
   PDF is written by hand (`A4Pdf`) so its page box is exactly A4: `gs -sPAPERSIZE=a4` is the
   rounded 595 × 842 pt, which would rasterise one pixel narrower.
+- **`JRockReplyTextTest`** is the one test with no window: it feeds chat-completion JSON to
+  the reply parser and checks non-ASCII text comes back intact — as characters, as `\uXXXX`
+  escapes (a server may use either, and an emoji arrives as a *pair* of them), and mixed.
 
 ```sh
 cd tests/
