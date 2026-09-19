@@ -161,7 +161,9 @@ Built-in cards include:
   `usage`).
 - The **raw request and raw response** are shown for debugging, but prompt/reply/attachment
   content is **masked** (shown by hash/placeholder) so the transcript isn't a noisy duplicate
-  and included files stay referenced only by hash.
+  and included files stay referenced only by hash. The response `id` is elided after its
+  first few characters (`"id":"chatcmpl-abcd<...>"`) — in full it is long enough on its own
+  to put a horizontal scrollbar under the dump.
 
 ![Two timestamped turns with Extend conversation and Dialog only both on](images/extend-dialog-only.png)
 

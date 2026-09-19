@@ -3149,9 +3149,37 @@ public class JRock {
         return chatRequestBody(masked);
     }
 
-    // Masks the assistant reply text inside the raw response body.
+    // Masks the assistant reply text inside the raw response body, and shortens the
+    // response id, which is noise either way.
     private static String maskResponse(String rawResponse, String reply) {
-        return maskFirst(rawResponse, jsonEscape(reply), "<output masked>");
+        return shortenId(maskFirst(rawResponse, jsonEscape(reply), "<output masked>"));
+    }
+
+    // How much of the response id to keep: the "chatcmpl-" prefix plus four
+    // characters, enough to tell two replies apart or to quote one in a support
+    // question, which is all this field is ever good for.
+    private static final int ID_KEPT_CHARS = 13;
+
+    // Replaces the tail of the response's "id" with <...>. The id is ~40 characters
+    // that nobody reads, and on its own long enough to put a horizontal scrollbar
+    // under the raw response - so the rest of the dump has to be scrolled to be read.
+    // Only the first "id" is touched: in a chat-completion response that is the
+    // top-level one.
+    private static String shortenId(String json) {
+        int k = json.indexOf("\"id\"");
+        if (k < 0) return json;
+        int i = k + 4;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        if (i >= json.length() || json.charAt(i) != ':') return json;
+        i++;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        if (i >= json.length() || json.charAt(i) != '"') return json;
+        int start = i + 1;
+        int end = json.indexOf('"', start);   // ids are alphanumeric: no escapes to skip
+        if (end < 0) return json;
+        // Don't "shorten" something that is already short: the elision costs 5 of its own.
+        if (end - start <= ID_KEPT_CHARS + 5) return json;
+        return json.substring(0, start + ID_KEPT_CHARS) + "<...>" + json.substring(end);
     }
 
     // Low-level primitive: replaces the first occurrence of `needle` in `haystack`
