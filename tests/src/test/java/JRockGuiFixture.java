@@ -1,6 +1,9 @@
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.swing.timing.Pause.pause;
 import static org.assertj.swing.timing.Timeout.timeout;
 
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -12,15 +15,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import javax.swing.Action;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JRootPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextPane;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 
 import org.assertj.swing.core.BasicRobot;
 import org.assertj.swing.core.GenericTypeMatcher;
 import org.assertj.swing.core.Robot;
 import org.assertj.swing.edt.GuiActionRunner;
+import org.assertj.swing.edt.GuiQuery;
 import org.assertj.swing.edt.GuiTask;
 import org.assertj.swing.finder.JOptionPaneFinder;
 import org.assertj.swing.finder.WindowFinder;
@@ -228,6 +237,50 @@ abstract class JRockGuiFixture {
             }
         }).click();
         return JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
+    }
+
+    /**
+     * Triggers one of JRock's Ctrl+&lt;key&gt; shortcuts on the main window.
+     * <p>
+     * Looked up in the root pane's WHEN_IN_FOCUSED_WINDOW input map and run, rather
+     * than typed on the keyboard with the Robot. A real keystroke has to be delivered
+     * by the display server to whichever window it thinks is focused, and the headless
+     * runner is an X server with <em>no window manager</em> - so nothing gives the frame
+     * its focus back after a modal dialog closes. The keystroke then simply vanishes:
+     * no chooser opens, and not even a stray character arrives in the prompt. Mouse
+     * clicks need no focus, which is why every other interaction here works.
+     * <p>
+     * The binding is still what is under test. This is the same KeyStroke the toolkit
+     * would build from that key press, looked up in the same map, so a shortcut that
+     * was renamed, unbound or registered at the wrong scope fails here - loudly, and
+     * naming the shortcut - instead of quietly doing nothing. What is no longer covered
+     * is the trip through X, which this environment cannot do for a frame anyway.
+     * <p>
+     * invokeLater rather than GuiActionRunner.execute, because these actions open modal
+     * dialogs: the EDT would not come back until the dialog was dismissed, and
+     * dismissing it is what the caller does next.
+     */
+    protected void pressCtrl(final int keyCode) {
+        final JFrame frame = (JFrame) window.target();
+        final KeyStroke shortcut = KeyStroke.getKeyStroke(keyCode, InputEvent.CTRL_DOWN_MASK);
+        final Action action = GuiActionRunner.execute(new GuiQuery<Action>() {
+            @Override
+            protected Action executeInEDT() {
+                JRootPane root = frame.getRootPane();
+                Object name = root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(shortcut);
+                return (name == null) ? null : root.getActionMap().get(name);
+            }
+        });
+        assertThat(action)
+                .describedAs("the window-level action bound to " + shortcut)
+                .isNotNull();
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                action.actionPerformed(
+                        new ActionEvent(frame, ActionEvent.ACTION_PERFORMED, null));
+            }
+        });
     }
 
     /**

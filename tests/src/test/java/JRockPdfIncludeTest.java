@@ -164,15 +164,12 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
      * <p>
      * Ctrl+I rather than the prompt's context menu: it is bound on the root pane as
      * WHEN_IN_FOCUSED_WINDOW and opens the very same chooser, without depending on
-     * a popup being rendered and hit-tested on a virtual display.
+     * a popup being rendered and hit-tested on a virtual display. See
+     * {@link JRockGuiFixture#pressCtrl} for why the shortcut is fired through its
+     * binding rather than typed on the keyboard.
      */
     private void includeAsPageImages(Path pdf) {
-        promptArea().focus();
-        // Ctrl held explicitly rather than passed as a modifier mask: AssertJ-Swing
-        // translates masks through a table that knows only the legacy InputEvent
-        // constants, so CTRL_DOWN_MASK silently presses nothing at all.
-        robot.pressKeyWhileRunning(KeyEvent.VK_CONTROL,
-                () -> robot.pressAndReleaseKey(KeyEvent.VK_I));
+        pressCtrl(KeyEvent.VK_I);
 
         JFileChooserFixture chooser =
                 JFileChooserFinder.findFileChooser().withTimeout(DIALOG_TIMEOUT_MS).using(robot);

@@ -147,15 +147,12 @@ class JRockPromptsDirTest extends JRockGuiFixture {
     }
 
     /**
-     * Presses Ctrl+&lt;key&gt; on the main window and returns the chooser it opens.
-     * <p>
-     * Ctrl held explicitly rather than passed as a modifier mask: AssertJ-Swing
-     * translates masks through a table that knows only the legacy InputEvent
-     * constants, so CTRL_DOWN_MASK silently presses nothing at all.
+     * Fires the Ctrl+&lt;key&gt; shortcut on the main window and returns the chooser it
+     * opens. See {@link JRockGuiFixture#pressCtrl} for why the shortcut is triggered
+     * through its binding rather than typed on the keyboard.
      */
     private JFileChooserFixture pressCtrlAnd(final int key) {
-        promptArea().focus();
-        robot.pressKeyWhileRunning(KeyEvent.VK_CONTROL, () -> robot.pressAndReleaseKey(key));
+        pressCtrl(key);
         return JFileChooserFinder.findFileChooser().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
     }
 
