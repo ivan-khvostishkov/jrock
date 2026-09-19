@@ -63,26 +63,38 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
 4. Type a prompt and press **Ctrl+Enter** (or the **Send** button).
 
-### `--prompts-dir`
+### The prompts directory
 
 Prompts tend to live together in one folder, while the working directory is wherever
-today's work is. `--prompts-dir <dir>` separates the two:
+today's work is. The **prompts directory** separates the two:
 
-- **Ctrl+O / Ctrl+S** open in `<dir>` instead of the working directory. As always, the
-  chooser then remembers wherever you last browsed; reconfiguring returns it to `<dir>`.
-- The **initial-prompt-file argument** is resolved relative to `<dir>`, so it can be a bare
-  file name. Absolute paths are unaffected.
+- **Ctrl+O and Ctrl+S always open there.** Not "there the first time, then wherever you last
+  browsed" — *every* time. A prompt library is a place you keep going back to, so a chooser
+  that drifts adds a small navigation chore to every single load. If it's opening in the wrong
+  place, that's a setting to change, not a folder to re-navigate.
+- The **initial-prompt-file argument** is resolved relative to it, so it can be a bare file
+  name. Absolute paths are unaffected.
 - **Include (Ctrl+I)** and log exports are deliberately *not* affected — those files live
-  wherever the source material is.
+  wherever the source material is, so those choosers do remember where you last browsed.
 
-On Windows, installing the **"JRock here!"** Explorer entries while this flag is in effect
-bakes it into them, so the library follows you into every folder — see
+Set it in the **Configure dialog** (its own row, under the working directory), or on the
+command line with `--prompts-dir <dir>`. The dialog wins: changing it there replaces
+whatever the flag asked for, for the rest of the session.
+
+Unset, prompts simply **follow the working directory** — which is what a plain launch gets,
+and what setting the prompts directory equal to the working directory means. That state isn't
+a path frozen at launch: change the working directory later and prompts come with it.
+
+On Windows, installing the **"JRock here!"** Explorer entries bakes in whichever prompts
+directory is in effect at that moment — but only if it differs from the working directory,
+since otherwise the flag would pin every future launch to today's folder. So the library
+follows you into every folder; see
 [Explorer right-click integration](#windows-explorer-right-click-integration).
 
-`--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file.
-Without the flag, everything follows the working directory exactly as before. The resolved
-directory is reported in the startup log, including when the path isn't usable — in which
-case it's reported and ignored rather than silently applied.
+`--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file. The
+directory is reported in the startup log whenever it isn't just the working directory —
+including when the path isn't usable, in which case it's reported and ignored rather than
+silently applied.
 
 ## JRock Web (in the browser)
 
@@ -295,6 +307,12 @@ includes in prior turns are expanded too.
 
 - **Working directory** (with a Browse button) — reroutes JRock's own files to the chosen
   folder. The OS-level process working directory is unchanged.
+- **Prompts directory** (with a Browse button) — where Ctrl+O and Ctrl+S open, always (see
+  [the prompts directory](#the-prompts-directory)). It shows the path actually in effect, so
+  on a plain launch it shows the working directory; set it back to that to have prompts follow
+  the working directory again. Leaving the row untouched changes nothing, so moving the
+  working directory alone doesn't pin prompts to the folder you just left. A directory that
+  doesn't exist yet is created.
 - **BEDROCK_API_KEY** — write-only: left blank, it keeps the current key; type a value to
   override for the session. The key is never displayed or stored beyond the running process.
   In the browser this row is absent: the key belongs to the page (see
@@ -369,12 +387,14 @@ Details:
 - **No console window.** Both launch `javaw.exe`, so nothing flashes on screen.
 - **Self-configuring.** They use the `javaw.exe` of the JVM currently running JRock, and launch
   JRock's own `jrock.jar` (or the `JRock.java` file when running from source) — no paths to edit.
-- **The prompt library comes along.** If JRock was started with
-  [`--prompts-dir`](#--prompts-dir), both entries are installed carrying that flag, so
-  **Ctrl+O opens your prompt library from whichever folder you right-clicked**. Explorer
-  supplies the working directory; this supplies the prompts directory. It is captured at
-  install time, so reinstall after changing it — the confirmation dialog and the log both
-  spell out exactly what was written.
+- **The prompt library comes along.** If a [prompts directory](#the-prompts-directory) is set
+  — from `--prompts-dir` or from the Configure dialog — both entries are installed carrying
+  that flag, so **Ctrl+O opens your prompt library from whichever folder you right-clicked**.
+  Explorer supplies the working directory; this supplies the prompts directory. Nothing is
+  written when prompts just follow the working directory, since the flag would then pin every
+  future launch to the folder you installed from. It is captured at install time, so reinstall
+  after changing it — the confirmation dialog and the log both spell out exactly what was
+  written, including when nothing was.
 - **Inspectable.** The applied registry file is kept under `JRock/`
   (`jrock-context-menu-install.reg` / `jrock-context-menu-uninstall.reg`), and each action is
   recorded in the log.

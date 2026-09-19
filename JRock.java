@@ -8,7 +8,10 @@
 //     --prompts-dir makes <dir> the directory Load/Save prompt (Ctrl+O / Ctrl+S)
 //     opens in, and the initial-prompt-file argument is then resolved relative to
 //     it - so it can be a bare file name. Absolute paths are unaffected. Without
-//     the flag, both follow the working directory exactly as before.
+//     the flag it follows the working directory.
+//     The same setting is in the Configure dialog, which overrides the flag for the
+//     rest of the session; installing the Explorer entries then bakes in whatever
+//     is in effect at that moment.
 //
 // Persistence (crash recovery + full local history):
 //   Everything lives under a "JRock" subfolder of the working directory.
@@ -172,32 +175,48 @@ public class JRock {
     // are distinguishable in Alt-Tab / the taskbar.
     private static Path workingDir = Paths.get("").toAbsolutePath();
 
-    // Where prompts live, from --prompts-dir on the command line. NULL means "follow
-    // the working directory", which is what happens without the flag - so a plain
-    // launch behaves exactly as before.
+    // Where prompts live: --prompts-dir on the command line, or the Configure dialog.
     //
     // This is deliberately separate from workingDir: a collection of prompts is
     // reference material that tends to sit in one place, while the working directory
     // is wherever today's work is. Keeping prompts out of it means Ctrl+O opens in
     // the library rather than in whichever folder JRock was started from.
+    //
+    // NULL means "follow the working directory" - the unset state, and what a plain
+    // launch gets. The invariant is that this is non-null ONLY when the prompts
+    // directory actually differs from the working one, so a value equal to it is
+    // stored as null instead. Two things read that directly: the session report,
+    // which then has nothing extra to say, and an installed Explorer entry, which
+    // then carries no --prompts-dir - a flag repeating the launch folder would be
+    // noise at best and wrong the moment you launched from elsewhere.
     private static Path promptsDir = null;
 
-    // What to print for --prompts-dir in the session report, including a complaint
-    // when the path wasn't usable. Held as a string because the command line is
-    // parsed before the log exists. Null when the flag wasn't given.
+    // The prompts directory in effect: the configured one, or the working directory
+    // when prompts follow it. Every prompt dialog opens here.
+    private static Path promptsDir() { return promptsDir != null ? promptsDir : workingDir; }
+
+    // What to say about the prompts directory in the session report when promptsDir
+    // itself doesn't say it: a --prompts-dir value that had to be rejected, or one
+    // that was accepted but meant nothing. Held as a string because the command line
+    // is parsed before the log exists. Null when there is no such story to tell.
     private static String promptsDirNote = null;
 
     // Remembers where a file chooser last browsed, so the next dialog of the same
     // kind opens there. One instance PER PURPOSE, because these files live in
-    // different places in practice: prompts in a prompt folder, included documents
-    // and images wherever the source material is, exported logs somewhere else
-    // again. A single shared memory meant that including a file dropped the user in
-    // the prompt folder (and vice versa) - a directory away from what they wanted.
+    // different places in practice: included documents and images wherever the
+    // source material is, exported logs somewhere else again. A single shared memory
+    // meant that exporting a log dropped the user where they last included a file - a
+    // directory away from what they wanted.
+    //
+    // The two prompt dialogs (Ctrl+O, Ctrl+S) deliberately have NO ChooserDir: both
+    // always open in the prompts directory. That is a setting now, and a setting that
+    // quietly drifts as you browse is not one. It also keeps the pair symmetric -
+    // prompts are loaded from and saved to the same place, which is what a library
+    // is. See loadPromptInto and savePromptAs.
     private static final class ChooserDir {
         // Where this chooser goes when it has nothing remembered. A supplier, not a
-        // Path, because both of the directories these resolve against are mutable:
-        // workingDir changes via the Configure dialog, and promptsDir is set from the
-        // command line AFTER this class is initialized.
+        // Path, because workingDir is mutable - the Configure dialog changes it, and
+        // these fields are initialized long before that.
         private final java.util.function.Supplier<Path> home;
         private Path dir;
 
@@ -218,15 +237,11 @@ public class JRock {
             if (current != null) dir = current.toPath();
         }
 
-        // Back to this chooser's home directory; see initSession(). Called on startup
-        // too, which is what lets --prompts-dir take effect: the flag is parsed after
-        // these fields are initialized.
+        // Back to this chooser's home directory; see initSession().
         void reset() { dir = home.get(); }
     }
-    // Save/Load prompt: the prompts directory when one was given, else the working one.
-    private static final ChooserDir promptChooserDir  =
-            new ChooserDir(() -> promptsDir != null ? promptsDir : workingDir);
     private static final ChooserDir includeChooserDir = new ChooserDir(() -> workingDir);
+
     private static final ChooserDir logChooserDir     = new ChooserDir(() -> workingDir);
 
     // Derived endpoints/paths (recomputed from the mutable config above).
@@ -569,11 +584,48 @@ public class JRock {
             return;
         }
         Path candidate = Paths.get(value).toAbsolutePath().normalize();
-        if (Files.isDirectory(candidate)) {
-            promptsDir = candidate;
-            promptsDirNote = candidate.toString();
-        } else {
+        if (!Files.isDirectory(candidate)) {
             promptsDirNote = candidate + " (not a directory - using the working directory)";
+        } else if (candidate.equals(workingDir)) {
+            // Accepted, and then deliberately not stored: prompts already open here.
+            // Left as null to keep promptsDir's invariant (see its declaration), so
+            // an Explorer entry installed later doesn't carry a --prompts-dir naming
+            // the folder it was launched from. Still reported, because the flag WAS
+            // given and silence would look like it had been dropped.
+            promptsDirNote = candidate + " (same as the working directory)";
+        } else {
+            promptsDir = candidate;
+        }
+    }
+
+    // The same setting from the Configure dialog, which replaces whatever
+    // --prompts-dir asked for - the dialog is the later word, and the one the user is
+    // looking at. Unlike the command line, a directory that doesn't exist yet is
+    // CREATED: this path was typed or browsed to deliberately, just like the working
+    // directory a few lines above it, and refusing it would be the odd one out.
+    private static void applyPromptsDir(JFrame frame, String value) {
+        // Emptied on purpose: back to following the working directory.
+        if (value.isEmpty()) {
+            promptsDir = null;
+            promptsDirNote = null;
+            return;
+        }
+        Path candidate = Paths.get(value).toAbsolutePath().normalize();
+        if (candidate.equals(workingDir)) {
+            // Left null rather than stored, per promptsDir's invariant: prompts now
+            // follow the working directory, including if it changes again later.
+            promptsDir = null;
+            promptsDirNote = null;
+            return;
+        }
+        try {
+            Files.createDirectories(candidate);
+            promptsDir = candidate;
+            promptsDirNote = null;   // the path itself is now the whole story
+        } catch (IOException ex) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Could not use prompts directory " + candidate + ":\n" + ex.getMessage(),
+                    "Invalid directory", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
     }
 
@@ -987,7 +1039,6 @@ public class JRock {
     // prompt is untouched so it's omitted.
     private static void initSession(LogView log, String promptSourceNote) {
         // Every file chooser starts fresh in the (possibly new) working directory.
-        promptChooserDir.reset();
         includeChooserDir.reset();
         logChooserDir.reset();
 
@@ -1000,9 +1051,13 @@ public class JRock {
         // The session report begins here; the working directory is its first line.
         // A restored log already ends with its own trailing blank line.
         log.gray("Working directory: " + workingDir);
-        // Only when --prompts-dir was given: without it, prompts follow the working
-        // directory and there is nothing to report.
-        if (promptsDirNote != null) {
+        // Only when prompts don't simply follow the working directory - saying so
+        // when they do would just repeat the line above. promptsDirNote covers the
+        // cases where promptsDir is null but something still needs explaining: a
+        // --prompts-dir that was rejected, or one that named the working directory.
+        if (promptsDir != null) {
+            log.gray("Prompts directory: " + promptsDir);
+        } else if (promptsDirNote != null) {
             log.gray("Prompts directory: " + promptsDirNote);
         }
         // App identity + local date/time in the user's locale/format.
@@ -1747,23 +1802,29 @@ public class JRock {
     }
 
     // ---- Configure dialog --------------------------------------------------
-    // Shows working directory, API key (write-only override), region and model.
+    // Shows working directory, prompts directory, API key (write-only override),
+    // region and model.
     // Returns true if the user applied changes (so the caller re-inits the session).
     private static boolean showConfigureDialog(JFrame frame) {
-        javax.swing.JTextField cwdF    = new javax.swing.JTextField(workingDir.toString(), 30);
-        JButton browse = new JButton("Browse...");
-        browse.addActionListener(ev -> {
-            javax.swing.JFileChooser dc = new javax.swing.JFileChooser(cwdF.getText().trim());
-            dc.setDialogTitle("Choose working directory");
-            dc.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
-            if (dc.showOpenDialog(frame) == javax.swing.JFileChooser.APPROVE_OPTION
-                    && dc.getSelectedFile() != null) {
-                cwdF.setText(dc.getSelectedFile().getAbsolutePath());
-            }
-        });
-        javax.swing.JPanel cwdRow = new javax.swing.JPanel(new BorderLayout(4, 0));
-        cwdRow.add(cwdF, BorderLayout.CENTER);
-        cwdRow.add(browse, BorderLayout.EAST);
+        // Named, because these two rows are otherwise indistinguishable from each
+        // other: same widget, and on a plain launch the same text as well.
+        javax.swing.JTextField cwdF = new javax.swing.JTextField(workingDir.toString(), 30);
+        cwdF.setName("workingDir");
+        javax.swing.JPanel cwdRow = dirRow(frame, cwdF, "Choose working directory");
+
+        // The prompts directory, shown as the path actually in effect rather than as
+        // an empty field meaning "wherever the working directory is": the user is
+        // being asked where their prompts live, and the honest answer is a path.
+        // Which is why what happens on OK depends on whether this was EDITED, not on
+        // what it contains - see the apply block.
+        String promptsShown = promptsDir().toString();
+        javax.swing.JTextField promptsF = new javax.swing.JTextField(promptsShown, 30);
+        promptsF.setName("promptsDir");
+        promptsF.setToolTipText("Where Load prompt (Ctrl+O) and Save prompt copy "
+                + "(Ctrl+S) open. Set it to the working directory to have prompts "
+                + "follow that instead.");
+        javax.swing.JPanel promptsRow = dirRow(frame, promptsF, "Choose prompts directory");
+
         javax.swing.JPasswordField keyF = new javax.swing.JPasswordField(24); // never prefilled
         javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
         // In the browser the API key belongs to the hosting page, so JRock has no
@@ -1801,6 +1862,7 @@ public class JRock {
         c.fill = java.awt.GridBagConstraints.HORIZONTAL;
         int row = 0;
         addRow(fields, c, row++, "Working directory:", cwdRow);
+        addRow(fields, c, row++, "Prompts directory:", promptsRow);
         if (!hostKey) {
             addRow(fields, c, row++, "BEDROCK_API_KEY:", keyF);
         }
@@ -1829,6 +1891,11 @@ public class JRock {
           + "Clearing the log only clears jrock-log.txt (and the window); the "
           + "per-message files in JRock/messages/ are never deleted, so your inputs "
           + "and outputs are preserved.\n\n"
+          + "The prompts directory is where Load prompt (Ctrl+O) and Save prompt copy "
+          + "(Ctrl+S) always open - they don't drift to wherever you last browsed. Set "
+          + "it to the working directory to have prompts simply follow that. It "
+          + "overrides " + PROMPTS_DIR_FLAG + " for this session, and installing the "
+          + "Explorer entries writes whichever directory is in effect then.\n\n"
           + "Note: a true OS process chdir isn't possible from Java, so changing the "
           + "working directory reroutes JRock's own files (a JRock/ subfolder holding "
           + "the prompt, log and messages/) to the new directory rather than changing "
@@ -1934,6 +2001,19 @@ public class JRock {
             }
         }
 
+        // Prompts directory. Applied only when the field was actually EDITED, which is
+        // what leaves "prompts follow the working directory" intact for someone who
+        // opened this dialog to change the working directory and nothing else: the
+        // field showed them the old working directory, and taking that at face value
+        // would silently pin prompts to a folder they just moved away from.
+        //
+        // Deliberately after the working directory above, so "same as the working
+        // directory" is judged against the new one.
+        String promptsText = promptsF.getText().trim();
+        if (!promptsText.equals(promptsShown)) {
+            applyPromptsDir(frame, promptsText);
+        }
+
         // API key override: only set if the user typed something. Never store the
         // env value; an empty field means "keep whatever is already in effect".
         // Skipped when the host holds the key - the field wasn't even shown.
@@ -1959,6 +2039,27 @@ public class JRock {
         return true;
     }
 
+    // A directory field with its own "Browse..." button, which opens on whatever the
+    // field currently holds. Two rows in the Configure dialog are exactly this, and
+    // wiring a chooser by hand twice is how two rows end up behaving differently.
+    private static javax.swing.JPanel dirRow(JFrame frame, javax.swing.JTextField field,
+                                             String chooserTitle) {
+        JButton browse = new JButton("Browse...");
+        browse.addActionListener(ev -> {
+            javax.swing.JFileChooser dc = new javax.swing.JFileChooser(field.getText().trim());
+            dc.setDialogTitle(chooserTitle);
+            dc.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
+            if (dc.showOpenDialog(frame) == javax.swing.JFileChooser.APPROVE_OPTION
+                    && dc.getSelectedFile() != null) {
+                field.setText(dc.getSelectedFile().getAbsolutePath());
+            }
+        });
+        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(4, 0));
+        panel.add(field, BorderLayout.CENTER);
+        panel.add(browse, BorderLayout.EAST);
+        return panel;
+    }
+
     // Adds a "label: field" row to a GridBagLayout panel.
     private static void addRow(javax.swing.JPanel p, java.awt.GridBagConstraints c,
                                int row, String label, javax.swing.JComponent field) {
@@ -1972,12 +2073,13 @@ public class JRock {
     // Saves a copy of the given text to a user-chosen file. Does NOT touch the
     // persistent jrock-prompt.txt; this is an extra export.
     private static void savePromptAs(JFrame frame, String text) {
-        javax.swing.JFileChooser chooser =
-                new javax.swing.JFileChooser(promptChooserDir.start());
+        // The prompts directory, every time - see loadPromptInto for why neither of
+        // these two remembers where it was last.
+        Path prompts = promptsDir();
+        javax.swing.JFileChooser chooser = new javax.swing.JFileChooser(prompts.toFile());
         chooser.setDialogTitle("Save prompt copy as");
-        chooser.setSelectedFile(promptChooserDir.startFile("jrock-prompt-copy.txt"));
+        chooser.setSelectedFile(new java.io.File(prompts.toFile(), "jrock-prompt-copy.txt"));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        promptChooserDir.remember(chooser);
 
         Path target = chooser.getSelectedFile().toPath();
         try {
@@ -2173,12 +2275,16 @@ public class JRock {
             log.gray("Applied registry file kept at: " + regFile);
             log.gray("");
             // Spelled out because it is baked in at install time, not read live: if
-            // the prompts directory changes, these entries keep the old one until
-            // they are installed again.
-            String promptsNote = (promptsDir == null) ? ""
+            // the prompts directory is changed in Configure afterwards, these entries
+            // keep the old one until they are installed again.
+            String promptsNote = (promptsDir == null)
+                    ? "Prompts follow the working directory, so the entries carry no "
+                    + PROMPTS_DIR_FLAG + ":\nCtrl+O opens in whichever folder you "
+                    + "launch from. Set a prompts directory\nin Configure and "
+                    + "reinstall to pin it.\n\n"
                     : "Both entries carry " + PROMPTS_DIR_FLAG + " " + promptsDir + ",\n"
                     + "so Ctrl+O opens there whichever folder you launch from.\n"
-                    + "Reinstall to change it.\n\n";
+                    + "Change it in Configure and reinstall to update this.\n\n";
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Installed two Explorer right-click entries:\n"
                         + "  \u2022 \"" + CTX_LABEL + "\" - inside or on a folder, launches JRock there.\n"
@@ -2271,8 +2377,14 @@ public class JRock {
     // Explorer supplies the working directory - that is the whole point of "JRock
     // here!" - but nothing would otherwise supply the prompts directory, so without
     // this the entry would always fall back to opening Ctrl+O in the clicked folder.
-    // Installing records the directory in effect at that moment; change it and you
-    // reinstall, which is why the dialog and the log both spell out what was written.
+    // Installing records the directory in effect at that moment, whether that came
+    // from the flag or from the Configure dialog since; change it and you reinstall,
+    // which is why the dialog and the log both spell out what was written.
+    //
+    // Nothing is written when prompts simply follow the working directory (promptsDir
+    // null, per its invariant): the flag would then name the folder this instance
+    // happened to be launched from, and bake it into every future launch from
+    // everywhere else - the opposite of what "JRock here!" means.
     private static String ctxPromptsDirArg() {
         if (promptsDir == null) return "";
         String dir = promptsDir.toString();
@@ -2398,9 +2510,15 @@ public class JRock {
 
     // Loads a prompt from a user-chosen file (read-only) into the input area.
     // The document listener then autosaves the loaded text to jrock-prompt.txt.
+    //
+    // Always opens in the prompts directory - it does NOT remember where it was last.
+    // A prompt library is a place you go back to, so Ctrl+O landing somewhere else
+    // because of where you last browsed is a small navigation chore added to every
+    // single load. Where that place is is now a setting (Configure), which is the
+    // thing to change if it's wrong; Ctrl+S is the same, so the pair stays symmetric.
     private static void loadPromptInto(JFrame frame, JTextArea input, LogView log) {
         javax.swing.JFileChooser chooser =
-                new javax.swing.JFileChooser(promptChooserDir.start());
+                new javax.swing.JFileChooser(promptsDir().toFile());
         chooser.setDialogTitle("Load prompt");
         // Prompts are text - restrict to text types so an image can't be loaded by
         // mistake.
@@ -2408,7 +2526,6 @@ public class JRock {
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 TEXT_FILTER_LABEL, TEXT_EXTENSIONS));
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        promptChooserDir.remember(chooser);
 
         Path source = chooser.getSelectedFile().toPath();
         String loaded = readFileQuietly(source);

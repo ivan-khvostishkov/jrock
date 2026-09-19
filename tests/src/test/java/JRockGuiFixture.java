@@ -67,8 +67,8 @@ abstract class JRockGuiFixture {
      * Saved before each test and put back after it.
      */
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
-            "workingDir", "apiKeyOverride", "REGION", "regionSource", "MODEL_ID",
-            "availableModels", "pdfDpi");
+            "workingDir", "promptsDir", "promptsDirNote", "apiKeyOverride", "REGION",
+            "regionSource", "MODEL_ID", "availableModels", "pdfDpi");
 
     private final Map<String, Object> savedConfig = new LinkedHashMap<>();
 

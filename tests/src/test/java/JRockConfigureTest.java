@@ -40,9 +40,9 @@ class JRockConfigureTest extends JRockGuiFixture {
     void neverShowsBackTheApiKeyItWasGiven() throws Exception {
         awaitReadyCount(1);
 
-        // Set directly rather than typed into the dialog's region field: three of the
-        // dialog's fields are JTextFields, and picking one out by type alone would be
-        // ambiguous. What is under test here is the key field, not the region field.
+        // Set directly rather than typed into the dialog's region field: several of
+        // the dialog's fields are JTextFields, and picking one out by type alone would
+        // be ambiguous. What is under test here is the key field, not the region field.
         field("REGION").set(null, UNROUTABLE_REGION);
 
         JOptionPaneFixture dialog = openConfigure();
