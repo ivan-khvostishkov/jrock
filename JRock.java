@@ -2627,7 +2627,7 @@ public class JRock {
         String gs = findGhostscript();
         if (gs == null) {
             // Name the executable the current platform actually looks for.
-            String exe = isWindows() ? "gswin64c" : "gs";
+            String exe = isWindows() ? "gswin64" : "gs";
             log.gray("Ghostscript (" + exe + ") was not found on PATH. Install it from "
                     + "https://ghostscript.com/ to convert PDFs, then try again.");
             onEdt(() -> {
@@ -2663,15 +2663,22 @@ public class JRock {
         cmd.add(gs);
         // No -q: Ghostscript's own progress ("Processing pages 1 through N.", then a
         // "Page N" as each one is finished) is the only honest answer to "is this
-        // working, and how far along is it?" on a long document. Each line is echoed
-        // into the log below as it arrives.
+        // working, and how far along is it?" on a long document.
         cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
-        // Those messages go to stderr rather than stdout, because a pipe makes the C
-        // runtime buffer stdout in 4 KB blocks - progress would then arrive in bursts,
-        // or all at once at the end, which is precisely what it is there to avoid.
-        // stderr is unbuffered, and redirectErrorStream below reads both as one.
-        // Page output is unaffected: -o writes that to files, not to stdout.
-        cmd.add("-sstdout=%stderr");
+        boolean windowed = isWindowedGhostscript(gs);
+        if (!windowed) {
+            // Console build: the messages are read back through the pipe and echoed
+            // into the log below. They are asked for on stderr rather than stdout
+            // because a pipe makes the C runtime buffer stdout in 4 KB blocks -
+            // progress would then arrive in bursts, or all at once at the end, which
+            // is precisely what it is there to avoid. stderr is unbuffered, and
+            // redirectErrorStream below reads both as one. Page output is unaffected:
+            // -o writes that to files, not to stdout.
+            cmd.add("-sstdout=%stderr");
+        }
+        // The windowed build gets no -sstdout at all, deliberately: it honours the
+        // redirect, and its own window - the whole reason for preferring it - would
+        // then sit there empty.
         cmd.add("-sDEVICE=" + device);
         if (asImages) { cmd.add("-r" + pdfDpi); }   // page raster resolution (Configure)
         cmd.add("-o"); cmd.add(outPattern);
@@ -2680,12 +2687,21 @@ public class JRock {
         // Logged before the process is started, and now actually seen: this method is
         // off the EDT, so the pane repaints while Ghostscript works.
         log.gray("Converting PDF with Ghostscript: " + String.join(" ", cmd));
+        if (windowed) {
+            // Said plainly, because the log falls silent for the whole conversion and
+            // the window is somewhere else on screen - possibly behind this one.
+            log.gray("Ghostscript reports its progress in its own window; it closes "
+                    + "when the conversion finishes.");
+        }
         int code;
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             Process p = pb.start();
-            // Drain output so the process can't block, and echo it to the log.
+            // Drain output so the process can't block, and echo it to the log. The
+            // windowed build writes nothing here - its messages go to its window - so
+            // this reads to end-of-stream and logs nothing, which is also what keeps
+            // the wait below from starting before the process has finished.
             try (java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
@@ -2699,7 +2715,9 @@ public class JRock {
             return;
         }
         if (code != 0) {
-            log.gray("Ghostscript exited with code " + code + "; no pages included.");
+            log.gray("Ghostscript exited with code " + code + "; no pages included."
+                    // Nothing was echoed, so say where the reason went.
+                    + (windowed ? " It reported the reason in its own window." : ""));
             return;
         }
 
@@ -2738,11 +2756,16 @@ public class JRock {
         // prompt once the whole batch is finished, on the EDT where it belongs.
     }
 
-    // Finds the Ghostscript console executable on PATH (gswin64c/gswin32c on
-    // Windows, "gs" elsewhere). Returns the command to run, or null if not found.
+    // Finds Ghostscript on PATH. Returns the command to run, or null if not found.
+    //
+    // On Windows the WINDOWED build (gswin64.exe) is preferred over the console one
+    // (gswin64c.exe): it puts up its own window and reports its progress there, which
+    // is what a long conversion needs - a native window that is visibly working,
+    // rather than a hidden console. The console builds stay as the fallback, for an
+    // installation that ships only those. Elsewhere there is one "gs" and no choice.
     private static String findGhostscript() {
         String[] names = isWindows()
-                ? new String[] { "gswin64c", "gswin32c", "gs" }
+                ? new String[] { "gswin64", "gswin32", "gswin64c", "gswin32c", "gs" }
                 : new String[] { "gs" };
         String path = System.getenv("PATH");
         String[] dirs = path == null ? new String[0] : path.split(java.io.File.pathSeparator);
@@ -2757,6 +2780,18 @@ public class JRock {
             }
         }
         return null;
+    }
+
+    // Whether that command is one of Ghostscript's windowed Windows builds.
+    //
+    // The naming is Ghostscript's own and has been stable for decades: gswin64 is the
+    // windowed build, gswin64c the console one - the trailing "c". It decides two
+    // things below: that JRock must not redirect gs's messages (they are what the
+    // window shows), and that it therefore cannot echo them into the log.
+    private static boolean isWindowedGhostscript(String command) {
+        String name = Paths.get(command).getFileName().toString().toLowerCase();
+        if (name.endsWith(".exe")) name = name.substring(0, name.length() - 4);
+        return name.startsWith("gswin") && !name.endsWith("c");
     }
 
     // ---- Move & resize dialog (Ctrl+M) -------------------------------------

@@ -245,8 +245,15 @@ Attach **text or image** files to a prompt (and convert **PDFs** to either):
 ### PDF conversion (Ghostscript)
 
 Selecting a PDF filter runs **Ghostscript** to convert the PDF, one file per page, then
-includes each produced page. Ghostscript must be on your PATH: `gswin64c` on Windows, `gs` on
+includes each produced page. Ghostscript must be on your PATH: `gswin64` on Windows, `gs` on
 macOS and Linux.
+
+A long conversion says so while it runs, rather than after. The command line is logged before
+Ghostscript is started, and the conversion happens off the UI thread so the window stays
+alive. On **Windows** JRock runs the **windowed** build (`gswin64.exe`, preferring it over
+`gswin64c.exe`), which reports its progress in its own window and closes when finished.
+Everywhere else the console `gs` is run with `-q` omitted, and its progress — `Page 1`,
+`Page 2`, … — is echoed into the log as `gs:` lines while it works.
 
 - Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.txt` (text pages via
   the `txtwrite` device) or `<pdfname>.gs.NNN.png` (page images at the **PDF image DPI** set
@@ -458,7 +465,8 @@ Nothing is stubbed and no credentials are needed: tests run with `BEDROCK_API_KE
 JRock skips its startup model-list fetch. No test contacts AWS — the one case that does set a
 key points the region at a host that doesn't resolve, so the fetch fails at DNS.
 
-One external program is needed: **Ghostscript on `PATH`** (`gs`, or `gswin64c` on Windows),
+One external program is needed: **Ghostscript on `PATH`** (`gs`, or `gswin64`/`gswin64c` on
+Windows),
 for the PDF test — which converts a real PDF rather than pretending to. CI installs it; the
 test fails with that as its message if it's missing.
 

@@ -80,13 +80,24 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
                 .describedAs("the logged Ghostscript command line")
                 .contains("-r" + DPI);
 
-        // 2. Ghostscript's own progress was echoed, page by page. This is what keeps
-        //    -q out of that command line: with it, gs says nothing at all, and a long
-        //    conversion looks like a hung application.
-        assertThat(logPane().text())
-                .describedAs("Ghostscript's own output, echoed into the log")
-                .contains("gs: Page 1")
-                .contains("gs: Page 2");
+        // 2. The user was told what Ghostscript is doing, page by page - which is what
+        //    keeps -q off that command line: with it, gs says nothing at all, and a
+        //    long conversion looks like a hung application.
+        //
+        //    Where it is said depends on the build. Only the console one can be
+        //    echoed; on Windows JRock prefers the windowed gswin64.exe, which reports
+        //    into its own window and writes nothing to the pipe, so the log points
+        //    there instead.
+        if (windowedGhostscript()) {
+            assertThat(logPane().text())
+                    .describedAs("the log saying where Ghostscript's progress appears")
+                    .contains("Ghostscript reports its progress in its own window");
+        } else {
+            assertThat(logPane().text())
+                    .describedAs("Ghostscript's own output, echoed into the log")
+                    .contains("gs: Page 1")
+                    .contains("gs: Page 2");
+        }
 
         // 3. Two pages came back, and JRock measured each at A4-at-300dpi.
         assertThat(logPane().text())
@@ -121,6 +132,14 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
         java.lang.reflect.Method find = JRock.class.getDeclaredMethod("findGhostscript");
         find.setAccessible(true);
         return (String) find.invoke(null);
+    }
+
+    /** Whether that Ghostscript is one of the windowed Windows builds. */
+    private static boolean windowedGhostscript() throws Exception {
+        java.lang.reflect.Method windowed =
+                JRock.class.getDeclaredMethod("isWindowedGhostscript", String.class);
+        windowed.setAccessible(true);
+        return (Boolean) windowed.invoke(null, ghostscriptOnPath());
     }
 
     /** Opens Configure, picks the DPI from the dropdown, and applies it. */
