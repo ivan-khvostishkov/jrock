@@ -2554,19 +2554,15 @@ public class JRock {
 
         if (isImage) {
             // Dimensions + total pixel count + file size (all locale-formatted).
-            try {
-                java.awt.image.BufferedImage bi = javax.imageio.ImageIO.read(file.toFile());
-                if (bi != null) {
-                    long pixels = (long) bi.getWidth() * bi.getHeight();
-                    log.gray("Image: " + bi.getWidth() + " x " + bi.getHeight()
-                            + ", " + fmtNum(pixels) + " pixels"
-                            + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
-                } else {
-                    log.gray("Image: (could not decode dimensions)"
-                            + (fileBytes >= 0 ? "; " + fmtNum(fileBytes) + " bytes" : ""));
-                }
-            } catch (IOException ex) {
-                log.gray("Image: (could not read dimensions: " + ex.getMessage() + ")");
+            int[] size = imageSize(file);
+            if (size != null) {
+                long pixels = (long) size[0] * size[1];
+                log.gray("Image: " + size[0] + " x " + size[1]
+                        + ", " + fmtNum(pixels) + " pixels"
+                        + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
+            } else {
+                log.gray("Image: (dimensions not in the header)"
+                        + (fileBytes >= 0 ? "; " + fmtNum(fileBytes) + " bytes" : ""));
             }
         } else {
             // Text: symbol count (Unicode code points) + byte count.
@@ -2611,6 +2607,167 @@ public class JRock {
             input.append(token + "\n");   // fallback: append at end
         }
         return true;
+    }
+
+    // ---- Image dimensions --------------------------------------------------
+    // Width and height read straight out of an image's header: {width, height}, or
+    // null if the format isn't one of these or the file is truncated.
+    //
+    // Deliberately NOT ImageIO. In the browser (CheerpJ) ImageIO.read on a JPEG walks
+    // into the JDK's colour management, which wants the native lcms library that a
+    // browser JVM has no way to load:
+    //   java.lang.UnsatisfiedLinkError: no lcms in java.library.path
+    //   ... sun.java2d.cmm.lcms.LCMS.getModule -> JPEGImageReader.setImageData
+    // That is an Error, not an IOException, so it went straight past the catch around
+    // it and out of the include - losing the file over a line of log text.
+    //
+    // A header is a handful of integers in a documented place, so reading it needs no
+    // native code, no image decoder and no platform: web and desktop now report the
+    // same numbers by running the same arithmetic. It is also strictly less work -
+    // a 40 MB photo is no longer decoded into memory in full just to log its size.
+    //
+    // The four formats the include filter accepts: PNG, JPEG, GIF, WEBP. The bytes
+    // JRock sends the model are untouched by any of this - an image is uploaded as
+    // itself (base64), so these numbers are only ever for the log.
+    private static final int IMAGE_HEAD_BYTES = 32;   // enough for PNG, GIF and WEBP
+
+    private static int[] imageSize(Path file) {
+        try (java.io.InputStream in =
+                     new java.io.BufferedInputStream(Files.newInputStream(file), 8192)) {
+            in.mark(IMAGE_HEAD_BYTES);
+            byte[] h = new byte[IMAGE_HEAD_BYTES];
+            int n = 0;
+            for (int r; n < h.length && (r = in.read(h, n, h.length - n)) >= 0; ) n += r;
+            in.reset();
+
+            // PNG: 8-byte signature, then the IHDR chunk, whose first two fields are
+            // the dimensions as big-endian 32-bit.
+            if (n >= 24 && (h[0] & 0xFF) == 0x89 && h[1] == 'P' && h[2] == 'N' && h[3] == 'G'
+                    && isAscii(h, 12, "IHDR")) {
+                return positive(be32(h, 16), be32(h, 20));
+            }
+            // GIF: "GIF87a"/"GIF89a", then the logical screen size, little-endian 16-bit.
+            if (n >= 10 && isAscii(h, 0, "GIF8")) {
+                return positive(le16(h, 6), le16(h, 8));
+            }
+            // WEBP: a RIFF container whose payload says which of three encodings it is.
+            if (n >= 16 && isAscii(h, 0, "RIFF") && isAscii(h, 8, "WEBP")) {
+                return webpSize(h, n);
+            }
+            // JPEG: no fixed place at all - the size lives in a frame header that can
+            // sit behind any amount of EXIF, ICC or thumbnail data, so the segments
+            // have to be walked. Continues from the stream, past the SOI.
+            if (n >= 2 && (h[0] & 0xFF) == 0xFF && (h[1] & 0xFF) == 0xD8) {
+                skipFully(in, 2);
+                return jpegSize(in);
+            }
+            return null;
+        } catch (IOException ex) {
+            return null;
+        }
+    }
+
+    // WEBP, from the 32-byte head: one of three payload chunks, each packing the
+    // canvas size differently. VP8X is the extended format (the one an animation or
+    // an alpha channel produces), VP8 the ordinary lossy one, VP8L the lossless one.
+    private static int[] webpSize(byte[] h, int n) {
+        if (n >= 30 && isAscii(h, 12, "VP8X")) {
+            // Canvas size is stored minus one, as 24-bit little-endian.
+            return positive(le24(h, 24) + 1, le24(h, 27) + 1);
+        }
+        if (n >= 30 && isAscii(h, 12, "VP8 ")) {
+            // A 3-byte frame tag, then the 3-byte start code, then 14 bits of width
+            // and 14 of height, each with 2 scaling bits above them.
+            if ((h[23] & 0xFF) != 0x9D || (h[24] & 0xFF) != 0x01 || (h[25] & 0xFF) != 0x2A) {
+                return null;
+            }
+            return positive(le16(h, 26) & 0x3FFF, le16(h, 28) & 0x3FFF);
+        }
+        if (n >= 25 && isAscii(h, 12, "VP8L") && (h[20] & 0xFF) == 0x2F) {
+            // 14 bits of width-1 then 14 of height-1, packed into 4 little-endian bytes.
+            int bits = le16(h, 21) | (le16(h, 23) << 16);
+            return positive((bits & 0x3FFF) + 1, ((bits >>> 14) & 0x3FFF) + 1);
+        }
+        return null;
+    }
+
+    // JPEG: walks the segments from just after the SOI to the first frame header
+    // (SOF), which carries the size. Reached the image data without finding one ->
+    // null, rather than a guess.
+    private static int[] jpegSize(java.io.InputStream in) throws IOException {
+        while (true) {
+            // Segments are introduced by 0xFF; a run of them is padding.
+            int b = u8(in);
+            if (b != 0xFF) continue;
+            int marker = u8(in);
+            while (marker == 0xFF) marker = u8(in);
+
+            // Standalone markers: no length, no payload.
+            if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD9)) continue;
+
+            int length = (u8(in) << 8) | u8(in);   // includes these two bytes
+            if (length < 2) return null;
+            if (isStartOfFrame(marker)) {
+                u8(in);                            // sample precision
+                int height = (u8(in) << 8) | u8(in);
+                int width = (u8(in) << 8) | u8(in);
+                return positive(width, height);
+            }
+            if (marker == 0xDA) return null;       // start of scan: the pixels, no SOF
+            skipFully(in, length - 2);
+        }
+    }
+
+    // SOF0..SOF15 - baseline through lossless and hierarchical - minus the three
+    // markers that share that range without being frame headers: DHT (0xC4),
+    // JPG (0xC8) and DAC (0xCC).
+    private static boolean isStartOfFrame(int marker) {
+        return marker >= 0xC0 && marker <= 0xCF
+                && marker != 0xC4 && marker != 0xC8 && marker != 0xCC;
+    }
+
+    private static int u8(java.io.InputStream in) throws IOException {
+        int b = in.read();
+        if (b < 0) throw new java.io.EOFException("truncated image header");
+        return b;
+    }
+
+    private static void skipFully(java.io.InputStream in, long count) throws IOException {
+        long left = count;
+        while (left > 0) {
+            long skipped = in.skip(left);
+            // skip() may legitimately do nothing, so fall back to reading a byte;
+            // this way a stream that only ever returns 0 still terminates on EOF.
+            if (skipped <= 0) { u8(in); left--; } else { left -= skipped; }
+        }
+    }
+
+    private static boolean isAscii(byte[] b, int at, String want) {
+        if (at + want.length() > b.length) return false;
+        for (int i = 0; i < want.length(); i++) {
+            if ((b[at + i] & 0xFF) != want.charAt(i)) return false;
+        }
+        return true;
+    }
+
+    private static int be32(byte[] b, int at) {
+        return ((b[at] & 0xFF) << 24) | ((b[at + 1] & 0xFF) << 16)
+                | ((b[at + 2] & 0xFF) << 8) | (b[at + 3] & 0xFF);
+    }
+
+    private static int le16(byte[] b, int at) {
+        return (b[at] & 0xFF) | ((b[at + 1] & 0xFF) << 8);
+    }
+
+    private static int le24(byte[] b, int at) {
+        return le16(b, at) | ((b[at + 2] & 0xFF) << 16);
+    }
+
+    // Both dimensions or nothing: a zero or negative size means the header was not
+    // what it claimed to be, and reporting "0 x 0 pixels" would be worse than saying
+    // the dimensions could not be read.
+    private static int[] positive(int width, int height) {
+        return (width > 0 && height > 0) ? new int[] { width, height } : null;
     }
 
     // Converts a PDF to per-page files with Ghostscript, then includes

@@ -110,6 +110,9 @@ as WebAssembly), so nothing runs on a server.
   between JRock and your mail or notes, by Ctrl+C/X/V or from the context menus. A browser
   may ask permission the first time a page reads the clipboard, and some refuse reads
   outright — paste then falls back to whatever was last copied inside JRock, and says so.
+- **Image includes work too.** A browser JVM has no native libraries, so nothing here may
+  depend on one — JRock reads an image's dimensions from its header rather than decoding it
+  (see [Multimodal includes](#multimodal-includes-ctrli)).
 
 ![JRock running in a browser tab, saving just the selected reply to the downloads folder](images/web-save-selection.png)
 
@@ -241,6 +244,16 @@ Attach **text or image** files to a prompt (and convert **PDFs** to either):
 4. The log records each include with stats (locale-formatted numbers):
    - **Images**: dimensions, total pixel count, and file size in bytes.
    - **Text**: symbol count (Unicode code points) and file size in bytes.
+
+Image dimensions are read **straight out of the file header** — the PNG, GIF, WEBP and JPEG
+headers all state the size in a documented place — rather than by decoding the image. That is
+the same arithmetic on every platform, so the browser build reports the same numbers as the
+desktop one; `ImageIO` could not, because in CheerpJ it reaches for the JDK's *native* colour
+management (`UnsatisfiedLinkError: no lcms in java.library.path`) and an image include failed
+outright over a line of log text. It is also less work: a 40 MB photo is no longer decoded in
+full just to say how big it is. If a header can't be read, the include still happens and the
+log says the dimensions were unavailable — the bytes sent to the model are the file itself
+either way, so none of this touches what the model receives.
 
 ### PDF conversion (Ghostscript)
 
@@ -452,9 +465,13 @@ application via `JRock.main(...)` and then works its window like a person would.
   prompt gained **two `@img` tokens**, and that both PNGs really are **2480 × 3508 px**. The
   PDF is written by hand (`A4Pdf`) so its page box is exactly A4: `gs -sPAPERSIZE=a4` is the
   rounded 595 × 842 pt, which would rasterise one pixel narrower.
-- **`JRockReplyTextTest`** is the one test with no window: it feeds chat-completion JSON to
-  the reply parser and checks non-ASCII text comes back intact — as characters, as `\uXXXX`
-  escapes (a server may use either, and an emoji arrives as a *pair* of them), and mixed.
+- **`JRockReplyTextTest`** feeds chat-completion JSON to the reply parser and checks non-ASCII
+  text comes back intact — as characters, as `\uXXXX` escapes (a server may use either, and an
+  emoji arrives as a *pair* of them), and mixed. No window.
+- **`JRockImageSizeTest`** checks the image-header reader: PNG, GIF and JPEG against what the
+  JDK's own encoder wrote, a JPEG whose size sits behind a 60 KB metadata segment, all three
+  WEBP encodings from hand-built headers, and junk or truncated files, which must report
+  nothing rather than a number read from whatever bytes followed. No window.
 
 ```sh
 cd tests/
