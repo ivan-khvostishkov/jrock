@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Reads image dimensions out of a file header, the way JRock does.
+ * Exercises {@code JRock.ImageHeader}, which reads image dimensions out of a file header.
  * <p>
  * No GUI, and deliberately no {@link ImageIO} in the code under test: in the browser
  * (CheerpJ) {@code ImageIO.read} on a JPEG fails with {@code UnsatisfiedLinkError: no
@@ -99,12 +99,32 @@ class JRockImageSizeTest {
         assertThat(imageSize(file("headless.jpg", new byte[] { (byte) 0xFF, (byte) 0xD8,
                 (byte) 0xFF, (byte) 0xDA, 0, 2 }))).isNull();
 
+        // A WEBP announcing VP8 whose start code isn't VP8's: the bytes where the size
+        // would be mean nothing, so they must not be read as a size.
+        byte[] webp = lossyWebp(WIDTH, HEIGHT);
+        webp[23] = 0x00;                            // was 0x9D
+        assertThat(imageSize(file("bad-start-code.webp", webp))).isNull();
+
+        // A RIFF/WEBP container whose first chunk is none of the three encodings —
+        // malformed, or some revision this doesn't know. Either way, no size.
+        assertThat(imageSize(file("unknown-chunk.webp", webp("ICCP", new byte[24])))).isNull();
+
+        // A header that parses but claims nothing: "0 x 0 pixels" would be a worse
+        // answer than admitting the dimensions are unavailable.
+        assertThat(imageSize(file("zero.gif", "GIF89a\0\0\0\0".getBytes("US-ASCII")))).isNull();
+
         assertThat(imageSize(dir.resolve("does-not-exist.png"))).isNull();
     }
 
-    /** JRock's own header reader. */
+    /**
+     * JRock's own header reader: {@code JRock.ImageHeader.size(Path)}.
+     * <p>
+     * Found by name rather than called directly, because the class is private - it is
+     * an implementation detail of an include, not an API.
+     */
     private static int[] imageSize(Path file) throws Exception {
-        Method m = JRock.class.getDeclaredMethod("imageSize", Path.class);
+        Class<?> imageHeader = Class.forName("JRock$ImageHeader");
+        Method m = imageHeader.getDeclaredMethod("size", Path.class);
         m.setAccessible(true);
         return (int[]) m.invoke(null, file);
     }

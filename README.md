@@ -246,7 +246,9 @@ Attach **text or image** files to a prompt (and convert **PDFs** to either):
    - **Text**: symbol count (Unicode code points) and file size in bytes.
 
 Image dimensions are read **straight out of the file header** — the PNG, GIF, WEBP and JPEG
-headers all state the size in a documented place — rather than by decoding the image. That is
+headers all state the size in a documented place — rather than by decoding the image (an
+`ImageHeader` class of its own, since byte-level format parsing has nothing to do with the
+rest of JRock and is worth being able to read, and measure, on its own). That is
 the same arithmetic on every platform, so the browser build reports the same numbers as the
 desktop one; `ImageIO` could not, because in CheerpJ it reaches for the JDK's *native* colour
 management (`UnsatisfiedLinkError: no lcms in java.library.path`) and an image include failed
