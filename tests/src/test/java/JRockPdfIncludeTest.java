@@ -80,7 +80,15 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
                 .describedAs("the logged Ghostscript command line")
                 .contains("-r" + DPI);
 
-        // 2. Two pages came back, and JRock measured each at A4-at-300dpi.
+        // 2. Ghostscript's own progress was echoed, page by page. This is what keeps
+        //    -q out of that command line: with it, gs says nothing at all, and a long
+        //    conversion looks like a hung application.
+        assertThat(logPane().text())
+                .describedAs("Ghostscript's own output, echoed into the log")
+                .contains("gs: Page 1")
+                .contains("gs: Page 2");
+
+        // 3. Two pages came back, and JRock measured each at A4-at-300dpi.
         assertThat(logPane().text())
                 .describedAs("the log pane's text")
                 .contains("Ghostscript produced 2 page file(s)")
@@ -90,11 +98,11 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
                 .describedAs("log lines reporting " + expected)
                 .isEqualTo(2);
 
-        // 3. The prompt references both pages: one @img token per page.
+        // 4. The prompt references both pages: one @img token per page.
         assertThat(countOccurrences(promptArea().text(), "@img "))
                 .describedAs("@img tokens in the prompt").isEqualTo(2);
 
-        // 4. And the files on disk really are that size - measured from the PNGs
+        // 5. And the files on disk really are that size - measured from the PNGs
         //    themselves, not from what JRock said about them.
         List<Path> pages = producedPages();
         assertThat(pages).describedAs("PNG pages under JRock/gs-pdf/").hasSize(2);
@@ -175,8 +183,10 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
         chooser.selectFiles(pdf.toFile());
         chooser.approve();
 
-        // The conversion runs on the EDT: it starts Ghostscript and waits for it, so
-        // there is no worker to join - only the last line it writes to look for.
+        // The conversion runs on a background worker, so approve() returns long
+        // before it is finished. There is no worker to join from here - the last
+        // line it writes is the signal, and it is only written once the tokens are
+        // in the prompt.
         pause(new Condition("the PDF include to finish") {
             @Override
             public boolean test() {

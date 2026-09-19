@@ -2472,16 +2472,65 @@ public class JRock {
         boolean isImage = chosen == imageFilter;
 
         // Process each chosen file in turn, all under the selected filter's kind.
-        for (java.io.File f : selected) {
-            Path file = f.toPath();
-            if (pdf) {
-                includePdf(frame, input, log, extend, file, asImages);
-            } else {
-                includeOne(input, log, extend, file, isImage ? "img" : "txt", isImage);
+        //
+        // Off the EDT, because a PDF include runs Ghostscript and waits for it: on a
+        // big document that is minutes, and on the EDT nothing would repaint for all
+        // of them - not the "Converting PDF with Ghostscript: ..." line, not gs's own
+        // page-by-page progress, not even the window. The user would see a frozen
+        // application and no explanation. Everything that touches a widget from here
+        // hops back onto the EDT with onEdt().
+        final java.io.File[] files = selected;
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                for (java.io.File f : files) {
+                    Path file = f.toPath();
+                    if (pdf) {
+                        includePdf(frame, input, log, extend, file, asImages);
+                    } else {
+                        // Left on the EDT: hashing and reading a plain include is
+                        // quick, and this is what it always did.
+                        onEdt(() -> includeOne(input, log, extend, file,
+                                isImage ? "img" : "txt", isImage));
+                    }
+                }
+                return null;
             }
+
+            @Override
+            protected void done() {
+                try {
+                    get();   // surfaces anything doInBackground threw
+                } catch (Exception ex) {
+                    log.gray("Include failed: " + ex.getMessage());
+                }
+                log.gray("");   // closes the include block (one per Ctrl+I, however many files)
+                input.requestFocusInWindow();
+            }
+        }.execute();
+    }
+
+    // Runs body on the EDT and waits for it to finish.
+    //
+    // For work started on a background thread that still has to read or change a
+    // widget: Swing components are not thread-safe, and the prompt's document in
+    // particular is being edited by the user at the same time.
+    private static void onEdt(Runnable body) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            body.run();
+            return;
         }
-        log.gray("");   // closes the include block (one per Ctrl+I, however many files)
-        input.requestFocusInWindow();
+        try {
+            SwingUtilities.invokeAndWait(body);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        } catch (java.lang.reflect.InvocationTargetException ex) {
+            // Rethrown so the caller's SwingWorker.done() can report it, rather
+            // than the failure vanishing on a thread nobody is watching.
+            Throwable cause = ex.getCause();
+            throw (cause instanceof RuntimeException)
+                    ? (RuntimeException) cause : new RuntimeException(cause);
+        }
     }
 
     // Registers one file as an include (hash -> path), logs it (with image
@@ -2569,6 +2618,10 @@ public class JRock {
     // page images. Output files are written under JRock/gs-pdf/, named
     // "<pdfname>.gs.NNN.txt" / "<pdfname>.gs.NNN.png". If Ghostscript isn't on
     // PATH, points the user to the download page and does nothing else.
+    //
+    // Runs on a background thread (see showIncludeDialog): it waits for Ghostscript,
+    // which on a large PDF takes a long time. Anything touching a widget goes
+    // through onEdt().
     private static void includePdf(JFrame frame, JTextArea input, LogView log,
                                    boolean extend, Path pdf, boolean asImages) {
         String gs = findGhostscript();
@@ -2577,12 +2630,14 @@ public class JRock {
             String exe = isWindows() ? "gswin64c" : "gs";
             log.gray("Ghostscript (" + exe + ") was not found on PATH. Install it from "
                     + "https://ghostscript.com/ to convert PDFs, then try again.");
-            javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Ghostscript (" + exe + ") is required to convert PDFs but was not found "
-                        + "on your PATH.\n\nInstall it from https://ghostscript.com/ and "
-                        + "restart JRock (or your shell) so " + exe + " is on PATH.",
-                    "Ghostscript not found", javax.swing.JOptionPane.WARNING_MESSAGE);
-            openUrl("https://ghostscript.com/");
+            onEdt(() -> {
+                javax.swing.JOptionPane.showMessageDialog(frame,
+                        "Ghostscript (" + exe + ") is required to convert PDFs but was not found "
+                            + "on your PATH.\n\nInstall it from https://ghostscript.com/ and "
+                            + "restart JRock (or your shell) so " + exe + " is on PATH.",
+                        "Ghostscript not found", javax.swing.JOptionPane.WARNING_MESSAGE);
+                openUrl("https://ghostscript.com/");
+            });
             return;
         }
 
@@ -2606,12 +2661,24 @@ public class JRock {
 
         java.util.List<String> cmd = new java.util.ArrayList<>();
         cmd.add(gs);
-        cmd.add("-q"); cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
+        // No -q: Ghostscript's own progress ("Processing pages 1 through N.", then a
+        // "Page N" as each one is finished) is the only honest answer to "is this
+        // working, and how far along is it?" on a long document. Each line is echoed
+        // into the log below as it arrives.
+        cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
+        // Those messages go to stderr rather than stdout, because a pipe makes the C
+        // runtime buffer stdout in 4 KB blocks - progress would then arrive in bursts,
+        // or all at once at the end, which is precisely what it is there to avoid.
+        // stderr is unbuffered, and redirectErrorStream below reads both as one.
+        // Page output is unaffected: -o writes that to files, not to stdout.
+        cmd.add("-sstdout=%stderr");
         cmd.add("-sDEVICE=" + device);
         if (asImages) { cmd.add("-r" + pdfDpi); }   // page raster resolution (Configure)
         cmd.add("-o"); cmd.add(outPattern);
         cmd.add(pdf.toAbsolutePath().toString());
 
+        // Logged before the process is started, and now actually seen: this method is
+        // off the EDT, so the pane repaints while Ghostscript works.
         log.gray("Converting PDF with Ghostscript: " + String.join(" ", cmd));
         int code;
         try {
@@ -2658,11 +2725,17 @@ public class JRock {
         log.gray("Ghostscript produced " + pages.size() + " page file(s); including them.");
         int inserted = 0;
         for (Path page : pages) {
-            if (includeOne(input, log, extend, page, asImages ? "img" : "txt", asImages)) inserted++;
+            final Path p = page;
+            // Inserts the token into the prompt's document, so: on the EDT.
+            boolean[] added = new boolean[1];
+            onEdt(() -> added[0] =
+                    includeOne(input, log, extend, p, asImages ? "img" : "txt", asImages));
+            if (added[0]) inserted++;
         }
         log.gray("Inserted " + inserted + " new @" + (asImages ? "img" : "txt")
                 + " token(s) for " + pdf.getFileName() + ".");
-        input.requestFocusInWindow();
+        // No requestFocusInWindow here: the caller's done() puts focus back on the
+        // prompt once the whole batch is finished, on the EDT where it belongs.
     }
 
     // Finds the Ghostscript console executable on PATH (gswin64c/gswin32c on
