@@ -1532,10 +1532,16 @@ public class JRock {
         useBrowserClipboard(input, log, true);
 
         // Window chrome (empty area of the top bar, e.g. right of Configure):
-        // Move & resize window...; on Windows, also install/uninstall the
-        // "Open JRock here" folder context-menu entry.
+        // Move & resize window...; in the browser, also show/hide the page's own
+        // header and footer; on Windows, install/uninstall the "Open JRock here"
+        // folder context-menu entry.
         javax.swing.JPopupMenu windowMenu = new javax.swing.JPopupMenu();
         addMenuItem(windowMenu, "Move & resize window...", () -> showMoveResizeDialog(frame));
+        if (isCheerpJ()) {
+            windowMenu.addSeparator();
+            addMenuItem(windowMenu, "Show/hide the page header & footer",
+                    () -> toggleBrowserChrome(log));
+        }
         if (isWindows()) {
             windowMenu.addSeparator();
             addMenuItem(windowMenu, "Install \"JRock here!\" (Explorer menu)...",
@@ -1629,6 +1635,28 @@ public class JRock {
                     + "). Pasting what was last copied inside JRock instead.");
         }
         comp.paste();
+    }
+
+    // ---- Hosting page chrome (browser only) --------------------------------
+    // The page hides its header (title, checksum, credentials button) and its
+    // footer (the page's own log) a few seconds after launch, so the Swing display
+    // gets the whole tab. Sometimes you want them back - to check the checksum, or
+    // to change the API key the page holds - and then gone again.
+    //
+    // This is a proxy and nothing more: the page has one function that flips the
+    // chrome and reports which way it went, so there is no second copy of the
+    // state here to fall out of step with the one that matters.
+    private static void toggleBrowserChrome(LogView log) {
+        try {
+            String[] r = bridgeReply(browserToggleChrome());
+            if ("1".equals(r[0])) {
+                log.gray("Page header and footer: " + r[1] + ".");
+            } else {
+                log.gray("Could not toggle the page header and footer: " + r[1]);
+            }
+        } catch (Throwable ex) {
+            log.gray("This page provides no header/footer bridge (" + ex + ").");
+        }
     }
 
     // Points a component's own cut/copy/paste actions at the page's clipboard, so
@@ -2993,6 +3021,15 @@ public class JRock {
     //   browserClipboardWrite() -> "1\n", or "0\n<reason>".
     static native String browserClipboardRead();
     static native String browserClipboardWrite(String text);
+
+    // The hosting page's own header and footer, again over the same wire format.
+    // The page hides them a few seconds after launch to give the Swing display the
+    // whole tab; this asks it to put them back, or to take them away again.
+    //   browserToggleChrome() -> "1\nshown" or "1\nhidden" - which it now is - or
+    //                            "0\n<reason>".
+    // One call FLIPS the state, so JRock never has to track it: the page owns the
+    // chrome, including whether it is currently there.
+    static native String browserToggleChrome();
 
     // The browser transport: hands each request to the page's JavaScript client.
     private static final class BrowserHttpTransport implements HttpTransport {

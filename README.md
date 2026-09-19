@@ -100,6 +100,11 @@ as WebAssembly), so nothing runs on a server.
   never sent anywhere but the Bedrock endpoint. You can change the key at any time — a
   missing or rejected one reopens the credentials dialog by itself.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
+- **The page gets out of the way — and comes back.** A few seconds after launch the page
+  hides its own header and footer, giving the Swing display the whole tab. To check the
+  checksum again, or change the key, the top-bar context menu has **Show/hide the page
+  header & footer**: it calls one function in the page, which flips the chrome and reports
+  which way it went. The page owns that state, so JRock never has to guess.
 - **Copy and paste reach other apps.** CheerpJ gives the JVM a clipboard of its own that
   nothing else can see, so JRock goes through the browser's clipboard instead: text moves
   between JRock and your mail or notes, by Ctrl+C/X/V or from the context menus. A browser
@@ -304,8 +309,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   warns about unsaved changes.
 - **Prompt area** — Include text or image file... (also PDFs, multi-select), Load prompt from
   file..., Save prompt copy as...
-- **Top bar (empty area)** — Move & resize window...; on **Windows**, also Install /
-  Uninstall the "JRock here!" Explorer entry (see below).
+- **Top bar (empty area)** — Move & resize window...; in the **browser**, also Show/hide
+  the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
+  entry (see below).
 
 ## Windows: Explorer right-click integration
 

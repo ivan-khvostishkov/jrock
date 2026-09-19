@@ -311,11 +311,35 @@
         container.addEventListener("contextmenu", function (e) { e.preventDefault(); });
       }
 
-      // Hide the header + footer to give the Swing display all the space. The
-      // flex layout reflows and the CheerpJ display fills the freed area.
-      function hideChrome() {
-        if (headerEl) headerEl.style.display = "none";
-        if (bottom)   bottom.style.display = "none";
+      // --- Page chrome: the header, the verification panel, the bottom bar ------
+      //
+      // All of it is hidden shortly after launch to give the Swing display the
+      // whole tab, which is what you want almost always - but not quite always:
+      // the checksum is up there, and so is the credentials button. So JRock's
+      // window menu can ask for it back, through the single function below.
+      //
+      // The page owns the state, and one call flips it - the Java side never has
+      // to know or guess which way round things currently are.
+      var chromeEls = [headerEl, infoEl, bottom];
+      var chromeHidden = false;
+
+      function setChromeHidden(hidden) {
+        chromeHidden = hidden;
+        // Clearing the inline style rather than setting a display value: the
+        // header is a flex row and the others are blocks, and the stylesheet
+        // already knows that.
+        chromeEls.forEach(function (el) {
+          if (el) el.style.display = hidden ? "none" : "";
+        });
+        // The flex column reflows into (or out of) the freed space; nudge Swing
+        // to relayout to the display's new size.
+        window.dispatchEvent(new Event("resize"));
+      }
+
+      /** Flips the chrome's visibility. Returns true if it is now hidden. */
+      function toggleChrome() {
+        setChromeHidden(!chromeHidden);
+        return chromeHidden;
       }
 
       // Keep the layout height in sync with the VISUAL viewport so the on-screen
@@ -471,6 +495,20 @@
         }
       }
 
+      // Page chrome, over the same wire format. JRock's window menu calls this to
+      // bring the header and footer back after the automatic hide, and to put them
+      // away again; the reply says which of the two just happened.
+      async function Java_JRock_browserToggleChrome(lib) {
+        try {
+          if (!headerEl && !infoEl && !bottom) {
+            return "0\nthis page has no header or footer to toggle";
+          }
+          return "1\n" + (toggleChrome() ? "hidden" : "shown");
+        } catch (e) {
+          return "0\n" + ((e && e.message) ? e.message : e);
+        }
+      }
+
       async function Java_JRock_browserHttpSend(lib, method, url, headersJson,
                                                 body, timeoutSeconds) {
         var http = window.myBrowserHttp;
@@ -548,7 +586,8 @@
               Java_JRock_browserHttpInfo: Java_JRock_browserHttpInfo,
               Java_JRock_browserHttpSend: Java_JRock_browserHttpSend,
               Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
-              Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite
+              Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
+              Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome
             }
           });
 
@@ -559,9 +598,11 @@
           cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
 
           log("Running JRock ... (first run downloads the Java runtime; please wait)");
-          // Once the app is up, hide the header + footer after 5s to give the
-          // Swing display all the space (the display reflows to fill).
-          setTimeout(hideChrome, 5000);
+          // Once the app is up, hide the chrome after 5s to give the Swing display
+          // all the space. Going through setChromeHidden (rather than hiding the
+          // elements directly) is what makes JRock's toggle exact: the page knows
+          // the chrome is away, so the first toggle brings it back.
+          setTimeout(function () { setChromeHidden(true); }, 5000);
           var code = await cheerpjRunJar(JAR_PATH);
           log("JRock exited with code " + code + ".");
         } catch (e) {
