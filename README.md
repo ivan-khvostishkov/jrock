@@ -405,12 +405,26 @@ git-ignored, and that's also where the app's own `JRock/` folder goes during a t
 CI runs this on every push (`.github/workflows/tests.yml`), under `xvfb` since the Linux
 runners are headless, on JDK 11 — the minimum JRock supports.
 
+### Coverage
+
+[JaCoCo](https://www.jacoco.org/jacoco/) measures coverage on the same `mvn test` — no extra
+phase or profile. Reports land in `tests/target/site/jacoco/`: open `index.html` for the
+line-by-line view of `JRock.java`, and CI uploads that directory as the `coverage-report`
+artifact.
+
+Coverage is **reported, not enforced**. There is no threshold to fail a build on, because a
+threshold mostly buys tests written to move a number. One startup test currently reaches
+about **22% of lines and 9% of branches** — that is the honest baseline, and it is what a
+single test against a GUI application buys.
+
+### Reporting
+
 Results are published to the **job summary** on the run's own page: how many tests passed,
-each test's name, and for a failure the assertion text inline — rather than only in the raw
-console log or the downloadable report zip. GitHub has no built-in JUnit view, so
-`.github/build/TestSummary.java` renders Surefire's XML into Markdown. It uses nothing but
-the JDK and needs no third-party action, the same reasoning as `BuildJar.java`; run it
-locally with:
+each test's name, for a failure the assertion text inline, and the coverage totals — rather
+than only in the raw console log or the downloadable report zips. GitHub has no built-in
+JUnit view, so `.github/build/TestSummary.java` renders Surefire's XML and JaCoCo's CSV into
+Markdown. It uses nothing but the JDK and needs no third-party action, the same reasoning as
+`BuildJar.java`; run it locally with:
 
 ```sh
 java .github/build/TestSummary.java tests/target/surefire-reports

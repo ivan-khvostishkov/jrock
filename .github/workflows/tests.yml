@@ -39,10 +39,11 @@ jobs:
         run: xvfb-run -a -s "-screen 0 1280x1024x24" mvn -B --no-transfer-progress test
 
       # Render the results onto the run's own page: how many passed, what each test
-      # is called, and for a failure the assertion text inline. Without this, results
-      # are only in the raw console log and the downloadable zip below.
+      # is called, for a failure the assertion text inline, and the coverage JaCoCo
+      # measured. Without this, results are only in the raw console log and the
+      # downloadable zips below.
       # always(), so a failing run is exactly when it still gets written.
-      - name: Publish results to the job summary
+      - name: Publish results and coverage to the job summary
         if: always()
         run: java .github/build/TestSummary.java tests/target/surefire-reports
 
@@ -54,4 +55,15 @@ jobs:
         with:
           name: surefire-reports
           path: tests/target/surefire-reports/
+          if-no-files-found: warn
+
+      # The job summary gives the totals; this is the source-annotated version, where
+      # every line of JRock.java is coloured by whether a test reached it. Worth having
+      # separately - it is what you actually read when deciding what to test next.
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-report
+          path: tests/target/site/jacoco/
           if-no-files-found: warn

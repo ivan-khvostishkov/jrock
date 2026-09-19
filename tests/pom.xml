@@ -39,6 +39,7 @@
 
     <surefire.version>3.5.2</surefire.version>
     <compiler.version>3.13.0</compiler.version>
+    <jacoco.version>0.8.13</jacoco.version>
   </properties>
 
   <dependencies>
@@ -102,6 +103,37 @@
             <BEDROCK_API_KEY></BEDROCK_API_KEY>
           </environmentVariables>
         </configuration>
+      </plugin>
+
+      <!-- Code coverage. Declared AFTER surefire on purpose: both the report goal
+           and the tests run in the "test" phase, and within one phase plugins run in
+           declaration order, so this keeps the report generation after the run that
+           produces the data.
+
+           prepare-agent sets the argLine property that surefire passes to the forked
+           JVM. Nothing above sets argLine, so there is no conflict to manage. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+        <executions>
+          <execution>
+            <id>attach-coverage-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <!-- Bound to "test" rather than the usual "verify", so a plain
+                 "mvn test" produces the report and CI needs no extra phase - "verify"
+                 would also package a jar, which is emphatically not JRock's jar. -->
+            <id>coverage-report</id>
+            <phase>test</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>
