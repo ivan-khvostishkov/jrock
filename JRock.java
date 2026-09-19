@@ -154,6 +154,17 @@ public class JRock {
     // set when the user explicitly types a new key in the Configure dialog.
     private static String apiKeyOverride = null;
 
+    // Resolution Ghostscript rasterises PDF pages at (-r), when a PDF is included
+    // as page images rather than as text. Settable in the Configure dialog.
+    //
+    // It is a real trade-off, which is why it is worth exposing: a page image is
+    // what the model actually sees, so too low and small print becomes unreadable,
+    // while too high costs tokens and time for detail no model needs. 150 reads
+    // ordinary documents reliably and stays modest in size, so it is the default.
+    private static final int[] PDF_DPI_OPTIONS = { 72, 96, 150, 203, 300 };
+    private static final int PDF_DPI_DEFAULT = 150;
+    private static int pdfDpi = PDF_DPI_DEFAULT;
+
     // Working directory = the process current directory. When JRock is launched
     // from the "JRock here!" context menu, Explorer starts it in the clicked
     // folder, so the CWD is already correct with no extra flags. The window
@@ -1017,6 +1028,12 @@ public class JRock {
         log.gray("Bedrock endpoint: " + mantleHost());
         log.gray("Configured model: " + MODEL_ID);
         resolveAndLogCard(MODEL_ID, log);
+        // Only when it has been changed: silent for everyone on the default, but
+        // applying the dialog re-runs this report, so a change is acknowledged.
+        // Every conversion logs its full Ghostscript command line anyway, -r and all.
+        if (pdfDpi != PDF_DPI_DEFAULT) {
+            log.gray("PDF page images: " + pdfDpi + " dpi (default " + PDF_DPI_DEFAULT + ")");
+        }
         if (promptSourceNote != null) {
             log.gray("Prompt source: " + promptSourceNote);
         }
@@ -1763,6 +1780,20 @@ public class JRock {
         modelF.getEditor().getEditorComponent()
                 .setFont(modelF.getFont().deriveFont(java.awt.Font.PLAIN));
 
+        // PDF page-image resolution: a fixed list, so not editable - unlike the
+        // model, an arbitrary number here has no meaning worth supporting.
+        javax.swing.JComboBox<Integer> dpiF = new javax.swing.JComboBox<>();
+        for (int dpi : PDF_DPI_OPTIONS) dpiF.addItem(dpi);
+        dpiF.setSelectedItem(pdfDpi);
+        dpiF.setFont(dpiF.getFont().deriveFont(java.awt.Font.PLAIN));
+        dpiF.setToolTipText("Resolution Ghostscript rasterises PDF pages at, when a "
+                + "PDF is included as images (72/96 screen, 150 documents, 203 fax/"
+                + "receipt, 300 print). Higher is sharper but costs more tokens.");
+        // In a wrapper so the layout's horizontal fill doesn't stretch a
+        // three-digit dropdown across the whole dialog.
+        javax.swing.JPanel dpiRow = new javax.swing.JPanel(new BorderLayout());
+        dpiRow.add(dpiF, BorderLayout.WEST);
+
         javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
         c.insets = new java.awt.Insets(4, 4, 4, 4);
@@ -1775,6 +1806,7 @@ public class JRock {
         }
         addRow(fields, c, row++, "AWS_REGION:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
+        addRow(fields, c, row++, "PDF image DPI:", dpiRow);
 
         // A plain (non-bold) font derived from the default label font, reused for
         // the notes, shortcuts and titled-border titles so nothing renders bold.
@@ -1919,6 +1951,10 @@ public class JRock {
         Object selected = modelF.getEditor().getItem();  // typed or picked value
         String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
+
+        // PDF page-image resolution: picked from the list, so always valid.
+        Object dpi = dpiF.getSelectedItem();
+        if (dpi instanceof Integer) { pdfDpi = (Integer) dpi; }
 
         return true;
     }
@@ -2572,7 +2608,7 @@ public class JRock {
         cmd.add(gs);
         cmd.add("-q"); cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
         cmd.add("-sDEVICE=" + device);
-        if (asImages) { cmd.add("-r150"); }   // 150 dpi page raster
+        if (asImages) { cmd.add("-r" + pdfDpi); }   // page raster resolution (Configure)
         cmd.add("-o"); cmd.add(outPattern);
         cmd.add(pdf.toAbsolutePath().toString());
 

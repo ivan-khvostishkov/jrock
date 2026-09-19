@@ -249,7 +249,8 @@ includes each produced page. Ghostscript must be on your PATH: `gswin64c` on Win
 macOS and Linux.
 
 - Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.txt` (text pages via
-  the `txtwrite` device) or `<pdfname>.gs.NNN.png` (page images at 150 dpi).
+  the `txtwrite` device) or `<pdfname>.gs.NNN.png` (page images at the **PDF image DPI** set
+  in Configure — 150 by default).
 - The exact Ghostscript command and its output are echoed to the log.
 - If Ghostscript isn't found on your PATH, JRock logs a note, shows a dialog, and opens
   https://ghostscript.com/ so you can install it. (Text extraction quality depends on the
@@ -278,6 +279,12 @@ includes in prior turns are expanded too.
   [HTTP transport](#http-transport)) and is changed there.
 - **AWS_REGION** — free text.
 - **Model** — free text with a dropdown of recently fetched models.
+- **PDF image DPI** — the resolution Ghostscript rasterises PDF pages at (`-r`) when a PDF is
+  included as images: 72 / 96 (screen), **150** (documents, the default), 203 (fax/receipt),
+  300 (print). A page image is what the model actually sees, so this is a real trade-off —
+  too low and small print is unreadable, too high and you pay tokens for detail no model
+  needs. Only reported at startup when it isn't the default; every conversion logs its full
+  Ghostscript command line regardless.
 
 Applying re-runs the session init (working directory reported first, then models loaded,
 ending with `Ready.`). Changing the working directory reloads the log from the new folder,
