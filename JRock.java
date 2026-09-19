@@ -824,6 +824,33 @@ public class JRock {
         }
     }
 
+    // Normalizes a message as it is taken from the window or out of a reply, BEFORE
+    // it is either sent or logged - so the request and the transcript carry one
+    // identical string, and an extended conversation resends exactly what is on
+    // screen. Trailing spaces and surrounding blank lines are invisible but a
+    // selection picks them up, so a line copied as a filename would arrive with
+    // spaces on it, and blank lines at the end push the separator after a message
+    // down. Indentation on the first kept line survives, so code keeps its shape.
+    private static String stripMessage(String text) {
+        if (text == null) return null;
+        String[] lines = text.split("\n", -1);
+        int first = -1, last = -1;
+        for (int i = 0; i < lines.length; i++) {
+            lines[i] = lines[i].stripTrailing();   // also drops a \r from CRLF input
+            if (!lines[i].isEmpty()) {
+                if (first < 0) first = i;
+                last = i;
+            }
+        }
+        if (first < 0) return "";                  // nothing but whitespace
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = first; i <= last; i++) {
+            if (i > first) sb.append('\n');
+            sb.append(lines[i]);
+        }
+        return sb.toString();
+    }
+
     // Longest run of non-whitespace left with nowhere to wrap.
     private static final int GRAY_RUN_MAX = 40;
 
@@ -1095,7 +1122,9 @@ public class JRock {
 
         JButton send = new JButton("Send (Ctrl-Enter)");
         send.addActionListener(e -> {
-            String prompt = input.getText().trim();
+            // Normalized here, at the one point the prompt leaves the text area, so
+            // the request and the transcript get the identical string.
+            String prompt = stripMessage(input.getText());
             if (prompt.isEmpty()) {
                 log.gray("Nothing to send - type a prompt first...");
                 log.gray("");
@@ -3046,7 +3075,11 @@ public class JRock {
             };
         }
 
-        String reply = extractContent(resp.body);
+        // The reply as it arrived, kept only to mask it out of the raw response
+        // below: that works by finding it as a substring of the raw body, which a
+        // normalized copy would no longer match.
+        String rawReply = extractContent(resp.body);
+        String reply = stripMessage(rawReply);
 
         // Text-symbol counts are computed locally. Input counts the prompt text
         // plus all prior turns (extend mode). Images don't contribute text symbols.
@@ -3062,7 +3095,7 @@ public class JRock {
 
         // Mask the reply text inside the raw response so it isn't duplicated
         // (it's already shown above). The request was masked during assembly.
-        String maskedResponse = maskResponse(resp.body, reply);
+        String maskedResponse = maskResponse(resp.body, rawReply);
 
         String details = rawDump(maskedRequestBody, maskedResponse)
                 + "\n\n--- stats ---"
