@@ -75,6 +75,10 @@ today's work is. `--prompts-dir <dir>` separates the two:
 - **Include (Ctrl+I)** and log exports are deliberately *not* affected — those files live
   wherever the source material is.
 
+On Windows, installing the **"JRock here!"** Explorer entries while this flag is in effect
+bakes it into them, so the library follows you into every folder — see
+[Explorer right-click integration](#windows-explorer-right-click-integration).
+
 `--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file.
 Without the flag, everything follows the working directory exactly as before. The resolved
 directory is reported in the startup log, including when the path isn't usable — in which
@@ -330,6 +334,12 @@ Details:
 - **No console window.** Both launch `javaw.exe`, so nothing flashes on screen.
 - **Self-configuring.** They use the `javaw.exe` of the JVM currently running JRock, and launch
   JRock's own `jrock.jar` (or the `JRock.java` file when running from source) — no paths to edit.
+- **The prompt library comes along.** If JRock was started with
+  [`--prompts-dir`](#--prompts-dir), both entries are installed carrying that flag, so
+  **Ctrl+O opens your prompt library from whichever folder you right-clicked**. Explorer
+  supplies the working directory; this supplies the prompts directory. It is captured at
+  install time, so reinstall after changing it — the confirmation dialog and the log both
+  spell out exactly what was written.
 - **Inspectable.** The applied registry file is kept under `JRock/`
   (`jrock-context-menu-install.reg` / `jrock-context-menu-uninstall.reg`), and each action is
   recorded in the log.

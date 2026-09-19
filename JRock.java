@@ -2108,10 +2108,18 @@ public class JRock {
             log.gray(".txt launch:   " + txtLaunch);
             log.gray("Applied registry file kept at: " + regFile);
             log.gray("");
+            // Spelled out because it is baked in at install time, not read live: if
+            // the prompts directory changes, these entries keep the old one until
+            // they are installed again.
+            String promptsNote = (promptsDir == null) ? ""
+                    : "Both entries carry " + PROMPTS_DIR_FLAG + " " + promptsDir + ",\n"
+                    + "so Ctrl+O opens there whichever folder you launch from.\n"
+                    + "Reinstall to change it.\n\n";
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Installed two Explorer right-click entries:\n"
                         + "  \u2022 \"" + CTX_LABEL + "\" - inside or on a folder, launches JRock there.\n"
                         + "  \u2022 \"" + TXT_LABEL + "\" - on a .txt file, opens it as the prompt.\n\n"
+                        + promptsNote
                         + "(On Windows 11 they may appear under \"Show more options\".)\n\n"
                         + "The applied registry file was kept for your inspection at:\n"
                         + regFile,
@@ -2164,29 +2172,51 @@ public class JRock {
 
     // The launch command for the folder verb: just javaw + JRock. Explorer starts
     // the process with its current directory set to the clicked folder, so JRock
-    // roots its files there with no extra flag. No cmd, no console. Prefers this
-    // running jar; falls back to the JRock.java source file.
+    // roots its files there with no extra flag. No cmd, no console.
     private static String buildCtxLaunch(String javaw) {
-        Path self = ownJarOrSource();
-        if (self == null) return null;
-        String base = "\"" + javaw + "\" ";
-        if (self.toString().toLowerCase().endsWith(".jar")) {
-            return base + "-jar \"" + self + "\"";
-        }
-        return base + "\"" + self + "\"";   // single-file source launch (JDK 11+)
+        return buildLaunch(javaw, null);
     }
 
     // The launch command for the .txt verb: javaw passing the clicked file (%1)
     // as JRock's prompt-source argument. JRock uses whatever current directory
     // Explorer starts it in (typically the file's folder). No cmd, no console.
     private static String buildTxtLaunch(String javaw) {
+        return buildLaunch(javaw, "\"%1\"");
+    }
+
+    // Shared shape of both installed commands: javaw, this JRock, the current
+    // --prompts-dir if there is one, then the clicked file for the .txt verb.
+    // Prefers this running jar; falls back to the JRock.java source file.
+    private static String buildLaunch(String javaw, String fileArg) {
         Path self = ownJarOrSource();
         if (self == null) return null;
-        String base = "\"" + javaw + "\" ";
+        StringBuilder cmd = new StringBuilder("\"").append(javaw).append("\" ");
         if (self.toString().toLowerCase().endsWith(".jar")) {
-            return base + "-jar \"" + self + "\" \"%1\"";
-        }
-        return base + "\"" + self + "\" \"%1\"";   // single-file source launch (JDK 11+)
+            cmd.append("-jar ");
+        }   // else: single-file source launch (JDK 11+), which needs no flag
+        cmd.append('"').append(self).append('"');
+        cmd.append(ctxPromptsDirArg());
+        if (fileArg != null) cmd.append(' ').append(fileArg);
+        return cmd.toString();
+    }
+
+    // The --prompts-dir fragment to bake into an installed command, or "" when the
+    // flag wasn't given.
+    //
+    // This is what makes the context menu carry the prompt library into any folder.
+    // Explorer supplies the working directory - that is the whole point of "JRock
+    // here!" - but nothing would otherwise supply the prompts directory, so without
+    // this the entry would always fall back to opening Ctrl+O in the clicked folder.
+    // Installing records the directory in effect at that moment; change it and you
+    // reinstall, which is why the dialog and the log both spell out what was written.
+    private static String ctxPromptsDirArg() {
+        if (promptsDir == null) return "";
+        String dir = promptsDir.toString();
+        // A trailing backslash - which only a drive root like "D:\" still has after
+        // normalize() - would escape the closing quote when Windows parses the
+        // command line. Doubling it is the standard fix.
+        if (dir.endsWith("\\")) dir = dir + "\\";
+        return " " + PROMPTS_DIR_FLAG + " \"" + dir + "\"";
     }
 
     // Locates JRock's own artifact: the jar it's running from (via CodeSource),
