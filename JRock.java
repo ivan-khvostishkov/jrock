@@ -487,8 +487,9 @@ public class JRock {
 
     // Wires undo/redo into a text component: Ctrl+Z undo, Ctrl+Y (and Ctrl+Shift+Z)
     // redo. JTextArea has no built-in undo, so we attach an UndoManager to its
-    // document and bind the keystrokes.
-    private static void enableUndo(javax.swing.text.JTextComponent comp) {
+    // document and bind the keystrokes. Returns the manager so the context menu can
+    // offer the same two actions to users without a keyboard.
+    private static UndoManager enableUndo(javax.swing.text.JTextComponent comp) {
         UndoManager undo = new UndoManager();
         comp.getDocument().addUndoableEditListener(e -> undo.addEdit(e.getEdit()));
 
@@ -510,6 +511,7 @@ public class JRock {
                 if (undo.canRedo()) undo.redo();
             }
         });
+        return undo;
     }
 
     // JRock-branded color for the role headers ([HUMAN OPERATOR] / assistant).
@@ -1065,7 +1067,7 @@ public class JRock {
         input.setLineWrap(true);
         input.setWrapStyleWord(true);
         input.setMargin(new java.awt.Insets(8, 8, 8, 8));
-        enableUndo(input);
+        UndoManager promptUndo = enableUndo(input);
 
         // Persist the initial text immediately (this also seeds/rewrites the
         // persistent file when loading from a command-line source), then autosave
@@ -1344,11 +1346,15 @@ public class JRock {
                 addMenuItem(logMenu, "Save log copy as...", () -> saveLogAs(frame, log));
         javax.swing.JMenuItem printLogItem =
                 addMenuItem(logMenu, "Print...",            () -> printLog(frame, output));
+        // The log pane is read-only, so Copy is the only clipboard verb it needs.
+        logMenu.addSeparator();
+        javax.swing.JMenuItem copyLogItem = addEditItem(logMenu, "Copy", output, output::copy);
         logMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
                 boolean selected = log.selectedText() != null;
                 saveLogItem.setText(selected ? "Save selected text as..." : "Save log copy as...");
                 printLogItem.setText(selected ? "Print selected text..."  : "Print...");
+                copyLogItem.setEnabled(selected);
             }
             @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) { }
             @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) { }
@@ -1363,6 +1369,29 @@ public class JRock {
                 () -> loadPromptInto(frame, input, log));
         addMenuItem(promptMenu, "Save prompt copy as...",
                 () -> savePromptAs(frame, input.getText()));
+        // Clipboard and undo/redo, which on a touch device have no keyboard to come
+        // from. Paste stays enabled whatever the clipboard holds: an empty one is a
+        // harmless no-op, and asking for its contents just to grey out an item can
+        // fail when another process owns it.
+        promptMenu.addSeparator();
+        javax.swing.JMenuItem cutItem   = addEditItem(promptMenu, "Cut",   input, input::cut);
+        javax.swing.JMenuItem copyItem  = addEditItem(promptMenu, "Copy",  input, input::copy);
+        addEditItem(promptMenu, "Paste", input, input::paste);
+        javax.swing.JMenuItem undoItem  = addEditItem(promptMenu, "Undo",  input,
+                () -> { if (promptUndo.canUndo()) promptUndo.undo(); });
+        javax.swing.JMenuItem redoItem  = addEditItem(promptMenu, "Redo",  input,
+                () -> { if (promptUndo.canRedo()) promptUndo.redo(); });
+        promptMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
+                boolean selected = input.getSelectedText() != null;
+                cutItem.setEnabled(selected);
+                copyItem.setEnabled(selected);
+                undoItem.setEnabled(promptUndo.canUndo());
+                redoItem.setEnabled(promptUndo.canRedo());
+            }
+            @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) { }
+            @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) { }
+        });
         attachPopup(input, promptMenu);
 
         // Window chrome (empty area of the top bar, e.g. right of Configure):
@@ -1390,6 +1419,18 @@ public class JRock {
         item.addActionListener(e -> action.run());
         menu.add(item);
         return item;
+    }
+
+    // A menu item acting on a text component, which then takes focus back so the
+    // caret is where the user continues typing (or, in the log, so the selection
+    // they just copied stays highlighted).
+    private static javax.swing.JMenuItem addEditItem(javax.swing.JPopupMenu menu, String label,
+                                                     javax.swing.text.JTextComponent comp,
+                                                     Runnable action) {
+        return addMenuItem(menu, label, () -> {
+            action.run();
+            comp.requestFocusInWindow();
+        });
     }
 
     // Shows a popup menu on a native right-click (desktop) OR a long-press
