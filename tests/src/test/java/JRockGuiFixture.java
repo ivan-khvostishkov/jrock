@@ -4,6 +4,7 @@ import static org.assertj.swing.timing.Timeout.timeout;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 
 import javax.swing.Action;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JRootPane;
@@ -24,6 +26,7 @@ import javax.swing.JTextArea;
 import javax.swing.JTextPane;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileFilter;
 
 import org.assertj.swing.core.BasicRobot;
 import org.assertj.swing.core.GenericTypeMatcher;
@@ -31,9 +34,12 @@ import org.assertj.swing.core.Robot;
 import org.assertj.swing.edt.GuiActionRunner;
 import org.assertj.swing.edt.GuiQuery;
 import org.assertj.swing.edt.GuiTask;
+import org.assertj.swing.finder.JFileChooserFinder;
 import org.assertj.swing.finder.JOptionPaneFinder;
 import org.assertj.swing.finder.WindowFinder;
 import org.assertj.swing.fixture.FrameFixture;
+import org.assertj.swing.fixture.JComboBoxFixture;
+import org.assertj.swing.fixture.JFileChooserFixture;
 import org.assertj.swing.fixture.JOptionPaneFixture;
 import org.assertj.swing.fixture.JTextComponentFixture;
 import org.assertj.swing.timing.Condition;
@@ -281,6 +287,105 @@ abstract class JRockGuiFixture {
                         new ActionEvent(frame, ActionEvent.ACTION_PERFORMED, null));
             }
         });
+    }
+
+    /**
+     * Includes files through the real Ctrl+I dialog, under the chooser filter with the
+     * given description, and waits until JRock reports it has finished with each one.
+     * <p>
+     * The filter decides everything that follows: same dialog, same files, but it is
+     * what turns an include into a Ghostscript page-image conversion, or an RTF read as
+     * Markdown, rather than an attempt to attach the file as it stands - so it is named,
+     * per test, by the description the user reads in the dropdown.
+     * <p>
+     * Ctrl+I rather than the prompt's context menu: it is bound on the root pane as
+     * WHEN_IN_FOCUSED_WINDOW and opens the very same chooser, without depending on a
+     * popup being rendered and hit-tested on a virtual display. See {@link #pressCtrl}
+     * for why the shortcut is fired through its binding rather than typed.
+     * <p>
+     * {@code timeoutSeconds} is per file, because how long a conversion takes is the
+     * caller's business: rasterising A4 pages is not reading an RTF.
+     */
+    protected void includeThroughTheDialog(String filterDescription, long timeoutSeconds,
+                                           Path... files) {
+        chooseInTheIncludeDialog(filterDescription, files);
+        // A conversion runs on a background worker, so approving the dialog returns
+        // long before it has finished. There is no worker to join from here - the last
+        // line it writes is the signal, and it is only written once the tokens are in
+        // the prompt.
+        for (Path file : files) {
+            awaitLogLine("token(s) for " + file.getFileName(), timeoutSeconds);
+        }
+    }
+
+    /**
+     * The same, but without waiting for the include to report success: for a file the
+     * conversion is expected to refuse, where the line to wait for is the refusal.
+     */
+    protected void chooseInTheIncludeDialog(String filterDescription, Path... files) {
+        pressCtrl(KeyEvent.VK_I);
+
+        JFileChooserFixture chooser =
+                JFileChooserFinder.findFileChooser().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
+
+        // JFileChooserFixture exposes the file name box and the buttons, not the "Files
+        // of Type" combo, so it is found in the chooser's own hierarchy - by what its
+        // items are, rather than by a position in the dialog.
+        JComboBox<?> filters = robot.finder().find(chooser.target(),
+                new GenericTypeMatcher<JComboBox>(JComboBox.class) {
+                    @Override
+                    protected boolean isMatching(JComboBox candidate) {
+                        return candidate.getItemCount() > 0
+                                && candidate.getItemAt(0) instanceof FileFilter;
+                    }
+                });
+        int index = indexOfFilter(filters, filterDescription);
+        assertThat(index).describedAs("the \"" + filterDescription + "\" filter")
+                .isNotNegative();
+        new JComboBoxFixture(robot, filters).selectItem(index);
+
+        // selectFiles, not selectFile: the chooser is in multi-selection mode, and JRock
+        // reads getSelectedFiles() - which setSelectedFile alone leaves empty.
+        java.io.File[] chosen = new java.io.File[files.length];
+        for (int i = 0; i < files.length; i++) chosen[i] = files[i].toFile();
+        chooser.selectFiles(chosen);
+        chooser.approve();
+    }
+
+    /** Waits until the log pane holds {@code needle} anywhere in its text. */
+    protected void awaitLogLine(final String needle, long timeoutSeconds) {
+        pause(new Condition("\"" + needle + "\" in the log") {
+            @Override
+            public boolean test() {
+                return logPane().text().contains(needle);
+            }
+        }, timeout(timeoutSeconds, TimeUnit.SECONDS));
+    }
+
+    /** Index of the chooser's filter with the given description, or -1. */
+    private static int indexOfFilter(final JComboBox<?> filters, final String description) {
+        return GuiActionRunner.execute(new GuiQuery<Integer>() {
+            @Override
+            protected Integer executeInEDT() {
+                for (int i = 0; i < filters.getItemCount(); i++) {
+                    Object item = filters.getItemAt(i);
+                    if (item instanceof FileFilter
+                            && description.equals(((FileFilter) item).getDescription())) {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+        });
+    }
+
+    /** How many times {@code needle} occurs in {@code text}. */
+    protected static int countOccurrences(String text, String needle) {
+        int count = 0;
+        for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
     }
 
     /**

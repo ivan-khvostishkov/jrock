@@ -1,27 +1,16 @@
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.swing.timing.Pause.pause;
-import static org.assertj.swing.timing.Timeout.timeout;
 
-import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import javax.imageio.ImageIO;
 import javax.swing.JComboBox;
-import javax.swing.filechooser.FileFilter;
 
 import org.assertj.swing.core.GenericTypeMatcher;
-import org.assertj.swing.edt.GuiActionRunner;
-import org.assertj.swing.edt.GuiQuery;
-import org.assertj.swing.finder.JFileChooserFinder;
-import org.assertj.swing.fixture.JComboBoxFixture;
-import org.assertj.swing.fixture.JFileChooserFixture;
 import org.assertj.swing.fixture.JOptionPaneFixture;
-import org.assertj.swing.timing.Condition;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -69,7 +58,7 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
         assertThat(field("pdfDpi").get(null))
                 .describedAs("the configured PDF image DPI").isEqualTo(300);
 
-        includeAsPageImages(pdf);
+        includeThroughTheDialog(PDF_IMAGE_FILTER, CONVERSION_TIMEOUT_SECONDS, pdf);
 
         // 1. Ghostscript was asked for the resolution the dialog was given. Checked
         //    on the command line JRock logs, so a wrong flag name would show up here
@@ -158,76 +147,6 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
         awaitReadyCount(2);
     }
 
-    /**
-     * Presses Ctrl+I, picks the "PDF as page images" filter in the chooser, selects
-     * the PDF and confirms - then waits for the conversion to finish.
-     * <p>
-     * Ctrl+I rather than the prompt's context menu: it is bound on the root pane as
-     * WHEN_IN_FOCUSED_WINDOW and opens the very same chooser, without depending on
-     * a popup being rendered and hit-tested on a virtual display. See
-     * {@link JRockGuiFixture#pressCtrl} for why the shortcut is fired through its
-     * binding rather than typed on the keyboard.
-     */
-    private void includeAsPageImages(Path pdf) {
-        pressCtrl(KeyEvent.VK_I);
-
-        JFileChooserFixture chooser =
-                JFileChooserFinder.findFileChooser().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
-
-        // The filter decides everything that follows: same dialog, same file, but
-        // this is what makes it a Ghostscript page-image include rather than an
-        // attempt to attach the PDF itself.
-        //
-        // JFileChooserFixture exposes the file name box and the buttons, not the
-        // "Files of Type" combo, so it is found in the chooser's own hierarchy - by
-        // what its items are, rather than by a position in the dialog.
-        JComboBox<?> box = robot.finder().find(chooser.target(),
-                new GenericTypeMatcher<JComboBox>(JComboBox.class) {
-                    @Override
-                    protected boolean isMatching(JComboBox candidate) {
-                        return candidate.getItemCount() > 0
-                                && candidate.getItemAt(0) instanceof FileFilter;
-                    }
-                });
-        int index = indexOfFilter(box, PDF_IMAGE_FILTER);
-        assertThat(index).describedAs("the \"" + PDF_IMAGE_FILTER + "\" filter")
-                .isNotNegative();
-        new JComboBoxFixture(robot, box).selectItem(index);
-
-        // selectFiles, not selectFile: the chooser is in multi-selection mode, and
-        // JRock reads getSelectedFiles() - which setSelectedFile alone leaves empty.
-        chooser.selectFiles(pdf.toFile());
-        chooser.approve();
-
-        // The conversion runs on a background worker, so approve() returns long
-        // before it is finished. There is no worker to join from here - the last
-        // line it writes is the signal, and it is only written once the tokens are
-        // in the prompt.
-        pause(new Condition("the PDF include to finish") {
-            @Override
-            public boolean test() {
-                return logPane().text().contains("token(s) for " + pdf.getFileName());
-            }
-        }, timeout(CONVERSION_TIMEOUT_SECONDS, TimeUnit.SECONDS));
-    }
-
-    /** Index of the chooser's filter with the given description, or -1. */
-    private static int indexOfFilter(final JComboBox<?> box, String description) {
-        return GuiActionRunner.execute(new GuiQuery<Integer>() {
-            @Override
-            protected Integer executeInEDT() {
-                for (int i = 0; i < box.getItemCount(); i++) {
-                    Object item = box.getItemAt(i);
-                    if (item instanceof FileFilter
-                            && description.equals(((FileFilter) item).getDescription())) {
-                        return i;
-                    }
-                }
-                return -1;
-            }
-        });
-    }
-
     /** The PNGs Ghostscript wrote, in page order. */
     private List<Path> producedPages() throws Exception {
         Path dir = workingDirectory().resolve("JRock").resolve("gs-pdf");
@@ -239,13 +158,5 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
                     .forEach(pages::add);
         }
         return pages;
-    }
-
-    private static int countOccurrences(String text, String needle) {
-        int count = 0;
-        for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + needle.length())) {
-            count++;
-        }
-        return count;
     }
 }

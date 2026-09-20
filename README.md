@@ -28,7 +28,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   plain files under a `JRock/` folder you own and can inspect.
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text and image files, plus PDF-to-text/PDF-to-images via
-  Ghostscript) referenced by hash; multi-select supported.
+  Ghostscript and RTF-to-Markdown with no external tool at all) referenced by hash;
+  multi-select supported.
 - **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
   workflow, which is Bedrock Prompt management and Flows without the cloud
   ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)).
@@ -237,6 +238,8 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   dialog-only transcript.
 - `JRock/gs-pdf/` — per-page text/image files produced when a PDF is included via Ghostscript
   (see Multimodal includes).
+- `JRock/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
+  (see Multimodal includes).
 
 The main log is a bit-perfect copy of the pane, except that each role header is followed by an
 `@<datetime>` include-style reference to the message's own file under `JRock/messages/`.
@@ -247,14 +250,15 @@ paid-for inputs/outputs are preserved. If the log has changed since it was last 
 
 ## Multimodal includes (Ctrl+I)
 
-Attach **text or image** files to a prompt (and convert **PDFs** to either):
+Attach **text or image** files to a prompt (and convert **PDFs** or **RTFs** into either):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers four kinds:
+   once, and the dropdown offers five kinds:
    - **Image files** (png, jpg, jpeg, gif, webp)
    - **Text files** (txt, csv, html, java)
    - **PDF as text pages** — converts the PDF to one text file per page
    - **PDF as page images** — converts the PDF to one PNG per page
+   - **RTF as Markdown text** — converts the RTF to one Markdown file
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart you must re-include files to reuse them.
 3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor (one per file / per PDF
@@ -303,6 +307,36 @@ Everywhere else the console `gs` is run with `-q` omitted, and its progress — 
 Ghostscript command, both pages with their dimensions and byte counts, and the `@img` hash tokens
 still sitting in the prompt. The model then reads its own transcript and answers from the image
 alone. Below it, the masked raw request and response, and the token stats.*
+
+### RTF conversion (no external tool)
+
+Selecting **RTF as Markdown text** converts the `.rtf` to Markdown and includes *that* file as
+an ordinary `@txt` token — so what the model receives is a text part, and the prompt shows one
+token for the document.
+
+Nothing has to be installed, unlike the PDF path: the reader is the JDK's own
+`javax.swing.text.rtf.RTFEditorKit`, the same one a `JTextPane` uses, so this works on a bare
+JVM. Markdown rather than flat text because the formatting is what RTF is for — headings, bold
+and italic survive as markup a model reads as structure instead of being thrown away.
+
+- Output is written under **`JRock/rtf-md/`**, named `<rtfname>.md` — `notes.rtf` becomes
+  `notes.rtf.md`, so two RTFs with the same stem can't overwrite each other.
+- What is mapped, and nothing more:
+
+  | In the RTF | In the Markdown |
+  |---|---|
+  | paragraph | a block, separated by a blank line |
+  | bold, italic | `**bold**`, `*italic*`, `***both***` |
+  | a font size larger than the document's body size | a heading — `#`/`##`/`###` by how much larger (6 pt, 3 pt, any), short lines only |
+  | a bullet character (Word writes the bullet as text) | a `-` list item; `1.`, `2)` … are kept as they are |
+
+  Markdown's own characters in the text (`*`, `` ` ``, `\`, a leading `#`) are escaped, so a
+  document that talks about asterisks still says so.
+- **Not** attempted: tables (RTF table rows reach the reader as ordinary paragraphs, so their
+  cells run together), embedded images, colours, alignment. Underline has no Markdown of its
+  own and stays plain text rather than being invented into emphasis.
+- A file that isn't really RTF (some other document renamed, say) has no text the reader can
+  find; JRock logs that and includes nothing, rather than attaching an empty file.
 
 On send, every referenced include is verified (known hash **and** the file still hashes the
 same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid
@@ -447,7 +481,7 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   on the **selection only**, and the menu says so (*Save selected text as...*, *Print
   selected text...*). A partial export doesn't count as saving the log, so Clear log still
   warns about unsaved changes.
-- **Prompt area** — Include text or image file... (also PDFs, multi-select), Load prompt from
+- **Prompt area** — Include text, image, PDF or RTF file... (multi-select), Load prompt from
   file..., Save prompt copy as...
 - **Top bar (empty area)** — Move & resize window...; in the **browser**, also Show/hide
   the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
@@ -514,7 +548,7 @@ and the directory is CheerpJ's own virtual mount, so naming it would say nothing
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (text only) |
-| Ctrl+I | Include text/image files or a PDF (multi-select) |
+| Ctrl+I | Include text/image files, a PDF or an RTF (multi-select) |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle Extend conversation |
 | Ctrl+M | Move & resize the window |
@@ -580,6 +614,13 @@ application via `JRock.main(...)` and then works its window like a person would.
   prompt gained **two `@img` tokens**, and that both PNGs really are **2480 × 3508 px**. The
   PDF is written by hand (`A4Pdf`) so its page box is exactly A4: `gs -sPAPERSIZE=a4` is the
   rounded 595 × 842 pt, which would rasterise one pixel narrower.
+- **`JRockRtfIncludeTest`** includes an RTF through the real include dialog with the *RTF as
+  Markdown text* filter, and compares the file under `JRock/rtf-md/` against the **whole
+  expected Markdown** — headings from the font sizes, bold and italic as markup, Word's bullets
+  as a list, asterisks escaped, an umlaut intact as UTF-8 — plus the single `@txt` token in the
+  prompt. The document is written by hand (`FormattedRtf`), one control word per mapping. A
+  second test renames a plain text file to `.rtf` and checks JRock says it found no text and
+  includes nothing. No external program: the reader is the JDK's.
 - **`JRockReplyTextTest`** feeds chat-completion JSON to the reply parser and checks non-ASCII
   text comes back intact — as characters, as `\uXXXX` escapes (a server may use either, and an
   emoji arrives as a *pair* of them), and mixed. No window.

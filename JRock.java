@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "1.5.0";
+    private static final String VERSION = "1.6.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -525,6 +525,7 @@ public class JRock {
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
     private static Path gsPdfDir()         { return jrockDir().resolve("gs-pdf"); }
+    private static Path rtfMdDir()         { return jrockDir().resolve("rtf-md"); }
 
     // Resolves the effective API key: the in-memory override from the Configure
     // dialog first, then the BEDROCK_API_KEY env var. Returns null when neither is
@@ -1565,7 +1566,7 @@ public class JRock {
 
         // Prompt area: Include... / Load prompt... / Save prompt copy...
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
-        addMenuItem(promptMenu, "Include text or image file...",
+        addMenuItem(promptMenu, "Include text, image, PDF or RTF file...",
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
         addMenuItem(promptMenu, "Load prompt from file...",
                 () -> loadPromptInto(frame, input, log));
@@ -1910,7 +1911,7 @@ public class JRock {
         // (no space-padding). The "Shortcuts" border title keeps the default bold.
         String[][] keys = {
             {"Ctrl+Enter", "Send message (call a Bedrock model)"},
-            {"Ctrl+I", "Include a text or image file"},
+            {"Ctrl+I", "Include a text, image, PDF or RTF file"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
             {"Ctrl+S", "Save prompt as (a copy)"},
@@ -2550,11 +2551,12 @@ public class JRock {
     }
 
     // ---- Include file (Ctrl+I) ---------------------------------------------
-    // Lets the user pick a text or image file, or a PDF to convert (via
-    // Ghostscript) into per-page text or per-page images. Each included file is
-    // hashed, remembered as hash -> path in the non-persistent INCLUDES map,
-    // logged (with image dimensions where applicable), and gets an
-    // "@txt <hash>" / "@img <hash>" token inserted at the prompt cursor.
+    // Lets the user pick a text or image file, a PDF to convert (via Ghostscript)
+    // into per-page text or per-page images, or an RTF to convert into Markdown
+    // (via Swing's own RTF reader). Each included file is hashed, remembered as
+    // hash -> path in the non-persistent INCLUDES map, logged (with image
+    // dimensions where applicable), and gets an "@txt <hash>" / "@img <hash>"
+    // token inserted at the prompt cursor.
     private static void showIncludeDialog(JFrame frame, JTextArea input, LogView log,
                                           boolean extend) {
         javax.swing.JFileChooser chooser =
@@ -2571,10 +2573,14 @@ public class JRock {
                 new javax.swing.filechooser.FileNameExtensionFilter("PDF as text pages (*.pdf)", "pdf");
         javax.swing.filechooser.FileNameExtensionFilter pdfImageFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter("PDF as page images (*.pdf)", "pdf");
+        javax.swing.filechooser.FileNameExtensionFilter rtfMarkdownFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "RTF as Markdown text (*.rtf)", "rtf");
         chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
         chooser.addChoosableFileFilter(textFilter);
         chooser.addChoosableFileFilter(pdfTextFilter);
         chooser.addChoosableFileFilter(pdfImageFilter);
+        chooser.addChoosableFileFilter(rtfMarkdownFilter);
         chooser.setFileFilter(imageFilter);            // default selection = image
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
@@ -2586,6 +2592,7 @@ public class JRock {
         javax.swing.filechooser.FileFilter chosen = chooser.getFileFilter();
         boolean asImages = chosen == pdfImageFilter;
         boolean pdf = chosen == pdfTextFilter || chosen == pdfImageFilter;
+        boolean rtf = chosen == rtfMarkdownFilter;
         boolean isImage = chosen == imageFilter;
 
         // Process each chosen file in turn, all under the selected filter's kind.
@@ -2595,7 +2602,8 @@ public class JRock {
         // of them - not the "Converting PDF with Ghostscript: ..." line, not gs's own
         // page-by-page progress, not even the window. The user would see a frozen
         // application and no explanation. Everything that touches a widget from here
-        // hops back onto the EDT with onEdt().
+        // hops back onto the EDT with onEdt(). An RTF conversion is quick by
+        // comparison, but it parses a whole document, so it goes the same way.
         final java.io.File[] files = selected;
         new SwingWorker<Void, Void>() {
             @Override
@@ -2604,6 +2612,8 @@ public class JRock {
                     Path file = f.toPath();
                     if (pdf) {
                         includePdf(frame, input, log, extend, file, asImages);
+                    } else if (rtf) {
+                        includeRtfAsMarkdown(input, log, extend, file);
                     } else {
                         // Left on the EDT: hashing and reading a plain include is
                         // quick, and this is what it always did.
@@ -3076,6 +3086,378 @@ public class JRock {
         String name = Paths.get(command).getFileName().toString().toLowerCase();
         if (name.endsWith(".exe")) name = name.substring(0, name.length() - 4);
         return name.startsWith("gswin") && !name.endsWith("c");
+    }
+
+    // ---- RTF as Markdown ---------------------------------------------------
+    // Converts an RTF file to Markdown, writes it under JRock/rtf-md/ as
+    // "<rtfname>.md", and includes that file as an ordinary @txt token - so from the
+    // prompt's point of view the model is simply reading a text file.
+    //
+    // Nothing external is needed, unlike the PDF path: the reader is the JDK's own
+    // javax.swing.text.rtf.RTFEditorKit, the same one a JTextPane uses, so this works
+    // on a bare JVM with nothing installed.
+    // Markdown rather than flat text because RTF's whole point is the formatting:
+    // headings, bold and italic survive as markup a model reads as structure,
+    // instead of being thrown away. See RtfMarkdown for what is kept.
+    //
+    // Runs on a background thread (see showIncludeDialog); the include itself, which
+    // touches the prompt's document, goes through onEdt().
+    private static void includeRtfAsMarkdown(JTextArea input, LogView log,
+                                             boolean extend, Path rtf) {
+        log.gray("Converting RTF to Markdown with Swing's RTF reader: " + rtf);
+
+        String markdown;
+        try {
+            markdown = RtfMarkdown.of(rtf);
+        } catch (IOException | BadLocationException | RuntimeException ex) {
+            log.gray("Could not read RTF " + rtf.getFileName() + ": " + ex.getMessage());
+            return;
+        }
+        if (markdown.isBlank()) {
+            // Also what a file that isn't really RTF looks like: the reader wants the
+            // "{\rtf1" header and control words, and finds no text without them. It
+            // does not complain about that, so this line has to cover both cases.
+            log.gray("No text found in " + rtf.getFileName() + "; nothing included. "
+                    + "(An empty document - or a file that is not really RTF.)");
+            return;
+        }
+
+        // Output goes to JRock/rtf-md/, named "<rtfname>.md" - the RTF's full name
+        // kept as the prefix (as with gs-pdf/), so "notes.rtf" becomes "notes.rtf.md"
+        // and two RTFs of the same stem can't overwrite each other's Markdown.
+        Path outDir = rtfMdDir();
+        Path out = outDir.resolve(rtf.getFileName().toString() + ".md");
+        try {
+            Files.createDirectories(outDir);
+            Files.write(out, markdown.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            log.gray("Could not write " + out + ": " + ex.getMessage());
+            return;
+        }
+        log.gray("Markdown written to " + out);
+
+        boolean[] added = new boolean[1];
+        // Inserts the token into the prompt's document, so: on the EDT.
+        onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+        log.gray("Inserted " + (added[0] ? 1 : 0) + " new @txt token(s) for "
+                + rtf.getFileName() + ".");
+    }
+
+    // RTF -> Markdown, with the JDK's RTF reader doing the parsing.
+    //
+    // The reader hands back a styled document: paragraphs of runs, each run carrying
+    // the attributes RTFEditorKit understood (bold, italic, font size, ...). That is
+    // all this needs, and all it uses - the mapping is deliberately small, because
+    // every guess made here is a guess about someone else's document:
+    //
+    //   paragraph          -> a block, separated by a blank line
+    //   bold / italic      -> **bold**, *italic*, ***both***
+    //   a larger font size -> a heading, #/##/### by how much larger (short lines only)
+    //   a bullet character -> a "-" list item ("1." etc. are kept as they are)
+    //
+    // A line break (RTF's \line) is a paragraph of its own to the reader, and comes
+    // out as one here: a blank line, which in Markdown reads the same way.
+    //
+    // Not attempted: tables (RTF's table rows reach the reader as ordinary
+    // paragraphs), embedded images, colours, alignment. Underline has no Markdown of
+    // its own and is left as plain text rather than invented into emphasis.
+    //
+    // Deliberately static and free of any widget: it reads a file and returns a
+    // String, which is also what makes it testable without a GUI.
+    private static final class RtfMarkdown {
+
+        // A paragraph longer than this is never a heading, however large its font: a
+        // heading is a line, not a page. Without it, a document set in one big face
+        // would come back as nothing but headings.
+        private static final int MAX_HEADING_CHARS = 120;
+
+        // How far above the body font size (in points) a paragraph has to be for h1
+        // and h2. Anything larger than the body at all is at least an h3.
+        private static final int H1_POINTS_OVER_BODY = 6;
+        private static final int H2_POINTS_OVER_BODY = 3;
+
+        // The characters word processors leave in the text where a bullet belongs.
+        // RTF has list *markup* too, but Word and friends also write the bullet as a
+        // literal character followed by a tab, and that is what the reader delivers.
+        //
+        // Written as escapes, and kept to characters that are only ever bullets: the
+        // source file stays ASCII (so no compiler's default encoding can quietly
+        // change this list), and a paragraph opening with a section sign and a number
+        // keeps both instead of losing them to a list marker.
+        private static final java.util.regex.Pattern BULLET = java.util.regex.Pattern.compile(
+                "^ *[\\u2022\\u2023\\u2043\\u00b7\\u2219\\u25aa\\u25cf\\u25e6] *");
+        // "1." / "12)" and the like: already Markdown, so only the spacing is redone.
+        private static final java.util.regex.Pattern NUMBERED =
+                java.util.regex.Pattern.compile("^ *(\\d{1,3}[.)]) +");
+
+        private RtfMarkdown() { }
+
+        /** The Markdown for one RTF file. Never null; empty when the RTF has no text. */
+        static String of(Path rtf) throws IOException, BadLocationException {
+            javax.swing.text.rtf.RTFEditorKit kit = new javax.swing.text.rtf.RTFEditorKit();
+            javax.swing.text.DefaultStyledDocument doc =
+                    new javax.swing.text.DefaultStyledDocument();
+            try (java.io.InputStream in = Files.newInputStream(rtf)) {
+                kit.read(in, doc, 0);
+            }
+            return markdown(paragraphs(doc));
+        }
+
+        /** One styled stretch of text: what the RTF said about it, reduced to this. */
+        private static final class Run {
+            final String text;
+            final boolean bold;
+            final boolean italic;
+            final int size;
+
+            Run(String text, boolean bold, boolean italic, int size) {
+                this.text = text;
+                this.bold = bold;
+                this.italic = italic;
+                this.size = size;
+            }
+
+            boolean sameStyleAs(Run other) {
+                return bold == other.bold && italic == other.italic && size == other.size;
+            }
+        }
+
+        // The document as paragraphs of runs.
+        //
+        // Walked by offset rather than by element tree: getParagraphElement is the
+        // document's own answer to "which paragraph is this character in", so it holds
+        // whatever the reader nested the content in.
+        private static List<List<Run>> paragraphs(javax.swing.text.DefaultStyledDocument doc)
+                throws BadLocationException {
+            List<List<Run>> paragraphs = new ArrayList<>();
+            int length = doc.getLength();
+            int at = 0;
+            while (at <= length) {
+                javax.swing.text.Element paragraph = doc.getParagraphElement(at);
+                List<Run> runs = new ArrayList<>();
+                collect(doc, paragraph, runs);
+                paragraphs.add(runs);
+                int end = paragraph.getEndOffset();
+                if (end <= at) break;   // a zero-length paragraph would loop for ever
+                at = end;
+            }
+            return paragraphs;
+        }
+
+        // Appends the runs under one element, descending to the leaves (the styled
+        // stretches) and merging neighbours the RTF happened to split but styled
+        // identically - "**a****b**" is not the bold "ab" any Markdown reader wants.
+        private static void collect(javax.swing.text.DefaultStyledDocument doc,
+                                    javax.swing.text.Element element, List<Run> runs)
+                throws BadLocationException {
+            if (!element.isLeaf()) {
+                for (int i = 0; i < element.getElementCount(); i++) {
+                    collect(doc, element.getElement(i), runs);
+                }
+                return;
+            }
+            int start = element.getStartOffset();
+            int end = Math.min(element.getEndOffset(), doc.getLength());
+            if (end <= start) return;
+            String text = text(doc.getText(start, end - start));
+            if (text.isEmpty()) return;
+
+            javax.swing.text.AttributeSet a = element.getAttributes();
+            Run run = new Run(text, StyleConstants.isBold(a), StyleConstants.isItalic(a),
+                    StyleConstants.getFontSize(a));
+            int last = runs.size() - 1;
+            if (last >= 0 && runs.get(last).sameStyleAs(run)) {
+                runs.set(last, new Run(runs.get(last).text + run.text,
+                        run.bold, run.italic, run.size));
+            } else {
+                runs.add(run);
+            }
+        }
+
+        // The characters of a run that are text rather than structure. A tab becomes a
+        // space (a leading tab in Markdown is a code block), and the control characters
+        // an RTF can carry - a form feed, say - are dropped. The newline ending every
+        // paragraph is left to be trimmed off with the rest of its whitespace below.
+        private static String text(String raw) {
+            StringBuilder out = new StringBuilder(raw.length());
+            for (int i = 0; i < raw.length(); i++) {
+                char c = raw.charAt(i);
+                if (c == '\t') out.append(' ');
+                else if (c == '\n' || c >= ' ') out.append(c);
+            }
+            return out.toString();
+        }
+
+        private static String markdown(List<List<Run>> paragraphs) {
+            int bodySize = bodySize(paragraphs);
+            StringBuilder md = new StringBuilder();
+            boolean previousWasListItem = false;
+            for (List<Run> paragraph : paragraphs) {
+                String block = block(paragraph, bodySize);
+                if (block.isEmpty()) continue;
+                boolean listItem = block.startsWith("- ") || NUMBERED.matcher(block).find();
+                if (md.length() > 0 && !(listItem && previousWasListItem)) {
+                    md.append('\n');   // blank line between blocks, but not within a list
+                }
+                md.append(block).append('\n');
+                previousWasListItem = listItem;
+            }
+            return md.toString();
+        }
+
+        // The document's body font size: the size most of its text is set in, by
+        // character count rather than by paragraph count, so one enormous title can't
+        // outvote the body it sits above. Headings are then judged against it -
+        // "16pt" means nothing on its own, "4pt larger than everything else" does.
+        private static int bodySize(List<List<Run>> paragraphs) {
+            java.util.Map<Integer, Integer> characters = new java.util.HashMap<>();
+            for (List<Run> paragraph : paragraphs) {
+                for (Run run : paragraph) {
+                    String trimmed = run.text.trim();
+                    if (trimmed.isEmpty()) continue;
+                    characters.merge(run.size, trimmed.length(), Integer::sum);
+                }
+            }
+            int body = 0;
+            int most = 0;
+            for (java.util.Map.Entry<Integer, Integer> e : characters.entrySet()) {
+                // On a tie the smaller size wins: body text is the smaller one.
+                if (e.getValue() > most || (e.getValue() == most && e.getKey() < body)) {
+                    most = e.getValue();
+                    body = e.getKey();
+                }
+            }
+            return body;
+        }
+
+        // One paragraph as a Markdown block, or "" when it holds no text.
+        private static String block(List<Run> paragraph, int bodySize) {
+            String plain = plain(paragraph);
+            if (plain.trim().isEmpty()) return "";
+
+            // The list marker, and how many characters of the text it replaces: the
+            // bullet is part of the text, so it has to come off before the runs are
+            // formatted - otherwise a bold bullet ends up inside the emphasis.
+            String marker = "";
+            int drop = 0;
+            java.util.regex.Matcher bullet = BULLET.matcher(plain);
+            java.util.regex.Matcher numbered = NUMBERED.matcher(plain);
+            if (bullet.find()) {
+                marker = "- ";
+                drop = bullet.end();
+            } else if (numbered.find()) {
+                marker = numbered.group(1) + " ";
+                drop = numbered.end();
+            }
+
+            if (marker.isEmpty()) {
+                int heading = headingLevel(paragraph, plain, bodySize);
+                if (heading > 0) {
+                    // No emphasis inside a heading: the bold a heading is set in is
+                    // what identified it, and "# **Title**" says the same thing twice.
+                    String title = escape(plain).trim();
+                    if (title.isEmpty()) return "";
+                    StringBuilder hashes = new StringBuilder();
+                    for (int i = 0; i < heading; i++) hashes.append('#');
+                    return hashes.toString() + " " + title;
+                }
+            }
+
+            String text = inline(paragraph, drop).trim();
+            if (text.isEmpty()) return "";
+            // A paragraph that happens to start with Markdown's own markup is text,
+            // not markup: "#" would silently become a heading, ">" a quote.
+            if (marker.isEmpty() && (text.startsWith("#") || text.startsWith(">"))) {
+                text = "\\" + text;
+            }
+            return marker + text;
+        }
+
+        /** The paragraph's text, unformatted - what the decisions above are made on. */
+        private static String plain(List<Run> paragraph) {
+            StringBuilder out = new StringBuilder();
+            for (Run run : paragraph) out.append(run.text);
+            return out.toString();
+        }
+
+        // The paragraph as Markdown text, skipping the first "skip" characters (the
+        // list marker, when there was one).
+        private static String inline(List<Run> paragraph, int skip) {
+            StringBuilder out = new StringBuilder();
+            int left = skip;
+            for (Run run : paragraph) {
+                String text = run.text;
+                if (left > 0) {
+                    if (left >= text.length()) {
+                        left -= text.length();
+                        continue;
+                    }
+                    text = text.substring(left);
+                    left = 0;
+                }
+                out.append(emphasised(text, run.bold, run.italic));
+            }
+            return out.toString();
+        }
+
+        // 1/2/3 for a heading, 0 for an ordinary paragraph. Decided on the font size
+        // alone: bold-only headings are indistinguishable from a bold sentence, and
+        // turning every bold line into a heading wrecks more documents than it fixes.
+        private static int headingLevel(List<Run> paragraph, String plain, int bodySize) {
+            if (bodySize <= 0) return 0;
+            String trimmed = plain.trim();
+            if (trimmed.isEmpty() || trimmed.length() > MAX_HEADING_CHARS) return 0;
+
+            int size = 0;
+            for (Run run : paragraph) {
+                if (run.text.trim().isEmpty()) continue;   // trailing break, indentation
+                size = Math.max(size, run.size);
+            }
+            if (size <= bodySize) return 0;
+            if (size >= bodySize + H1_POINTS_OVER_BODY) return 1;
+            if (size >= bodySize + H2_POINTS_OVER_BODY) return 2;
+            return 3;
+        }
+
+        // Wraps a run in its emphasis markers, keeping any surrounding whitespace
+        // outside them: "** bold **" is not emphasis in Markdown, it is four asterisks
+        // and a word, and a run that ends in a space is entirely normal in RTF.
+        private static String emphasised(String text, boolean bold, boolean italic) {
+            String escaped = escape(text);
+            if (!bold && !italic) return escaped;
+            int start = 0;
+            int end = escaped.length();
+            while (start < end && Character.isWhitespace(escaped.charAt(start))) start++;
+            while (end > start && Character.isWhitespace(escaped.charAt(end - 1))) end--;
+            if (start == end) return escaped;   // whitespace only: nothing to emphasise
+            String marker = bold && italic ? "***" : (bold ? "**" : "*");
+            return escaped.substring(0, start) + marker + escaped.substring(start, end)
+                    + marker + escaped.substring(end);
+        }
+
+        // The document's text is data, not markup: an asterisk someone typed must come
+        // out as an asterisk. Escaped are the characters that would otherwise be read
+        // as the markup this converter itself emits, plus the backslash that escapes
+        // them. "_" only where it could actually open emphasis - Markdown does not
+        // emphasise inside a word, and escaping every one would turn a file_name_here
+        // into noise for no gain.
+        private static String escape(String text) {
+            StringBuilder out = new StringBuilder(text.length() + 8);
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                boolean special = c == '\\' || c == '`' || c == '*'
+                        || (c == '_' && !insideWord(text, i));
+                if (special) out.append('\\');
+                out.append(c);
+            }
+            return out.toString();
+        }
+
+        private static boolean insideWord(String text, int at) {
+            return at > 0 && at + 1 < text.length()
+                    && Character.isLetterOrDigit(text.charAt(at - 1))
+                    && Character.isLetterOrDigit(text.charAt(at + 1));
+        }
     }
 
     // ---- Move & resize dialog (Ctrl+M) -------------------------------------
