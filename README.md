@@ -140,6 +140,68 @@ as WebAssembly), so nothing runs on a server.
 selected, so the context menu offers **Save selected text as...**; saving into `downloads` hands the
 file to the browser as a download.*
 
+## Mobile support for iOS and Android
+
+Both work today, through [JRock Web](#jrock-web-in-the-browser): the phone's browser runs the same
+unmodified `jrock.jar`, so there is nothing to install and no app store in the way.
+
+<img src="images/mobile-touch-menu.png" width="340"
+     alt="JRock in Edge on an iPhone, with the prompt's long-tap context menu open">
+
+*Edge on an iPhone, with the page's own header and footer left showing: the jar's size and SHA-256
+to check before typing a key, and a footer log ending in `GET .../v1/models -> 200` — a real Bedrock
+call from a phone. In the window, the session report (`/files`, the page's `fetch()` as the transport,
+the key held by the page) and the prompt's context menu, opened with a long tap because that is how
+a phone reaches everything the Ctrl shortcuts do.*
+
+The UX is a little clumsy, and worth knowing about before you judge it:
+
+- The on-screen keyboard sometimes needs a tap on the window **outside** the text area before it
+  will come up.
+- Scroll bars, text selection and the menus are Swing's own, drawn for a desktop and driven by a
+  fingertip. It takes some learning — but you do get used to it.
+
+For an app like this that is a fair trade: one jar, one build, no per-platform code and no store
+review, and the phone gets the same client as the desktop, with the same plain files under
+`JRock/`.
+
+### Working with PDFs
+
+The two PDF filters are the one thing a phone doesn't get. Java ships no PDF support of its own, so
+JRock converts with [Ghostscript](#pdf-conversion-ghostscript) as a subprocess — and there is no
+process to start under a browser JVM, CheerpJ having no operating system beneath it. The filters are
+still in the dropdown, and picking one there gets you the same "not found" note as a desktop without
+Ghostscript installed. Two ways round, both of which work in a browser exactly as they do on the
+desktop:
+
+- **Page images.** Screenshot the pages in whatever PDF viewer the phone already has and include
+  them under **Image files**. This is what *PDF as page images* produces anyway, done by hand — and
+  image includes need nothing native, JRock reading their dimensions straight out of the file header.
+- **Via RTF.** Export the PDF as RTF in Acrobat (which has a mobile app too), then include the `.rtf`
+  either under **Text files as is**, markup and all, or as
+  [**RTF as Markdown text**](#rtf-conversion-no-external-tool). Both run in-process on the JDK's own
+  RTF reader, so both work in a browser tab.
+
+Which one depends on the document: a scan or anything where the layout carries meaning goes as page
+images, while a text document is better as RTF, where headings, bold and italic survive into the
+Markdown as structure the model reads.
+
+### What native mobile support would take
+
+The compilers already exist. For iOS,
+[MobiVM/RoboVM](https://github.com/MobiVM/robovm) translates Java bytecode ahead of time into a
+native iOS binary; for Android, the platform's own toolchain compiles Java straight to DEX and runs
+it natively, Android having been a Java platform from the start. What is missing on both is
+**Swing**: an AWT/Swing backend plugged into UIKit and Android's own view primitives, so that a
+`JFrame` is a native window and a `JTextArea` a native text view with the keyboard, selection and
+scrolling that the platform already knows how to do. That is a months-long project in its own right,
+and none of it is specific to JRock.
+
+Which is also why it would be worth more than JRock. A Swing backend on native mobile primitives
+would make plain Java a cross-platform UI target again — desktop, iOS and Android from one source —
+and put Java and Swing back in the same row as Kotlin and Unity/C#. If that interests you, vote with
+the **Sponsor** button at the top of this repository ;)
+
 ## Endpoint & API design
 
 - Uses the **`bedrock-mantle`** endpoint. AWS recommends `bedrock-runtime` for new apps
