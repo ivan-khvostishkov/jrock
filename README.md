@@ -539,8 +539,12 @@ windows opened in different folders are easy to tell apart:
 - The app icon is a generated teal tile badged with a short abbreviation of the folder name
   (e.g. `my-cool-project` → `MCP`, `research` → `RES`).
 
-In the browser this is switched off (plain title, plain `JR` icon): there's a single instance
-and the directory is CheerpJ's own virtual mount, so naming it would say nothing useful.
+Both follow a change of working directory, so they always name the folder the window is
+actually working in.
+
+In the browser the plain title `JRock - Bedrock (mantle)` and the plain `JR` icon are used
+while the working directory is CheerpJ's own mount (`/files`) — a folder nobody chose. Open one
+of your own and it is named in the title just as on the desktop.
 
 ## Keyboard shortcuts
 

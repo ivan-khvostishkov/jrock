@@ -1173,25 +1173,9 @@ public class JRock {
     }
 
     private static void createAndShowGui(String sourceArg) {
-        // Put the working-directory folder name FIRST in the title so it stays
-        // visible even when Alt-Tab truncates ("myproj - JRock" rather than
-        // "JRock - Bedro..."), so instances in different folders are
-        // distinguishable. Falls back to a plain title at a filesystem root.
-        //
-        // Not in the browser: there is only ever one instance, and the directory is
-        // CheerpJ's own virtual mount (so the title read "file - JRock" and the icon
-        // said "FIL") - a folder name the user never chose and cannot act on. The
-        // plain title and the plain "JR" icon are the right answer there.
-        Path folderPath = isCheerpJ() ? null : workingDir.getFileName();
-        String folder = folderPath != null ? folderPath.toString() : null;
-        String title = (folder != null && !folder.isBlank())
-                ? folder + " - JRock"
-                : "JRock - Bedrock (mantle)";
-        JFrame frame = new JFrame(title);
+        JFrame frame = new JFrame();
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        // App icon; when launched into a folder, overlay a short abbreviation so
-        // each instance is visually distinct in the taskbar / Alt-Tab.
-        frame.setIconImages(makeAppIcons(folder));
+        applyWindowIdentity(frame);
 
         // Preferred window size; if the screen can't fit it in either dimension,
         // start maximized, otherwise center it on screen.
@@ -1537,9 +1521,10 @@ public class JRock {
         configure.addActionListener(e -> {
             Path dirBefore = workingDir;
             if (showConfigureDialog(frame)) {
-                String promptNote = workingDir.equals(dirBefore)
-                        ? null : adoptPromptOfWorkingDir(input);
-                initSession(log, promptNote);
+                boolean movedDir = !workingDir.equals(dirBefore);
+                // The title and the icon name the folder, so they move with it too.
+                if (movedDir) applyWindowIdentity(frame);
+                initSession(log, movedDir ? adoptPromptOfWorkingDir(input) : null);
             }
         });
 
@@ -2134,6 +2119,37 @@ public class JRock {
                     "Could not save to " + target + ":\n" + ex.getMessage(),
                     "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    // Where CheerpJ starts a JAR in the browser: its own writable mount, which is
+    // the working directory until the user opens one of their own.
+    private static final Path CHEERPJ_HOME = Paths.get("/files");
+
+    // Names the window and its taskbar icon after the working directory. Applied at
+    // startup and again whenever that directory changes, so both always say which
+    // folder this window is working in.
+    private static void applyWindowIdentity(JFrame frame) {
+        String folder = titleFolder();
+        frame.setTitle(folder != null ? folder + " - JRock" : "JRock - Bedrock (mantle)");
+        frame.setIconImages(makeAppIcons(folder));
+    }
+
+    // The folder name for the title and the icon, or null for the plain ones.
+    //
+    // The name goes FIRST in the title so it survives Alt-Tab truncation ("myproj -
+    // JRock" rather than "JRock - Bedro..."), which is what tells instances in
+    // different folders apart.
+    //
+    // There is no name at a filesystem root, and none worth showing while the browser
+    // sits in CheerpJ's mount: that would title the window "files - JRock" and label
+    // the icon "FIL" after a folder the user never chose. A folder they did choose is
+    // named here exactly as on the desktop.
+    private static String titleFolder() {
+        if (isCheerpJ() && workingDir.equals(CHEERPJ_HOME)) return null;
+        Path name = workingDir.getFileName();
+        if (name == null) return null;
+        String folder = name.toString();
+        return folder.isBlank() ? null : folder;
     }
 
     // Builds app icons (several sizes) for the window/taskbar. The base is a
