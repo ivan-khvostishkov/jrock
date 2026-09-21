@@ -3493,10 +3493,16 @@ public class JRock {
             if (screen != null) prefill = screen;
         }
 
+        // Named, because four fields of the same width holding four numbers are
+        // otherwise told apart only by where they sit in the grid.
         javax.swing.JTextField widthF  = new javax.swing.JTextField(String.valueOf(prefill.width), 6);
+        widthF.setName("windowWidth");
         javax.swing.JTextField heightF = new javax.swing.JTextField(String.valueOf(prefill.height), 6);
+        heightF.setName("windowHeight");
         javax.swing.JTextField xF      = new javax.swing.JTextField(String.valueOf(prefill.x), 6);
+        xF.setName("windowX");
         javax.swing.JTextField yF      = new javax.swing.JTextField(String.valueOf(prefill.y), 6);
+        yF.setName("windowY");
 
         // Screen info: find the device whose bounds contain the window's center.
         String header = maximized
