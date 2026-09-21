@@ -137,13 +137,15 @@
 
   <div id="display-wrap">
     <div class="placeholder" id="placeholder">
-      Verify the checksum above (and optionally download the JAR to check it
-      yourself). Set your Bedrock region and API key with the &#128274; button -
-      they stay in this tab - then press <b>Run JRock</b>.
+      Compare the SHA-256 above with the build hashes published in the
+      <a href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock
+      repository</a> (and optionally download the JAR to hash it yourself). Set your
+      Bedrock region and API key with the &#128274; button - they stay in this tab -
+      then press <b>Run JRock</b>.
     </div>
   </div>
 
-  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own <code>fetch()</code>, because CheerpJ has no native socket layer for Java's HttpClient: your region and API key stay in this tab's JavaScript (<code>window.myBrowserHttp</code>) and are sent only to the Bedrock endpoint. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
+  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own HTTP <code>fetch()</code>. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
 
   <!-- API key modal -->
   <div class="modal-backdrop" id="keyModal">
