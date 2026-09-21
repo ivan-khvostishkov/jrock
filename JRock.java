@@ -1530,9 +1530,16 @@ public class JRock {
         // initSession reloads the log from the (possibly new) working directory,
         // fully replacing the window contents - so switching directories shows
         // only the new directory's log, with nothing carried over from the old one.
+        //
+        // The prompt goes with it when the directory changed (see
+        // adoptPromptOfWorkingDir), and is reported like it is at startup. A dialog
+        // that changed something else leaves the prompt, and its report line, alone.
         configure.addActionListener(e -> {
+            Path dirBefore = workingDir;
             if (showConfigureDialog(frame)) {
-                initSession(log, null);   // no prompt-source line on reconfigure
+                String promptNote = workingDir.equals(dirBefore)
+                        ? null : adoptPromptOfWorkingDir(input);
+                initSession(log, promptNote);
             }
         });
 
@@ -2506,8 +2513,15 @@ public class JRock {
     // plain-text formats people actually reach for. A .csv, .html or .java file is
     // text like any other, and having to rename it to .txt to load or include it was
     // pure friction. (Any file still has to pass the looksBinary check on load.)
-    private static final String[] TEXT_EXTENSIONS = { "txt", "csv", "html", "java" };
-    private static final String TEXT_FILTER_LABEL = "Text files (*.txt, *.csv, *.html, *.java)";
+    //
+    // .rtf is in the list because an RTF file is text too - its markup is ASCII, which
+    // is how it carries everything else - and a model that knows RTF can read it as it
+    // stands, and answer in it. "as is" is what separates this from the include
+    // dialog's other offer for the same file: "RTF as Markdown text", which converts it
+    // and sends the Markdown instead.
+    private static final String[] TEXT_EXTENSIONS = { "txt", "csv", "html", "java", "rtf" };
+    private static final String TEXT_FILTER_LABEL =
+            "Text files as is (*.txt, *.csv, *.html, *.java, *.rtf)";
 
     // Loads a prompt from a user-chosen file (read-only) into the input area.
     // The document listener then autosaves the loaded text to jrock-prompt.txt.
@@ -4335,6 +4349,30 @@ public class JRock {
     // Rewrites the persistent prompt file (crash recovery for the input box).
     private static void savePromptQuietly(String text) {
         atomicWriteQuietly(promptFile(), text);
+    }
+
+    // Takes over the prompt stored in the (just changed) working directory, and
+    // returns the "Prompt source:" line for the session report.
+    //
+    // The same thing initSession does with that directory's log, and for the same
+    // reason: after a switch, everything on screen is about the new directory. Without
+    // it the previous directory's prompt stayed in the box with the new directory's
+    // file underneath it - and since every keystroke rewrites that file in full, the
+    // first one silently destroyed the prompt stored there. A directory's prompt is
+    // the work someone left in it; opening it must not be a way to lose that.
+    //
+    // A directory with no stored prompt keeps what is on screen and is seeded with it:
+    // nothing can be lost that way, and carrying the prompt into a new folder is the
+    // useful half of the old behaviour.
+    private static String adoptPromptOfWorkingDir(JTextArea input) {
+        String stored = readFileQuietly(promptFile());
+        if (stored == null) {
+            savePromptQuietly(input.getText());
+            return "carried over from the previous working directory";
+        }
+        input.setText(stored);        // autosave rewrites the same file with the same text
+        input.setCaretPosition(0);
+        return "recovered persistent file: JRock/jrock-prompt.txt";
     }
 
     // Atomically rewrites `target` with `text`: write to a temp file, then move it

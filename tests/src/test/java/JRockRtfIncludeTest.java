@@ -27,6 +27,10 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
     /** The include chooser's filter that means "convert this RTF to Markdown". */
     private static final String RTF_FILTER = "RTF as Markdown text (*.rtf)";
 
+    /** The other offer for the same file: send the bytes on disk, markup and all. */
+    private static final String AS_IS_FILTER =
+            "Text files as is (*.txt, *.csv, *.html, *.java, *.rtf)";
+
     /** Reading one small document in-process; only a slow CI runner needs the rest. */
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;
 
@@ -91,6 +95,39 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
         assertThat(workingDirectory().resolve("JRock").resolve("rtf-md"))
                 .describedAs("JRock/rtf-md/, which nothing should have created").doesNotExist();
+    }
+
+    @Test
+    @DisplayName("an RTF included as is is the RTF itself, converted by nothing")
+    void includesTheRtfItselfUnderTheAsIsFilter() throws Exception {
+        awaitReadyCount(1);
+
+        // The same document, under the other filter. An RTF file is text - its markup is
+        // ASCII, which is how it carries everything else - so a model that knows the
+        // format can be handed it as it stands, and answer in it. That is a different
+        // thing to ask for than Markdown, and the only difference between the two is
+        // which filter was chosen.
+        Path rtf = FormattedRtf.write(workingDirectory().resolve("quarterly.rtf"));
+
+        chooseInTheIncludeDialog(AS_IS_FILTER, rtf);
+        // A plain include has nothing to convert and no worker to wait for; the line it
+        // logs as it registers the file is the signal.
+        awaitLogLine("Included @txt ", CONVERSION_TIMEOUT_SECONDS);
+
+        // 1. The include is the RTF, not a file derived from it: nothing was converted
+        //    and nothing was written.
+        assertThat(includedPaths()).describedAs("the files registered as includes")
+                .containsExactly(rtf);
+        assertThat(workingDirectory().resolve("JRock").resolve("rtf-md"))
+                .describedAs("JRock/rtf-md/, which converting nothing should not create")
+                .doesNotExist();
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .doesNotContain("Converting RTF to Markdown");
+
+        // 2. And the prompt references it once, as text - which is what "as is" means
+        //    here: the file goes to the model the way @txt always sends one.
+        assertThat(countOccurrences(promptArea().text(), "@txt "))
+                .describedAs("@txt tokens in the prompt").isEqualTo(1);
     }
 
     /** The paths JRock currently has registered as includes. */

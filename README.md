@@ -255,7 +255,8 @@ Attach **text or image** files to a prompt (and convert **PDFs** or **RTFs** int
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
    once, and the dropdown offers five kinds:
    - **Image files** (png, jpg, jpeg, gif, webp)
-   - **Text files** (txt, csv, html, java)
+   - **Text files as is** (txt, csv, html, java, rtf) — sent exactly as they are on disk,
+     RTF markup and all, for a model that reads (and writes) the format itself
    - **PDF as text pages** — converts the PDF to one text file per page
    - **PDF as page images** — converts the PDF to one PNG per page
    - **RTF as Markdown text** — converts the RTF to one Markdown file
@@ -408,7 +409,7 @@ of every document for reading and further automation.
 5. **Ctrl+O** → `jrock-prompt-doc-inventory.txt`. Ctrl+O always opens back in the prompts
    directory, so step 5 is the same two keystrokes as step 1 even though step 4 just saved a
    file somewhere else entirely.
-6. **Ctrl+I** → the `.txt` you just saved, with the **Text files** filter. One `@txt` token.
+6. **Ctrl+I** → the `.txt` you just saved, with the **Text files as is** filter. One `@txt` token.
 7. **Ctrl+Enter**. The reply is a base file name.
 8. **Rename both files to it** — `<name>.pdf` and `<name>.txt`.
 
@@ -454,8 +455,10 @@ text file.
   Ghostscript command line regardless.
 
 Applying re-runs the session init (working directory reported first, then models loaded,
-ending with `Ready.`). Changing the working directory reloads the log from the new folder,
-so nothing carries over from the old one.
+ending with `Ready.`). Changing the working directory reloads **both the log and the prompt**
+from the new folder, so nothing carries over from the old one — and, since the prompt is
+autosaved over on every keystroke, nothing in the new folder is overwritten by what was on
+screen. A new folder with no prompt of its own keeps the current one and is seeded with it.
 
 The dialog also shows an **About** line with the version and a **JRock** link to the project
 on GitHub, a short description, keyboard shortcuts, and authorship.
@@ -599,8 +602,19 @@ java JRock.java
 
 Tests live in **`tests/`** and run on **JUnit 5**. Most are GUI tests, using
 [AssertJ-Swing](https://github.com/assertj/assertj-swing) (the maintained descendant of
-FEST-Swing) to drive the real widgets through `java.awt.Robot`: each one starts the actual
-application via `JRock.main(...)` and then works its window like a person would.
+FEST-Swing) to find the real widgets and read them: each one starts the actual application
+via `JRock.main(...)` and then works its window.
+
+They do **not** move the mouse or type on the keyboard. Both go through the operating system,
+which hands them to whichever window it believes is focused or under the pointer — and the
+headless runner has no window manager to make that JRock's, while a desktop has whatever its
+owner is doing in front. Injected input can also be dropped outright, and a lost click looks
+exactly like a button that does nothing: the test sits at its timeout waiting for a dialog
+that was never opened. So buttons are pressed with `doClick`, the Ctrl shortcuts are looked up
+in the root pane's input map and run, dropdowns are given `setSelectedItem`, and text is set on
+the field's document — in each case the very thing a real click or keystroke reaches, once it
+has arrived. What this gives up is evidence that a widget is where a mouse could reach it;
+what it buys is a suite that reports on JRock rather than on the window manager.
 
 - **`JRockStartupTest`** waits for the log pane to report `Ready.` among the rest of the
   session report.
@@ -620,7 +634,15 @@ application via `JRock.main(...)` and then works its window like a person would.
   as a list, asterisks escaped, an umlaut intact as UTF-8 — plus the single `@txt` token in the
   prompt. The document is written by hand (`FormattedRtf`), one control word per mapping. A
   second test renames a plain text file to `.rtf` and checks JRock says it found no text and
-  includes nothing. No external program: the reader is the JDK's.
+  includes nothing. A third includes the same RTF under *Text files as is* and checks the
+  include is the `.rtf` itself, with nothing converted and no `JRock/rtf-md/` written — the
+  filter is the whole difference. No external program: the reader is the JDK's.
+- **`JRockWorkingDirTest`** opens another working directory from the Configure dialog and
+  checks nothing is lost at either end: the prompt stored in the folder being opened is what
+  ends up on screen and still what is in its file, the folder left behind keeps what was on
+  screen when it was left, and a folder with no prompt of its own is given the current one.
+  The prompt is autosaved on every change, so a switch that left the previous prompt in the box
+  would overwrite the opened folder's prompt on the next keystroke — unrecoverably.
 - **`JRockReplyTextTest`** feeds chat-completion JSON to the reply parser and checks non-ASCII
   text comes back intact — as characters, as `\uXXXX` escapes (a server may use either, and an
   emoji arrives as a *pair* of them), and mixed. No window.

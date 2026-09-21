@@ -26,6 +26,9 @@ import org.junit.jupiter.api.Test;
  */
 class JRockPromptsDirTest extends JRockGuiFixture {
 
+    /** Reading one small text file; only a slow CI runner needs the rest. */
+    private static final long LOAD_TIMEOUT_SECONDS = 30;
+
     @Test
     @DisplayName("Ctrl+O and Ctrl+S always open in the prompts directory, whatever was browsed last")
     void alwaysOpensInThePromptsDirectory() throws Exception {
@@ -49,8 +52,11 @@ class JRockPromptsDirTest extends JRockGuiFixture {
         //    allowed, and is exactly what would teach a remembering chooser the wrong
         //    directory.
         browseTo(chooser, elsewhere);
-        chooser.selectFile(strayPrompt.toFile());
-        chooser.approve();
+        approveWith(chooser, strayPrompt);
+        // The load runs on the EDT as the dialog closes, so the prompt is not there the
+        // instant approve() returns. JRock says when it has loaded one; that is the
+        // moment to look.
+        awaitLogLine("Loaded prompt from (read-only): ", LOAD_TIMEOUT_SECONDS);
         assertThat(promptArea().text())
                 .describedAs("the prompt, loaded from outside the library")
                 .isEqualTo("a prompt from afar");
@@ -60,14 +66,14 @@ class JRockPromptsDirTest extends JRockGuiFixture {
         assertThat(currentDirectoryOf(reopened))
                 .describedAs("where Load prompt opened the second time")
                 .isEqualTo(real(library));
-        reopened.cancel();
+        dismiss(reopened);
 
         // 4. And Ctrl+S opens in the same place, so a prompt is saved back where
         //    prompts are loaded from.
         JFileChooserFixture save = pressCtrlAnd(KeyEvent.VK_S);
         assertThat(currentDirectoryOf(save))
                 .describedAs("where Save prompt copy opened").isEqualTo(real(library));
-        save.cancel();
+        dismiss(save);
     }
 
     @Test
@@ -140,8 +146,8 @@ class JRockPromptsDirTest extends JRockGuiFixture {
         JOptionPaneFixture dialog = openConfigure();
         // By name: the working-directory row is the same kind of widget, and on a
         // plain launch it holds the same text, so type alone would not separate them.
-        dialog.textBox("promptsDir").setText(dir.toString());
-        dialog.okButton().click();
+        enterText(dialog.textBox("promptsDir"), dir.toString());
+        press(dialog.okButton());
         // Applying re-runs the whole session report, ending in a second "Ready.".
         awaitReadyCount(2);
     }

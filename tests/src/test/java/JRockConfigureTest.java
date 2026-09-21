@@ -48,8 +48,8 @@ class JRockConfigureTest extends JRockGuiFixture {
         JOptionPaneFixture dialog = openConfigure();
         // Blank on a first open too, not only after a key has been set.
         apiKeyField(dialog).requireEmpty();
-        apiKeyField(dialog).enterText(FAKE_API_KEY);
-        dialog.okButton().click();
+        enterText(apiKeyField(dialog), FAKE_API_KEY);
+        press(dialog.okButton());
 
         // Applying settings re-runs the whole session report, which ends in its own
         // "Ready." - so a second one is the evidence the app came back up. Counting is
@@ -58,7 +58,7 @@ class JRockConfigureTest extends JRockGuiFixture {
 
         JOptionPaneFixture reopened = openConfigure();
         apiKeyField(reopened).requireEmpty();
-        reopened.cancelButton().click();
+        press(reopened.cancelButton());
 
         // The key was taken, though - blank-on-reopen is write-only, not ignored.
         assertThat(field("apiKeyOverride").get(null))

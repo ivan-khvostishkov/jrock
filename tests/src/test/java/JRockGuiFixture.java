@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import javax.swing.AbstractButton;
 import javax.swing.Action;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -27,6 +28,7 @@ import javax.swing.JTextPane;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileFilter;
+import javax.swing.text.JTextComponent;
 
 import org.assertj.swing.core.BasicRobot;
 import org.assertj.swing.core.GenericTypeMatcher;
@@ -38,6 +40,7 @@ import org.assertj.swing.finder.JFileChooserFinder;
 import org.assertj.swing.finder.JOptionPaneFinder;
 import org.assertj.swing.finder.WindowFinder;
 import org.assertj.swing.fixture.FrameFixture;
+import org.assertj.swing.fixture.JButtonFixture;
 import org.assertj.swing.fixture.JComboBoxFixture;
 import org.assertj.swing.fixture.JFileChooserFixture;
 import org.assertj.swing.fixture.JOptionPaneFixture;
@@ -70,8 +73,11 @@ abstract class JRockGuiFixture {
      */
     private static final long READY_TIMEOUT_SECONDS = 90;
 
-    /** How long to wait for a dialog JRock was just asked to open. */
+    /** How long to wait for a dialog JRock was just asked to open, or to close. */
     protected static final long DIALOG_TIMEOUT_MS = 30_000;
+
+    /** How much of the log to quote when a wait for one of its lines times out. */
+    private static final int LOG_TAIL_LINES = 30;
 
     /**
      * The mutable statics the application keeps its configuration in.
@@ -234,14 +240,14 @@ abstract class JRockGuiFixture {
         return throwawayHome;
     }
 
-    /** Clicks Configure and returns the dialog it opens. */
+    /** Presses Configure and returns the dialog it opens. */
     protected JOptionPaneFixture openConfigure() {
-        window.button(new GenericTypeMatcher<JButton>(JButton.class) {
+        press(window.button(new GenericTypeMatcher<JButton>(JButton.class) {
             @Override
             protected boolean isMatching(JButton button) {
                 return "Configure".equals(button.getText());
             }
-        }).click();
+        }));
         return JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
     }
 
@@ -290,6 +296,81 @@ abstract class JRockGuiFixture {
     }
 
     /**
+     * Presses a button: what a click on it does, without the click.
+     * <p>
+     * The Robot's clicks are not delivered by Swing but by the operating system, to
+     * whichever window it believes is under the pointer. The headless runner has no
+     * window manager to put the right one there, and a desktop has whatever the person
+     * at the keyboard is doing - and injected input can be dropped outright, which no
+     * amount of waiting recovers from: the pointer lands on the pixel, the button never
+     * hears about it, and the test times out waiting for the dialog it asked for.
+     * {@code doClick} runs the button's own listeners, which is all a click is once it
+     * has arrived, and nothing between the test and the listener can swallow it.
+     * <p>
+     * What is no longer covered is that the button is where the mouse can reach it. The
+     * alternative was a suite that reports on the window manager as often as on JRock.
+     * <p>
+     * invokeLater rather than GuiActionRunner.execute, for the reason given in
+     * {@link #pressCtrl}: these buttons close modal dialogs and open others, and an
+     * invokeAndWait would not return until they were dealt with. Later EDT work still
+     * queues behind the press, so a query about what it changed sees the change.
+     */
+    protected static void press(JButtonFixture button) {
+        press(button.target());
+    }
+
+    /** As {@link #press(JButtonFixture)}, for a button the test found for itself. */
+    protected static void press(final AbstractButton button) {
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                button.doClick(0);
+            }
+        });
+    }
+
+    /**
+     * Puts text in a field, as leaving it there is what the dialogs read.
+     * <p>
+     * Set on the document rather than typed with the Robot, for the reason given in
+     * {@link #press}. Every listener on the field runs, this being the same change
+     * typing makes; what is skipped is the keyboard's trip through the display server,
+     * which also needs the field to be focused, and nothing here can make it so.
+     */
+    protected static void enterText(JTextComponentFixture field, final String text) {
+        final JTextComponent target = field.target();
+        GuiActionRunner.execute(new GuiTask() {
+            @Override
+            protected void executeInEDT() {
+                target.setText(text);
+            }
+        });
+    }
+
+    /**
+     * Chooses an item in a dropdown without opening it.
+     * <p>
+     * Picking an item with the mouse means the popup has to be rendered and hit-tested,
+     * which is the same thing {@link #press} avoids - and a missed click here is worse
+     * than a timeout, because the dropdown keeps the value it had and the test goes on
+     * to check the wrong thing. {@code setSelectedItem} is what a click on the item
+     * reaches, and it is what tells everything listening that the choice changed.
+     */
+    protected static void select(JComboBoxFixture combo, Object item) {
+        select(combo.target(), item);
+    }
+
+    /** As {@link #select(JComboBoxFixture, Object)}, for a combo the test found itself. */
+    protected static void select(final JComboBox<?> combo, final Object item) {
+        GuiActionRunner.execute(new GuiTask() {
+            @Override
+            protected void executeInEDT() {
+                combo.setSelectedItem(item);
+            }
+        });
+    }
+
+    /**
      * Includes files through the real Ctrl+I dialog, under the chooser filter with the
      * given description, and waits until JRock reports it has finished with each one.
      * <p>
@@ -331,7 +412,7 @@ abstract class JRockGuiFixture {
         // JFileChooserFixture exposes the file name box and the buttons, not the "Files
         // of Type" combo, so it is found in the chooser's own hierarchy - by what its
         // items are, rather than by a position in the dialog.
-        JComboBox<?> filters = robot.finder().find(chooser.target(),
+        final JComboBox<?> filters = robot.finder().find(chooser.target(),
                 new GenericTypeMatcher<JComboBox>(JComboBox.class) {
                     @Override
                     protected boolean isMatching(JComboBox candidate) {
@@ -339,17 +420,95 @@ abstract class JRockGuiFixture {
                                 && candidate.getItemAt(0) instanceof FileFilter;
                     }
                 });
-        int index = indexOfFilter(filters, filterDescription);
-        assertThat(index).describedAs("the \"" + filterDescription + "\" filter")
-                .isNotNegative();
-        new JComboBoxFixture(robot, filters).selectItem(index);
+        final FileFilter filter = filterNamed(filters, filterDescription);
+        assertThat(filter).describedAs("the \"" + filterDescription + "\" filter in the "
+                + "\"Files of Type\" dropdown").isNotNull();
 
-        // selectFiles, not selectFile: the chooser is in multi-selection mode, and JRock
-        // reads getSelectedFiles() - which setSelectedFile alone leaves empty.
-        java.io.File[] chosen = new java.io.File[files.length];
-        for (int i = 0; i < files.length; i++) chosen[i] = files[i].toFile();
-        chooser.selectFiles(chosen);
-        chooser.approve();
+        // Choosing the filter is the whole difference between one kind of include and
+        // another, so it is checked rather than assumed: the chooser has to be going by
+        // the filter that was asked for before anything is approved under it.
+        select(filters, filter);
+        assertThat(currentFilterOf(chooser)).describedAs("the chooser's filter")
+                .isSameAs(filter);
+
+        approveWith(chooser, files);
+    }
+
+    /**
+     * Names the files in the chooser's file-name box and approves it, then waits until
+     * the dialog has gone.
+     * <p>
+     * NOT {@code chooser.selectFiles(...)}, which is the obvious way and is why these
+     * tests were unstable. A JFileChooser reads its directory on a thread of its own and
+     * applies the result later, on the EDT; choosing a filter starts a fresh read, and
+     * when that one lands it rebuilds the file list and clears its selection - which
+     * Swing turns straight back into {@code setSelectedFiles(null)} on the chooser. A
+     * selection set programmatically in that window is silently dropped, and Approve is
+     * then left with nothing to approve: no include starts, and the test waits for a log
+     * line that can never be written. How long the read takes is how busy the machine is,
+     * which is exactly the shape of the flakiness seen on CI.
+     * <p>
+     * The file-name box survives it - a chooser only ever writes a non-empty selection
+     * into that box, never an empty one - and it is what the Approve action reads: it
+     * resolves the names itself, makes them the selection and approves. So this is the
+     * same code path as a user typing a file name, and a late directory read cannot undo
+     * it. Absolute paths, quoted and space-separated when there are several, which is the
+     * form that action parses in multi-selection mode.
+     * <p>
+     * The name goes in on the EDT and Approve is pressed rather than clicked, for the
+     * reasons given in {@link #enterText} and {@link #press}.
+     */
+    protected void approveWith(final JFileChooserFixture chooser, final Path... files) {
+        enterText(chooser.fileNameTextBox(), fileNameBoxText(files));
+        press(chooser.approveButton());
+        // An Approve that was ignored leaves the dialog up: say so here, naming the
+        // dialog, rather than letting the caller time out waiting for what it should
+        // have started.
+        awaitChooserGone(chooser, "approved");
+    }
+
+    /** Cancels a chooser and waits until it has gone, so the next one can't find it. */
+    protected void dismiss(final JFileChooserFixture chooser) {
+        press(chooser.cancelButton());
+        awaitChooserGone(chooser, "cancelled");
+    }
+
+    /**
+     * What to put in the file-name box: one absolute path, or several quoted ones.
+     * <p>
+     * The quoted form is only understood in multi-selection mode, so a single file is
+     * left bare - a lone chooser would take the quotes for part of the name.
+     */
+    private static String fileNameBoxText(Path... files) {
+        if (files.length == 1) return files[0].toString();
+        StringBuilder sb = new StringBuilder();
+        for (Path file : files) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append('"').append(file).append('"');
+        }
+        return sb.toString();
+    }
+
+    /** Waits until a chooser is off the screen, whichever button was pressed. */
+    private void awaitChooserGone(final JFileChooserFixture chooser, final String what) {
+        final javax.swing.JFileChooser target = chooser.target();
+        String title = GuiActionRunner.execute(new GuiQuery<String>() {
+            @Override
+            protected String executeInEDT() {
+                return target.getDialogTitle();
+            }
+        });
+        pause(new Condition("the \"" + title + "\" chooser to close after being " + what) {
+            @Override
+            public boolean test() {
+                return !GuiActionRunner.execute(new GuiQuery<Boolean>() {
+                    @Override
+                    protected Boolean executeInEDT() {
+                        return target.isShowing();
+                    }
+                });
+            }
+        }, timeout(DIALOG_TIMEOUT_MS));
     }
 
     /** Waits until the log pane holds {@code needle} anywhere in its text. */
@@ -359,22 +518,50 @@ abstract class JRockGuiFixture {
             public boolean test() {
                 return logPane().text().contains(needle);
             }
+
+            /**
+             * The log itself, in the timeout message. Whatever went wrong instead, JRock
+             * said so in the log - "Could not read RTF ...", "Ghostscript not found" -
+             * and without this a CI failure reports only that the hoped-for line never
+             * arrived, which is the one thing already known.
+             */
+            @Override
+            protected String descriptionAddendum() {
+                return ", which said:\n" + tailOfTheLog();
+            }
         }, timeout(timeoutSeconds, TimeUnit.SECONDS));
     }
 
-    /** Index of the chooser's filter with the given description, or -1. */
-    private static int indexOfFilter(final JComboBox<?> filters, final String description) {
-        return GuiActionRunner.execute(new GuiQuery<Integer>() {
+    /** The last few lines of the log, for a failure message. */
+    private String tailOfTheLog() {
+        List<String> lines = logLines();
+        int from = Math.max(0, lines.size() - LOG_TAIL_LINES);
+        return String.join("\n", lines.subList(from, lines.size()));
+    }
+
+    /** The dropdown's filter with the given description, or null if it offers none. */
+    private static FileFilter filterNamed(final JComboBox<?> filters, final String description) {
+        return GuiActionRunner.execute(new GuiQuery<FileFilter>() {
             @Override
-            protected Integer executeInEDT() {
+            protected FileFilter executeInEDT() {
                 for (int i = 0; i < filters.getItemCount(); i++) {
                     Object item = filters.getItemAt(i);
                     if (item instanceof FileFilter
                             && description.equals(((FileFilter) item).getDescription())) {
-                        return i;
+                        return (FileFilter) item;
                     }
                 }
-                return -1;
+                return null;
+            }
+        });
+    }
+
+    /** The filter the chooser is actually going by, which is what JRock reads. */
+    private static FileFilter currentFilterOf(final JFileChooserFixture chooser) {
+        return GuiActionRunner.execute(new GuiQuery<FileFilter>() {
+            @Override
+            protected FileFilter executeInEDT() {
+                return chooser.target().getFileFilter();
             }
         });
     }
@@ -410,6 +597,33 @@ abstract class JRockGuiFixture {
             @Override
             public boolean test() {
                 return readyCount() >= expected;
+            }
+        }, timeout(READY_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+
+    /**
+     * Waits until the session report for a newly opened working directory has finished.
+     * <p>
+     * Not {@link #awaitReadyCount}: opening another directory reloads the log from
+     * <em>that</em> directory, which replaces everything in the pane - the "Ready." of
+     * the session just left is not there to be counted any more, and in a directory
+     * JRock has never been in, the pane starts empty. What is fixed is the order within
+     * the report: the pane is rebuilt first, its first line names the directory, and its
+     * last line is "Ready." - so a "Ready." after that line belongs to this report.
+     */
+    protected void awaitSessionReportFor(final Path dir) {
+        final String firstLine = "Working directory: " + dir;
+        pause(new Condition("the session report for " + dir) {
+            @Override
+            public boolean test() {
+                String log = logPane().text();
+                int reportStart = log.indexOf(firstLine);
+                return reportStart >= 0 && log.indexOf("Ready.", reportStart) >= 0;
+            }
+
+            @Override
+            protected String descriptionAddendum() {
+                return ", which said:\n" + tailOfTheLog();
             }
         }, timeout(READY_TIMEOUT_SECONDS, TimeUnit.SECONDS));
     }

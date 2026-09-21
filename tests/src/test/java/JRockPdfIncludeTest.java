@@ -34,7 +34,12 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
     /** The include chooser's filter that means "convert with Ghostscript to PNGs". */
     private static final String PDF_IMAGE_FILTER = "PDF as page images (*.pdf)";
 
-    private static final String DPI = "300";
+    /**
+     * The resolution to pick in Configure, as an {@code int} because that is what the
+     * dropdown holds: its items are Integers, and choosing one means naming the item,
+     * not the text it is rendered as.
+     */
+    private static final int DPI = 300;
 
     /** Ghostscript rasterising two A4 pages at 300 dpi takes a moment. */
     private static final long CONVERSION_TIMEOUT_SECONDS = 120;
@@ -56,7 +61,7 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
 
         chooseDpiInConfigureDialog();
         assertThat(field("pdfDpi").get(null))
-                .describedAs("the configured PDF image DPI").isEqualTo(300);
+                .describedAs("the configured PDF image DPI").isEqualTo(DPI);
 
         includeThroughTheDialog(PDF_IMAGE_FILTER, CONVERSION_TIMEOUT_SECONDS, pdf);
 
@@ -136,13 +141,13 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
         JOptionPaneFixture dialog = openConfigure();
         // The Configure dialog's one non-editable combo: the model combo is
         // editable, which separates them without depending on their order.
-        dialog.comboBox(new GenericTypeMatcher<JComboBox>(JComboBox.class) {
+        select(dialog.comboBox(new GenericTypeMatcher<JComboBox>(JComboBox.class) {
             @Override
             protected boolean isMatching(JComboBox box) {
                 return !box.isEditable();
             }
-        }).selectItem(DPI);
-        dialog.okButton().click();
+        }), DPI);
+        press(dialog.okButton());
         // Applying re-runs the whole session report, ending in a second "Ready.".
         awaitReadyCount(2);
     }
