@@ -456,9 +456,8 @@ text file.
 
 Applying re-runs the session init (working directory reported first, then models loaded,
 ending with `Ready.`). Changing the working directory reloads **both the log and the prompt**
-from the new folder, so nothing carries over from the old one — and, since the prompt is
-autosaved over on every keystroke, nothing in the new folder is overwritten by what was on
-screen. A new folder with no prompt of its own keeps the current one and is seeded with it.
+from the new folder, so nothing carries over from the old one. A folder with no prompt of its
+own keeps the one on screen and stores it there.
 
 The dialog also shows an **About** line with the version and a **JRock** link to the project
 on GitHub, a short description, keyboard shortcuts, and authorship.
@@ -605,16 +604,10 @@ Tests live in **`tests/`** and run on **JUnit 5**. Most are GUI tests, using
 FEST-Swing) to find the real widgets and read them: each one starts the actual application
 via `JRock.main(...)` and then works its window.
 
-They do **not** move the mouse or type on the keyboard. Both go through the operating system,
-which hands them to whichever window it believes is focused or under the pointer — and the
-headless runner has no window manager to make that JRock's, while a desktop has whatever its
-owner is doing in front. Injected input can also be dropped outright, and a lost click looks
-exactly like a button that does nothing: the test sits at its timeout waiting for a dialog
-that was never opened. So buttons are pressed with `doClick`, the Ctrl shortcuts are looked up
-in the root pane's input map and run, dropdowns are given `setSelectedItem`, and text is set on
-the field's document — in each case the very thing a real click or keystroke reaches, once it
-has arrived. What this gives up is evidence that a widget is where a mouse could reach it;
-what it buys is a suite that reports on JRock rather than on the window manager.
+They do **not** move the mouse or type on the keyboard. Both are delivered by the operating
+system, to whichever window it believes is focused or under the pointer, and on a headless
+runner with no window manager that need not be JRock's. So a test presses the real buttons,
+picks the real filters and sets text in the real fields, then waits on what JRock logs.
 
 - **`JRockStartupTest`** waits for the log pane to report `Ready.` among the rest of the
   session report.
@@ -641,8 +634,6 @@ what it buys is a suite that reports on JRock rather than on the window manager.
   checks nothing is lost at either end: the prompt stored in the folder being opened is what
   ends up on screen and still what is in its file, the folder left behind keeps what was on
   screen when it was left, and a folder with no prompt of its own is given the current one.
-  The prompt is autosaved on every change, so a switch that left the previous prompt in the box
-  would overwrite the opened folder's prompt on the next keystroke — unrecoverably.
 - **`JRockReplyTextTest`** feeds chat-completion JSON to the reply parser and checks non-ASCII
   text comes back intact — as characters, as `\uXXXX` escapes (a server may use either, and an
   emoji arrives as a *pair* of them), and mixed. No window.

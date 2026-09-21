@@ -4361,15 +4361,14 @@ public class JRock {
     // returns the "Prompt source:" line for the session report.
     //
     // The same thing initSession does with that directory's log, and for the same
-    // reason: after a switch, everything on screen is about the new directory. Without
-    // it the previous directory's prompt stayed in the box with the new directory's
-    // file underneath it - and since every keystroke rewrites that file in full, the
-    // first one silently destroyed the prompt stored there. A directory's prompt is
-    // the work someone left in it; opening it must not be a way to lose that.
+    // reason: after a switch, everything on screen is about the new directory. It is
+    // also what keeps the file safe - every keystroke rewrites the prompt of the
+    // current working directory in full, so whatever is left in the box is what that
+    // directory will hold from then on, and a directory's prompt is the work someone
+    // left in it.
     //
-    // A directory with no stored prompt keeps what is on screen and is seeded with it:
-    // nothing can be lost that way, and carrying the prompt into a new folder is the
-    // useful half of the old behaviour.
+    // A directory with no stored prompt keeps what is on screen and is seeded with it,
+    // which is how a prompt is carried into a new folder to work in.
     private static String adoptPromptOfWorkingDir(JTextArea input) {
         String stored = readFileQuietly(promptFile());
         if (stored == null) {

@@ -254,19 +254,12 @@ abstract class JRockGuiFixture {
     /**
      * Triggers one of JRock's Ctrl+&lt;key&gt; shortcuts on the main window.
      * <p>
-     * Looked up in the root pane's WHEN_IN_FOCUSED_WINDOW input map and run, rather
-     * than typed on the keyboard with the Robot. A real keystroke has to be delivered
-     * by the display server to whichever window it thinks is focused, and the headless
-     * runner is an X server with <em>no window manager</em> - so nothing gives the frame
-     * its focus back after a modal dialog closes. The keystroke then simply vanishes:
-     * no chooser opens, and not even a stray character arrives in the prompt. Mouse
-     * clicks need no focus, which is why every other interaction here works.
-     * <p>
-     * The binding is still what is under test. This is the same KeyStroke the toolkit
-     * would build from that key press, looked up in the same map, so a shortcut that
-     * was renamed, unbound or registered at the wrong scope fails here - loudly, and
-     * naming the shortcut - instead of quietly doing nothing. What is no longer covered
-     * is the trip through X, which this environment cannot do for a frame anyway.
+     * The binding is what is under test: this is the same KeyStroke the toolkit builds
+     * from that key press, looked up in the root pane's WHEN_IN_FOCUSED_WINDOW map, so a
+     * shortcut that is renamed, unbound or registered at the wrong scope fails here -
+     * loudly, and naming the shortcut. A keystroke typed with the Robot would need the
+     * display server to consider the frame focused, which nothing arranges on a runner
+     * with no window manager; see {@link #press}.
      * <p>
      * invokeLater rather than GuiActionRunner.execute, because these actions open modal
      * dialogs: the EDT would not come back until the dialog was dismissed, and
@@ -298,22 +291,18 @@ abstract class JRockGuiFixture {
     /**
      * Presses a button: what a click on it does, without the click.
      * <p>
-     * The Robot's clicks are not delivered by Swing but by the operating system, to
-     * whichever window it believes is under the pointer. The headless runner has no
-     * window manager to put the right one there, and a desktop has whatever the person
-     * at the keyboard is doing - and injected input can be dropped outright, which no
-     * amount of waiting recovers from: the pointer lands on the pixel, the button never
-     * hears about it, and the test times out waiting for the dialog it asked for.
-     * {@code doClick} runs the button's own listeners, which is all a click is once it
-     * has arrived, and nothing between the test and the listener can swallow it.
-     * <p>
-     * What is no longer covered is that the button is where the mouse can reach it. The
-     * alternative was a suite that reports on the window manager as often as on JRock.
+     * Nothing in this suite uses the mouse or the keyboard. Both are delivered not by
+     * Swing but by the operating system, to whichever window it believes is focused or
+     * under the pointer: the headless runner has no window manager to make that JRock's,
+     * a desktop has whatever its owner is working in, and injected input can be discarded
+     * outright - which is indistinguishable from a button that does nothing.
+     * {@code doClick} runs the button's own listeners, which is all a click is once it has
+     * arrived; what it gives up is that the button is where a mouse could reach it.
      * <p>
      * invokeLater rather than GuiActionRunner.execute, for the reason given in
-     * {@link #pressCtrl}: these buttons close modal dialogs and open others, and an
-     * invokeAndWait would not return until they were dealt with. Later EDT work still
-     * queues behind the press, so a query about what it changed sees the change.
+     * {@link #pressCtrl}: a button may close one modal dialog and open another, and an
+     * invokeAndWait would not return until it was dealt with. Later EDT work still queues
+     * behind the press, so a query about what it changed sees the change.
      */
     protected static void press(JButtonFixture button) {
         press(button.target());
@@ -330,12 +319,11 @@ abstract class JRockGuiFixture {
     }
 
     /**
-     * Puts text in a field, as leaving it there is what the dialogs read.
+     * Puts text in a field, which is what a dialog reads when it is applied.
      * <p>
-     * Set on the document rather than typed with the Robot, for the reason given in
-     * {@link #press}. Every listener on the field runs, this being the same change
-     * typing makes; what is skipped is the keyboard's trip through the display server,
-     * which also needs the field to be focused, and nothing here can make it so.
+     * Set on the field's document rather than typed, for the reason given in
+     * {@link #press}. Every listener on the field runs, this being the same change typing
+     * makes.
      */
     protected static void enterText(JTextComponentFixture field, final String text) {
         final JTextComponent target = field.target();
@@ -350,11 +338,11 @@ abstract class JRockGuiFixture {
     /**
      * Chooses an item in a dropdown without opening it.
      * <p>
-     * Picking an item with the mouse means the popup has to be rendered and hit-tested,
-     * which is the same thing {@link #press} avoids - and a missed click here is worse
-     * than a timeout, because the dropdown keeps the value it had and the test goes on
-     * to check the wrong thing. {@code setSelectedItem} is what a click on the item
-     * reaches, and it is what tells everything listening that the choice changed.
+     * {@code setSelectedItem} is what a click on the item reaches, and what tells
+     * everything listening that the choice changed; the popup it skips would have to be
+     * rendered and hit-tested, which is what {@link #press} avoids for buttons. The item
+     * is named as the model holds it rather than as it is rendered, so a dropdown of
+     * Integers is chosen from with an Integer.
      */
     protected static void select(JComboBoxFixture combo, Object item) {
         select(combo.target(), item);
@@ -438,22 +426,18 @@ abstract class JRockGuiFixture {
      * Names the files in the chooser's file-name box and approves it, then waits until
      * the dialog has gone.
      * <p>
-     * NOT {@code chooser.selectFiles(...)}, which is the obvious way and is why these
-     * tests were unstable. A JFileChooser reads its directory on a thread of its own and
-     * applies the result later, on the EDT; choosing a filter starts a fresh read, and
-     * when that one lands it rebuilds the file list and clears its selection - which
-     * Swing turns straight back into {@code setSelectedFiles(null)} on the chooser. A
-     * selection set programmatically in that window is silently dropped, and Approve is
-     * then left with nothing to approve: no include starts, and the test waits for a log
-     * line that can never be written. How long the read takes is how busy the machine is,
-     * which is exactly the shape of the flakiness seen on CI.
+     * The file-name box, not {@code chooser.selectFiles(...)}: a JFileChooser reads its
+     * directory on a thread of its own and applies the result on the EDT, and choosing a
+     * filter starts a fresh read. When one lands it rebuilds the file list and clears the
+     * list's selection, which Swing turns straight into {@code setSelectedFiles(null)} on
+     * the chooser - so a selection set programmatically can be dropped, at a moment that
+     * depends on how busy the machine is, leaving Approve with nothing to approve.
      * <p>
-     * The file-name box survives it - a chooser only ever writes a non-empty selection
-     * into that box, never an empty one - and it is what the Approve action reads: it
-     * resolves the names itself, makes them the selection and approves. So this is the
-     * same code path as a user typing a file name, and a late directory read cannot undo
-     * it. Absolute paths, quoted and space-separated when there are several, which is the
-     * form that action parses in multi-selection mode.
+     * The box survives that, a chooser only ever writing a non-empty selection into it,
+     * and it is what the Approve action reads: it resolves the names itself, makes them the
+     * selection and approves, which is the same path as a user typing a file name.
+     * Absolute paths, quoted and space-separated when there are several, which is the form
+     * that action parses in multi-selection mode.
      * <p>
      * The name goes in on the EDT and Approve is pressed rather than clicked, for the
      * reasons given in {@link #enterText} and {@link #press}.
@@ -461,9 +445,9 @@ abstract class JRockGuiFixture {
     protected void approveWith(final JFileChooserFixture chooser, final Path... files) {
         enterText(chooser.fileNameTextBox(), fileNameBoxText(files));
         press(chooser.approveButton());
-        // An Approve that was ignored leaves the dialog up: say so here, naming the
-        // dialog, rather than letting the caller time out waiting for what it should
-        // have started.
+        // An Approve that was ignored leaves the dialog up, and saying so here names the
+        // dialog - rather than leaving the caller to time out on whatever the include was
+        // supposed to start.
         awaitChooserGone(chooser, "approved");
     }
 
@@ -520,10 +504,9 @@ abstract class JRockGuiFixture {
             }
 
             /**
-             * The log itself, in the timeout message. Whatever went wrong instead, JRock
-             * said so in the log - "Could not read RTF ...", "Ghostscript not found" -
-             * and without this a CI failure reports only that the hoped-for line never
-             * arrived, which is the one thing already known.
+             * The log itself, in the timeout message: whatever happened instead, JRock
+             * said so there - "Could not read RTF ...", "Ghostscript not found" - while
+             * the line that never arrived is the one thing already known.
              */
             @Override
             protected String descriptionAddendum() {
@@ -605,11 +588,10 @@ abstract class JRockGuiFixture {
      * Waits until the session report for a newly opened working directory has finished.
      * <p>
      * Not {@link #awaitReadyCount}: opening another directory reloads the log from
-     * <em>that</em> directory, which replaces everything in the pane - the "Ready." of
-     * the session just left is not there to be counted any more, and in a directory
-     * JRock has never been in, the pane starts empty. What is fixed is the order within
-     * the report: the pane is rebuilt first, its first line names the directory, and its
-     * last line is "Ready." - so a "Ready." after that line belongs to this report.
+     * <em>that</em> directory, which replaces everything in the pane, so there is no
+     * earlier "Ready." left to count. The order within the report is fixed, though - the
+     * pane is rebuilt first, its first line names the directory and its last is "Ready." -
+     * so a "Ready." after that line belongs to this report.
      */
     protected void awaitSessionReportFor(final Path dir) {
         final String firstLine = "Working directory: " + dir;

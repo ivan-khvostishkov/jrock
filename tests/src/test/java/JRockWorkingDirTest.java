@@ -9,14 +9,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Opening another working directory, which is a whole switch of everything JRock keeps
- * on disk - and therefore the one moment where its own files can be destroyed.
+ * Opening another working directory, which switches everything JRock keeps on disk - and
+ * is therefore the one moment where its own files are at stake.
  * <p>
- * The prompt is autosaved over on every keystroke, so a switch that leaves the previous
- * directory's prompt in the box has armed the next keystroke to overwrite the prompt
- * stored in the directory just opened. That is unrecoverable, and it is the kind of bug
- * that is invisible in use until the work is already gone - so it is tested from both
- * sides: what the newly opened directory keeps, and what the one left behind keeps.
+ * The prompt is autosaved over on every keystroke, so whichever prompt is left in the box
+ * is the one the directory just opened will hold from the next keystroke on. Both sides of
+ * the switch are checked: what the newly opened directory keeps, and what the one left
+ * behind keeps.
  *
  * @see JRockGuiFixture for how the application is started and stopped
  */
@@ -43,8 +42,8 @@ class JRockWorkingDirTest extends JRockGuiFixture {
 
         switchWorkingDirectoryTo(other);
 
-        // 1. The other folder's prompt is what is now on screen - and still what is in
-        //    its file, which is the part that used to be lost.
+        // 1. The other folder's prompt is what is now on screen, and still what is in its
+        //    file - the autosave that follows must not have rewritten it with anything else.
         assertThat(promptArea().text())
                 .describedAs("the prompt after opening the other folder").isEqualTo(LEFT_BEHIND);
         assertThat(read(itsPrompt))

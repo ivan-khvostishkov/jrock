@@ -54,7 +54,7 @@ class JRockPromptsDirTest extends JRockGuiFixture {
         browseTo(chooser, elsewhere);
         approveWith(chooser, strayPrompt);
         // The load runs on the EDT as the dialog closes, so the prompt is not there the
-        // instant approve() returns. JRock says when it has loaded one; that is the
+        // instant the chooser has gone. JRock says when it has loaded one; that is the
         // moment to look.
         awaitLogLine("Loaded prompt from (read-only): ", LOAD_TIMEOUT_SECONDS);
         assertThat(promptArea().text())
