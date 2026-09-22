@@ -29,7 +29,9 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text and image files, plus PDF-to-text/PDF-to-images via
   Ghostscript and RTF/DOCX-to-Markdown with no external tool at all) referenced by hash;
-  multi-select supported.
+  multi-select supported, with optional **copies kept under `JRock/`** and every include
+  **reloaded from the log** in one menu item after a restart
+  ([**includes that outlive the session**](#includes-that-outlive-the-session)).
 - **Markdown export** of an answer as **RTF or DOCX**, written in-process — the model replies in
   Markdown, and a selected reply becomes a document a word processor, or a layout application,
   opens with its headings, tables and **the pictures it was given** intact
@@ -347,8 +349,14 @@ into either):
    - **PDF as page images** — converts the PDF to one PNG per page
    - **RTF as Markdown text** — converts the RTF to one Markdown file
    - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
+
+   The dialog also carries a **Save include copies** checkbox, which keeps a copy of each
+   chosen file under `JRock/includes/` and includes it from there
+   ([why](#includes-that-outlive-the-session)).
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
-   (not persisted), so after a restart you must re-include files to reuse them.
+   (not persisted), so after a restart the files have to be attached again — or their paths read
+   back out of the log with **Reload all includes**
+   ([below](#includes-that-outlive-the-session)).
 3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor (one per file / per PDF
    page), preceded by a `![](<hash>)` line under the Markdown-reference filter. Duplicate
    tokens for the same file are not added again (also checked across prior turns in Extend
@@ -368,6 +376,59 @@ outright over a line of log text. It is also less work: a 40 MB photo is no long
 full just to say how big it is. If a header can't be read, the include still happens and the
 log says the dimensions were unavailable — the bytes sent to the model are the file itself
 either way, so none of this touches what the model receives.
+
+### Includes that outlive the session
+
+The hash → path map is not persisted, and a restart therefore loses it — while the prompt and
+the whole transcript *are* restored from disk. So the tokens come back and nothing knows what
+they stand for: sending says `Included @img <hash> is not known`, and the conversation is stuck
+until every file is attached again. Two things fix that, and they are meant to be used together.
+
+**Save include copies** — a checkbox in the include dialog itself, next to the file list. With
+it on, a chosen file is **copied into `JRock/includes/` first and included from the copy**, so
+the log's line points inside the folder you own:
+
+```
+Copied for the include: C:\photos\IMG_4002.jpg -> C:\demo\JRock\includes\IMG_4002.jpg
+Included @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
+```
+
+It is off by default and remembered for the session. Two different files of the same name both
+survive, the second as `IMG_4002-2.jpg`; the same file twice is not copied twice. A file already
+under `JRock/includes/` is included where it is, and so is anything the conversions wrote (they
+write under `JRock/` themselves). A copy that fails is reported and the original included anyway —
+the option is there to keep a file within reach, not to refuse the include. It matters most in
+the [browser](#jrock-web-in-the-browser), where an uploaded file lands in CheerpJ's `/uploads`
+and is gone after a reload, taking the only path the log recorded with it.
+
+**Reload all includes** — an item in the prompt's context menu, which rebuilds the map from the
+log. The log recorded every include ever made, which is the same information the map held, so it
+is read top to bottom as the history it is:
+
+| In the log | What it means |
+|---|---|
+| `Included @img <hash> from <path>` | remember `<hash>` → `<path>`, replacing an earlier path for that hash — the file was included again, perhaps from somewhere else |
+| a message (yours or the model's) referring to a hash | that hash is wanted, at the path remembered for it **at that point**, so a later include cannot rewrite what an earlier message meant |
+
+Both spellings of a reference count: the `@img`/`@txt` token, and the `![](<hash>)` a
+[Markdown-reference include](#multimodal-includes-ctrli) leaves — an answer carrying one needs
+the file to export as a DOCX with the picture in it. The current prompt is read last, being the
+newest thing there is, and after a restart its recovered tokens are usually the whole reason for
+doing this. Each hash is then reported on its own line:
+
+```
+Reloaded @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
+Reloaded @txt 8b52e0ad91cc from C:\demo\JRock\rtf-md\quarterly.rtf.md - but that file is not there any more.
+No include recorded for @img 4d0c1a77e6b3 - attach the file again with Ctrl+I (the log may have been cleared since).
+Reload all includes: 1 reloaded, 1 with a missing file, 1 not recorded in the log (of 3 referred to). Each file is checked again, by its hash, on send.
+```
+
+**Nothing is hashed here**, deliberately. Whether each file is still the file it was is exactly
+what the send checks, one hash per token, and the answer can change between the two moments
+anyway — so a reload is cheap on a folder of large attachments, and a file that has been edited
+since is caught at the only moment that matters. What the reload *does* check is that the file is
+still there, because a path that no longer exists is the one problem you can do something about
+before sending.
 
 ### PDF conversion (Ghostscript)
 
@@ -692,8 +753,10 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
-- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), Load prompt
-  from file..., Save prompt copy as...
+- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Reload all
+  includes* (which rebuilds the hash → path map from the log, so a conversation survives a
+  restart — see [**includes that outlive the session**](#includes-that-outlive-the-session)),
+  Load prompt from file..., Save prompt copy as...
 - **Top bar (empty area)** — Move & resize window...; in the **browser**, also Show/hide
   the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
   entry (see below).
@@ -856,6 +919,20 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   two filters that offer images, and checks the one line that is the whole difference: *Image with
   a Markdown reference* leaves `![](<hash>)` above the `@img` token and says so in the log, *Image
   files* leaves the token alone.
+- **`JRockIncludeCopyTest`** ticks the dialog's own **Save include copies** checkbox and checks
+  where the include then points: the copy line comes *before* the include it was made for, the
+  copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what
+  the hash is registered against. Unticked, nothing is copied and no `JRock/includes/` is created.
+  A third test includes two *different* files both called `photo.png` and checks that neither is
+  lost (the second becomes `photo-2.png`), and that the same file again is not copied a third time.
+- **`JRockReloadIncludesTest`** includes a PNG and a text file, throws the hash → path map away by
+  reflection — which is the state a restart leaves, minus the restart — and invokes **Reload all
+  includes** from the prompt's context menu. The map has to come back identical, each entry named
+  in the log with the path it was recorded at. Three more tests cover what a log can say instead:
+  a token no include line accounts for is named rather than dropped, a file deleted since is
+  reloaded *and* reported as gone, and a file included twice from two folders is reloaded from
+  where it was included **last**. The menu is opened by dispatching a popup-trigger event to the
+  prompt, so the item is reached through the listener a right-click reaches — with no mouse.
 - **`JRockMarkdownExportTest`** takes the other direction, without a window: it exports a
   Markdown selection and checks each format against something other than itself. The RTF must be
   all ASCII, must read back through the JDK's **own `RTFEditorKit`** with its bold run, bullet
