@@ -3442,18 +3442,14 @@ public class JRock {
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(promptsDir().toFile());
         chooser.setDialogTitle("Load prompt");
-        // All files, like Save prompt copy - a prompt is a prompt whatever it is called,
-        // and "*.md", "*.prompt" or no extension at all are all of them ways people keep
-        // one. The text types are offered as a way of narrowing a crowded folder, not as
-        // a rule about what a prompt may be; what actually refuses a file that cannot be
-        // one is the looksBinary check below.
-        //
-        // Not the include dialog's filter list, either: those filters say what to DO with
-        // a file (as text, as an image, as Markdown), which is a question a prompt never
-        // asks - it is loaded as the text it is.
-        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                TEXT_FILTER_LABEL, TEXT_EXTENSIONS));
-        chooser.setFileFilter(chooser.getAcceptAllFileFilter());
+        // All files, and only that - exactly what Save prompt copy offers, so the pair
+        // stays symmetric. A prompt is a prompt whatever it is called: "*.md", "*.prompt"
+        // or no extension at all are all of them ways people keep one, so a filter here
+        // would only hide prompts. Nothing has to be said about the kinds of file either,
+        // which is the include dialog's business: its filters say what to DO with a file
+        // (as text, as an image, as Markdown), a question a prompt never asks - it is
+        // loaded as the text it is. What refuses a file that cannot be one is the
+        // looksBinary check below, after it has been read.
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
 
         Path source = chooser.getSelectedFile().toPath();
