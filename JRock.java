@@ -140,6 +140,11 @@ public class JRock {
     // so it gets the same patience as a completion rather than the model list's.
     private static final int URL_TIMEOUT_SECONDS     = 60;
 
+    // How long the prompt's cursor has to sit still before "Autobackup log" takes its
+    // backup. Long enough that it never lands in the middle of writing a message, short
+    // enough that a coffee break is already backed up when you come back.
+    private static final int IDLE_BACKUP_MINUTES = 5;
+
     // Shown after an UnsatisfiedLinkError from the networking stack. That can only
     // really happen in one situation: JRock is running on CheerpJ in the browser
     // (no native socket layer, so HttpClient's sun.nio.ch.EPoll is unavailable)
@@ -697,6 +702,12 @@ public class JRock {
     private static final String ROLE_HUMAN = "HUMAN OPERATOR";
     private static final String ROLE_ASSISTANT = "OPERATOR'S ASSISTANT";
 
+    // The third "role" - and the only one that is never a dialog message. The clock
+    // (see clockMessage) is sent with a request but is not part of the conversation:
+    // it is not shown, not logged as a turn, and not resent by extend mode. It exists
+    // here solely so its file in JRock/messages/ is named like the other two.
+    private static final String ROLE_CLOCK = "CLOCK";
+
     // Filesystem layout for persistence (resolved against workingDir via
     // logFile() / logsDir(), so they follow the configured working directory).
     private static final DateTimeFormatter STAMP_FMT =
@@ -710,6 +721,31 @@ public class JRock {
                 .ofLocalizedDateTime(java.time.format.FormatStyle.FULL, java.time.format.FormatStyle.MEDIUM)
                 .withLocale(java.util.Locale.getDefault())
                 .format(java.time.ZonedDateTime.now());
+    }
+
+    // ---- Clock -------------------------------------------------------------
+    // A model has no clock and no location: on its own it cannot tell whether "now"
+    // is Monday morning or Friday night, nor what "this evening" would mean here. The
+    // Clock checkbox answers both with one extra message per request.
+    //
+    // Both halves of the answer are there on purpose. The offset (+02:00) is what
+    // makes the time unambiguous, and the zone id (Europe/Berlin) is what the offset
+    // cannot say: which place this is, and therefore when its clocks next change.
+    // Seconds resolution, because a request takes longer than that anyway.
+    //
+    // Lowercase "xxx", not "XXX": the two differ only at UTC, where the uppercase form
+    // writes "Z" and this one writes "+00:00". One shape for every zone is worth more
+    // here than the shorter spelling - not least to whoever reads the file afterwards.
+    private static final DateTimeFormatter CLOCK_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss xxx");
+
+    // The clock message body, in the tagged form the model is meant to read it in.
+    // Deliberately machine-shaped rather than localized: this one is addressed to the
+    // model, not to the user (humanNow above is the user's copy).
+    private static String clockMessage() {
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+        return "<clock><now>" + now.format(CLOCK_FMT) + " " + now.getZone()
+                + "</now></clock>";
     }
 
     // ---- Multimodal includes (Ctrl+I) --------------------------------------
@@ -1242,7 +1278,8 @@ public class JRock {
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
         LogView log = new LogView(output);
 
-        // Top bar: [Configure] on the left; [Dialog only] + [Clear log] on the right.
+        // Top bar: [Configure] on the left; [Dialog only] [Autobackup log] [Clear log]
+        // on the right.
         JButton configure = new JButton("Configure");
         configure.setToolTipText("Working directory, API key, region, model");
         // (Listener wired below, once `input` exists.)
@@ -1250,12 +1287,22 @@ public class JRock {
         javax.swing.JCheckBox dialogOnly = new javax.swing.JCheckBox("Dialog only");
         dialogOnly.setToolTipText("Show only the headers and dialog (hide gray system text)");
         dialogOnly.addActionListener(e -> log.setDialogOnly(dialogOnly.isSelected()));
+
+        // On by default: the work worth keeping is already on disk, and the backup is
+        // what survives the disk. It fires itself after a spell of inactivity, which
+        // is the moment a backup costs nothing - see the idle timer below, wired once
+        // the Send button it has to hold exists.
+        javax.swing.JCheckBox autoBackup = new javax.swing.JCheckBox("Autobackup log", true);
+        autoBackup.setToolTipText("Zip the JRock folder after " + IDLE_BACKUP_MINUTES
+                + " minutes without the cursor moving in the prompt");
+
         JButton clear = new JButton("Clear log");
         clear.addActionListener(e -> clearLogConfirmed(frame, log));
 
         javax.swing.JPanel topRight = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
         topRight.add(dialogOnly);
+        topRight.add(autoBackup);
         topRight.add(clear);
         javax.swing.JPanel topLeft = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 4));
@@ -1326,7 +1373,30 @@ public class JRock {
         javax.swing.JCheckBox extendMode = new javax.swing.JCheckBox("Extend conversation");
         extendMode.setToolTipText("Send the whole prior dialog with each message (continuous chat)");
 
+        // "Clock" mode: tell the model what time it is here, with each message. On by
+        // default - a model that has to guess the date guesses wrong, and one extra
+        // short message is a cheap way to stop it (see clockMessage).
+        javax.swing.JCheckBox clockMode = new javax.swing.JCheckBox("Clock", true);
+        clockMode.setToolTipText(
+                "Send the local time and time zone with each message, as <clock><now>...</now></clock>");
+
         JButton send = new JButton("Send (Ctrl-Enter)");
+
+        // Two things disable Send - a request in flight and a backup in progress - and
+        // they can overlap: a backup started while an answer was on its way must not
+        // re-enable the button when it finishes, and the answer arriving must not
+        // re-enable it while the backup is still running. So the button is gated by a
+        // count of reasons rather than by whoever spoke last. EDT only, like the button.
+        int[] sendBlockers = { 0 };
+        java.util.function.Consumer<Boolean> sendGate = allow -> {
+            if (allow) {
+                if (sendBlockers[0] > 0) sendBlockers[0]--;
+            } else {
+                sendBlockers[0]++;
+            }
+            send.setEnabled(sendBlockers[0] == 0);
+        };
+
         send.addActionListener(e -> {
             // Normalized here, at the one point the prompt leaves the text area, so
             // the request and the transcript get the identical string.
@@ -1336,10 +1406,11 @@ public class JRock {
                 log.gray("");
                 return;
             }
-            send.setEnabled(false);
+            sendGate.accept(false);
             // In "extend" mode, capture the prior dialog turns BEFORE adding the new
             // prompt, so the request is [history...] + [new prompt].
             boolean extend = extendMode.isSelected();
+            boolean clock = clockMode.isSelected();
             java.util.List<String[]> history = extend
                     ? log.dialogHistory() : java.util.Collections.emptyList();
             log.human(prompt, extend);
@@ -1361,7 +1432,7 @@ public class JRock {
             if (includeError != null) {
                 log.gray(includeError);
                 log.gray("");
-                send.setEnabled(true);
+                sendGate.accept(true);
                 return;
             }
 
@@ -1376,7 +1447,7 @@ public class JRock {
                         + "bedrock-mantle; it uses " + via + ", which JRock does not implement "
                         + "yet. Choose a Chat-Completions-capable model.");
                 log.gray("");
-                send.setEnabled(true);
+                sendGate.accept(true);
                 return;
             }
 
@@ -1387,7 +1458,7 @@ public class JRock {
                 @Override
                 protected String[] doInBackground() {
                     try {
-                        return callModel(prompt, history);
+                        return callModel(prompt, history, clock);
                     } catch (Throwable ex) {
                         // Catch Throwable, not just Exception: a JVM without a real
                         // socket layer (CheerpJ in the browser, with no page-side
@@ -1435,10 +1506,31 @@ public class JRock {
                         log.gray("ERROR: " + ex.getMessage());
                         log.gray("");
                     }
-                    send.setEnabled(true);
+                    sendGate.accept(true);
                 }
             }.execute();
         });
+
+        // Autobackup: a one-shot timer, restarted by every caret event in the prompt
+        // area, so it only ever fires when the cursor has not moved there - typed,
+        // clicked or arrowed - for IDLE_BACKUP_MINUTES. That is the point: a backup
+        // zips the whole JRock folder and holds the Send button while it does, which
+        // nobody wants mid-sentence, and an idle window is exactly when it is free.
+        //
+        // Deliberately NOT restarted after it fires: one backup per idle spell, not one
+        // every five minutes for as long as the window is left open. The next caret
+        // event arms it again.
+        javax.swing.Timer idleBackup =
+                new javax.swing.Timer(IDLE_BACKUP_MINUTES * 60_000, null);
+        idleBackup.setRepeats(false);
+        idleBackup.addActionListener(e -> {
+            if (autoBackup.isSelected()) backupLog(frame, log, sendGate, false);
+        });
+        input.addCaretListener(e -> { if (autoBackup.isSelected()) idleBackup.restart(); });
+        autoBackup.addActionListener(e -> {
+            if (autoBackup.isSelected()) idleBackup.restart(); else idleBackup.stop();
+        });
+        idleBackup.start();   // on by default, so the first spell counts from startup
 
         // Ctrl+Enter in the prompt area triggers Send.
         input.getInputMap().put(
@@ -1462,12 +1554,16 @@ public class JRock {
         split.setContinuousLayout(true);
         split.setOneTouchExpandable(true);
 
-        // Bottom bar: Send on the left, Extend checkbox on the right, same row.
+        // Bottom bar: Send on the left, the two send-time checkboxes on the right, same
+        // row. Zero gaps in this layout keep "Extend conversation" flush with the bar's
+        // own right margin, so the space before it is a strut rather than a hgap.
         javax.swing.JPanel sendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         sendSide.add(send);
         javax.swing.JPanel extendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        extendSide.add(clockMode);
+        extendSide.add(javax.swing.Box.createHorizontalStrut(10));
         extendSide.add(extendMode);
 
         javax.swing.JPanel buttonBar = new javax.swing.JPanel(new BorderLayout());
@@ -1666,11 +1762,19 @@ public class JRock {
         useBrowserClipboard(output, log, false);   // read-only: copy only
         useBrowserClipboard(input, log, true);
 
-        // Window chrome (empty area of the top bar, e.g. right of Configure):
-        // Move & resize window...; in the browser, also show/hide the page's own
-        // header and footer; on Windows, install/uninstall the "Open JRock here"
-        // folder context-menu entry.
+        // Window chrome (empty area of the top bar, e.g. right of Configure): the
+        // backup pair, then Move & resize window...; in the browser, also show/hide the
+        // page's own header and footer; on Windows, install/uninstall the "Open JRock
+        // here" folder context-menu entry.
+        //
+        // Backup and restore lead the menu, above the separator, because they are about
+        // the work rather than about the window - and because they are the two items
+        // here that a hurry would look for.
         javax.swing.JPopupMenu windowMenu = new javax.swing.JPopupMenu();
+        addMenuItem(windowMenu, "Backup log...", () -> backupLog(frame, log, sendGate, true));
+        addMenuItem(windowMenu, "Load from backup...",
+                () -> showRestoreDialog(frame, input, log, sendGate));
+        windowMenu.addSeparator();
         addMenuItem(windowMenu, "Move & resize window...", () -> showMoveResizeDialog(frame));
         if (isCheerpJ()) {
             windowMenu.addSeparator();
@@ -2189,6 +2293,448 @@ public class JRock {
                     "Could not save to " + target + ":\n" + ex.getMessage(),
                     "Save failed", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    // ---- Backup & restore (window menu) ------------------------------------
+    // Everything JRock keeps lives under JRock/ in the working directory: the log, every
+    // message as its own file, the prompt, the includes and the copies converted from
+    // them. So a backup is that one folder in a zip and a restore is that zip back over
+    // it - there is no format to define and no state kept anywhere else to be missed.
+    //
+    // The archive holds the folder itself ("JRock/..." entries), not its contents loose.
+    // That makes it unambiguous what a restore unpacks, and lets one be told apart from
+    // any other zip somebody might pick in the dialog (see unpackBackup).
+
+    // yymmddhhmm: short, sorts chronologically, and distinct for any two backups a
+    // minute apart. Two in the same minute are one file, which is the right answer to
+    // "I clicked it twice".
+    private static final DateTimeFormatter BACKUP_STAMP_FMT =
+            DateTimeFormatter.ofPattern("yyMMddHHmm");
+
+    // The top-level folder inside a backup zip, which is also the folder it restores.
+    private static final String BACKUP_ROOT = "JRock";
+
+    // The name the Backup dialog offers, and the one an automatic backup takes.
+    private static String backupFileName() {
+        return "jrock-backup-" + LocalDateTime.now().format(BACKUP_STAMP_FMT) + ".zip";
+    }
+
+    // Packs the whole JRock folder into a zip. Two callers, one difference: `ask` true is
+    // the menu item, which offers a chooser starting where Save log copy does; `ask`
+    // false is "Autobackup log", which takes that same directory and the default name
+    // without a word - it fires when nobody is at the keyboard, and a modal dialog with
+    // nobody there to answer it would leave the window blocked instead of backed up.
+    //
+    // Send is held for the duration through sendGate, because the folder being zipped is
+    // the folder a request writes its message files into.
+    private static void backupLog(JFrame frame, LogView log,
+                                  java.util.function.Consumer<Boolean> sendGate,
+                                  boolean ask) {
+        if (!Files.isDirectory(jrockDir())) {
+            backupNote(frame, log, ask, "There is no " + jrockDir()
+                    + " folder yet - nothing to back up.",
+                    javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        Path target;
+        if (ask) {
+            javax.swing.JFileChooser chooser =
+                    new javax.swing.JFileChooser(logChooserDir.start());
+            chooser.setDialogTitle("Backup the JRock folder as");
+            chooser.setSelectedFile(logChooserDir.startFile(backupFileName()));
+            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                    "Zip archives (*.zip)", "zip"));
+            if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+            logChooserDir.remember(chooser);
+            // The dialog says .zip; a name typed without it gets it anyway.
+            target = withExtension(chooser.getSelectedFile().toPath(), "zip");
+        } else {
+            target = logChooserDir.startFile(backupFileName()).toPath();
+        }
+        final Path zip = target.toAbsolutePath().normalize();
+
+        // A backup written inside the folder it packs would be packing itself, half
+        // finished. Worth one check: the chooser opens in the working directory, which
+        // is one double-click away from JRock/.
+        if (zip.startsWith(jrockDir().toAbsolutePath().normalize())) {
+            backupNote(frame, log, ask,
+                    "A backup cannot be written inside the folder it packs.\nChoose a "
+                    + "place outside " + jrockDir() + ".",
+                    javax.swing.JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        log.gray("Backing up " + jrockDir() + " to " + zip + " ...");
+        sendGate.accept(false);
+        new SwingWorker<String, Void>() {
+            private long files, bytes;
+
+            // Returns null when it went well, or the line to log when it did not.
+            @Override
+            protected String doInBackground() {
+                try {
+                    long[] counts = writeBackup(zip);
+                    files = counts[0];
+                    bytes = counts[1];
+                    return null;
+                } catch (IOException ex) {
+                    return "Could not write the backup " + zip + ": " + ex;
+                }
+            }
+
+            @Override
+            protected void done() {
+                String failure;
+                try {
+                    failure = get();
+                } catch (Exception ex) {
+                    failure = "Could not write the backup " + zip + ": " + ex;
+                }
+                if (failure == null) {
+                    log.gray("Backed up " + files + " file(s), " + fmtNum(bytes)
+                            + " bytes, to " + zip);
+                    log.gray("");
+                } else {
+                    backupNote(frame, log, ask, failure,
+                            javax.swing.JOptionPane.WARNING_MESSAGE);
+                }
+                sendGate.accept(true);
+            }
+        }.execute();
+    }
+
+    // Says the same thing twice over, once in the log and once in a dialog - but only
+    // when a person asked for this backup. An automatic one says it in the log alone:
+    // nobody is there to click OK, and a dialog left standing would sit on top of the
+    // window until they came back.
+    private static void backupNote(JFrame frame, LogView log, boolean ask,
+                                   String message, int messageType) {
+        log.gray(message);
+        log.gray("");
+        if (ask) {
+            javax.swing.JOptionPane.showMessageDialog(frame, message, "Backup log", messageType);
+        }
+    }
+
+    // Writes the JRock folder into a zip, every entry named "JRock/..." with the folder
+    // itself as the root. Returns {files, bytes} for the log line.
+    //
+    // Directories get entries of their own, so one that happens to be empty survives the
+    // round trip: an empty includes/ is still part of the layout.
+    private static long[] writeBackup(Path zip) throws IOException {
+        Path root = jrockDir().toAbsolutePath().normalize();
+        Path parent = zip.getParent();
+        if (parent != null) Files.createDirectories(parent);
+
+        java.util.List<Path> paths;
+        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
+            paths = walk.sorted().collect(java.util.stream.Collectors.toList());
+        }
+
+        long files = 0, bytes = 0;
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                Files.newOutputStream(zip))) {
+            for (Path path : paths) {
+                String name = BACKUP_ROOT + "/" + zipName(root.relativize(path));
+                if (Files.isDirectory(path)) {
+                    out.putNextEntry(new java.util.zip.ZipEntry(
+                            name.endsWith("/") ? name : name + "/"));
+                    out.closeEntry();
+                    continue;
+                }
+                // Anything that is not a plain file is skipped rather than guessed at -
+                // including one that has just been moved away, which is what JRock's own
+                // atomic writes do with their temp files.
+                if (!Files.isRegularFile(path)) continue;
+                java.util.zip.ZipEntry entry = new java.util.zip.ZipEntry(name);
+                entry.setLastModifiedTime(Files.getLastModifiedTime(path));
+                out.putNextEntry(entry);
+                bytes += Files.copy(path, out);
+                out.closeEntry();
+                files++;
+            }
+        }
+        return new long[] { files, bytes };
+    }
+
+    // A relative path as a zip entry spells it: forward slashes whatever the platform
+    // separator is, which is what the format says and what every other tool reading the
+    // archive expects. The folder's own (empty) relative path becomes "".
+    private static String zipName(Path relative) {
+        StringBuilder name = new StringBuilder();
+        for (Path part : relative) {
+            String element = part.toString();
+            if (element.isEmpty()) continue;
+            if (name.length() > 0) name.append('/');
+            name.append(element);
+        }
+        return name.toString();
+    }
+
+    // "Load from backup": which archive, and which working directory to unpack it into.
+    // Two paths, so two rows with a browse button each - the file one for the archive,
+    // and for where it lands the very row the Configure dialog uses for the working
+    // directory, so the two behave the same.
+    //
+    // A restore replaces the target's JRock folder outright and then switches JRock into
+    // that directory, prompt and all. That is the point of having taken a backup: what
+    // comes back is the session, not a folder to go looking through.
+    private static void showRestoreDialog(JFrame frame, JTextArea input, LogView log,
+                                          java.util.function.Consumer<Boolean> sendGate) {
+        // Named, because both rows are a path field with a button next to it.
+        javax.swing.JTextField zipF = new javax.swing.JTextField("", 32);
+        zipF.setName("backupFile");
+        javax.swing.JPanel zipRow = fileRow(frame, zipF, "Locate the backup file",
+                new javax.swing.filechooser.FileNameExtensionFilter("Zip archives (*.zip)", "zip"),
+                logChooserDir.start());
+
+        javax.swing.JTextField dirF = new javax.swing.JTextField(workingDir.toString(), 32);
+        dirF.setName("restoreDir");
+        javax.swing.JPanel unpackRow = dirRow(frame, dirF, "Choose working directory");
+
+        javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.insets = new java.awt.Insets(4, 4, 4, 4);
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        addRow(fields, c, 0, "Backup file:", zipRow);
+        addRow(fields, c, 1, "Unpack into:", unpackRow);
+
+        javax.swing.JTextArea note = new javax.swing.JTextArea(
+                "The " + BACKUP_ROOT + " folder in the target directory is deleted and "
+                + "replaced by the one in the backup. JRock then works in that directory, "
+                + "with the restored log and prompt.");
+        note.setEditable(false);
+        note.setOpaque(false);
+        note.setLineWrap(true);
+        note.setWrapStyleWord(true);
+        note.setFont(javax.swing.UIManager.getFont("Label.font"));
+
+        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
+        panel.add(fields, BorderLayout.NORTH);
+        panel.add(note, BorderLayout.CENTER);
+
+        int result = javax.swing.JOptionPane.showConfirmDialog(
+                frame, panel, "Load from backup",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.PLAIN_MESSAGE);
+        if (result != javax.swing.JOptionPane.OK_OPTION) return;
+
+        String zipText = zipF.getText().trim();
+        if (zipText.isEmpty()) {
+            restoreRefused(frame, "Name the backup file to load from.");
+            return;
+        }
+        Path zip = Paths.get(zipText).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(zip)) {
+            restoreRefused(frame, "There is no file at " + zip + ".");
+            return;
+        }
+
+        String dirText = dirF.getText().trim();
+        if (dirText.isEmpty()) {
+            restoreRefused(frame, "Name the working directory to unpack into.");
+            return;
+        }
+        Path target = Paths.get(dirText).toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(target);
+        } catch (IOException ex) {
+            restoreRefused(frame, "Could not use " + target + ":\n" + ex.getMessage());
+            return;
+        }
+
+        // The one target that cannot work: the archive sitting inside the folder about to
+        // be deleted, which would take the backup with it.
+        final Path root = target.resolve(BACKUP_ROOT);
+        if (zip.startsWith(root.toAbsolutePath().normalize())) {
+            restoreRefused(frame, "The backup is inside " + root
+                    + ", which a restore deletes.\nMove it elsewhere first.");
+            return;
+        }
+
+        // Not empty means there is work in there, whether or not it is JRock's. Said
+        // plainly, because "overwrite everything?" is what is actually being asked.
+        if (!isEmptyDir(target)) {
+            int choice = javax.swing.JOptionPane.showConfirmDialog(frame,
+                    target + " is not empty.\n\nOverwrite everything? The " + BACKUP_ROOT
+                        + " folder there will be deleted and replaced by the backup's.",
+                    "Overwrite everything?",
+                    javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                    javax.swing.JOptionPane.WARNING_MESSAGE);
+            if (choice != javax.swing.JOptionPane.OK_OPTION) return;
+        }
+
+        log.gray("Restoring " + zip + " into " + target + " ...");
+        sendGate.accept(false);
+        new SwingWorker<String, Void>() {
+            private long files;
+
+            // Returns null when it went well, or the line to log when it did not.
+            @Override
+            protected String doInBackground() {
+                try {
+                    deleteRecursively(root);
+                    files = unpackBackup(zip, target);
+                    return null;
+                } catch (IOException ex) {
+                    return "Could not restore " + zip + " into " + target + ": " + ex;
+                }
+            }
+
+            @Override
+            protected void done() {
+                String failure;
+                try {
+                    failure = get();
+                } catch (Exception ex) {
+                    failure = "Could not restore " + zip + " into " + target + ": " + ex;
+                }
+                if (failure != null) {
+                    log.gray(failure);
+                    log.gray("");
+                    javax.swing.JOptionPane.showMessageDialog(frame, failure,
+                            "Restore failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+                    sendGate.accept(true);
+                    return;
+                }
+                // Switched exactly as the Configure dialog switches it: working
+                // directory, user.dir for anything reading it, then the window's own
+                // name, and finally the session report - which reloads the log and the
+                // prompt from the directory that has just been restored.
+                //
+                // The count goes in after initSession, not before: loading the restored
+                // log replaces everything on screen, so a line logged first would be
+                // wiped by the very restore it was reporting.
+                workingDir = target;
+                System.setProperty("user.dir", target.toString());
+                applyWindowIdentity(frame);
+                initSession(log, adoptPromptOfWorkingDir(input));
+                log.gray("Restored " + files + " file(s) from " + zip);
+                sendGate.accept(true);
+            }
+        }.execute();
+    }
+
+    // A restore that cannot start says so and stops. In a dialog only: the log it would
+    // otherwise write to may be about to be replaced.
+    private static void restoreRefused(JFrame frame, String message) {
+        javax.swing.JOptionPane.showMessageDialog(frame, message,
+                "Load from backup", javax.swing.JOptionPane.WARNING_MESSAGE);
+    }
+
+    // Unpacks a backup, recreating target/JRock from the archive. Returns the number of
+    // files written.
+    //
+    // Only "JRock/..." entries are taken, and an archive with none of them is refused
+    // rather than scattered - that is what tells a JRock backup from any other zip that
+    // could be picked in the dialog. Each entry is then resolved and checked to land
+    // inside target/JRock, so an archive carrying ".." in its names cannot write outside
+    // it (zip slip).
+    private static long unpackBackup(Path zip, Path target) throws IOException {
+        Path root = target.resolve(BACKUP_ROOT).toAbsolutePath().normalize();
+        String prefix = BACKUP_ROOT + "/";
+        long files = 0;
+        try (java.util.zip.ZipInputStream in = new java.util.zip.ZipInputStream(
+                Files.newInputStream(zip))) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = in.getNextEntry()) != null) {
+                // Zips are written with forward slashes; a backslash in a name is some
+                // other tool's idea of a separator, and means the same thing here.
+                String name = entry.getName().replace('\\', '/');
+                if (!name.startsWith(prefix)) continue;
+                Path out = root.resolve(name.substring(prefix.length()))
+                        .toAbsolutePath().normalize();
+                if (!out.startsWith(root)) {
+                    throw new IOException("the archive holds an entry outside "
+                            + BACKUP_ROOT + "/: " + entry.getName());
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(out);
+                    continue;
+                }
+                Files.createDirectories(out.getParent());
+                Files.copy(in, out, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                if (entry.getLastModifiedTime() != null) {
+                    Files.setLastModifiedTime(out, entry.getLastModifiedTime());
+                }
+                files++;
+            }
+        }
+        // Nothing written AND no folder made: not one entry of this archive was ours.
+        if (files == 0 && !Files.isDirectory(root)) {
+            throw new IOException("there is no " + prefix + " folder in the archive, so "
+                    + "this is not a JRock backup");
+        }
+        return files;
+    }
+
+    // Deletes a directory tree, if it is there at all. Used on the one directory a
+    // restore owns: the JRock folder the archive is about to replace.
+    private static void deleteRecursively(Path dir) throws IOException {
+        if (!Files.exists(dir)) return;
+        Files.walkFileTree(dir, new java.nio.file.SimpleFileVisitor<Path>() {
+            @Override
+            public java.nio.file.FileVisitResult visitFile(
+                    Path file, java.nio.file.attribute.BasicFileAttributes attrs)
+                    throws IOException {
+                Files.delete(file);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult postVisitDirectory(Path d, IOException failure)
+                    throws IOException {
+                if (failure != null) throw failure;
+                Files.delete(d);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    // Whether a directory has nothing in it. A directory that isn't there counts as
+    // empty - the restore creates it, and there is nothing in it to overwrite. One that
+    // cannot be listed counts as occupied, so the question gets asked rather than
+    // assumed away.
+    private static boolean isEmptyDir(Path dir) {
+        if (!Files.isDirectory(dir)) return true;
+        try (java.util.stream.Stream<Path> entries = Files.list(dir)) {
+            return !entries.findAny().isPresent();
+        } catch (IOException ex) {
+            return false;
+        }
+    }
+
+    // A file field with its own "Locate..." button: dirRow's counterpart for one file,
+    // offered under one extension. The chooser opens on whatever the field holds, or on
+    // the given directory while it is still empty.
+    private static javax.swing.JPanel fileRow(JFrame frame, javax.swing.JTextField field,
+                                              String chooserTitle,
+                                              javax.swing.filechooser.FileFilter filter,
+                                              java.io.File fallbackDir) {
+        JButton browse = new JButton("Locate...");
+        browse.addActionListener(ev -> {
+            javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+            fc.setDialogTitle(chooserTitle);
+            fc.setFileFilter(filter);
+            String current = field.getText().trim();
+            if (current.isEmpty()) {
+                fc.setCurrentDirectory(fallbackDir);
+            } else {
+                java.io.File chosen = new java.io.File(current);
+                fc.setCurrentDirectory(chosen.getParentFile());
+                fc.setSelectedFile(chosen);
+            }
+            if (fc.showOpenDialog(frame) == javax.swing.JFileChooser.APPROVE_OPTION
+                    && fc.getSelectedFile() != null) {
+                field.setText(fc.getSelectedFile().getAbsolutePath());
+            }
+        });
+        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(4, 0));
+        panel.add(field, BorderLayout.CENTER);
+        panel.add(browse, BorderLayout.EAST);
+        return panel;
     }
 
     // Where CheerpJ starts a JAR in the browser: its own writable mount, which is
@@ -5907,6 +6453,19 @@ public class JRock {
         return parts.size() == 1 && !parts.get(0).image && parts.get(0).maskHash == null;
     }
 
+    // Appends the clock's message, with its trailing comma, to a messages array that
+    // is still being built - it always goes first, so there is always something after
+    // it. One helper for both copies of the request (real and masked) because the two
+    // have to stay the same shape, and this message is identical in both.
+    //
+    // A "system" message, not a "user" one: the time is not something the operator
+    // said, and an extra user turn in front of the real one would break the
+    // user/assistant alternation that several models on mantle insist on.
+    private static void appendClockMessage(StringBuilder messages, String clockNow) {
+        messages.append("{\"role\":\"system\",\"content\":\"")
+                .append(jsonEscape(clockNow)).append("\"},");
+    }
+
     // ---- HTTP transport ----------------------------------------------------
     // JRock makes exactly two kinds of request (GET /v1/models and POST
     // /v1/chat/completions), so the whole transport surface is one send() method.
@@ -6155,8 +6714,8 @@ public class JRock {
     //   [1] = the model reply (success) or the error message (failure).
     //   [2] = raw request/response/stats detail block (gray), or null.
     // Only a successful reply is treated as dialog; failures are logged in gray.
-    private static String[] callModel(String prompt, java.util.List<String[]> history)
-            throws Exception {
+    private static String[] callModel(String prompt, java.util.List<String[]> history,
+                                      boolean clock) throws Exception {
         HttpTransport http = http();
         String apiKey = resolveApiKey();
         boolean haveKey = apiKey != null && !apiKey.isBlank();
@@ -6191,10 +6750,20 @@ public class JRock {
         // become image/text parts). verifyIncludes() has already run in the UI.
         java.util.List<Part> parts = buildParts(prompt);
 
+        // The clock, when the checkbox is on: read once here, so the request, the
+        // masked copy in the log and the file on disk all carry the same instant. Its
+        // own file in JRock/messages/ is written at the same time, for the record -
+        // nothing ever reads it back (see writeMessageFile).
+        String clockNow = clock ? clockMessage() : null;
+        if (clockNow != null) {
+            writeMessageFile(ROLE_CLOCK, LocalDateTime.now().format(STAMP_FMT), clockNow);
+        }
+
         // Build the real messages array. Human turns - both prior ones (extend
         // mode) and the new turn - are expanded via buildParts so their @img/@txt
         // tokens become image/text content parts. Assistant turns are plain text.
         StringBuilder messages = new StringBuilder("[");
+        if (clockNow != null) appendClockMessage(messages, clockNow);
         for (String[] turn : history) {
             if (ROLE_HUMAN.equals(turn[0])) {
                 messages.append("{\"role\":\"user\",\"content\":");
@@ -6214,7 +6783,7 @@ public class JRock {
 
         // Masked copy of the request for display - built independently from the
         // same history + prompt parts.
-        String maskedRequestBody = maskRequest(history, parts);
+        String maskedRequestBody = maskRequest(history, parts, clockNow);
 
         List<String[]> headers = new ArrayList<>();
         headers.add(new String[] { "Content-Type", "application/json" });
@@ -6287,9 +6856,14 @@ public class JRock {
     // request: prior turns plus the new prompt's content parts. Message content is
     // replaced with masked placeholders (see appendMaskedContent) so the raw
     // request shown in the log carries no prompt/reply/attachment content.
+    // The clock message (or null when Clock is off) is the one thing carried over
+    // verbatim: a time JRock generated itself is not the operator's content, and
+    // masking the very line that says what time was sent would defeat logging it.
     private static String maskRequest(java.util.List<String[]> history,
-                                      java.util.List<Part> parts) throws IOException {
+                                      java.util.List<Part> parts, String clockNow)
+            throws IOException {
         StringBuilder masked = new StringBuilder("[");
+        if (clockNow != null) appendClockMessage(masked, clockNow);
         for (String[] turn : history) {
             if (ROLE_HUMAN.equals(turn[0])) {
                 masked.append("{\"role\":\"user\",\"content\":");
@@ -6617,7 +7191,9 @@ public class JRock {
     // Maps a role to a filename-safe slug. Kept explicit (no user text in the
     // name) so filenames are always predictable and injection-free.
     private static String roleSlug(String role) {
-        return role.equals(ROLE_HUMAN) ? "operator" : "assistant";
+        if (role.equals(ROLE_HUMAN)) return "operator";
+        if (role.equals(ROLE_CLOCK)) return "clock";
+        return "assistant";
     }
 
     // Builds the per-message file path from a validated stamp + role. The stamp
@@ -6627,8 +7203,14 @@ public class JRock {
         return logsDir().resolve(stamp + "-" + roleSlug(role) + ".txt");
     }
 
-    // Writes a dialog message body to its own file in logs/. Written once and
-    // never modified afterwards. Best-effort.
+    // Writes a message body to its own file in messages/. Written once and never
+    // modified afterwards. Best-effort.
+    //
+    // Three kinds of file end up here: -operator.txt and -assistant.txt, which are the
+    // dialog and are read back when the log is restored, and -clock.txt, which is not.
+    // A clock file is written for the record only: nothing parses it, nothing loads it,
+    // and the log has no line pointing at it (see clockMessage and parseMainLog). It is
+    // there to answer "what time did it think it was?" after the fact.
     private static void writeMessageFile(String role, String stamp, String text) {
         try {
             Files.createDirectories(logsDir());

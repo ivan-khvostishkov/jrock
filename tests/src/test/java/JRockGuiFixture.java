@@ -484,15 +484,54 @@ abstract class JRockGuiFixture {
      * opened.
      */
     protected void chooseInThePromptMenu(final String label) {
-        final JTextComponent prompt = promptArea().target();
+        rightClick(promptArea().target());
+        pressMenuItem(label);
+    }
+
+    /**
+     * Invokes an item of the window's own context menu - the one on the top bar, beside
+     * the Configure button - by its label.
+     * <p>
+     * The same popup trigger as {@link #chooseInThePromptMenu}, aimed at the other
+     * component that has a menu: the top bar, found as what the content pane lays out to
+     * the north rather than by counting children.
+     */
+    protected void chooseInTheWindowMenu(final String label) {
+        final JFrame frame = (JFrame) window.target();
+        java.awt.Component topBar = GuiActionRunner.execute(new GuiQuery<java.awt.Component>() {
+            @Override
+            protected java.awt.Component executeInEDT() {
+                java.awt.Container content = frame.getContentPane();
+                return ((java.awt.BorderLayout) content.getLayout())
+                        .getLayoutComponent(java.awt.BorderLayout.NORTH);
+            }
+        });
+        assertThat(topBar).describedAs("the window's top bar").isNotNull();
+        rightClick(topBar);
+        pressMenuItem(label);
+    }
+
+    /**
+     * Delivers a popup-trigger press to a component, which is what a right-click is once
+     * the operating system has decided where it went. Dispatched to the component rather
+     * than injected, for the reasons given in {@link #press}.
+     */
+    private static void rightClick(final java.awt.Component comp) {
         GuiActionRunner.execute(new GuiTask() {
             @Override
             protected void executeInEDT() {
-                prompt.dispatchEvent(new java.awt.event.MouseEvent(prompt,
+                comp.dispatchEvent(new java.awt.event.MouseEvent(comp,
                         java.awt.event.MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
                         0, 4, 4, 1, true));      // popupTrigger = true
             }
         });
+    }
+
+    /**
+     * Presses the showing menu item with the given label, then dismisses the menu so the
+     * next lookup can only find one that was opened after it.
+     */
+    private void pressMenuItem(final String label) {
         JMenuItem item = robot.finder().find(new GenericTypeMatcher<JMenuItem>(JMenuItem.class) {
             @Override
             protected boolean isMatching(JMenuItem candidate) {
@@ -506,6 +545,20 @@ abstract class JRockGuiFixture {
                 javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath();
             }
         });
+    }
+
+    /**
+     * The window's checkbox with the given label, which is how the ones in the bars are
+     * told apart - there being nothing else to tell them apart by.
+     */
+    protected JCheckBox checkBox(final String label) {
+        return robot.finder().find(window.target(),
+                new GenericTypeMatcher<JCheckBox>(JCheckBox.class) {
+                    @Override
+                    protected boolean isMatching(JCheckBox candidate) {
+                        return label.equals(candidate.getText());
+                    }
+                });
     }
 
     /**
