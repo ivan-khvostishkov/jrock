@@ -22,7 +22,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 /**
- * Drives <em>Insert URL...</em> in the prompt's context menu against a web server of
+ * Drives <em>Fetch URL...</em> in the prompt's context menu against a web server of
  * this test's own: a page, a picture, and something that is neither.
  * <p>
  * A real server on 127.0.0.1 rather than a stubbed transport, because what the feature
@@ -36,10 +36,10 @@ import com.sun.net.httpserver.HttpServer;
  *
  * @see JRockGuiFixture for how the application is started and stopped
  */
-class JRockInsertUrlTest extends JRockGuiFixture {
+class JRockFetchUrlTest extends JRockGuiFixture {
 
     /** A download from localhost, hashed and included; a slow CI runner needs the rest. */
-    private static final long INSERT_TIMEOUT_SECONDS = 30;
+    private static final long FETCH_TIMEOUT_SECONDS = 30;
 
     /**
      * A page deliberately NOT served as UTF-8, with a character that proves it: JRock
@@ -93,8 +93,8 @@ class JRockInsertUrlTest extends JRockGuiFixture {
         awaitReadyCount(1);
 
         String url = base + "/a/article";
-        insertUrl(url);
-        awaitLogLine("new @txt token(s) for " + url, INSERT_TIMEOUT_SECONDS);
+        fetchUrl(url);
+        awaitLogLine("new @txt token(s) for " + url, FETCH_TIMEOUT_SECONDS);
 
         // Named after the URL's last path segment, with the extension its media type
         // called for - and holding the page, re-encoded as UTF-8.
@@ -125,8 +125,8 @@ class JRockInsertUrlTest extends JRockGuiFixture {
         awaitReadyCount(1);
 
         String url = base + "/pics/cat.png";
-        insertUrl(url);
-        awaitLogLine("new @img token(s) for " + url, INSERT_TIMEOUT_SECONDS);
+        fetchUrl(url);
+        awaitLogLine("new @img token(s) for " + url, FETCH_TIMEOUT_SECONDS);
 
         // The URL already named it ".png" and the media type agrees, so the extension
         // is not added twice.
@@ -154,12 +154,12 @@ class JRockInsertUrlTest extends JRockGuiFixture {
 
         String promptBefore = promptArea().text();
         String url = base + "/data/notes.json";
-        insertUrl(url);
+        fetchUrl(url);
 
         // The refusal names the type the server answered with, in the log and in a
         // dialog of its own - which is dismissed here, the application being left as
         // this test found it.
-        awaitLogLine("application/json", INSERT_TIMEOUT_SECONDS);
+        awaitLogLine("application/json", FETCH_TIMEOUT_SECONDS);
         JOptionPaneFixture refusal =
                 JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
         refusal.requireTitle("Unsupported media type");
@@ -179,7 +179,7 @@ class JRockInsertUrlTest extends JRockGuiFixture {
     }
 
     /**
-     * Opens <em>Insert URL...</em> from the prompt's context menu, gives it the address
+     * Opens <em>Fetch URL...</em> from the prompt's context menu, gives it the address
      * and approves it.
      * <p>
      * Through the menu item rather than by calling the fetch, because the item is part
@@ -187,11 +187,11 @@ class JRockInsertUrlTest extends JRockGuiFixture {
      * dialog holds one text component, so it is found by that; see
      * {@link #enterText} for why the address is set rather than typed.
      */
-    private void insertUrl(String url) {
-        chooseInThePromptMenu("Insert URL...");
+    private void fetchUrl(String url) {
+        chooseInThePromptMenu("Fetch URL...");
         JOptionPaneFixture dialog =
                 JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
-        dialog.requireTitle("Insert URL");
+        dialog.requireTitle("Fetch URL");
         enterText(dialog.textBox(), url);
         press(dialog.okButton());
     }

@@ -36,6 +36,11 @@ public class BuildJar {
     private static final String SRC_ZIP    = "jrock-src.zip";
     private static final String MAIN_CLASS = "JRock";
 
+    // Shipped alongside the source: the sample prompts. They are part of what JRock
+    // is for rather than part of how it is built, and a download that has the
+    // application but none of them starts from an empty prompt.
+    private static final String SAMPLES_DIR = "automation-samples";
+
     // Fixed timestamp so output never depends on build time or machine.
     // 2026-01-01T00:00:00Z. (Reproducible-builds convention: SOURCE_DATE_EPOCH.)
     private static final long SOURCE_DATE_EPOCH_MS = 1767225600L * 1000L;
@@ -89,13 +94,34 @@ public class BuildJar {
         System.out.println("SHA-256: " + sha);
         System.out.println("MD5:     " + md5);
 
-        // Zip the source file too.
+        // The sample prompts, as forward-slash names under automation-samples/ and
+        // sorted for the same reason the classes are: the zip has to be reproducible
+        // too, and a directory listing's order is the file system's business.
+        List<String[]> samples = new ArrayList<>();   // {relName, absPath}
+        Path samplesDir = Paths.get(SAMPLES_DIR);
+        if (Files.isDirectory(samplesDir)) {
+            try (var stream = Files.walk(samplesDir)) {
+                stream.filter(Files::isRegularFile).forEach(p -> samples.add(new String[] {
+                        SAMPLES_DIR + "/"
+                                + samplesDir.relativize(p).toString().replace('\\', '/'),
+                        p.toString() }));
+            }
+            samples.sort(Comparator.comparing(e -> e[0]));
+        } else {
+            System.out.println("No " + SAMPLES_DIR + "/ directory - none packed");
+        }
+
+        // Zip the source file too, with the samples beside it.
         buildZip(Paths.get(SRC_ZIP), () -> {
             List<Object[]> zipEntries = new ArrayList<>();
             zipEntries.add(new Object[] { SRC, Files.readAllBytes(Paths.get(SRC)) });
+            for (String[] e : samples) {
+                zipEntries.add(new Object[] { e[0], Files.readAllBytes(Paths.get(e[1])) });
+            }
             return zipEntries;
         });
-        System.out.println("Wrote " + SRC_ZIP);
+        System.out.println("Wrote " + SRC_ZIP + " (" + SRC + " + " + samples.size()
+                + " sample(s))");
     }
 
     // Functional supplier of the entries (name -> bytes) to write, in order.

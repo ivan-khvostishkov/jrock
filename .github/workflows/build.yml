@@ -69,12 +69,15 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: jrock-${{ matrix.os }}
-          # jar + its checksums side by side, plus the zipped source.
+          # jar + its checksums side by side, plus the zipped source and the sample
+          # prompts (which are inside jrock-src.zip as well, and loose here so they
+          # can be read without unpacking anything).
           path: |
             jrock.jar
             jrock.jar.sha256
             jrock.jar.md5
             jrock-src.zip
+            automation-samples/
           if-no-files-found: error
 
       # Assemble the CheerpJ web bundle for Amplify: a flat directory with

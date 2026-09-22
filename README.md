@@ -32,9 +32,14 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   multi-select supported, with optional **copies kept under `JRock/`** and every include
   **reloaded from the log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
-- **Include a URL**, not just a file: an address is downloaded into `JRock/urls/` and attached
-  as text or as a picture according to the `Content-Type` it answered with, with a Markdown
-  link to where it came from above the token ([**inserting a URL**](#inserting-a-url)).
+- **Fetch a URL** (Ctrl+U), not just a file: an address is downloaded into `JRock/urls/` and
+  attached as text or as a picture according to the `Content-Type` it answered with, with a
+  Markdown link to where it came from above the token ([**fetching a URL**](#fetching-a-url)).
+- **Clock**: the local time and the full time zone (`Europe/Berlin`, not an offset) go with
+  every message, so a model that is asked what day it is has an answer
+  ([**Clock**](#clock)).
+- **Backup and restore the whole working folder** as one `.zip` - by hand, or by itself after
+  five minutes of not touching the prompt ([**backup and restore**](#backup-and-restore)).
 - **Markdown export** of an answer as **RTF or DOCX**, written in-process — the model replies in
   Markdown, and a selected reply becomes a document a word processor, or a layout application,
   opens with its headings, tables and **the pictures it was given** intact
@@ -309,6 +314,26 @@ is answered correctly, because the whole prior dialog was resent. Every gray lin
 what's left is a clean, copy-pastable transcript — and the header timestamps keep the order of
 these stateless turns visible.*
 
+## Clock
+
+**Clock** — the checkbox left of *Extend conversation*, **on by default** — sends the current
+local time with each message, as one extra `system` message ahead of the dialog:
+
+```
+<clock><now>2026-09-22 14:07:31 +02:00 Europe/Berlin</now></clock>
+```
+
+The zone is named in full (`Europe/Berlin`), not just offset: a model that knows the zone knows
+about summer time, holidays and business hours, which an offset alone doesn't say. Without this
+a model has no idea what day it is - the request carries no clock of its own.
+
+It is **not** part of the conversation. It is never shown as a turn, never resent by *Extend
+conversation*, and never read back from disk: what goes with the request is always the time
+**now**, not the time some earlier message was sent. It is saved once, for debugging, as
+`JRock/messages/<datetime>-clock.txt` beside the operator's and the assistant's own files, and
+it appears verbatim (unmasked) in the raw request dump - the point of logging a clock being to
+see what time was actually sent.
+
 ## Persistence (crash recovery + full local history)
 
 Everything lives under a **`JRock/`** subfolder of the working directory:
@@ -317,8 +342,10 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   so a crash can't corrupt it).
 - `JRock/jrock-log.txt` — the conversation transcript, restored on startup so a session
   survives restarts.
-- `JRock/messages/` — one **append-only** file per human/assistant message. These are never
-  modified or deleted (not even by Clear log). `cat`-ing them in order reproduces the
+- `JRock/messages/` — one **append-only** file per human/assistant message
+  (`<datetime>-operator.txt`, `<datetime>-assistant.txt`), plus a `<datetime>-clock.txt` for
+  each clock that was sent (see [**Clock**](#clock)). These are never modified or deleted (not
+  even by Clear log). `cat`-ing the operator's and the assistant's in order reproduces the
   dialog-only transcript.
 - `JRock/gs-pdf/` — per-page text/image files produced when a PDF is included via Ghostscript
   (see Multimodal includes).
@@ -332,6 +359,31 @@ The main log is a bit-perfect copy of the pane, except that each role header is 
 **Clear log** empties `jrock-log.txt` and the window but never touches `JRock/messages/`, so
 paid-for inputs/outputs are preserved. If the log has changed since it was last exported with
 **Ctrl+L** (Save log as a copy), Clear log first asks for confirmation and suggests saving.
+
+## Backup and restore
+
+The whole working folder in one file, from the **top bar's context menu** (right-click the empty
+area beside *Configure*):
+
+- **Backup log...** asks for a `.zip` name - offering `jrock-backup-yymmddhhmm.zip`, in the same
+  folder *Save log as* opens in - and packs the entire `JRock/` directory into it: the log, the
+  prompt, every message file, the includes and everything the conversions wrote. The Send button
+  is held while it runs, and the log says how many files and bytes went in.
+- **Load from backup...** takes two paths: the archive (with a *Locate...* button) and the
+  working directory to unpack it into (with a *Choose...* button). If that directory isn't
+  empty it asks **Overwrite everything?** first. Then `JRock/` is deleted, the archive is
+  unpacked in its place, and JRock **switches to that directory** - re-reading its log and its
+  prompt exactly as it does when the working directory is changed in Configure.
+
+An archive has to hold a `JRock/` folder or it is refused, which is what keeps *Load from
+backup* from unpacking some unrelated zip over a working folder; nothing in it can be written
+outside the chosen directory whatever the entry names say. A backup can't be saved inside
+`JRock/` either - that is the folder being packed.
+
+**Autobackup log** (Configure dialog, on by default) does the same thing by itself: five minutes
+after the cursor last moved in the prompt, it takes a backup with the dated default name and no
+dialog at all. Once per idle spell, not every five minutes - a window left open overnight has one
+backup, and the next keystroke arms it again.
 
 ## Multimodal includes (Ctrl+I)
 
@@ -380,10 +432,10 @@ full just to say how big it is. If a header can't be read, the include still hap
 log says the dimensions were unavailable — the bytes sent to the model are the file itself
 either way, so none of this touches what the model receives.
 
-### Inserting a URL
+### Fetching a URL
 
-The same include, for something that isn't on this machine. **Right-click the prompt →
-Insert URL...** asks for an address, downloads it into `JRock/urls/`, and includes the saved
+The same include, for something that isn't on this machine. **Ctrl+U**, or **right-click the
+prompt → Fetch URL...**, asks for an address, downloads it into `JRock/urls/`, and includes the saved
 file exactly as if you had picked it with Ctrl+I — a **web page as text**, an **image as a
 picture**. Two lines go into the prompt, the address above the token:
 
@@ -692,6 +744,11 @@ text file.
   too low and small print is unreadable, too high and you pay tokens for detail no model
   needs. Only reported at startup when it isn't the default; every conversion logs its full
   Ghostscript command line regardless.
+- **Autobackup log** — on the same line as the DPI dropdown, and **on by default**: after five
+  minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
+  `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
+  long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
+  only when it is **off**, so nobody counts on a backup that isn't being taken.
 
 Applying re-runs the session init (working directory reported first, then models loaded,
 ending with `Ready.`). Changing the working directory reloads **both the log and the prompt**
@@ -807,14 +864,15 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
-- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Insert
+- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Fetch
   URL...* (which downloads an address into `JRock/urls/` and includes it as text or as a
-  picture, according to what it answered with — see [**inserting a
-  URL**](#inserting-a-url)), *Reload all includes* (which rebuilds the hash → path map from
+  picture, according to what it answered with — see [**fetching a
+  URL**](#fetching-a-url)), *Reload all includes* (which rebuilds the hash → path map from
   the log, so a conversation survives a restart — see [**includes that outlive the
   session**](#includes-that-outlive-the-session)), Load prompt from file..., Save prompt copy
   as...
-- **Top bar (empty area)** — Move & resize window...; in the **browser**, also Show/hide
+- **Top bar (empty area)** — Backup log... and Load from backup... (see [**backup and
+  restore**](#backup-and-restore)), then Move & resize window...; in the **browser**, also Show/hide
   the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
   entry (see below).
 
@@ -884,6 +942,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (text only) |
 | Ctrl+I | Include text/image files, a PDF, an RTF or a DOCX (multi-select) |
+| Ctrl+U | Fetch a URL and include what it answers with |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle Extend conversation |
 | Ctrl+M | Move & resize the window |
@@ -903,8 +962,10 @@ For robustness the build runs on **three operating systems** and publishes three
 - `jrock-windows-latest.zip`
 
 Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
-(`jrock.jar.sha256`, `jrock.jar.md5`) and the zipped source (`jrock-src.zip`). Because the
-build is reproducible, the `jrock.jar` inside all three archives is identical.
+(`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
+`JRock.java` and the sample prompts) and `automation-samples/` loose beside it, so the samples
+can be read without unpacking anything. Because the build is reproducible, the `jrock.jar`
+inside all three archives is identical.
 
 To verify and run JRock from a build artifact, unzip it, then:
 
@@ -976,8 +1037,8 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   two filters that offer images, and checks the one line that is the whole difference: *Image with
   a Markdown reference* leaves `![](<hash>)` above the `@img` token and says so in the log, *Image
   files* leaves the token alone.
-- **`JRockInsertUrlTest`** starts a **web server of its own** on loopback — a real one, since
-  what the feature turns on is the response — and drives **Insert URL...** from the prompt's
+- **`JRockFetchUrlTest`** starts a **web server of its own** on loopback — a real one, since
+  what the feature turns on is the response — and drives **Fetch URL...** from the prompt's
   context menu against three of its paths. A page served as `ISO-8859-1` has to land in
   `JRock/urls/article.html` **re-encoded as UTF-8**, with `[](<url>)` above an `@txt` token; a
   PNG has to land as `cat.png` **byte for byte**, with an `@img` token and its 120 × 80 read out

@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "1.6.0";
+    private static final String VERSION = "1.7.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -135,7 +135,7 @@ public class JRock {
     private static final int MODELS_TIMEOUT_SECONDS  = 30;
     private static final int CHAT_TIMEOUT_SECONDS    = 60;
     private static final int CONNECT_TIMEOUT_SECONDS = 30;
-    // Downloading a page or an image the user asked to insert (see insertUrl). Not
+    // Downloading a page or an image the user asked for (see fetchUrl). Not
     // an API call at all - some other server's, on a link that may well be slow -
     // so it gets the same patience as a completion rather than the model list's.
     private static final int URL_TIMEOUT_SECONDS     = 60;
@@ -176,6 +176,15 @@ public class JRock {
     private static final int[] PDF_DPI_OPTIONS = { 72, 96, 150, 203, 300 };
     private static final int PDF_DPI_DEFAULT = 150;
     private static int pdfDpi = PDF_DPI_DEFAULT;
+
+    // "Autobackup log" in the Configure dialog: when on, a spell of inactivity in the
+    // prompt takes a backup of the whole JRock folder (see the idle timer in
+    // createAndShowGui, and backupLog). On by default, because the work worth keeping
+    // is already on disk and a backup is what survives the disk.
+    //
+    // A setting rather than a checkbox in the window: it is decided once and then left
+    // alone, and the top bar is for the two things that are toggled while working.
+    private static boolean autoBackupLog = true;
 
     // "Save include copies" in the include dialog: when on, a chosen file is copied
     // into JRock/includes/ and included from the copy, so the include survives
@@ -1175,6 +1184,11 @@ public class JRock {
         if (pdfDpi != PDF_DPI_DEFAULT) {
             log.gray("PDF page images: " + pdfDpi + " dpi (default " + PDF_DPI_DEFAULT + ")");
         }
+        // Same rule, and the more important one to say out loud: a backup that is not
+        // being taken is worth a line, so nobody counts on one that was switched off.
+        if (!autoBackupLog) {
+            log.gray("Autobackup log: off");
+        }
         if (promptSourceNote != null) {
             log.gray("Prompt source: " + promptSourceNote);
         }
@@ -1278,8 +1292,7 @@ public class JRock {
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
         LogView log = new LogView(output);
 
-        // Top bar: [Configure] on the left; [Dialog only] [Autobackup log] [Clear log]
-        // on the right.
+        // Top bar: [Configure] on the left; [Dialog only] [Clear log] on the right.
         JButton configure = new JButton("Configure");
         configure.setToolTipText("Working directory, API key, region, model");
         // (Listener wired below, once `input` exists.)
@@ -1288,21 +1301,12 @@ public class JRock {
         dialogOnly.setToolTipText("Show only the headers and dialog (hide gray system text)");
         dialogOnly.addActionListener(e -> log.setDialogOnly(dialogOnly.isSelected()));
 
-        // On by default: the work worth keeping is already on disk, and the backup is
-        // what survives the disk. It fires itself after a spell of inactivity, which
-        // is the moment a backup costs nothing - see the idle timer below, wired once
-        // the Send button it has to hold exists.
-        javax.swing.JCheckBox autoBackup = new javax.swing.JCheckBox("Autobackup log", true);
-        autoBackup.setToolTipText("Zip the JRock folder after " + IDLE_BACKUP_MINUTES
-                + " minutes without the cursor moving in the prompt");
-
         JButton clear = new JButton("Clear log");
         clear.addActionListener(e -> clearLogConfirmed(frame, log));
 
         javax.swing.JPanel topRight = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
         topRight.add(dialogOnly);
-        topRight.add(autoBackup);
         topRight.add(clear);
         javax.swing.JPanel topLeft = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 4));
@@ -1520,17 +1524,18 @@ public class JRock {
         // Deliberately NOT restarted after it fires: one backup per idle spell, not one
         // every five minutes for as long as the window is left open. The next caret
         // event arms it again.
+        //
+        // The timer runs whatever the setting says and asks autoBackupLog only when it
+        // fires, so turning "Autobackup log" off in Configure takes effect at once -
+        // and turning it back on does not need the timer re-armed by hand.
         javax.swing.Timer idleBackup =
                 new javax.swing.Timer(IDLE_BACKUP_MINUTES * 60_000, null);
         idleBackup.setRepeats(false);
         idleBackup.addActionListener(e -> {
-            if (autoBackup.isSelected()) backupLog(frame, log, sendGate, false);
+            if (autoBackupLog) backupLog(frame, log, sendGate, false);
         });
-        input.addCaretListener(e -> { if (autoBackup.isSelected()) idleBackup.restart(); });
-        autoBackup.addActionListener(e -> {
-            if (autoBackup.isSelected()) idleBackup.restart(); else idleBackup.stop();
-        });
-        idleBackup.start();   // on by default, so the first spell counts from startup
+        input.addCaretListener(e -> idleBackup.restart());
+        idleBackup.start();   // so the first idle spell counts from startup
 
         // Ctrl+Enter in the prompt area triggers Send.
         input.getInputMap().put(
@@ -1654,6 +1659,17 @@ public class JRock {
             }
         });
 
+        // Ctrl+U is the same include for something that is not on this machine: U for
+        // URL, next to Ctrl+I because that is what it is - Include, over the network
+        // (see showFetchUrlDialog).
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_U, InputEvent.CTRL_DOWN_MASK), "jrock-fetch-url");
+        frame.getRootPane().getActionMap().put("jrock-fetch-url", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showFetchUrlDialog(frame, input, log, extendMode.isSelected());
+            }
+        });
+
         // Configure button: opens the settings dialog, then re-runs the session
         // report (CWD first, models loaded, ... Ready) exactly like startup.
         // initSession reloads the log from the (possibly new) working directory,
@@ -1718,9 +1734,9 @@ public class JRock {
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
         // The same include for a file that is not on this machine: the address is
         // fetched into JRock/urls/ and included from there, as text or as a picture
-        // according to what it answered with (see insertUrl).
-        addMenuItem(promptMenu, "Insert URL...",
-                () -> showInsertUrlDialog(frame, input, log, extendMode.isSelected()));
+        // according to what it answered with (see fetchUrl).
+        addMenuItem(promptMenu, "Fetch URL...",
+                () -> showFetchUrlDialog(frame, input, log, extendMode.isSelected()));
         // Next to it, the repair for a conversation that outlived the session that
         // started it: the includes are read back out of the log rather than attached
         // again one by one (see reloadAllIncludes).
@@ -1815,6 +1831,23 @@ public class JRock {
         });
     }
 
+    // The one-item context menu a single-line field gets: Paste, on a long tap or a
+    // right-click (see attachPopup).
+    //
+    // For the fields whose value comes from somewhere else - a URL, an API key - which
+    // is to say the fields nobody types by hand. On a phone there is no Ctrl+V and no
+    // menu bar, so without this the only way in is to retype the value; in the browser
+    // build Ctrl+V is pointed at the page's clipboard here too, so the key and the menu
+    // reach the same place (see useBrowserClipboard).
+    //
+    // Paste alone: these are fields a value is put into, not text that is edited.
+    private static void addPasteMenu(javax.swing.text.JTextComponent field, LogView log) {
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        addEditItem(menu, "Paste", field, () -> clipboardPaste(field, log));
+        attachPopup(field, menu);
+        useBrowserClipboard(field, log, true);
+    }
+
     // ---- Clipboard ---------------------------------------------------------
     // On a normal JVM Swing's clipboard IS the OS clipboard and the default
     // cut/copy/paste need no help. In the browser they are two different things,
@@ -1831,6 +1864,14 @@ public class JRock {
                       : new String[] { reply.substring(0, nl).trim(), reply.substring(nl + 1) };
     }
 
+    // Where a clipboard note goes, when there is anywhere for it to go: log is null for
+    // a field in a dialog that has no log to reach - the Configure dialog's API key
+    // field is one - and a note nobody can read is not worth an exception, the paste
+    // itself having happened either way.
+    private static void clipboardNote(LogView log, String text) {
+        if (log != null) log.gray(text);
+    }
+
     // Copies to BOTH clipboards: the browser's is the one other apps read, and
     // Swing's keeps paste working inside JRock even where the browser blocks reads.
     private static void clipboardCopy(String text, LogView log) {
@@ -1845,10 +1886,12 @@ public class JRock {
         try {
             String[] r = bridgeReply(browserClipboardWrite(text));
             if (!"1".equals(r[0])) {
-                log.gray("Copied inside JRock only - the browser refused the clipboard: " + r[1]);
+                clipboardNote(log,
+                        "Copied inside JRock only - the browser refused the clipboard: " + r[1]);
             }
         } catch (Throwable ex) {
-            log.gray("Copied inside JRock only - no clipboard bridge on this page: " + ex);
+            clipboardNote(log,
+                    "Copied inside JRock only - no clipboard bridge on this page: " + ex);
         }
     }
 
@@ -1867,10 +1910,10 @@ public class JRock {
                 comp.replaceSelection(r[1]);   // "" is a genuinely empty clipboard
                 return;
             }
-            log.gray("Could not read the browser clipboard (" + r[1]
+            clipboardNote(log, "Could not read the browser clipboard (" + r[1]
                     + "). Pasting what was last copied inside JRock instead.");
         } catch (Throwable ex) {
-            log.gray("No clipboard bridge on this page (" + ex
+            clipboardNote(log, "No clipboard bridge on this page (" + ex
                     + "). Pasting what was last copied inside JRock instead.");
         }
         comp.paste();
@@ -1993,6 +2036,9 @@ public class JRock {
         javax.swing.JPanel promptsRow = dirRow(frame, promptsF, "Choose prompts directory");
 
         javax.swing.JPasswordField keyF = new javax.swing.JPasswordField(24); // never prefilled
+        // An API key is never typed: it is pasted from wherever it was issued. No log
+        // here - a modal dialog has none to write to (see addPasteMenu).
+        addPasteMenu(keyF, null);
         javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
         // In the browser the API key belongs to the hosting page, so JRock has no
         // key to show or set: the row is left out entirely rather than offered as a
@@ -2017,10 +2063,21 @@ public class JRock {
         dpiF.setToolTipText("Resolution Ghostscript rasterises PDF pages at, when a "
                 + "PDF is included as images (72/96 screen, 150 documents, 203 fax/"
                 + "receipt, 300 print). Higher is sharper but costs more tokens.");
+        // Autobackup, on the same line: a checkbox says what it is in its own label, so
+        // it costs no row of its own, and the space next to a three-digit dropdown is
+        // otherwise empty.
+        javax.swing.JCheckBox autoBackupF =
+                new javax.swing.JCheckBox("Autobackup log", autoBackupLog);
+        autoBackupF.setFont(autoBackupF.getFont().deriveFont(java.awt.Font.PLAIN));
+        autoBackupF.setToolTipText("Zip the JRock folder into a jrock-backup-....zip in "
+                + "the working directory after " + IDLE_BACKUP_MINUTES + " minutes "
+                + "without the cursor moving in the prompt");
+
         // In a wrapper so the layout's horizontal fill doesn't stretch a
         // three-digit dropdown across the whole dialog.
-        javax.swing.JPanel dpiRow = new javax.swing.JPanel(new BorderLayout());
+        javax.swing.JPanel dpiRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         dpiRow.add(dpiF, BorderLayout.WEST);
+        dpiRow.add(autoBackupF, BorderLayout.CENTER);
 
         javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
@@ -2078,6 +2135,7 @@ public class JRock {
         String[][] keys = {
             {"Ctrl+Enter", "Send message (call a Bedrock model)"},
             {"Ctrl+I", "Include a text, image, PDF, RTF or DOCX file"},
+            {"Ctrl+U", "Fetch a URL and include what it answers with"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
             {"Ctrl+S", "Save prompt as (a copy)"},
@@ -2202,6 +2260,10 @@ public class JRock {
         // PDF page-image resolution: picked from the list, so always valid.
         Object dpi = dpiF.getSelectedItem();
         if (dpi instanceof Integer) { pdfDpi = (Integer) dpi; }
+
+        // Autobackup: the idle timer reads this when it next fires, so a change here
+        // applies to the spell of inactivity that starts the moment this dialog closes.
+        autoBackupLog = autoBackupF.isSelected();
 
         return true;
     }
@@ -3430,9 +3492,9 @@ public class JRock {
     //
     // Two callers, wanting two different lines for the same reason: an image include
     // refers to the picture by hash, which the DOCX export turns back into the file it
-    // placed, and a URL insert refers to the address the file came from, which is what
-    // says where a page or a picture was found (see insertUrl). null writes the token
-    // alone.
+    // placed, and a fetched URL refers to the address the file came from, which is
+    // what says where a page or a picture was found (see fetchUrl). null writes the
+    // token alone.
     private static boolean includeOne(JTextArea input, LogView log, boolean extend,
                                       Path file, String kind, boolean isImage,
                                       java.util.function.Function<String, String> reference) {
@@ -3512,7 +3574,7 @@ public class JRock {
         return true;
     }
 
-    // ---- Insert URL (prompt menu) ------------------------------------------
+    // ---- Fetch URL (prompt menu, Ctrl+U) -----------------------------------
     // The same include as Ctrl+I, for something that is not on this machine: a URL is
     // asked for, downloaded into JRock/urls/, and then included from there like any
     // other file - a web page as "@txt", a picture as "@img". Two lines go into the
@@ -3557,10 +3619,14 @@ public class JRock {
     private static final int URL_NAME_MAX = 80;
 
     // Asks for a URL and, if one is given, fetches and includes it.
-    private static void showInsertUrlDialog(JFrame frame, JTextArea input, LogView log,
-                                            boolean extend) {
+    private static void showFetchUrlDialog(JFrame frame, JTextArea input, LogView log,
+                                           boolean extend) {
         javax.swing.JTextField urlF = new javax.swing.JTextField(48);
         urlF.setName("url");
+
+        // A URL is pasted far more often than it is typed, and on a phone there is no
+        // Ctrl+V to paste it with (see addPasteMenu).
+        addPasteMenu(urlF, log);
 
         javax.swing.JLabel what = new javax.swing.JLabel(
                 "<html>A web page is included as text (@txt), an image as a picture (@img).<br>"
@@ -3576,7 +3642,7 @@ public class JRock {
         panel.add(row, BorderLayout.SOUTH);
 
         int result = javax.swing.JOptionPane.showConfirmDialog(
-                frame, panel, "Insert URL",
+                frame, panel, "Fetch URL",
                 javax.swing.JOptionPane.OK_CANCEL_OPTION,
                 javax.swing.JOptionPane.PLAIN_MESSAGE);
         if (result != javax.swing.JOptionPane.OK_OPTION) return;
@@ -3590,7 +3656,7 @@ public class JRock {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
-                insertUrl(frame, input, log, extend, typed);
+                fetchUrl(frame, input, log, extend, typed);
                 return null;
             }
 
@@ -3599,7 +3665,7 @@ public class JRock {
                 try {
                     get();   // surfaces anything doInBackground threw
                 } catch (Exception ex) {
-                    log.gray("Insert URL failed: " + ex.getMessage());
+                    log.gray("Fetch URL failed: " + ex.getMessage());
                 }
                 log.gray("");   // closes the block, as an include does
                 input.requestFocusInWindow();
@@ -3608,16 +3674,16 @@ public class JRock {
     }
 
     // Downloads one address and includes what came back. Runs on a background thread
-    // (see showInsertUrlDialog); the insertion itself goes through onEdt().
-    private static void insertUrl(JFrame frame, JTextArea input, LogView log,
-                                  boolean extend, String typed) {
+    // (see showFetchUrlDialog); the insertion itself goes through onEdt().
+    private static void fetchUrl(JFrame frame, JTextArea input, LogView log,
+                                 boolean extend, String typed) {
         // No sockets in the browser, and no way to borrow the page's client either:
         // the HTTP bridge hands back a string with no headers, so there would be
         // neither the bytes of an image nor the Content-Type this whole feature turns
         // on. Said plainly rather than attempted and half-failing.
         if (isCheerpJ()) {
-            urlRefused(frame, log, "Insert URL is not available in the browser",
-                    "Insert URL needs a network client of its own, which the browser build "
+            urlRefused(frame, log, "Fetch URL is not available in the browser",
+                    "Fetch URL needs a network client of its own, which the browser build "
                     + "does not have: the page's client returns text without response "
                     + "headers, so neither an image's bytes nor its media type would "
                     + "survive. Download the file and use Include instead.");
