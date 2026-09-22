@@ -95,13 +95,12 @@
               implementation="org.apache.maven.plugin.surefire.extensions.junit5.JUnit5Xml30StatelessReporter">
             <usePhrasedTestCaseMethodName>true</usePhrasedTestCaseMethodName>
           </statelessTestsetReporter>
-          <environmentVariables>
-            <!-- Blank, so the startup model-list fetch reports "(skipped - no
-                 Bedrock API key set)" and the test needs no network and no
-                 credentials. JRock reads a blank environment variable as unset.
-                 This also stops a developer's real key from being used by a test. -->
-            <BEDROCK_API_KEY></BEDROCK_API_KEY>
-          </environmentVariables>
+          <!-- No environment variables are set here, and none need to be: JRock
+               reads nothing from the environment. Its API key comes from
+               JRock/bedrock-key.txt in the working directory, and every test runs in
+               a throwaway directory of its own - so the key file is empty, the
+               startup model-list fetch reports "(skipped - no Bedrock API key set)",
+               and a developer's real key cannot be picked up by a test. -->
         </configuration>
       </plugin>
 

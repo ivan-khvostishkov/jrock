@@ -60,12 +60,10 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
 1. **Get a Bedrock API key.** A short-term (recommended) key can be generated from the AWS
    console: https://console.aws.amazon.com/bedrock-mantle/api-keys
-2. **Provide the key** either as an environment variable or via the in-app Configure dialog:
-
-   ```powershell
-   $env:BEDROCK_API_KEY = "..."
-   $env:AWS_REGION = "us-east-1"   # optional; defaults to us-east-1
-   ```
+2. **Provide the key** by typing it into the in-app **Configure dialog** (top-left button),
+   which writes it to `JRock/bedrock-key.txt` in the working directory — or by putting it
+   in that file yourself, one line and nothing else. Nothing is read from the environment;
+   see [Settings files](#settings-files).
 
 3. **Run it:**
 
@@ -248,7 +246,7 @@ Which transport carries them is decided once at startup and reported in the log:
 
 | Runtime | Transport | Credentials |
 |---|---|---|
-| Any normal JVM | `java.net.http.HttpClient` | `BEDROCK_API_KEY` env var, or the Configure dialog |
+| Any normal JVM | `java.net.http.HttpClient` | `JRock/bedrock-key.txt`, written by the Configure dialog |
 | CheerpJ (browser) | the page's `window.myBrowserHttp.fetch` | held by the page; never passed to the JVM |
 
 In the browser there is no socket layer, so `HttpClient` cannot work at all and the hosting page
@@ -258,8 +256,10 @@ provides the transport instead. Any host page can serve JRock by providing
 itself, so the API key never reaches the JVM, and it reports the region it holds a key for, which
 JRock adopts at startup.
 
-Credentials are deliberately **not** read from JVM system properties (`-Dname=value`): a key
-passed on a command line leaks into shell history and process listings.
+Credentials are deliberately **not** read from JVM system properties (`-Dname=value`) or from
+environment variables: a key passed on a command line leaks into shell history and process
+listings, and an environment variable is set in a shell that's gone by the time anything goes
+wrong. The key lives in a file you can look at instead — see [Settings files](#settings-files).
 
 ## Models
 
@@ -347,6 +347,8 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   each clock that was sent (see [**Clock**](#clock)). These are never modified or deleted (not
   even by Clear log). `cat`-ing the operator's and the assistant's in order reproduces the
   dialog-only transcript.
+- `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the region and model
+  (see [**Settings files**](#settings-files)).
 - `JRock/gs-pdf/` — per-page text/image files produced when a PDF is included via Ghostscript
   (see Multimodal includes).
 - `JRock/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
@@ -359,6 +361,47 @@ The main log is a bit-perfect copy of the pane, except that each role header is 
 **Clear log** empties `jrock-log.txt` and the window but never touches `JRock/messages/`, so
 paid-for inputs/outputs are preserved. If the log has changed since it was last exported with
 **Ctrl+L** (Save log as a copy), Clear log first asks for confirmation and suggests saving.
+
+## Settings files
+
+**Nothing is read from the environment.** Settings are files in the working folder, next to that
+folder's log and prompt — files you can open, edit, copy, back up and delete. An environment
+variable is the opposite: set in a shell that's gone by the time anything goes wrong, invisible
+from inside the running application, and different for every way of launching it.
+
+- **`JRock/bedrock-key.txt`** — the Bedrock API key, on one line, and nothing else. Read at
+  startup (trimmed of surrounding spaces) and written by the **Configure dialog** when you type
+  a key into it. A folder that has none gets an **empty** file created, so there's an obvious
+  place to put one; a key is never copied into a folder it wasn't typed for. It gets a file of
+  its own because it's a credential: it can be locked down, kept out of a copy of the
+  configuration, or deleted on its own.
+- **`JRock/jrock-config.txt`** — the **region** and the **model**, so the next start comes up
+  the way you left it. Seeded with the settings in effect when the folder has none.
+
+Both belong to the working folder, so they are adopted every time JRock takes a folder on:
+startup, a change of working directory in Configure, a restore from a backup. In the browser the
+hosting page holds the key and names the region, and what the page says wins (see
+[HTTP transport](#http-transport)).
+
+The config format is a name on one line and its **value on the next**:
+
+```
+' JRock settings - https://github.com/ivan-khvostishkov/jrock
+'
+' A setting is a name ending in $ on one line, its value on the next.
+' Leading and trailing spaces are dropped. Blank lines, and lines starting
+' with ' (a single quote), are ignored.
+
+region$
+us-east-1
+
+model$
+xai.grok-4.3
+```
+
+A value being a whole line of its own is the whole point: it can be cut and pasted **as a line**
+in any text editor, with no quoting, no escaping and no "everything after the `=`, but trimmed"
+to get wrong. Lines starting with `'` are comments, and blank lines separate the pairs.
 
 ## Backup and restore
 
@@ -490,7 +533,9 @@ the whole transcript *are* restored from disk. So the tokens come back and nothi
 they stand for: sending says `Included @img <hash> is not known`, and the conversation is stuck
 until every file is attached again. Two things fix that, and they are meant to be used together.
 
-**Save include copies** — a checkbox in the include dialog itself, next to the file list. With
+**Save include copies** — a checkbox in the include dialog itself, on a line of its own under
+the file list (rather than in the accessory column down the right-hand side, which on a narrow
+dialog takes about a third of the width for one checkbox). With
 it on, a chosen file is **copied into `JRock/includes/` first and included from the copy**, so
 the log's line points inside the folder you own:
 
@@ -732,12 +777,14 @@ text file.
   the working directory again. Leaving the row untouched changes nothing, so moving the
   working directory alone doesn't pin prompts to the folder you just left. A directory that
   doesn't exist yet is created.
-- **BEDROCK_API_KEY** — write-only: left blank, it keeps the current key; type a value to
-  override for the session. The key is never displayed or stored beyond the running process.
-  In the browser this row is absent: the key belongs to the page (see
-  [HTTP transport](#http-transport)) and is changed there.
-- **AWS_REGION** — free text.
-- **Model** — free text with a dropdown of recently fetched models.
+- **Bedrock API key** — write-only: left blank, it keeps the current key; type a value to
+  replace it. What you type is written to `JRock/bedrock-key.txt` in the working directory,
+  which is where it's read from at startup. The key is never displayed. In the browser this
+  row is absent: the key belongs to the page (see [HTTP transport](#http-transport)) and is
+  changed there.
+- **Region** — free text. Kept in `JRock/jrock-config.txt`, so it survives a restart.
+- **Model** — free text with a dropdown of recently fetched models. Kept in
+  `JRock/jrock-config.txt` too.
 - **PDF image DPI** — the resolution Ghostscript rasterises PDF pages at (`-r`) when a PDF is
   included as images: 72 / 96 (screen), **150** (documents, the default), 203 (fax/receipt),
   300 (print). A page image is what the model actually sees, so this is a real trade-off —
@@ -940,7 +987,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+Enter | Send |
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+L | Save log as (a copy, or just the selected text) |
-| Ctrl+O | Load prompt from a file (text only) |
+| Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
 | Ctrl+I | Include text/image files, a PDF, an RTF or a DOCX (multi-select) |
 | Ctrl+U | Fetch a URL and include what it answers with |
 | Ctrl+D | Toggle Dialog only |
@@ -1092,9 +1139,11 @@ cd tests/
 mvn test
 ```
 
-Nothing is stubbed and no credentials are needed: tests run with `BEDROCK_API_KEY` blank, so
-JRock skips its startup model-list fetch. No test contacts AWS — the one case that does set a
-key points the region at a host that doesn't resolve, so the fetch fails at DNS.
+Nothing is stubbed and no credentials are needed: every test runs in a throwaway working
+directory of its own, so its `JRock/bedrock-key.txt` is the empty one JRock creates and the
+startup model-list fetch is skipped for want of a key. Your own key cannot be picked up by a
+test, because nothing is read from the environment. No test contacts AWS — the one case that
+does set a key points the region at a host that doesn't resolve, so the fetch fails at DNS.
 
 One external program is needed: **Ghostscript on `PATH`** (`gs`, or `gswin64`/`gswin64c` on
 Windows),

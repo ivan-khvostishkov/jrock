@@ -8,8 +8,10 @@ name: Tests
 # exact JDK patch because the JAR's bytes depend on it, which has nothing to do
 # with running tests.
 #
-# No credentials are needed or used: with BEDROCK_API_KEY blank (set in the POM)
-# JRock skips its startup model-list fetch, so the test never touches the network.
+# No credentials are needed or used: nothing is read from the environment, and each
+# test works in a throwaway directory whose JRock/bedrock-key.txt is the empty one
+# JRock creates - so the startup model-list fetch is skipped for want of a key and
+# the tests never touch the network.
 
 on:
   push:

@@ -67,14 +67,14 @@
 //   nothing needs to be, or is, kept on the server between calls.
 //
 // Authentication:
-//   Bearer token = your Bedrock API key, read from the BEDROCK_API_KEY env var.
-//   A short-term (recommended) Bedrock API key can be generated from the AWS
-//   console at: https://console.aws.amazon.com/bedrock-mantle/api-keys
-//   Set it before launching, e.g. (PowerShell):
-//     $env:BEDROCK_API_KEY = "..."
-//     $env:AWS_REGION = "us-east-1"   # optional, defaults below
-//   Alternatively, configure the API key (and region/model) in the app itself via
-//   the Configure dialog (top-left button); no env var needed.
+//   Bearer token = your Bedrock API key, kept in JRock/bedrock-key.txt in the
+//   working directory - one line, nothing else. A short-term (recommended)
+//   Bedrock API key can be generated from the AWS console at:
+//   https://console.aws.amazon.com/bedrock-mantle/api-keys
+//   Put it in that file, or type it into the Configure dialog (top-left button),
+//   which writes it there. Nothing is read from the environment: the region and
+//   the model live beside the key in JRock/jrock-config.txt (see "Settings
+//   files"), where they can be read, edited and copied like any other file.
 //   In the browser the key never reaches the JVM at all: the page's JavaScript
 //   HTTP client holds it and signs each request itself (see "HTTP transport").
 
@@ -121,12 +121,17 @@ public class JRock {
 
     // ---- Configuration (mutable: changed via the Configure dialog) ----------
     private static final String DEFAULT_REGION = "us-east-1";
-    // Region/model start from env/defaults and can be overridden at runtime.
-    private static String REGION = envOr("AWS_REGION", DEFAULT_REGION);
+    // Region/model start from the built-in defaults, are replaced by whatever the
+    // working folder's JRock/jrock-config.txt holds (see adoptSettingsOfWorkingDir),
+    // and can be changed at runtime in the Configure dialog.
+    private static String REGION = DEFAULT_REGION;
     // Where REGION came from, phrased for the startup log; null for the built-in
     // default and once the user sets it in the Configure dialog.
-    private static String regionSource =
-            (env("AWS_REGION") == null) ? null : "from the AWS_REGION env var";
+    private static String regionSource = null;
+    // What regionSource says when the hosting page supplied the region. A constant
+    // because it is also a decision: a region the page chose outranks a file (see
+    // adoptSettingsOfWorkingDir).
+    private static final String PAGE_REGION_SOURCE = "from the hosting page";
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
@@ -161,10 +166,14 @@ public class JRock {
     // Empty until the first successful fetch; used to populate the Configure dropdown.
     private static java.util.List<String> availableModels = new ArrayList<>();
 
-    // In-memory Bedrock API key override. Null means "use the BEDROCK_API_KEY env
-    // var". We never read/prefill the env value into the UI; the override is only
-    // set when the user explicitly types a new key in the Configure dialog.
-    private static String apiKeyOverride = null;
+    // The Bedrock API key in effect: read from JRock/bedrock-key.txt at startup and
+    // whenever the working folder changes, or set by the Configure dialog - which
+    // writes it to that file as well. Null means there is none, which is normal in
+    // the browser, where the key stays in the page.
+    //
+    // Never prefilled into the UI: the dialog's field is write-only, so a credential
+    // cannot appear on screen (or in a screenshot of it).
+    private static String apiKey = null;
 
     // Resolution Ghostscript rasterises PDF pages at (-r), when a PDF is included
     // as page images rather than as text. Settable in the Configure dialog.
@@ -560,14 +569,150 @@ public class JRock {
     private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
     private static Path urlsDir()          { return jrockDir().resolve("urls"); }
+    // The two settings files (see "Settings files"): the credential on its own, and
+    // everything else beside it.
+    private static Path keyFile()          { return jrockDir().resolve("bedrock-key.txt"); }
+    private static Path configFile()       { return jrockDir().resolve("jrock-config.txt"); }
 
-    // Resolves the effective API key: the in-memory override from the Configure
-    // dialog first, then the BEDROCK_API_KEY env var. Returns null when neither is
-    // set - which is normal in the browser, where the key stays in the page and
-    // the JVM never sees it (see HttpTransport.hostHoldsCredentials()).
+    // The API key to sign a request with, or null when there is none - which is
+    // normal in the browser, where the key stays in the page and the JVM never sees
+    // it (see HttpTransport.hostHoldsCredentials()).
     private static String resolveApiKey() {
-        if (apiKeyOverride != null && !apiKeyOverride.isBlank()) return apiKeyOverride;
-        return env("BEDROCK_API_KEY");
+        return (apiKey != null && !apiKey.isBlank()) ? apiKey : null;
+    }
+
+    // ---- Settings files (JRock/bedrock-key.txt, JRock/jrock-config.txt) -----
+    // Nothing is read from the environment. Settings live in the working folder, in
+    // files the user can open, edit, copy and back up - the same promise the log and
+    // the prompt make. An environment variable is the opposite: set in a shell that is
+    // gone by the time anything goes wrong, invisible from inside the running
+    // application, and different for every way of launching it.
+    //
+    // The key gets a file of its own because it is a credential: one line and nothing
+    // else, so it can be locked down, kept out of a copy of the configuration, or
+    // deleted on its own.
+    //
+    // Both files belong to the working folder, like that folder's log and prompt, and
+    // are adopted when JRock takes a folder on - startup, a change in the Configure
+    // dialog, a restore from a backup. A folder with no configuration yet is seeded
+    // with the settings in effect; the key is NEVER copied into a folder it was not
+    // typed for, a credential being nobody's idea of a convenience feature.
+    private static final String CONFIG_REGION = "region";
+    private static final String CONFIG_MODEL  = "model";
+
+    // Written above the settings, and the only documentation the format needs. The
+    // format itself exists for one reason: a value is a whole line of its own, so it
+    // can be cut and pasted as a line - no quoting, no escaping, and no "everything
+    // after the = sign, but trimmed" to get wrong.
+    private static final String CONFIG_HEADER =
+            "' JRock settings - " + GITHUB_URL + "\n"
+          + "'\n"
+          + "' A setting is a name ending in $ on one line, its value on the next.\n"
+          + "' Leading and trailing spaces are dropped. Blank lines, and lines starting\n"
+          + "' with ' (a single quote), are ignored.\n"
+          + "\n";
+
+    // Where JRock reports its settings came from: both are set by
+    // adoptSettingsOfWorkingDir and read by the session report.
+    private static String settingsSource = null;
+    private static String apiKeySource = null;
+
+    // Reads the settings of the working folder and applies them, seeding the file when
+    // that folder has none. Called from initSession, which is every moment JRock takes
+    // a folder on.
+    private static void adoptSettingsOfWorkingDir() {
+        String stored = readFileQuietly(configFile());
+        if (stored == null) {
+            saveConfigQuietly();
+            settingsSource = "JRock/jrock-config.txt (created with the current settings)";
+        } else {
+            java.util.Map<String, String> settings = parseConfig(stored);
+            String region = settings.get(CONFIG_REGION);
+            // The hosting page's region outranks the file: in the browser the page
+            // holds the key, and a key belongs to one region (see http()).
+            if (region != null && !PAGE_REGION_SOURCE.equals(regionSource)) {
+                REGION = region;
+                regionSource = "from JRock/jrock-config.txt";
+            }
+            String model = settings.get(CONFIG_MODEL);
+            if (model != null) MODEL_ID = model;
+            settingsSource = "JRock/jrock-config.txt";
+        }
+        adoptKeyOfWorkingDir();
+    }
+
+    // The same for the key, which is read here but never written: an empty file is
+    // created so there is somewhere obvious to put one, and that is all.
+    private static void adoptKeyOfWorkingDir() {
+        if (http().hostHoldsCredentials()) {
+            apiKeySource = null;   // the page holds it; JRock has no key to report
+            return;
+        }
+        String stored = readFileQuietly(keyFile());
+        if (stored == null) {
+            atomicWriteQuietly(keyFile(), "");
+            apiKey = null;
+            apiKeySource = "none yet - put one in JRock/bedrock-key.txt, "
+                    + "or type it into Configure";
+            return;
+        }
+        String key = stored.trim();
+        apiKey = key.isEmpty() ? null : key;
+        apiKeySource = key.isEmpty()
+                ? "none yet - JRock/bedrock-key.txt is empty, and Configure fills it in"
+                : "loaded from JRock/bedrock-key.txt";
+    }
+
+    // Writes the key to the working folder, where the next start reads it from. One
+    // line and a newline, so an editor shows it as a line and `cat` doesn't run it
+    // into whatever is printed next.
+    private static void saveKeyQuietly(String key) {
+        atomicWriteQuietly(keyFile(), key.trim() + "\n");
+    }
+
+    // Writes the settings of the working folder: the region and the model, which are
+    // the two that have to survive a restart to be worth setting at all.
+    //
+    // A blank value is left out rather than written as an empty line - an empty line
+    // is a separator in this format, so writing one would make the NEXT name read as
+    // this setting's value.
+    private static void saveConfigQuietly() {
+        StringBuilder text = new StringBuilder(CONFIG_HEADER);
+        appendSetting(text, CONFIG_REGION, REGION);
+        appendSetting(text, CONFIG_MODEL, MODEL_ID);
+        atomicWriteQuietly(configFile(), text.toString());
+    }
+
+    private static void appendSetting(StringBuilder text, String name, String value) {
+        if (value == null || value.trim().isEmpty()) return;
+        text.append(name).append("$\n").append(value.trim()).append("\n\n");
+    }
+
+    // Reads the format: name$ on one line, its value on the next, with blank lines and
+    // ' comments ignored anywhere.
+    //
+    // A line where a name is due and which does not end in $ is skipped rather than
+    // guessed at - the file is meant to be edited by hand, and the reading of a
+    // half-edited one should be "that setting is missing", not "that setting now holds
+    // a stray line". A value, on the other hand, is whatever its line says, trailing $
+    // and all: at that point the format is not asking a question.
+    private static java.util.Map<String, String> parseConfig(String text) {
+        java.util.Map<String, String> settings = new java.util.LinkedHashMap<>();
+        if (text == null) return settings;
+        String name = null;
+        for (String rawLine : text.split("\r\n|\r|\n", -1)) {
+            String line = rawLine.trim();
+            if (line.isEmpty() || line.startsWith("'")) continue;
+            if (name == null) {
+                if (line.length() > 1 && line.endsWith("$")) {
+                    name = line.substring(0, line.length() - 1).trim();
+                }
+            } else {
+                settings.put(name, line);
+                name = null;
+            }
+        }
+        return settings;
     }
 
     // ---- UI ----------------------------------------------------------------
@@ -1143,6 +1288,11 @@ public class JRock {
         boolean hadLog = Files.exists(logFile());
         int restored = log.loadFromDisk();
 
+        // The settings of this folder, before anything reports what they are. After
+        // loadFromDisk for the same reason the report lines are: it replaces the entry
+        // list, so anything logged before it would be wiped.
+        adoptSettingsOfWorkingDir();
+
         // The session report begins here; the working directory is its first line.
         // A restored log already ends with its own trailing blank line.
         log.gray("Working directory: " + workingDir);
@@ -1168,7 +1318,10 @@ public class JRock {
                 + (isCheerpJ() ? " (CheerpJ browser runtime)" : ""));
         if (http().hostHoldsCredentials()) {
             log.gray("Bedrock API key: held by the hosting page, not by JRock");
+        } else if (apiKeySource != null) {
+            log.gray("Bedrock API key: " + apiKeySource);
         }
+        log.gray("Settings: " + settingsSource);
         if (regionSource != null) {
             log.gray("AWS region: " + REGION + " (" + regionSource + ")");
         } else {
@@ -2088,9 +2241,9 @@ public class JRock {
         addRow(fields, c, row++, "Working directory:", cwdRow);
         addRow(fields, c, row++, "Prompts directory:", promptsRow);
         if (!hostKey) {
-            addRow(fields, c, row++, "BEDROCK_API_KEY:", keyF);
+            addRow(fields, c, row++, "Bedrock API key:", keyF);
         }
-        addRow(fields, c, row++, "AWS_REGION:", regionF);
+        addRow(fields, c, row++, "AWS region:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
         addRow(fields, c, row++, "PDF image DPI:", dpiRow);
 
@@ -2107,8 +2260,12 @@ public class JRock {
             + "to each request itself - so it is never handed to the JVM. Change it "
             + "on the page.\n\n"
             : "The API key field is intentionally blank and write-only: leave it empty "
-            + "to keep the current key (env var or a previous override); type a value "
-            + "to override it for this session. The key is never displayed.\n\n";
+            + "to keep the current key; type a value to replace it. What you type is "
+            + "written to JRock/bedrock-key.txt in the working directory, which is "
+            + "where it is read from at startup. The key is never displayed.\n\n"
+            + "The region and the model are kept in JRock/jrock-config.txt beside it, "
+            + "so they survive a restart. Both files belong to the working directory "
+            + "and are plain text you can edit yourself.\n\n";
 
         javax.swing.JTextArea note = new javax.swing.JTextArea(
             keyNote
@@ -2210,6 +2367,11 @@ public class JRock {
                 javax.swing.JOptionPane.PLAIN_MESSAGE);
         if (result != javax.swing.JOptionPane.OK_OPTION) return false;
 
+        // The folder whose settings this dialog was showing, so the apply below can
+        // tell "the settings of this folder changed" from "we are moving to another
+        // folder, which has settings of its own".
+        Path dirAtOpen = workingDir;
+
         // Working directory.
         String cwdText = cwdF.getText().trim();
         if (!cwdText.isEmpty()) {
@@ -2239,13 +2401,18 @@ public class JRock {
             applyPromptsDir(frame, promptsText);
         }
 
-        // API key override: only set if the user typed something. Never store the
-        // env value; an empty field means "keep whatever is already in effect".
-        // Skipped when the host holds the key - the field wasn't even shown.
+        // API key: only set if the user typed something - an empty field means "keep
+        // whatever is already in effect". Skipped when the host holds the key: the
+        // field wasn't even shown.
+        //
+        // Written to the working folder's key file, which is the one place a key is
+        // ever written: the folder it was typed for is the folder that keeps it (see
+        // "Settings files").
         if (!hostKey) {
             char[] key = keyF.getPassword();
             if (key.length > 0) {
-                apiKeyOverride = new String(key);
+                apiKey = new String(key);
+                saveKeyQuietly(apiKey);
             }
             java.util.Arrays.fill(key, '\0');   // wipe the transient char[]
         }
@@ -2264,6 +2431,15 @@ public class JRock {
         // Autobackup: the idle timer reads this when it next fires, so a change here
         // applies to the spell of inactivity that starts the moment this dialog closes.
         autoBackupLog = autoBackupF.isSelected();
+
+        // The settings of the folder being worked in, so the next start comes up the
+        // way this dialog was left.
+        //
+        // Not written when the working directory just changed: the folder being moved
+        // to has settings of its own, which initSession is about to adopt (see
+        // adoptSettingsOfWorkingDir), and writing first would overwrite them with the
+        // values this dialog was showing for the folder being left.
+        if (workingDir.equals(dirAtOpen)) saveConfigQuietly();
 
         return true;
     }
@@ -2405,6 +2581,10 @@ public class JRock {
                     new javax.swing.JFileChooser(logChooserDir.start());
             chooser.setDialogTitle("Backup the JRock folder as");
             chooser.setSelectedFile(logChooserDir.startFile(backupFileName()));
+            // Zip and nothing else: a backup is written as a zip whatever the name says
+            // (see withExtension below), so offering "All files" would only invite a name
+            // that ends in something the file is not.
+            chooser.setAcceptAllFileFilterUsed(false);
             chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                     "Zip archives (*.zip)", "zip"));
             if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
@@ -2563,15 +2743,19 @@ public class JRock {
         addRow(fields, c, 0, "Backup file:", zipRow);
         addRow(fields, c, 1, "Unpack into:", unpackRow);
 
-        javax.swing.JTextArea note = new javax.swing.JTextArea(
-                "The " + BACKUP_ROOT + " folder in the target directory is deleted and "
+        // Width-bounded HTML rather than a wrapping JTextArea. A JTextArea asked how big
+        // it would like to be before it has a width answers for one unwrapped line, so
+        // the dialog came up as short as one line and the wrapped text then pushed the OK
+        // and Cancel buttons out through the bottom of the window frame. An HTML label is
+        // asked the same question with the width already settled, so the height it gives
+        // back is the height it uses. The width is the one the two path rows ask for
+        // anyway, which is why this does not widen the dialog.
+        javax.swing.JLabel note = new javax.swing.JLabel(
+                "<html><body style='width:" + fields.getPreferredSize().width + "px'>"
+                + "The " + BACKUP_ROOT + " folder in the target directory is deleted and "
                 + "replaced by the one in the backup. JRock then works in that directory, "
-                + "with the restored log and prompt.");
-        note.setEditable(false);
-        note.setOpaque(false);
-        note.setLineWrap(true);
-        note.setWrapStyleWord(true);
-        note.setFont(javax.swing.UIManager.getFont("Label.font"));
+                + "with the restored log and prompt.</body></html>");
+        note.setVerticalAlignment(javax.swing.SwingConstants.TOP);
 
         javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
         panel.add(fields, BorderLayout.NORTH);
@@ -2779,6 +2963,10 @@ public class JRock {
         browse.addActionListener(ev -> {
             javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
             fc.setDialogTitle(chooserTitle);
+            // The caller's filter only: this button is for locating a file of one
+            // particular kind, and "All files" in the dropdown is an offer to pick
+            // something the caller has already said it cannot use.
+            fc.setAcceptAllFileFilterUsed(false);
             fc.setFileFilter(filter);
             String current = field.getText().trim();
             if (current.isEmpty()) {
@@ -3223,6 +3411,25 @@ public class JRock {
     private static final String[] IMAGE_EXTENSIONS = { "png", "jpg", "jpeg", "gif", "webp" };
     private static final String IMAGE_FILTER_SUFFIX = " (png, jpg, jpeg, gif, webp)";
 
+    // Puts a row of one's own underneath a file chooser's own controls, answering whether
+    // there was room for it.
+    //
+    // A chooser has no official slot for this - only the accessory, which is a column down
+    // the right-hand side. What every stock look and feel does have is a BorderLayout on
+    // the chooser itself with NORTH and CENTER taken (the folder row, and the file list
+    // with the filename, filter and button rows beneath it) and SOUTH free, which is
+    // exactly the line wanted. A layout that does not look like that is left untouched and
+    // the caller told so, because a row appearing where the buttons used to be would be a
+    // worse outcome than a row in the accessory.
+    private static boolean addBelow(javax.swing.JFileChooser chooser,
+                                    javax.swing.JComponent row) {
+        if (!(chooser.getLayout() instanceof BorderLayout)) return false;
+        BorderLayout layout = (BorderLayout) chooser.getLayout();
+        if (layout.getLayoutComponent(BorderLayout.SOUTH) != null) return false;
+        chooser.add(row, BorderLayout.SOUTH);
+        return true;
+    }
+
     // Loads a prompt from a user-chosen file (read-only) into the input area.
     // The document listener then autosaves the loaded text to jrock-prompt.txt.
     //
@@ -3235,11 +3442,18 @@ public class JRock {
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(promptsDir().toFile());
         chooser.setDialogTitle("Load prompt");
-        // Prompts are text - restrict to text types so an image can't be loaded by
-        // mistake.
-        chooser.setAcceptAllFileFilterUsed(false);
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+        // All files, like Save prompt copy - a prompt is a prompt whatever it is called,
+        // and "*.md", "*.prompt" or no extension at all are all of them ways people keep
+        // one. The text types are offered as a way of narrowing a crowded folder, not as
+        // a rule about what a prompt may be; what actually refuses a file that cannot be
+        // one is the looksBinary check below.
+        //
+        // Not the include dialog's filter list, either: those filters say what to DO with
+        // a file (as text, as an image, as Markdown), which is a question a prompt never
+        // asks - it is loaded as the text it is.
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 TEXT_FILTER_LABEL, TEXT_EXTENSIONS));
+        chooser.setFileFilter(chooser.getAcceptAllFileFilter());
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
 
         Path source = chooser.getSelectedFile().toPath();
@@ -3312,17 +3526,21 @@ public class JRock {
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
         // The one option that belongs with the files rather than in Configure: whether
-        // to keep a copy of what is being included (see saveIncludeCopies). The chooser
-        // hands it a whole panel of its own, so it sits at the top of it rather than
-        // being centred against the file list.
+        // to keep a copy of what is being included (see saveIncludeCopies).
+        //
+        // On a line of its own under the chooser's own rows, left-aligned, rather than in
+        // the accessory panel a chooser offers: the accessory is a column down the
+        // right-hand side, and it takes its width off the file list - on a narrow dialog
+        // roughly a third of it, for one checkbox. If some look and feel leaves no room
+        // there, the accessory is used after all (see addBelow).
         javax.swing.JCheckBox saveCopies =
                 new javax.swing.JCheckBox("Save include copies", saveIncludeCopies);
         saveCopies.setToolTipText("Copy each chosen file into JRock/includes/ first, "
                 + "and include it from there");
-        javax.swing.JPanel accessory = new javax.swing.JPanel(new BorderLayout());
-        accessory.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 8, 4, 0));
-        accessory.add(saveCopies, BorderLayout.NORTH);
-        chooser.setAccessory(accessory);
+        javax.swing.JPanel optionRow = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        optionRow.add(saveCopies);
+        if (!addBelow(chooser, optionRow)) chooser.setAccessory(optionRow);
 
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         includeChooserDir.remember(chooser);
@@ -6729,7 +6947,7 @@ public class JRock {
         String hostRegion = jsonStringField(info, "region");
         if (hostRegion != null && !hostRegion.isBlank()) {
             REGION = hostRegion.trim();
-            regionSource = "from the hosting page";
+            regionSource = PAGE_REGION_SOURCE;
         }
         return transport;
     }
@@ -6789,8 +7007,9 @@ public class JRock {
         if (!haveKey && !http.hostHoldsCredentials()) {
             return new String[] {
                 "0",
-                "No Bedrock API key set. Set the BEDROCK_API_KEY env var, or open "
-                    + "the Configure dialog (top-left button) and enter a key.",
+                "No Bedrock API key set. Put one in JRock/bedrock-key.txt, or open "
+                    + "the Configure dialog (top-left button) and enter a key - which "
+                    + "writes it there.",
                 null
             };
         }
@@ -7104,22 +7323,6 @@ public class JRock {
             }
         }
         return sb.toString();
-    }
-
-    private static String envOr(String name, String fallback) {
-        String v = env(name);
-        return (v == null) ? fallback : v;
-    }
-
-    // Reads a setting from the OS environment; returns null (never blank) when it
-    // isn't set. Settings are NOT read from JVM system properties: credentials
-    // must not be passable on a command line (-Dname=value), where they end up in
-    // shell history and process listings. Hosts that cannot set environment
-    // variables - CheerpJ in the browser - supply credentials through their own
-    // HTTP client instead (see the HTTP transport section).
-    private static String env(String name) {
-        String v = System.getenv(name);
-        return (v == null || v.isBlank()) ? null : v;
     }
 
     // ---- Prompt persistence (crash recovery) -------------------------------
