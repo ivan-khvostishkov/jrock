@@ -526,6 +526,7 @@ public class JRock {
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
     private static Path gsPdfDir()         { return jrockDir().resolve("gs-pdf"); }
     private static Path rtfMdDir()         { return jrockDir().resolve("rtf-md"); }
+    private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
 
     // Resolves the effective API key: the in-memory override from the Configure
     // dialog first, then the BEDROCK_API_KEY env var. Returns null when neither is
@@ -1540,6 +1541,15 @@ public class JRock {
                 addMenuItem(logMenu, "Save log copy as...", () -> saveLogAs(frame, log));
         javax.swing.JMenuItem printLogItem =
                 addMenuItem(logMenu, "Print...",            () -> printLog(frame, output));
+        // ...and two that only make sense for a selection, so they are simply greyed
+        // out without one: the model answers in Markdown, and these write that answer
+        // out as a document a word processor - or a layout application - can open.
+        javax.swing.JMenuItem exportRtfItem =
+                addMenuItem(logMenu, "Export selected Markdown as RTF...",
+                        () -> exportSelectedMarkdown(frame, log, false));
+        javax.swing.JMenuItem exportDocxItem =
+                addMenuItem(logMenu, "Export selected Markdown as DOCX...",
+                        () -> exportSelectedMarkdown(frame, log, true));
         // The log pane is read-only, so Copy is the only clipboard verb it needs.
         logMenu.addSeparator();
         javax.swing.JMenuItem copyLogItem = addEditItem(logMenu, "Copy", output,
@@ -1549,6 +1559,8 @@ public class JRock {
                 boolean selected = log.selectedText() != null;
                 saveLogItem.setText(selected ? "Save selected text as..." : "Save log copy as...");
                 printLogItem.setText(selected ? "Print selected text..."  : "Print...");
+                exportRtfItem.setEnabled(selected);
+                exportDocxItem.setEnabled(selected);
                 copyLogItem.setEnabled(selected);
             }
             @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) { }
@@ -1558,7 +1570,7 @@ public class JRock {
 
         // Prompt area: Include... / Load prompt... / Save prompt copy...
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
-        addMenuItem(promptMenu, "Include text, image, PDF or RTF file...",
+        addMenuItem(promptMenu, "Include text, image, PDF, RTF or DOCX file...",
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
         addMenuItem(promptMenu, "Load prompt from file...",
                 () -> loadPromptInto(frame, input, log));
@@ -1903,7 +1915,7 @@ public class JRock {
         // (no space-padding). The "Shortcuts" border title keeps the default bold.
         String[][] keys = {
             {"Ctrl+Enter", "Send message (call a Bedrock model)"},
-            {"Ctrl+I", "Include a text, image, PDF or RTF file"},
+            {"Ctrl+I", "Include a text, image, PDF, RTF or DOCX file"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
             {"Ctrl+S", "Save prompt as (a copy)"},
@@ -2582,8 +2594,8 @@ public class JRock {
 
     // ---- Include file (Ctrl+I) ---------------------------------------------
     // Lets the user pick a text or image file, a PDF to convert (via Ghostscript)
-    // into per-page text or per-page images, or an RTF to convert into Markdown
-    // (via Swing's own RTF reader). Each included file is hashed, remembered as
+    // into per-page text or per-page images, or an RTF or DOCX to convert into
+    // Markdown (with the JDK's own RTF reader and XML parser). Each included file is hashed, remembered as
     // hash -> path in the non-persistent INCLUDES map, logged (with image
     // dimensions where applicable), and gets an "@txt <hash>" / "@img <hash>"
     // token inserted at the prompt cursor.
@@ -2606,11 +2618,15 @@ public class JRock {
         javax.swing.filechooser.FileNameExtensionFilter rtfMarkdownFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         "RTF as Markdown text (*.rtf)", "rtf");
+        javax.swing.filechooser.FileNameExtensionFilter docxMarkdownFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "DOCX as Markdown text (*.docx)", "docx");
         chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
         chooser.addChoosableFileFilter(textFilter);
         chooser.addChoosableFileFilter(pdfTextFilter);
         chooser.addChoosableFileFilter(pdfImageFilter);
         chooser.addChoosableFileFilter(rtfMarkdownFilter);
+        chooser.addChoosableFileFilter(docxMarkdownFilter);
         chooser.setFileFilter(imageFilter);            // default selection = image
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
@@ -2623,6 +2639,7 @@ public class JRock {
         boolean asImages = chosen == pdfImageFilter;
         boolean pdf = chosen == pdfTextFilter || chosen == pdfImageFilter;
         boolean rtf = chosen == rtfMarkdownFilter;
+        boolean docx = chosen == docxMarkdownFilter;
         boolean isImage = chosen == imageFilter;
 
         // Process each chosen file in turn, all under the selected filter's kind.
@@ -2644,6 +2661,8 @@ public class JRock {
                         includePdf(frame, input, log, extend, file, asImages);
                     } else if (rtf) {
                         includeRtfAsMarkdown(input, log, extend, file);
+                    } else if (docx) {
+                        includeDocxAsMarkdown(input, log, extend, file);
                     } else {
                         // Left on the EDT: hashing and reading a plain include is
                         // quick, and this is what it always did.
@@ -3487,6 +3506,1193 @@ public class JRock {
             return at > 0 && at + 1 < text.length()
                     && Character.isLetterOrDigit(text.charAt(at - 1))
                     && Character.isLetterOrDigit(text.charAt(at + 1));
+        }
+    }
+
+    // ---- DOCX as Markdown --------------------------------------------------
+    // The same thing as includeRtfAsMarkdown for the other format a word processor
+    // saves: unzips the .docx, reads word/document.xml, writes Markdown under
+    // JRock/docx-md/ as "<docxname>.md", and includes that as an ordinary @txt token.
+    //
+    // Also with nothing installed - a .docx is a ZIP of XML, so java.util.zip and the
+    // JDK's XML parser are the whole toolchain, and this works in the browser too.
+    // Tables survive this direction, which is more than the RTF reader manages: they
+    // are w:tbl elements and plain to read, whereas RTF's table markup reaches
+    // RTFEditorKit as ordinary paragraphs.
+    //
+    // Runs on a background thread (see showIncludeDialog); the include itself, which
+    // touches the prompt's document, goes through onEdt().
+    private static void includeDocxAsMarkdown(JTextArea input, LogView log,
+                                              boolean extend, Path docx) {
+        log.gray("Converting DOCX to Markdown: " + docx);
+
+        String markdown;
+        try {
+            markdown = DocxMarkdown.of(docx);
+        } catch (IOException | RuntimeException ex) {
+            log.gray("Could not read DOCX " + docx.getFileName() + ": " + ex.getMessage());
+            return;
+        }
+        if (markdown.isBlank()) {
+            log.gray("No text found in " + docx.getFileName() + "; nothing included. "
+                    + "(An empty document - or a .docx with no body text of its own.)");
+            return;
+        }
+
+        // Output goes to JRock/docx-md/, named "<docxname>.md" - the same naming as
+        // gs-pdf/ and rtf-md/, so two documents of the same stem can't collide.
+        Path outDir = docxMdDir();
+        Path out = outDir.resolve(docx.getFileName().toString() + ".md");
+        try {
+            Files.createDirectories(outDir);
+            Files.write(out, markdown.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            log.gray("Could not write " + out + ": " + ex.getMessage());
+            return;
+        }
+        log.gray("Markdown written to " + out);
+
+        boolean[] added = new boolean[1];
+        // Inserts the token into the prompt's document, so: on the EDT.
+        onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+        log.gray("Inserted " + (added[0] ? 1 : 0) + " new @txt token(s) for "
+                + docx.getFileName() + ".");
+    }
+
+    // DOCX -> Markdown.
+    //
+    // What is read is word/document.xml and nothing else: the body's paragraphs and
+    // tables, each paragraph's style name, and each run's bold and italic. That is
+    // where a Word document keeps its meaning, and it maps onto Markdown directly:
+    //
+    //   Heading 1..6 / Title      -> #, ##, ### ...
+    //   bold / italic runs        -> **bold**, *italic*, ***both***
+    //   a Code-like style         -> an indented code block
+    //   a Quote-like style        -> "> "
+    //   a numbered/bulleted list  -> a "-" list item
+    //   w:tbl                     -> a Markdown pipe table
+    //
+    // Deliberately not read: numbering.xml (so an ordered list's real numbers are not
+    // recovered - a "-" item says the same structural thing), headers and footers,
+    // footnotes, images, colours, revision marks. Text a document typed itself, like a
+    // literal bullet character, is still cleaned up by the same rules the RTF side
+    // uses, whose escaping and emphasis this shares outright.
+    //
+    // A file that is not a .docx, or one Word wrote in some way not covered here,
+    // comes back as an IOException or as empty text - includeDocxAsMarkdown reports
+    // both and includes nothing, which is better than including nonsense.
+    private static final class DocxMarkdown {
+
+        /** The WordprocessingML namespace: every element and attribute read here. */
+        private static final String W =
+                "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        private static final String DOCUMENT_PART = "word/document.xml";
+
+        // Style names, matched loosely because they are not standardised: "Heading1"
+        // and "heading 1" are the same style, and a monospace paragraph is called
+        // "Code" by some applications and "HTMLPreformatted" or "SourceCode" by others.
+        private static final java.util.regex.Pattern HEADING_STYLE =
+                java.util.regex.Pattern.compile("(?i)^heading[ _-]*([1-6])$");
+        private static final java.util.regex.Pattern CODE_STYLE =
+                java.util.regex.Pattern.compile("(?i)code|preformat|listing|source");
+        private static final java.util.regex.Pattern QUOTE_STYLE =
+                java.util.regex.Pattern.compile("(?i)quot|citation");
+
+        private DocxMarkdown() { }
+
+        /** The Markdown for one .docx. Never null; empty when it has no body text. */
+        static String of(Path docx) throws IOException {
+            byte[] part = part(docx, DOCUMENT_PART);
+            if (part == null) {
+                throw new IOException("no " + DOCUMENT_PART + " inside it"
+                        + " - is it really a Word .docx?");
+            }
+            org.w3c.dom.Element body = child(document(part).getDocumentElement(), "body");
+            if (body == null) throw new IOException("its " + DOCUMENT_PART + " has no body");
+            return markdown(body);
+        }
+
+        // One named entry of the ZIP, or null when it isn't there.
+        //
+        // Read with ZipInputStream rather than ZipFile: a Path is not always a file a
+        // ZipFile can open (the browser build's filesystem is not the local one), and
+        // a sequential scan for one entry is nothing next to parsing the XML anyway.
+        private static byte[] part(Path zip, String name) throws IOException {
+            try (java.io.InputStream in = Files.newInputStream(zip);
+                 java.util.zip.ZipInputStream zin = new java.util.zip.ZipInputStream(in)) {
+                java.util.zip.ZipEntry entry;
+                while ((entry = zin.getNextEntry()) != null) {
+                    if (!name.equals(entry.getName())) continue;
+                    java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while ((read = zin.read(buffer)) > 0) out.write(buffer, 0, read);
+                    return out.toByteArray();
+                }
+            } catch (IllegalArgumentException | java.util.zip.ZipException ex) {
+                // Not a ZIP at all, or one this JDK won't read: the same answer either
+                // way, and the caller has the file name to put in front of it.
+                throw new IOException("not a readable ZIP archive: " + ex.getMessage());
+            }
+            return null;
+        }
+
+        // The part as a DOM tree.
+        //
+        // Parsed with the external world switched off: this XML comes from a file
+        // somebody sent, and a DOCTYPE in it must not be able to make the parser fetch
+        // anything or expand an entity into a gigabyte of text.
+        private static org.w3c.dom.Document document(byte[] xml) throws IOException {
+            try {
+                javax.xml.parsers.DocumentBuilderFactory factory =
+                        javax.xml.parsers.DocumentBuilderFactory.newInstance();
+                factory.setNamespaceAware(true);
+                factory.setFeature(
+                        "http://apache.org/xml/features/disallow-doctype-decl", true);
+                factory.setExpandEntityReferences(false);
+                return factory.newDocumentBuilder()
+                        .parse(new java.io.ByteArrayInputStream(xml));
+            } catch (javax.xml.parsers.ParserConfigurationException
+                     | org.xml.sax.SAXException ex) {
+                throw new IOException("its " + DOCUMENT_PART + " is not readable XML: "
+                        + ex.getMessage());
+            }
+        }
+
+        // The body as Markdown: one block per paragraph or table, blank line between
+        // them - except between consecutive list items, which are one list.
+        private static String markdown(org.w3c.dom.Element body) {
+            StringBuilder md = new StringBuilder();
+            boolean previousWasListItem = false;
+            for (org.w3c.dom.Element element : children(body)) {
+                String name = element.getLocalName();
+                String block;
+                boolean listItem = false;
+                if ("p".equals(name)) {
+                    block = paragraph(element);
+                    listItem = block.startsWith("- ")
+                            || RtfMarkdown.NUMBERED.matcher(block).find();
+                } else if ("tbl".equals(name)) {
+                    block = table(element);
+                } else {
+                    continue;   // sectPr and anything else structural
+                }
+                if (block.isEmpty()) continue;
+                if (md.length() > 0 && !(listItem && previousWasListItem)) md.append('\n');
+                md.append(block).append('\n');
+                previousWasListItem = listItem;
+            }
+            return md.toString();
+        }
+
+        // One w:p as a Markdown block, or "" when it holds no text.
+        private static String paragraph(org.w3c.dom.Element p) {
+            List<RtfMarkdown.Run> runs = runs(p);
+            String plain = RtfMarkdown.plain(runs);
+            if (plain.trim().isEmpty()) return "";
+            String style = style(p);
+
+            java.util.regex.Matcher heading = HEADING_STYLE.matcher(style);
+            int level = heading.matches() ? Integer.parseInt(heading.group(1))
+                    : ("Title".equalsIgnoreCase(style) ? 1 : 0);
+            if (level > 0) {
+                // No emphasis inside a heading: the style already said what this is.
+                String title = RtfMarkdown.escape(plain).trim();
+                if (title.isEmpty()) return "";
+                StringBuilder hashes = new StringBuilder();
+                for (int i = 0; i < level; i++) hashes.append('#');
+                return hashes + " " + title;
+            }
+            // Code keeps its own characters - escaping them would be escaping the code
+            // - and four spaces make a Markdown code block without needing a fence to
+            // be opened and closed around a run of paragraphs.
+            if (CODE_STYLE.matcher(style).find()) return "    " + stripEnd(plain);
+
+            // The list marker: a character the document typed into the text, or the
+            // list markup (w:numPr) that carries no character at all. Either way it
+            // comes out as "-": the real numbers live in numbering.xml, which is a
+            // whole numbering machine to implement for something Markdown renumbers
+            // by itself.
+            String marker = "";
+            int drop = 0;
+            java.util.regex.Matcher bullet = RtfMarkdown.BULLET.matcher(plain);
+            java.util.regex.Matcher numbered = RtfMarkdown.NUMBERED.matcher(plain);
+            if (bullet.find()) {
+                marker = "- ";
+                drop = bullet.end();
+            } else if (numbered.find()) {
+                marker = numbered.group(1) + " ";
+                drop = numbered.end();
+            } else if (numbering(p)) {
+                marker = "- ";
+            }
+
+            String text = RtfMarkdown.inline(runs, drop).trim();
+            if (text.isEmpty()) return "";
+            if (marker.isEmpty() && QUOTE_STYLE.matcher(style).find()) return "> " + text;
+            // A paragraph that happens to start with Markdown's own markup is text,
+            // not markup: "#" would silently become a heading, ">" a quote.
+            if (marker.isEmpty() && (text.startsWith("#") || text.startsWith(">"))) {
+                text = "\\" + text;
+            }
+            return marker + text;
+        }
+
+        // One w:tbl as a Markdown pipe table, with the first row as the header -
+        // Markdown has no other kind - and every row padded to the widest one, since a
+        // ragged pipe table is not a table to a reader.
+        private static String table(org.w3c.dom.Element tbl) {
+            List<List<String>> rows = new ArrayList<>();
+            int columns = 0;
+            for (org.w3c.dom.Element tr : children(tbl, "tr")) {
+                List<String> row = new ArrayList<>();
+                for (org.w3c.dom.Element tc : children(tr, "tc")) row.add(cell(tc));
+                if (row.isEmpty()) continue;
+                columns = Math.max(columns, row.size());
+                rows.add(row);
+            }
+            if (rows.isEmpty() || columns == 0) return "";
+
+            StringBuilder md = new StringBuilder();
+            for (int r = 0; r < rows.size(); r++) {
+                if (r > 0) md.append('\n');
+                md.append(row(rows.get(r), columns));
+                if (r == 0) {
+                    md.append('\n');
+                    List<String> dashes = new ArrayList<>();
+                    for (int c = 0; c < columns; c++) dashes.add("---");
+                    md.append(row(dashes, columns));
+                }
+            }
+            return md.toString();
+        }
+
+        private static String row(List<String> cells, int columns) {
+            StringBuilder line = new StringBuilder("|");
+            for (int c = 0; c < columns; c++) {
+                line.append(' ').append(c < cells.size() ? cells.get(c) : "").append(" |");
+            }
+            return line.toString();
+        }
+
+        // One w:tc: its paragraphs, joined with a space. A cell holding several
+        // paragraphs is not something a Markdown table row can reproduce, and keeping
+        // the words on one line loses less than dropping all but the first.
+        private static String cell(org.w3c.dom.Element tc) {
+            StringBuilder text = new StringBuilder();
+            for (org.w3c.dom.Element p : children(tc, "p")) {
+                String part = RtfMarkdown.inline(runs(p), 0).trim();
+                if (part.isEmpty()) continue;
+                if (text.length() > 0) text.append(' ');
+                text.append(part);
+            }
+            // A pipe inside a cell would end it; a newline would end the whole row.
+            return text.toString().replace("|", "\\|").replace("\n", " ");
+        }
+
+        // The paragraph's runs, reusing the RTF side's run model so that the emphasis
+        // and escaping are decided in exactly one place for both formats.
+        //
+        // Neighbours with the same style are merged, because Word splits runs freely -
+        // a spell-check boundary is enough - and "**a****b**" is not the bold "ab" to
+        // any Markdown reader. getElementsByTagNameNS is in document order and finds
+        // runs nested in a w:hyperlink too, which is where a link's text lives.
+        private static List<RtfMarkdown.Run> runs(org.w3c.dom.Element p) {
+            List<RtfMarkdown.Run> runs = new ArrayList<>();
+            org.w3c.dom.NodeList found = p.getElementsByTagNameNS(W, "r");
+            for (int i = 0; i < found.getLength(); i++) {
+                org.w3c.dom.Element r = (org.w3c.dom.Element) found.item(i);
+                String text = text(r);
+                if (text.isEmpty()) continue;
+                RtfMarkdown.Run run =
+                        new RtfMarkdown.Run(text, on(r, "b"), on(r, "i"), 0);
+                int last = runs.size() - 1;
+                if (last >= 0 && runs.get(last).sameStyleAs(run)) {
+                    runs.set(last, new RtfMarkdown.Run(
+                            runs.get(last).text + text, run.bold, run.italic, 0));
+                } else {
+                    runs.add(run);
+                }
+            }
+            return runs;
+        }
+
+        // One run's text. w:t is the text itself; a tab and a line break become a
+        // space, as they do on the RTF side, and w:delText - text someone deleted with
+        // track-changes on - is deliberately not among them.
+        private static String text(org.w3c.dom.Element r) {
+            StringBuilder out = new StringBuilder();
+            for (org.w3c.dom.Element child : children(r)) {
+                String name = child.getLocalName();
+                if ("t".equals(name)) out.append(child.getTextContent());
+                else if ("tab".equals(name) || "br".equals(name) || "cr".equals(name)) {
+                    out.append(' ');
+                } else if ("noBreakHyphen".equals(name)) out.append('-');
+            }
+            return out.toString();
+        }
+
+        /** A w:rPr toggle: present, and not switched off with w:val="0"/"false". */
+        private static boolean on(org.w3c.dom.Element run, String name) {
+            org.w3c.dom.Element rPr = child(run, "rPr");
+            org.w3c.dom.Element toggle = rPr == null ? null : child(rPr, name);
+            if (toggle == null) return false;
+            String value = toggle.getAttributeNS(W, "val");
+            return !("0".equals(value) || "false".equals(value) || "off".equals(value));
+        }
+
+        /** The paragraph's style id, or "" when it has none (i.e. body text). */
+        private static String style(org.w3c.dom.Element p) {
+            org.w3c.dom.Element pPr = child(p, "pPr");
+            org.w3c.dom.Element style = pPr == null ? null : child(pPr, "pStyle");
+            return style == null ? "" : style.getAttributeNS(W, "val");
+        }
+
+        /** Whether the paragraph is part of a list (w:numPr), bulleted or numbered. */
+        private static boolean numbering(org.w3c.dom.Element p) {
+            org.w3c.dom.Element pPr = child(p, "pPr");
+            return pPr != null && child(pPr, "numPr") != null;
+        }
+
+        // Direct element children only, all of them or by name. Direct, because
+        // getElementsByTagNameNS descends: it would find a nested table's rows among
+        // its parent's, and a cell's paragraphs among the table's.
+        private static List<org.w3c.dom.Element> children(org.w3c.dom.Element parent) {
+            return children(parent, null);
+        }
+
+        private static List<org.w3c.dom.Element> children(org.w3c.dom.Element parent,
+                                                          String name) {
+            List<org.w3c.dom.Element> found = new ArrayList<>();
+            org.w3c.dom.NodeList nodes = parent.getChildNodes();
+            for (int i = 0; i < nodes.getLength(); i++) {
+                org.w3c.dom.Node node = nodes.item(i);
+                if (node.getNodeType() != org.w3c.dom.Node.ELEMENT_NODE) continue;
+                org.w3c.dom.Element element = (org.w3c.dom.Element) node;
+                if (name == null || name.equals(element.getLocalName())) found.add(element);
+            }
+            return found;
+        }
+
+        private static org.w3c.dom.Element child(org.w3c.dom.Element parent, String name) {
+            List<org.w3c.dom.Element> found = children(parent, name);
+            return found.isEmpty() ? null : found.get(0);
+        }
+
+        /** Trailing whitespace off, leading whitespace kept: code is indented. */
+        private static String stripEnd(String text) {
+            int end = text.length();
+            while (end > 0 && Character.isWhitespace(text.charAt(end - 1))) end--;
+            return text.substring(0, end);
+        }
+    }
+
+    // ---- Markdown as RTF and DOCX (export) ---------------------------------
+    // The other direction, and the only one that writes a document: takes the text
+    // selected in the log - a model's answer, which is Markdown - and writes it out as
+    // a word processor file, with the markup turned into real formatting.
+    //
+    // DOCX is the one to export for anything that will be typeset, because it carries
+    // named paragraph styles a layout application can map onto its own (see the
+    // README's PDF section). RTF is the fallback that nearly everything opens.
+    //
+    // Both writers are built here out of strings. For DOCX there is no alternative in
+    // a bare JDK, and none needed: the format is a ZIP of XML parts, so java.util.zip
+    // and a StringBuilder are exactly enough. For RTF there nearly is one - Swing's
+    // RTFEditorKit - and it is deliberately not used: its *writer* has no notion of
+    // tables, which is half of what these documents need, and going through it would
+    // mean building a StyledDocument only to have it flattened again. Its *reader* is
+    // a different matter and is used, on the import side, in RtfMarkdown.
+    //
+    // Nothing shells out and nothing is installed, so both exports also work in the
+    // browser build - where "export" is how a phone gets a document out of JRock at
+    // all.
+
+    // Exports the log's selection, read as Markdown, as an RTF or DOCX file.
+    //
+    // Offered only while text is selected, and the selection is what it exports: the
+    // whole log is mostly JRock's own status lines, and a document made of those is
+    // not a document anyone wants. The conversion itself cannot fail (see
+    // MarkdownExport), so what the log reports afterwards is what was written.
+    private static void exportSelectedMarkdown(JFrame frame, LogView log, boolean asDocx) {
+        String selection = log.selectedText();
+        if (selection == null) return;   // the menu item is disabled without one
+        String ext = asDocx ? "docx" : "rtf";
+        String kind = asDocx ? "DOCX" : "RTF";
+
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(logChooserDir.start());
+        chooser.setDialogTitle("Export selected Markdown as " + kind);
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                kind + " document (*." + ext + ")", ext));
+        chooser.setSelectedFile(logChooserDir.startFile("jrock-selection." + ext));
+        if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        logChooserDir.remember(chooser);
+
+        // The extension belongs to the format, not to the typist: "notes" or
+        // "notes.txt" holding a DOCX is a file nothing will open by double-click.
+        Path target = withExtension(chooser.getSelectedFile().toPath(), ext);
+        MarkdownExport document = MarkdownExport.of(selection);
+        try {
+            byte[] bytes = asDocx ? document.docx() : document.rtf();
+            Files.write(target, bytes);
+            log.gray("Exported the selection as " + kind + ": " + target + " - "
+                    + fmtNum(document.blocks()) + " block(s), "
+                    + fmtNum(document.tables()) + " table(s), "
+                    + fmtNum(bytes.length) + " bytes.");
+            if (document.simplified()) {
+                log.gray("Its Markdown could not be read as Markdown, so the lines went "
+                        + "in as plain paragraphs - the text is all there, the "
+                        + "formatting is not.");
+            }
+        } catch (IOException | RuntimeException ex) {
+            log.gray("Could not export " + kind + " to " + target + ": " + ex);
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Could not export to " + target + ":\n" + ex.getMessage(),
+                    "Export failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    /** The path with the format's extension, unless it already ends in it. */
+    private static Path withExtension(Path file, String ext) {
+        String name = file.getFileName().toString();
+        if (name.toLowerCase(java.util.Locale.ROOT).endsWith("." + ext)) return file;
+        return file.resolveSibling(name + "." + ext);
+    }
+
+    // Markdown -> RTF and DOCX.
+    //
+    // Parsed once into a small block model, then written out twice, because the two
+    // formats differ only in spelling: heading, paragraph, list item, quote, code,
+    // rule and table, with bold, italic, `code` and links inside them. Links keep both
+    // the text and the URL - a printed page cannot be clicked.
+    //
+    // Forgiving by design. Every rule reads "if the line looks like this...", and the
+    // answer when none of them match is a paragraph of body text, so input that is
+    // half-written Markdown, or not Markdown at all, still exports - with less
+    // formatting, never with an error. of() additionally catches anything thrown by
+    // this class itself and falls back to one paragraph per line, so an export always
+    // produces a document and the log can say which of the two happened.
+    //
+    // No widgets, no files: a String in and bytes out, which is what makes it testable
+    // without a GUI (see JRockMarkdownExportTest).
+    private static final class MarkdownExport {
+
+        // Block kinds. `level` is the heading level for HEADING, and the nesting depth
+        // for ITEM and QUOTE.
+        private static final int BODY = 0, HEADING = 1, ITEM = 2, QUOTE = 3, CODE = 4,
+                RULE = 5, TABLE = 6;
+
+        // Font sizes for h1..h6 in half-points, which is what both formats count in
+        // (RTF's \fs and DOCX's w:sz). 22 half-points is the 11pt body.
+        private static final int[] HEADING_SIZE = { 36, 32, 28, 24, 22, 22 };
+        private static final int BODY_SIZE = 22;
+        private static final int CODE_SIZE = 20;
+
+        /** One indent step, in twips: a quarter inch, the usual list indent. */
+        private static final int INDENT = 360;
+
+        /** Deepest indent honoured, so a runaway "          - x" stays on the page. */
+        private static final int MAX_DEPTH = 5;
+
+        // The printable width of the A4 page set up below (11906 - 2 * 1134 twips),
+        // which is what a table's columns are shared out of.
+        private static final int TABLE_WIDTH = 9638;
+
+        private static final java.util.regex.Pattern HEADING_LINE =
+                java.util.regex.Pattern.compile("(#{1,6})\\s+(.*)");
+        private static final java.util.regex.Pattern RULE_LINE =
+                java.util.regex.Pattern.compile("-{3,}|\\*{3,}|_{3,}");
+        private static final java.util.regex.Pattern ITEM_LINE =
+                java.util.regex.Pattern.compile("( *)([-*+]|\\d{1,3}[.)])\\s+(.*)");
+        private static final java.util.regex.Pattern QUOTE_LINE =
+                java.util.regex.Pattern.compile("> ?(.*)");
+        private static final java.util.regex.Pattern TABLE_DASHES =
+                java.util.regex.Pattern.compile(":?-+:?");
+
+        /** A bullet for an unordered item; an ordered one keeps its own number. */
+        private static final String BULLET = "\u2022";
+
+        private final List<Block> blocks = new ArrayList<>();
+        private List<Run> pending;         // body text being gathered across lines
+        private boolean simplified;
+
+        private MarkdownExport() { }
+
+        /** Parses the Markdown. Never throws: worst case, every line is a paragraph. */
+        static MarkdownExport of(String markdown) {
+            String text = markdown == null ? "" : markdown;
+            MarkdownExport document = new MarkdownExport();
+            try {
+                document.parse(text);
+            } catch (RuntimeException ex) {
+                // A bug here is not a reason to lose someone's text. Keep the text,
+                // drop the structure, and let the caller say so in the log.
+                document.blocks.clear();
+                document.pending = null;
+                document.simplified = true;
+                for (String line : text.split("\n", -1)) {
+                    if (line.trim().isEmpty()) continue;
+                    document.block(BODY, 0).runs.add(plain(line.trim()));
+                }
+            }
+            return document;
+        }
+
+        /** How many blocks came out of it, and how many of those are tables. */
+        int blocks() { return blocks.size(); }
+
+        int tables() {
+            int tables = 0;
+            for (Block b : blocks) if (b.kind == TABLE) tables++;
+            return tables;
+        }
+
+        /** Whether the Markdown had to be given up on and written as plain lines. */
+        boolean simplified() { return simplified; }
+
+        // ---- the model ----
+
+        /** One inline stretch of text and the three things this converter tracks. */
+        private static final class Run {
+            final String text;
+            final boolean bold, italic, mono;
+
+            Run(String text, boolean bold, boolean italic, boolean mono) {
+                this.text = text;
+                this.bold = bold;
+                this.italic = italic;
+                this.mono = mono;
+            }
+        }
+
+        private static Run plain(String text) { return new Run(text, false, false, false); }
+
+        private static final class Block {
+            int kind = BODY;
+            int level;
+            String marker = "";              // ITEM: its bullet or number
+            final List<Run> runs = new ArrayList<>();
+            Table table;                     // TABLE only
+        }
+
+        // A table as rows of cells of runs. Nested lists rather than a cell class: the
+        // shape is the whole content, and both writers walk it the same way.
+        private static final class Table {
+            final List<List<List<Run>>> rows = new ArrayList<>();
+            int columns;
+            int[] align = new int[0];        // -1 left, 0 centre, 1 right, per column
+        }
+
+        // ---- parsing ----
+
+        private void parse(String markdown) {
+            String[] lines =
+                    markdown.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+            boolean fenced = false;
+            int i = 0;
+            while (i < lines.length) {
+                String line = lines[i];
+                String text = line.trim();
+                java.util.regex.Matcher m;
+                if (text.startsWith("```") || text.startsWith("~~~")) {
+                    endParagraph();                 // the fence itself is not content
+                    fenced = !fenced;
+                    i++;
+                } else if (fenced) {
+                    // Verbatim, markup and indentation included: that is what a code
+                    // block is for.
+                    block(CODE, 0).runs.add(new Run(line, false, false, true));
+                    i++;
+                } else if (text.isEmpty()) {
+                    endParagraph();
+                    i++;
+                } else if ((m = HEADING_LINE.matcher(text)).matches()) {
+                    block(HEADING, m.group(1).length()).runs.addAll(inline(m.group(2).trim()));
+                    i++;
+                } else if (RULE_LINE.matcher(text).matches()) {
+                    block(RULE, 0);
+                    i++;
+                } else if (text.indexOf('|') >= 0 && i + 1 < lines.length
+                        && isTableDashes(lines[i + 1])) {
+                    i = table(lines, i);
+                } else if ((m = ITEM_LINE.matcher(line)).matches()) {
+                    Block item = block(ITEM, 1 + Math.min(m.group(1).length() / 2, MAX_DEPTH - 1));
+                    String marker = m.group(2);
+                    item.marker = Character.isDigit(marker.charAt(0)) ? marker : BULLET;
+                    item.runs.addAll(inline(m.group(3).trim()));
+                    i++;
+                } else if ((m = QUOTE_LINE.matcher(text)).matches()) {
+                    block(QUOTE, 1).runs.addAll(inline(m.group(1).trim()));
+                    i++;
+                } else {
+                    // Anything else is body text, and consecutive lines of it are one
+                    // paragraph - which is what Markdown says, and what keeps a wrapped
+                    // answer from coming out as a column of short lines.
+                    if (pending == null) pending = new ArrayList<>();
+                    else pending.add(plain(" "));
+                    pending.addAll(inline(text));
+                    i++;
+                }
+            }
+            endParagraph();
+        }
+
+        /** Starts a block, closing any paragraph being gathered before it. */
+        private Block block(int kind, int level) {
+            endParagraph();
+            Block block = new Block();
+            block.kind = kind;
+            block.level = level;
+            blocks.add(block);
+            return block;
+        }
+
+        private void endParagraph() {
+            if (pending == null) return;
+            Block block = new Block();
+            block.runs.addAll(pending);
+            blocks.add(block);
+            pending = null;
+        }
+
+        // "|---|:--:|" and the like: the row of dashes under a table's header, which is
+        // what marks the line above it as a table rather than a sentence with pipes.
+        private static boolean isTableDashes(String line) {
+            if (line.indexOf('-') < 0 || line.indexOf('|') < 0) return false;
+            List<String> cells = cells(line);
+            if (cells.isEmpty()) return false;
+            for (String cell : cells) {
+                if (!TABLE_DASHES.matcher(cell.trim()).matches()) return false;
+            }
+            return true;
+        }
+
+        // Reads a table starting at the header row, and returns the line after it.
+        //
+        // The dashes decide the column count and the alignments; a row with fewer cells
+        // is padded and a longer one is cut, so the table stays rectangular whatever
+        // the source did. It ends at the first line that is blank or has no pipe.
+        private int table(String[] lines, int start) {
+            Table table = new Table();
+            List<String> dashes = cells(lines[start + 1]);
+            table.columns = Math.max(1, dashes.size());
+            table.align = new int[table.columns];
+            for (int c = 0; c < table.columns; c++) table.align[c] = align(dashes.get(c));
+            table.rows.add(row(lines[start], table.columns));
+
+            int i = start + 2;
+            while (i < lines.length) {
+                String line = lines[i];
+                if (line.trim().isEmpty() || line.indexOf('|') < 0) break;
+                table.rows.add(row(line, table.columns));
+                i++;
+            }
+            block(TABLE, 0).table = table;
+            return i;
+        }
+
+        /** ":-:" centre, "--:" right, anything else left. */
+        private static int align(String dashes) {
+            String cell = dashes.trim();
+            boolean left = cell.startsWith(":");
+            boolean right = cell.endsWith(":");
+            if (left && right) return 0;
+            return right ? 1 : -1;
+        }
+
+        private static List<List<Run>> row(String line, int columns) {
+            List<String> cells = cells(line);
+            List<List<Run>> row = new ArrayList<>();
+            for (int c = 0; c < columns; c++) {
+                row.add(c < cells.size() ? inline(cells.get(c).trim())
+                        : new ArrayList<>());
+            }
+            return row;
+        }
+
+        // A row split on its unescaped pipes. The outer pipes of "| a | b |" are the
+        // table's borders, not two empty cells; an inner empty cell is kept, because
+        // that one is a cell.
+        private static List<String> cells(String line) {
+            List<String> cells = new ArrayList<>();
+            StringBuilder cell = new StringBuilder();
+            for (int i = 0; i < line.length(); i++) {
+                char c = line.charAt(i);
+                if (c == '\\' && i + 1 < line.length() && line.charAt(i + 1) == '|') {
+                    cell.append('|');
+                    i++;
+                } else if (c == '|') {
+                    cells.add(cell.toString());
+                    cell.setLength(0);
+                } else {
+                    cell.append(c);
+                }
+            }
+            cells.add(cell.toString());
+            if (!cells.isEmpty() && cells.get(0).trim().isEmpty()) cells.remove(0);
+            int last = cells.size() - 1;
+            if (last >= 0 && cells.get(last).trim().isEmpty()) cells.remove(last);
+            return cells;
+        }
+
+        // Markdown's inline markup, as much of it as a document needs: **bold**,
+        // *italic*, `code`, [text](url) and a backslash escape.
+        //
+        // An asterisk only opens next to a non-space and only closes after one, which
+        // is the rule that keeps "2 * 3 * 4" out of italics; an underscore also needs a
+        // non-word character on its outer side, which is what saves snake_case. Inside
+        // `code` nothing else is markup at all.
+        private static List<Run> inline(String text) {
+            List<Run> runs = new ArrayList<>();
+            StringBuilder current = new StringBuilder();
+            boolean bold = false, italic = false, mono = false;
+            int i = 0;
+            while (i < text.length()) {
+                char c = text.charAt(i);
+                char next = i + 1 < text.length() ? text.charAt(i + 1) : '\0';
+                int afterLink;
+                if (c == '\\' && next != '\0' && !Character.isLetterOrDigit(next)
+                        && !Character.isWhitespace(next)) {
+                    current.append(next);
+                    i += 2;
+                } else if (c == '`') {
+                    flush(runs, current, bold, italic, mono);
+                    mono = !mono;
+                    i++;
+                } else if (!mono && (c == '*' || c == '_') && next == c
+                        && delimits(text, i, 2, !bold)) {
+                    flush(runs, current, bold, italic, mono);
+                    bold = !bold;
+                    i += 2;
+                } else if (!mono && (c == '*' || c == '_') && delimits(text, i, 1, !italic)) {
+                    flush(runs, current, bold, italic, mono);
+                    italic = !italic;
+                    i++;
+                } else if (!mono && (c == '[' || (c == '!' && next == '['))
+                        // An image is written as its alt text and its URL, same as a
+                        // link: there is no picture to place, only what it was called.
+                        && (afterLink = link(text, c == '!' ? i + 1 : i, current)) > 0) {
+                    i = afterLink;
+                } else {
+                    current.append(c);
+                    i++;
+                }
+            }
+            flush(runs, current, bold, italic, mono);
+            return runs;
+        }
+
+        // Appends the "[label](url)" at `at` as text the reader of a document can use:
+        // the label, and the URL after it unless the two say the same thing - a page
+        // cannot be clicked, so the address has to be readable. Returns the index just
+        // past the link, or -1 when what is there is a bracket in prose rather than a
+        // link, in which case nothing is appended.
+        private static int link(String text, int at, StringBuilder out) {
+            int close = text.indexOf(']', at);
+            if (close < 0 || close + 1 >= text.length() || text.charAt(close + 1) != '(') {
+                return -1;
+            }
+            int end = text.indexOf(')', close + 2);
+            if (end < 0) return -1;
+            String label = text.substring(at + 1, close);
+            String url = text.substring(close + 2, end).trim();
+            out.append(label);
+            if (!url.isEmpty() && !url.equals(label)) out.append(" (").append(url).append(')');
+            return end + 1;
+        }
+
+        // Whether the run of `length` delimiter characters at `at` can do what is
+        // wanted of it: open emphasis (text must follow) or close it (text must
+        // precede).
+        private static boolean delimits(String text, int at, int length, boolean opening) {
+            char c = text.charAt(at);
+            char before = at > 0 ? text.charAt(at - 1) : ' ';
+            char after = at + length < text.length() ? text.charAt(at + length) : ' ';
+            boolean ok = opening ? !Character.isWhitespace(after)
+                    : !Character.isWhitespace(before);
+            if (c == '_') {
+                ok = ok && (opening ? !Character.isLetterOrDigit(before)
+                        : !Character.isLetterOrDigit(after));
+            }
+            // Opening also requires something later that can close it. Without that,
+            // one lone asterisk in a sentence italicises everything after it - the kind
+            // of formatting a reader notices and the writer never wrote.
+            return ok && (!opening || closer(text, at + length, length, c));
+        }
+
+        // Whether a run of `length` copies of `c` appears later in the line that could
+        // close emphasis. A scan per delimiter, which a line's worth of text can afford.
+        private static boolean closer(String text, int from, int length, char c) {
+            for (int i = from; i + length <= text.length(); i++) {
+                boolean run = true;
+                for (int j = 0; j < length; j++) {
+                    if (text.charAt(i + j) != c) run = false;
+                }
+                if (run && delimits(text, i, length, false)) return true;
+            }
+            return false;
+        }
+
+        private static void flush(List<Run> runs, StringBuilder current,
+                                 boolean bold, boolean italic, boolean mono) {
+            if (current.length() == 0) return;
+            runs.add(new Run(current.toString(), bold, italic, mono));
+            current.setLength(0);
+        }
+
+        // ---- RTF ----
+
+        /** The document as RTF. Pure ASCII: everything else is escaped as \\uN?. */
+        byte[] rtf() {
+            StringBuilder rtf = new StringBuilder();
+            rtf.append("{\\rtf1\\ansi\\ansicpg1252\\uc1\\deff0\\deflang1033")
+               .append("{\\fonttbl{\\f0\\fswiss\\fcharset0 Calibri;}")
+               .append("{\\f1\\fmodern\\fcharset0 Consolas;}}\n");
+            for (Block block : blocks) rtf(rtf, block);
+            rtf.append("}\n");
+            return rtf.toString().getBytes(StandardCharsets.US_ASCII);
+        }
+
+        // Every paragraph starts \pard\plain, which resets both the paragraph and the
+        // character formatting - so no block can leak its bold or its indent into the
+        // next one, whatever order they come in.
+        private void rtf(StringBuilder rtf, Block block) {
+            switch (block.kind) {
+                case RULE:
+                    rtf.append("\\pard\\plain\\brdrb\\brdrs\\brdrw10\\brsp20\\sa120\\par\n");
+                    return;
+                case TABLE:
+                    rtfTable(rtf, block.table);
+                    return;
+                case HEADING:
+                    rtf.append("\\pard\\plain\\keepn\\sb240\\sa120\\f0\\b\\fs")
+                       .append(HEADING_SIZE[Math.min(block.level, HEADING_SIZE.length) - 1])
+                       .append(' ');
+                    rtfRuns(rtf, block.runs, false, false);
+                    break;
+                case CODE:
+                    // The paragraph is already in the monospace font, so its text goes
+                    // in as it stands - no group and no switches around it.
+                    rtf.append("\\pard\\plain\\sa0\\li").append(INDENT)
+                       .append("\\f1\\fs").append(CODE_SIZE).append(' ');
+                    for (Run run : block.runs) rtf.append(rtfText(run.text));
+                    break;
+                case ITEM:
+                    // A hanging indent, so a wrapped item lines up under its own text
+                    // rather than under its bullet.
+                    rtf.append("\\pard\\plain\\sa60\\li").append(INDENT * block.level)
+                       .append("\\fi-").append(INDENT).append("\\f0\\fs").append(BODY_SIZE)
+                       .append(' ').append(rtfText(block.marker)).append("\\tab ");
+                    rtfRuns(rtf, block.runs, false, false);
+                    break;
+                case QUOTE:
+                    // Italic on the paragraph, so every run inherits it and a bold run
+                    // inside the quote comes out bold-italic instead of losing one.
+                    rtf.append("\\pard\\plain\\sa120\\li").append(INDENT * block.level)
+                       .append("\\f0\\i\\fs").append(BODY_SIZE).append(' ');
+                    rtfRuns(rtf, block.runs, false, false);
+                    break;
+                default:
+                    rtf.append("\\pard\\plain\\sa120\\sl276\\slmult1\\f0\\fs")
+                       .append(BODY_SIZE).append(' ');
+                    rtfRuns(rtf, block.runs, false, false);
+            }
+            rtf.append("\\par\n");
+        }
+
+        private void rtfTable(StringBuilder rtf, Table table) {
+            int columns = Math.max(1, table.columns);
+            for (int r = 0; r < table.rows.size(); r++) {
+                boolean header = r == 0;
+                rtf.append("\\trowd\\trgaph108\\trleft0");
+                if (header) rtf.append("\\trhdr");   // repeats on every page
+                for (int c = 1; c <= columns; c++) {
+                    rtf.append("\\clbrdrt\\brdrs\\brdrw10\\clbrdrl\\brdrs\\brdrw10")
+                       .append("\\clbrdrb\\brdrs\\brdrw10\\clbrdrr\\brdrs\\brdrw10")
+                       .append("\\cellx").append(TABLE_WIDTH * c / columns);
+                }
+                rtf.append('\n');
+                List<List<Run>> row = table.rows.get(r);
+                for (int c = 0; c < columns; c++) {
+                    rtf.append("\\pard\\plain\\intbl\\f0\\fs").append(BODY_SIZE)
+                       .append(rtfAlign(table.align[c])).append(' ');
+                    rtfRuns(rtf, c < row.size() ? row.get(c) : new ArrayList<>(),
+                            header, false);
+                    rtf.append("\\cell ");
+                }
+                rtf.append("\\row\n");
+            }
+            rtf.append("\\pard\\plain\\sa120\\f0\\fs").append(BODY_SIZE).append('\n');
+        }
+
+        private static String rtfAlign(int align) {
+            return align == 0 ? "\\qc" : (align > 0 ? "\\qr" : "\\ql");
+        }
+
+        private static void rtfRuns(StringBuilder rtf, List<Run> runs,
+                                    boolean allBold, boolean allItalic) {
+            for (Run run : runs) {
+                boolean bold = run.bold || allBold;
+                boolean italic = run.italic || allItalic;
+                if (!bold && !italic && !run.mono) {
+                    rtf.append(rtfText(run.text));
+                    continue;
+                }
+                // A group, so the switches turn themselves off again at its end.
+                rtf.append('{');
+                if (bold) rtf.append("\\b ");
+                if (italic) rtf.append("\\i ");
+                if (run.mono) rtf.append("\\f1 ");
+                rtf.append(rtfText(run.text)).append('}');
+            }
+        }
+
+        // Text as RTF: its three special characters escaped, and everything outside
+        // ASCII written as \\uN? - the decimal code point as a SIGNED 16-bit number,
+        // which is what the format says, followed by the "?" a reader too old to
+        // understand that control word shows instead. So the whole file stays ASCII,
+        // and no encoding anywhere can change what it says.
+        private static String rtfText(String text) {
+            StringBuilder out = new StringBuilder(text.length());
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                if (c == '\\') out.append("\\\\");
+                else if (c == '{') out.append("\\{");
+                else if (c == '}') out.append("\\}");
+                else if (c == '\t') out.append("\\tab ");
+                else if (c == '\n') out.append("\\line ");
+                else if (c >= ' ' && c < 127) out.append(c);
+                else if (c >= 127) out.append("\\u").append((int) (short) c).append('?');
+            }
+            return out.toString();
+        }
+
+        // ---- DOCX ----
+
+        private static final String XML_HEAD =
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+        private static final String W_NS =
+                "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        private static final String CONTENT_TYPES = XML_HEAD
+                + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/"
+                + "content-types\">"
+                + "<Default Extension=\"rels\" ContentType=\"application/"
+                + "vnd.openxmlformats-package.relationships+xml\"/>"
+                + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                + "<Override PartName=\"/word/document.xml\" ContentType=\"application/"
+                + "vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
+                + "<Override PartName=\"/word/styles.xml\" ContentType=\"application/"
+                + "vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
+                + "</Types>";
+        private static final String ROOT_RELS = XML_HEAD
+                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/"
+                + "2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://"
+                + "schemas.openxmlformats.org/officeDocument/2006/relationships/"
+                + "officeDocument\" Target=\"word/document.xml\"/></Relationships>";
+        private static final String DOCUMENT_RELS = XML_HEAD
+                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/"
+                + "2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://"
+                + "schemas.openxmlformats.org/officeDocument/2006/relationships/styles\""
+                + " Target=\"styles.xml\"/></Relationships>";
+
+        /**
+         * The document as a .docx: the five parts of the smallest package Word, Pages,
+         * LibreOffice and a layout application will all open.
+         */
+        byte[] docx() throws IOException {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            try (java.util.zip.ZipOutputStream zip =
+                         new java.util.zip.ZipOutputStream(bytes)) {
+                entry(zip, "[Content_Types].xml", CONTENT_TYPES);
+                entry(zip, "_rels/.rels", ROOT_RELS);
+                entry(zip, "word/_rels/document.xml.rels", DOCUMENT_RELS);
+                entry(zip, "word/styles.xml", styles());
+                entry(zip, "word/document.xml", documentXml());
+            }
+            return bytes.toByteArray();
+        }
+
+        private static void entry(java.util.zip.ZipOutputStream zip, String name,
+                                  String xml) throws IOException {
+            zip.putNextEntry(new java.util.zip.ZipEntry(name));
+            zip.write(xml.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+
+        // The named styles, which are the point of exporting DOCX rather than RTF: a
+        // layout application imports a document by mapping style names onto its own, so
+        // the headings are Heading 1..6 under their conventional names and not just
+        // bigger type.
+        private static String styles() {
+            StringBuilder xml = new StringBuilder(XML_HEAD);
+            xml.append("<w:styles xmlns:w=\"").append(W_NS).append("\">")
+               .append("<w:docDefaults><w:rPrDefault><w:rPr>")
+               .append("<w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\"/>")
+               .append("<w:sz w:val=\"").append(BODY_SIZE).append("\"/>")
+               .append("</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>")
+               .append("<w:spacing w:after=\"120\" w:line=\"276\" w:lineRule=\"auto\"/>")
+               .append("</w:pPr></w:pPrDefault></w:docDefaults>")
+               .append("<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\">")
+               .append("<w:name w:val=\"Normal\"/><w:qFormat/></w:style>");
+            for (int level = 1; level <= HEADING_SIZE.length; level++) {
+                xml.append("<w:style w:type=\"paragraph\" w:styleId=\"Heading")
+                   .append(level).append("\"><w:name w:val=\"heading ").append(level)
+                   .append("\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
+                   .append("<w:pPr><w:keepNext/>")
+                   .append("<w:spacing w:before=\"240\" w:after=\"120\"/>")
+                   .append("<w:outlineLvl w:val=\"").append(level - 1).append("\"/></w:pPr>")
+                   .append("<w:rPr><w:b/><w:sz w:val=\"").append(HEADING_SIZE[level - 1])
+                   .append("\"/></w:rPr></w:style>");
+            }
+            xml.append("<w:style w:type=\"paragraph\" w:styleId=\"Code\">")
+               .append("<w:name w:val=\"Code\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
+               .append("<w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/>")
+               .append("<w:ind w:left=\"").append(INDENT).append("\"/></w:pPr>")
+               .append("<w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
+               .append("<w:sz w:val=\"").append(CODE_SIZE).append("\"/></w:rPr></w:style>")
+               .append("<w:style w:type=\"paragraph\" w:styleId=\"Quote\">")
+               .append("<w:name w:val=\"Quote\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
+               .append("<w:pPr><w:ind w:left=\"").append(INDENT).append("\"/></w:pPr>")
+               .append("<w:rPr><w:i/></w:rPr></w:style>")
+               .append("</w:styles>");
+            return xml.toString();
+        }
+
+        private String documentXml() {
+            StringBuilder xml = new StringBuilder(XML_HEAD);
+            xml.append("<w:document xmlns:w=\"").append(W_NS).append("\"><w:body>");
+            for (Block block : blocks) docx(xml, block);
+            // An empty paragraph to end on: a body whose last element is a table is
+            // what Word repairs documents for, and an empty body needs something.
+            xml.append("<w:p/>")
+               .append("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/>")
+               .append("<w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\"")
+               .append(" w:left=\"1134\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/>")
+               .append("</w:sectPr></w:body></w:document>");
+            return xml.toString();
+        }
+
+        // The elements of w:pPr and w:rPr have to come in the schema's order, which is
+        // why each of these writes them in one fixed sequence rather than as needed.
+        private void docx(StringBuilder xml, Block block) {
+            switch (block.kind) {
+                case RULE:
+                    xml.append("<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"8\"")
+                       .append(" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr></w:p>");
+                    return;
+                case TABLE:
+                    docxTable(xml, block.table);
+                    return;
+                case HEADING:
+                    xml.append("<w:p><w:pPr><w:pStyle w:val=\"Heading")
+                       .append(Math.min(block.level, HEADING_SIZE.length))
+                       .append("\"/></w:pPr>");
+                    docxRuns(xml, block.runs, false, false);
+                    break;
+                case CODE:
+                    xml.append("<w:p><w:pPr><w:pStyle w:val=\"Code\"/></w:pPr>");
+                    docxRuns(xml, block.runs, false, false);
+                    break;
+                case ITEM:
+                    // The marker is written as text, not as list markup: real numbering
+                    // means a numbering.xml part with its own definitions, and what
+                    // this converter knows is the character in front of the item.
+                    xml.append("<w:p><w:pPr><w:spacing w:after=\"60\"/><w:ind w:left=\"")
+                       .append(INDENT * block.level).append("\" w:hanging=\"")
+                       .append(INDENT).append("\"/></w:pPr>")
+                       .append("<w:r><w:t xml:space=\"preserve\">").append(xml(block.marker))
+                       .append("</w:t><w:tab/></w:r>");
+                    docxRuns(xml, block.runs, false, false);
+                    break;
+                case QUOTE:
+                    // Italic comes from the Quote style, not from the runs: a reader
+                    // importing this document should see a quotation, not a paragraph
+                    // that happens to be in italics.
+                    xml.append("<w:p><w:pPr><w:pStyle w:val=\"Quote\"/><w:ind w:left=\"")
+                       .append(INDENT * block.level).append("\"/></w:pPr>");
+                    docxRuns(xml, block.runs, false, false);
+                    break;
+                default:
+                    xml.append("<w:p>");
+                    docxRuns(xml, block.runs, false, false);
+            }
+            xml.append("</w:p>");
+        }
+
+        private void docxTable(StringBuilder xml, Table table) {
+            int columns = Math.max(1, table.columns);
+            int width = TABLE_WIDTH / columns;
+            xml.append("<w:tbl><w:tblPr><w:tblW w:w=\"").append(TABLE_WIDTH)
+               .append("\" w:type=\"dxa\"/><w:tblBorders>");
+            for (String side : new String[] { "top", "left", "bottom", "right",
+                                              "insideH", "insideV" }) {
+                xml.append("<w:").append(side).append(" w:val=\"single\" w:sz=\"8\"")
+                   .append(" w:space=\"0\" w:color=\"auto\"/>");
+            }
+            xml.append("</w:tblBorders><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>");
+            for (int c = 0; c < columns; c++) {
+                xml.append("<w:gridCol w:w=\"").append(width).append("\"/>");
+            }
+            xml.append("</w:tblGrid>");
+            for (int r = 0; r < table.rows.size(); r++) {
+                boolean header = r == 0;
+                xml.append("<w:tr>");
+                if (header) xml.append("<w:trPr><w:tblHeader/></w:trPr>");
+                List<List<Run>> row = table.rows.get(r);
+                for (int c = 0; c < columns; c++) {
+                    xml.append("<w:tc><w:tcPr><w:tcW w:w=\"").append(width)
+                       .append("\" w:type=\"dxa\"/></w:tcPr><w:p>");
+                    if (table.align[c] >= 0) {
+                        xml.append("<w:pPr><w:jc w:val=\"")
+                           .append(table.align[c] == 0 ? "center" : "right")
+                           .append("\"/></w:pPr>");
+                    }
+                    docxRuns(xml, c < row.size() ? row.get(c) : new ArrayList<>(),
+                            header, false);
+                    xml.append("</w:p></w:tc>");
+                }
+                xml.append("</w:tr>");
+            }
+            xml.append("</w:tbl>");
+        }
+
+        private static void docxRuns(StringBuilder xml, List<Run> runs,
+                                     boolean allBold, boolean allItalic) {
+            for (Run run : runs) {
+                boolean bold = run.bold || allBold;
+                boolean italic = run.italic || allItalic;
+                xml.append("<w:r>");
+                if (bold || italic || run.mono) {
+                    xml.append("<w:rPr>");
+                    if (run.mono) {
+                        xml.append("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>");
+                    }
+                    if (bold) xml.append("<w:b/>");
+                    if (italic) xml.append("<w:i/>");
+                    xml.append("</w:rPr>");
+                }
+                // xml:space, because a run can legitimately be " " - the space between
+                // two differently formatted words.
+                xml.append("<w:t xml:space=\"preserve\">").append(xml(run.text))
+                   .append("</w:t></w:r>");
+            }
+        }
+
+        // Text as XML content. The control characters XML 1.0 cannot carry are dropped
+        // rather than written: a model's answer is not guaranteed clean, and one stray
+        // byte would make the whole part unreadable and the document unopenable.
+        private static String xml(String text) {
+            StringBuilder out = new StringBuilder(text.length());
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                if (c == '&') out.append("&amp;");
+                else if (c == '<') out.append("&lt;");
+                else if (c == '>') out.append("&gt;");
+                else if (c == '\t' || c == '\n' || c >= ' ') out.append(c);
+            }
+            return out.toString();
         }
     }
 

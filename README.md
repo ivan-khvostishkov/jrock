@@ -28,8 +28,11 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   plain files under a `JRock/` folder you own and can inspect.
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text and image files, plus PDF-to-text/PDF-to-images via
-  Ghostscript and RTF-to-Markdown with no external tool at all) referenced by hash;
+  Ghostscript and RTF/DOCX-to-Markdown with no external tool at all) referenced by hash;
   multi-select supported.
+- **Markdown export** of an answer as **RTF or DOCX**, written in-process — the model replies in
+  Markdown, and a selected reply becomes a document a word processor, or a layout application,
+  opens with its headings and tables intact ([**Markdown export**](#markdown-export-rtf-and-docx)).
 - **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
   workflow, which is Bedrock Prompt management and Flows without the cloud
   ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)).
@@ -177,14 +180,25 @@ desktop:
 - **Page images.** Screenshot the pages in whatever PDF viewer the phone already has and include
   them under **Image files**. This is what *PDF as page images* produces anyway, done by hand — and
   image includes need nothing native, JRock reading their dimensions straight out of the file header.
-- **Via RTF.** Export the PDF as RTF in Acrobat (which has a mobile app too), then include the `.rtf`
-  either under **Text files as is**, markup and all, or as
-  [**RTF as Markdown text**](#rtf-conversion-no-external-tool). Both run in-process on the JDK's own
-  RTF reader, so both work in a browser tab.
+- **Via a word processor's format.** Export the PDF as RTF or as Word in Acrobat (which has a mobile
+  app too), then include the file as [**RTF as Markdown text**](#rtf-and-docx-conversion-no-external-tool) or
+  [**DOCX as Markdown text**](#rtf-and-docx-conversion-no-external-tool) — or, for an `.rtf`, under
+  **Text files as is**, markup and all. All of them run in-process on the JDK's own RTF reader and
+  XML parser, so all of them work in a browser tab.
 
 Which one depends on the document: a scan or anything where the layout carries meaning goes as page
-images, while a text document is better as RTF, where headings, bold and italic survive into the
-Markdown as structure the model reads.
+images, while a text document is better via RTF or DOCX, where headings, bold, italic and — from a
+`.docx` — tables survive into the Markdown as structure the model reads.
+
+**And the other direction: making a PDF.** Select the answer in the log, long-tap (or right-click)
+and pick **Export selected Markdown as DOCX...** — the Markdown becomes a real document, headings
+and tables and all, under [named paragraph styles](#markdown-export-rtf-and-docx). Place that in
+**InDesign**, which imports a Word file by mapping its style names onto your own paragraph styles,
+and the PDF that comes out is typeset rather than printed from a text editor. **Export selected
+Markdown as RTF...** is the lower standard for the same idea: no style names, but anything that
+opens an RTF — Word, Pages, LibreOffice, TextEdit, WordPad — will read it. Neither is mobile-only:
+the two items are in the log's context menu wherever JRock runs, and on the desktop they are the
+short way from an answer to a document somebody else can edit.
 
 ### What native mobile support would take
 
@@ -302,6 +316,7 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   (see Multimodal includes).
 - `JRock/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
   (see Multimodal includes).
+- `JRock/docx-md/` — the same for a `.docx` included as Markdown text.
 
 The main log is a bit-perfect copy of the pane, except that each role header is followed by an
 `@<datetime>` include-style reference to the message's own file under `JRock/messages/`.
@@ -312,16 +327,18 @@ paid-for inputs/outputs are preserved. If the log has changed since it was last 
 
 ## Multimodal includes (Ctrl+I)
 
-Attach **text or image** files to a prompt (and convert **PDFs** or **RTFs** into either):
+Attach **text or image** files to a prompt (and convert **PDFs**, **RTFs** or **DOCX** documents
+into either):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers five kinds:
+   once, and the dropdown offers six kinds:
    - **Image files** (png, jpg, jpeg, gif, webp)
    - **Text files as is** (txt, csv, html, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
    - **PDF as text pages** — converts the PDF to one text file per page
    - **PDF as page images** — converts the PDF to one PNG per page
    - **RTF as Markdown text** — converts the RTF to one Markdown file
+   - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart you must re-include files to reuse them.
 3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor (one per file / per PDF
@@ -371,16 +388,20 @@ Ghostscript command, both pages with their dimensions and byte counts, and the `
 still sitting in the prompt. The model then reads its own transcript and answers from the image
 alone. Below it, the masked raw request and response, and the token stats.*
 
-### RTF conversion (no external tool)
+### RTF and DOCX conversion (no external tool)
 
-Selecting **RTF as Markdown text** converts the `.rtf` to Markdown and includes *that* file as
-an ordinary `@txt` token — so what the model receives is a text part, and the prompt shows one
-token for the document.
+Selecting **RTF as Markdown text** or **DOCX as Markdown text** converts the document to
+Markdown and includes *that* file as an ordinary `@txt` token — so what the model receives is a
+text part, and the prompt shows one token for the document.
 
-Nothing has to be installed, unlike the PDF path: the reader is the JDK's own
-`javax.swing.text.rtf.RTFEditorKit`, the same one a `JTextPane` uses, so this works on a bare
-JVM. Markdown rather than flat text because the formatting is what RTF is for — headings, bold
-and italic survive as markup a model reads as structure instead of being thrown away.
+Nothing has to be installed, unlike the PDF path. The RTF reader is the JDK's own
+`javax.swing.text.rtf.RTFEditorKit`, the same one a `JTextPane` uses; a `.docx` is a ZIP of XML,
+so it is read with `java.util.zip` and the JDK's XML parser. Both work on a bare JVM — and in a
+browser tab, where no subprocess can run at all. Markdown rather than flat text because the
+formatting is what these formats are for: headings, bold, italic and (from a `.docx`) tables
+survive as markup a model reads as structure instead of being thrown away.
+
+**From an RTF.**
 
 - Output is written under **`JRock/rtf-md/`**, named `<rtfname>.md` — `notes.rtf` becomes
   `notes.rtf.md`, so two RTFs with the same stem can't overwrite each other.
@@ -400,6 +421,38 @@ and italic survive as markup a model reads as structure instead of being thrown 
   own and stays plain text rather than being invented into emphasis.
 - A file that isn't really RTF (some other document renamed, say) has no text the reader can
   find; JRock logs that and includes nothing, rather than attaching an empty file.
+
+**From a `.docx`.** A Word document says what each paragraph *is* — a style name, a list
+reference, a table cell — so the conversion reads that structure rather than guessing at it from
+font sizes:
+
+- Output is written under **`JRock/docx-md/`**, named `<docxname>.md` — `quarterly.docx` becomes
+  `quarterly.docx.md`, the same rule as for RTF.
+- Only `word/document.xml` is read, and only these parts of it:
+
+  | In the document | In the Markdown |
+  |---|---|
+  | a `Heading1`…`Heading6` or `heading 1`… style (either spelling), or `Title` | `#` … `######` |
+  | a paragraph with `w:numPr` (list markup) | a `-` list item — Word keeps the bullet in the numbering, not in the text |
+  | a `Quote`-ish style | a `>` quote line |
+  | a `Code`/`Preformatted`/`Listing`/`Source` style | an indented code block |
+  | `w:b`, `w:i` on a run (`w:val="false"` switches it back off) | `**bold**`, `*italic*`, `***both***` |
+  | `w:tbl` | a pipe table, with a `\| --- \|` separator after the first row; a `\|` inside a cell is escaped |
+  | `w:tab`, `w:br`, `w:cr` in a run | a space; a `w:noBreakHyphen` a `-` |
+  | runs Word split mid-word | one word — adjacent runs with the same bold/italic are joined back together |
+  | a `w:hyperlink` | its text, in place; the URL lives in a part this does not read |
+
+  Markdown's own characters in the text are escaped here too, so a document about asterisks
+  still says so.
+- **Not** read: `numbering.xml` (so every list level is a `-`, and numbered lists are not
+  renumbered), headers, footers and footnotes, embedded images, colours, alignment and
+  underline (which has no Markdown of its own, same as on the RTF side). With track changes on,
+  an insertion is read as the text it is and a **deletion is not read at all** — `w:delText` is
+  text someone took out, not text the document says.
+- A file that isn't really a `.docx` — an older `.doc`, a PDF, anything renamed — has no
+  `word/document.xml`, and the log says exactly that: *Could not read DOCX renamed.docx: no
+  word/document.xml inside it - is it really a Word .docx?* Nothing is included and no
+  `JRock/docx-md/` is created.
 
 On send, every referenced include is verified (known hash **and** the file still hashes the
 same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid
@@ -537,6 +590,48 @@ to save the transcript to a PDF, or print to a physical printer. If text is sele
 log pane, only the selection is printed (with its colors), so a single answer can be printed
 without the surrounding transcript.
 
+## Markdown export (RTF and DOCX)
+
+The model answers in Markdown. Select an answer in the log, right-click, and two more items
+write that answer out as a document: **Export selected Markdown as RTF...** and **Export
+selected Markdown as DOCX...**. Both are greyed out without a selection — there is nothing to
+export but a selection — and a save dialog gives the file the right extension whatever you type
+into it. Not mobile-only, and not desktop-only: it is the same code in a browser tab, because
+both converters are built in and neither starts a process.
+
+- **RTF** is written by hand as plain ASCII: every character above it becomes a `\u` control
+  word, so no encoding anywhere can change what the file says. Swing's `RTFEditorKit` reads the
+  import direction but does *not* write this one — its writer has no notion of a table, and a
+  table is half of what a document is for.
+- **DOCX** is a five-part OOXML package (`[Content_Types].xml`, two `_rels`, `word/styles.xml`,
+  `word/document.xml`) zipped with `java.util.zip`. The paragraphs carry **named styles** —
+  Normal, Heading 1–6, Code, Quote — and the page is A4 with 2 cm margins, which is why this is
+  the format to export for typesetting: a layout application imports a document by mapping style
+  *names* onto its own.
+
+What the Markdown becomes, in both:
+
+| In the Markdown | In the document |
+|---|---|
+| `#` … `######` | Heading 1–6, sized 18 pt down to 11 pt |
+| `**bold**`, `*italic*`, `` `code` `` | bold, italic, a monospace run |
+| `-`/`*`/`+` and `1.`/`1)` items, indented | a list paragraph, bullet or its own number, nested up to five levels |
+| `> quoted` | an indented italic paragraph — the *Quote* style in the DOCX, so a bold run inside it stays bold-italic |
+| a fenced block (three backticks or tildes) | a Code paragraph, verbatim |
+| `---`, `***`, `___` | a horizontal rule |
+| `\| a \| table \|` with a `\| --- \|` row | a real table: bordered cells, columns shared across the page width, first row repeated as a header, and `:---:` / `---:` honoured as cell alignment |
+| `[text](url)` | the text, with the URL after it unless the two say the same thing — paper cannot be clicked |
+| `\*` and the rest of Markdown's escapes | the character itself |
+
+An export **does not fail**. The parser's answer to anything it doesn't recognise is "a
+paragraph of text"; if it throws anyway, the document is rebuilt as one paragraph per line and
+the log says so — *the text is all there, the formatting is not*. The log line reports what was
+written: the file, the block and table counts, and the byte count.
+
+A `.docx` written here reads back through **DOCX as Markdown text** as the same Markdown, give
+or take the two honest differences a round trip has: a table's header row was written bold, so
+it comes back as bold markup, and column alignment is layout the import doesn't read.
+
 ## Context menus (right-click / long tap)
 
 Right-clicking (or long-tapping on touch devices) opens a context menu:
@@ -544,9 +639,11 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
 - **Log pane** — Save log copy as..., Print... When text is selected in the log, both act
   on the **selection only**, and the menu says so (*Save selected text as...*, *Print
   selected text...*). A partial export doesn't count as saving the log, so Clear log still
-  warns about unsaved changes.
-- **Prompt area** — Include text, image, PDF or RTF file... (multi-select), Load prompt from
-  file..., Save prompt copy as...
+  warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
+  *Export selected Markdown as DOCX...*, need a selection to mean anything and are greyed out
+  without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
+- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), Load prompt
+  from file..., Save prompt copy as...
 - **Top bar (empty area)** — Move & resize window...; in the **browser**, also Show/hide
   the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
   entry (see below).
@@ -616,7 +713,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (text only) |
-| Ctrl+I | Include text/image files, a PDF or an RTF (multi-select) |
+| Ctrl+I | Include text/image files, a PDF, an RTF or a DOCX (multi-select) |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle Extend conversation |
 | Ctrl+M | Move & resize the window |
@@ -696,6 +793,25 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   includes nothing. A third includes the same RTF under *Text files as is* and checks the
   include is the `.rtf` itself, with nothing converted and no `JRock/rtf-md/` written — the
   filter is the whole difference. No external program: the reader is the JDK's.
+- **`JRockDocxIncludeTest`** is the symmetric twin of that, for `.docx`: it includes a document
+  through the real dialog with the *DOCX as Markdown text* filter and compares
+  `JRock/docx-md/quarterly.docx.md` against the **whole expected Markdown** — headings from the
+  styles (spelled both `Heading1` and `heading 2`), runs Word split mid-word joined back into
+  words, a toggle switched off with `w:val="false"`, list markup that carries no bullet
+  character at all, a hyperlink, a table with a bold header row, an umlaut, asterisks escaped.
+  The document is written by hand (`FormattedDocx`), zip entries and all. A second test renames
+  a text file to `.docx` and checks the log says there is no `word/document.xml` in it and that
+  no `JRock/docx-md/` is created.
+- **`JRockMarkdownExportTest`** takes the other direction, without a window: it exports a
+  Markdown selection and checks each format against something other than itself. The RTF must be
+  all ASCII, must read back through the JDK's **own `RTFEditorKit`** with its bold run, bullet
+  and umlaut intact, and must contain the table that reader cannot see. The DOCX must be exactly
+  five parts, each **well-formed XML**, with its styles *named* (`w:val="heading 1"`) and its
+  header row marked as one. Then a **round trip**: exported as DOCX, read back by the importer,
+  and equal to the Markdown it started as. The last test feeds it markup that is wrong or isn't
+  markup — a lone `*`, `snake_case`, ragged pipes, an unclosed link, an unclosed fence, a NUL —
+  and checks it still exports, still reads, and that the control character was dropped rather
+  than written into the XML.
 - **`JRockWorkingDirTest`** opens another working directory from the Configure dialog and
   checks nothing is lost at either end: the prompt stored in the folder being opened is what
   ends up on screen and still what is in its file, the folder left behind keeps what was on
