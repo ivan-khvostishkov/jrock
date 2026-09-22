@@ -32,6 +32,9 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   multi-select supported, with optional **copies kept under `JRock/`** and every include
   **reloaded from the log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
+- **Include a URL**, not just a file: an address is downloaded into `JRock/urls/` and attached
+  as text or as a picture according to the `Content-Type` it answered with, with a Markdown
+  link to where it came from above the token ([**inserting a URL**](#inserting-a-url)).
 - **Markdown export** of an answer as **RTF or DOCX**, written in-process — the model replies in
   Markdown, and a selected reply becomes a document a word processor, or a layout application,
   opens with its headings, tables and **the pictures it was given** intact
@@ -376,6 +379,57 @@ outright over a line of log text. It is also less work: a 40 MB photo is no long
 full just to say how big it is. If a header can't be read, the include still happens and the
 log says the dimensions were unavailable — the bytes sent to the model are the file itself
 either way, so none of this touches what the model receives.
+
+### Inserting a URL
+
+The same include, for something that isn't on this machine. **Right-click the prompt →
+Insert URL...** asks for an address, downloads it into `JRock/urls/`, and includes the saved
+file exactly as if you had picked it with Ctrl+I — a **web page as text**, an **image as a
+picture**. Two lines go into the prompt, the address above the token:
+
+```
+[](https://example.org/a/article)
+@txt 1f3a9c0b7e42
+```
+
+The link says where the text or the picture came from, in a form the model reads as a
+reference belonging to the content below it; the token is what is actually sent.
+
+What decides which of the two it is — and the extension the file is saved under — is the
+**response's own `Content-Type`**, not the URL. A link ending in `.png` that answers with HTML
+is a web page, and saving it as a PNG would only produce an `@img` token no model can read:
+
+| It answers with | Saved as | Inserted as |
+|---|---|---|
+| `text/html`, `application/xhtml+xml` | `.html` | `@txt` — sent as text, markup and all |
+| `image/png` | `.png` | `@img` — sent as a picture |
+| `image/jpeg` | `.jpg` | `@img` |
+| `image/gif` | `.gif` | `@img` |
+| `image/webp` | `.webp` | `@img` |
+| **anything else** | — | **nothing.** The type is named, in the log and in a dialog, and no file is written |
+
+Details:
+
+- **The file is named after the URL**, by its last path segment, with the extension its media
+  type calls for *added* rather than substituted — `/a/article` → `article.html`,
+  `/pics/cat.png` → `cat.png`, `/page.php` → `page.php.html`, and an address with no path of
+  its own → `<host>.html`. Anything a file system might object to becomes `-`, and a very long
+  name is cut. The same URL fetched twice is **one file** (same bytes, same name, nothing
+  rewritten); a different page that wants a taken name becomes `article-2.html`, exactly as an
+  [include copy](#includes-that-outlive-the-session) does.
+- **A page is saved as UTF-8**, decoded first with the charset the response declares — an
+  included text file is *read back* as UTF-8, so a page served as `windows-1251` would
+  otherwise reach the model as mojibake. An image is saved byte for byte: those bytes are what
+  gets sent.
+- **`https://` is assumed** when the address has no scheme, so a bare `example.org/page` works;
+  anything else keeps the scheme it was given, and one that is not `http` or `https` is
+  refused by name. Redirects are followed (but not an `https` → `http` downgrade), and the
+  address the bytes really came from is logged when it differs.
+- Because the file lands under `JRock/`, it is **already where the copies go** — a URL include
+  survives a restart the same way, with **Reload all includes**.
+- **Not in the browser build.** It needs a network client of its own, and the page's client
+  returns text without response headers — so neither an image's bytes nor its media type would
+  survive. The item says so rather than half-working.
 
 ### Includes that outlive the session
 
@@ -753,10 +807,13 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
-- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Reload all
-  includes* (which rebuilds the hash → path map from the log, so a conversation survives a
-  restart — see [**includes that outlive the session**](#includes-that-outlive-the-session)),
-  Load prompt from file..., Save prompt copy as...
+- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Insert
+  URL...* (which downloads an address into `JRock/urls/` and includes it as text or as a
+  picture, according to what it answered with — see [**inserting a
+  URL**](#inserting-a-url)), *Reload all includes* (which rebuilds the hash → path map from
+  the log, so a conversation survives a restart — see [**includes that outlive the
+  session**](#includes-that-outlive-the-session)), Load prompt from file..., Save prompt copy
+  as...
 - **Top bar (empty area)** — Move & resize window...; in the **browser**, also Show/hide
   the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
   entry (see below).
@@ -919,6 +976,13 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   two filters that offer images, and checks the one line that is the whole difference: *Image with
   a Markdown reference* leaves `![](<hash>)` above the `@img` token and says so in the log, *Image
   files* leaves the token alone.
+- **`JRockInsertUrlTest`** starts a **web server of its own** on loopback — a real one, since
+  what the feature turns on is the response — and drives **Insert URL...** from the prompt's
+  context menu against three of its paths. A page served as `ISO-8859-1` has to land in
+  `JRock/urls/article.html` **re-encoded as UTF-8**, with `[](<url>)` above an `@txt` token; a
+  PNG has to land as `cat.png` **byte for byte**, with an `@img` token and its 120 × 80 read out
+  of the saved file's header; and `application/json` has to be **refused by name**, in the log
+  and in a dialog, leaving no `JRock/urls/` at all and the prompt untouched.
 - **`JRockIncludeCopyTest`** ticks the dialog's own **Save include copies** checkbox and checks
   where the include then points: the copy line comes *before* the include it was made for, the
   copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what

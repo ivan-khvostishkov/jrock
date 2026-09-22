@@ -135,6 +135,10 @@ public class JRock {
     private static final int MODELS_TIMEOUT_SECONDS  = 30;
     private static final int CHAT_TIMEOUT_SECONDS    = 60;
     private static final int CONNECT_TIMEOUT_SECONDS = 30;
+    // Downloading a page or an image the user asked to insert (see insertUrl). Not
+    // an API call at all - some other server's, on a link that may well be slow -
+    // so it gets the same patience as a completion rather than the model list's.
+    private static final int URL_TIMEOUT_SECONDS     = 60;
 
     // Shown after an UnsatisfiedLinkError from the networking stack. That can only
     // really happen in one situation: JRock is running on CheerpJ in the browser
@@ -541,6 +545,7 @@ public class JRock {
     private static Path rtfMdDir()         { return jrockDir().resolve("rtf-md"); }
     private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
+    private static Path urlsDir()          { return jrockDir().resolve("urls"); }
 
     // Resolves the effective API key: the in-memory override from the Configure
     // dialog first, then the BEDROCK_API_KEY env var. Returns null when neither is
@@ -736,7 +741,16 @@ public class JRock {
     // The first HASH_LEN hex digits of a file's SHA-256. Null on read failure.
     private static String hashFile(Path p) {
         try {
-            byte[] bytes = Files.readAllBytes(p);
+            return hashBytes(Files.readAllBytes(p));
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    // The same, for bytes not (yet) on disk: a download that has to be compared with
+    // what is already saved before it is written (see urlSaveTarget).
+    private static String hashBytes(byte[] bytes) {
+        try {
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
             StringBuilder sb = new StringBuilder(HASH_LEN);
             for (byte b : digest) {
@@ -1606,6 +1620,11 @@ public class JRock {
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
         addMenuItem(promptMenu, "Include text, image, PDF, RTF or DOCX file...",
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
+        // The same include for a file that is not on this machine: the address is
+        // fetched into JRock/urls/ and included from there, as text or as a picture
+        // according to what it answered with (see insertUrl).
+        addMenuItem(promptMenu, "Insert URL...",
+                () -> showInsertUrlDialog(frame, input, log, extendMode.isSelected()));
         // Next to it, the repair for a conversation that outlived the session that
         // started it: the includes are read back out of the log rather than attached
         // again one by one (see reloadAllIncludes).
@@ -2855,6 +2874,22 @@ public class JRock {
     private static boolean includeOne(JTextArea input, LogView log, boolean extend,
                                       Path file, String kind, boolean isImage,
                                       boolean markdownRef) {
+        return includeOne(input, log, extend, file, kind, isImage,
+                markdownRef ? hash -> "![](" + hash + ")" : null);
+    }
+
+    // The general form: reference, when given, is asked for the Markdown line to write
+    // above the token, and is handed the include's hash - which is why it is a function
+    // and not a string, the hash being known only once the file has been read.
+    //
+    // Two callers, wanting two different lines for the same reason: an image include
+    // refers to the picture by hash, which the DOCX export turns back into the file it
+    // placed, and a URL insert refers to the address the file came from, which is what
+    // says where a page or a picture was found (see insertUrl). null writes the token
+    // alone.
+    private static boolean includeOne(JTextArea input, LogView log, boolean extend,
+                                      Path file, String kind, boolean isImage,
+                                      java.util.function.Function<String, String> reference) {
         String hash = hashFile(file);
         if (hash == null) {
             log.gray("Include failed: could not read " + file);
@@ -2866,7 +2901,8 @@ public class JRock {
         // The one place this line is written: INCLUDE_LOG_LINE reads it back when the
         // includes are reloaded from the log, so its wording is part of the format.
         log.gray("Included @" + kind + " " + hash + " from " + file);
-        if (markdownRef) log.gray("With a Markdown reference above it: ![](" + hash + ")");
+        String refLine = (reference == null) ? null : reference.apply(hash);
+        if (refLine != null) log.gray("With a Markdown reference above it: " + refLine);
 
         long fileBytes = -1;
         try { fileBytes = Files.size(file); } catch (IOException ignore) { /* best-effort */ }
@@ -2920,7 +2956,7 @@ public class JRock {
 
         // Insert "@kind <hash>\n" at the cursor (no leading newline), preceded by the
         // Markdown reference when one was asked for.
-        String insert = (markdownRef ? "![](" + hash + ")\n" : "") + token + "\n";
+        String insert = (refLine == null ? "" : refLine + "\n") + token + "\n";
         int pos = input.getCaretPosition();
         try {
             input.getDocument().insertString(pos, insert, null);
@@ -2928,6 +2964,313 @@ public class JRock {
             input.append(insert);   // fallback: append at end
         }
         return true;
+    }
+
+    // ---- Insert URL (prompt menu) ------------------------------------------
+    // The same include as Ctrl+I, for something that is not on this machine: a URL is
+    // asked for, downloaded into JRock/urls/, and then included from there like any
+    // other file - a web page as "@txt", a picture as "@img". Two lines go into the
+    // prompt, the address above the token:
+    //
+    //     [](https://example.org/article)
+    //     @txt 1f3a9c0b7e42
+    //
+    // The link is what says where the text or the picture came from, in a form the
+    // model reads as a reference belonging to the content below it (and the Markdown
+    // export keeps as a link). The token is what is actually sent.
+    //
+    // What decides which kind it is - and the extension the file is saved under - is
+    // the response's own Content-Type, not the URL: a link ending in ".png" that
+    // answers with HTML is a web page, and saving it as a PNG would produce an @img
+    // token no model can read. A media type that is neither HTML nor one of the image
+    // types JRock sends is refused, named, and nothing is written or inserted.
+
+    // Accepted media type -> the extension the download is saved under.
+    //
+    // The images are the four types buildParts can send, spelled as the extensions
+    // imageMime() reads back, so the file JRock saves is a file it can send. HTML is
+    // saved as ".html", which the include dialog already offers as text - so from the
+    // request's point of view the model is simply reading a text file, markup and all.
+    // XHTML is in the list because it is a web page by any other name; it, too, is
+    // saved and sent as HTML.
+    private static final java.util.Map<String, String> URL_EXTENSIONS = urlExtensions();
+
+    private static java.util.Map<String, String> urlExtensions() {
+        java.util.Map<String, String> types = new java.util.LinkedHashMap<>();
+        types.put("text/html", "html");
+        types.put("application/xhtml+xml", "html");
+        types.put("image/png", "png");
+        types.put("image/jpeg", "jpg");
+        types.put("image/gif", "gif");
+        types.put("image/webp", "webp");
+        return java.util.Collections.unmodifiableMap(types);
+    }
+
+    // How long a saved name may be before the path itself becomes the problem: a URL
+    // path can be hundreds of characters, and Windows still has MAX_PATH to answer to.
+    private static final int URL_NAME_MAX = 80;
+
+    // Asks for a URL and, if one is given, fetches and includes it.
+    private static void showInsertUrlDialog(JFrame frame, JTextArea input, LogView log,
+                                            boolean extend) {
+        javax.swing.JTextField urlF = new javax.swing.JTextField(48);
+        urlF.setName("url");
+
+        javax.swing.JLabel what = new javax.swing.JLabel(
+                "<html>A web page is included as text (@txt), an image as a picture (@img).<br>"
+                + "Accepted: HTML, PNG, JPEG, GIF and WEBP - whatever the address itself "
+                + "answers with.<br>The file is saved under JRock/urls/ and included from "
+                + "there.</html>");
+
+        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
+        panel.add(what, BorderLayout.NORTH);
+        javax.swing.JPanel row = new javax.swing.JPanel(new BorderLayout(6, 0));
+        row.add(new javax.swing.JLabel("URL:"), BorderLayout.WEST);
+        row.add(urlF, BorderLayout.CENTER);
+        panel.add(row, BorderLayout.SOUTH);
+
+        int result = javax.swing.JOptionPane.showConfirmDialog(
+                frame, panel, "Insert URL",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.PLAIN_MESSAGE);
+        if (result != javax.swing.JOptionPane.OK_OPTION) return;
+
+        final String typed = urlF.getText().trim();
+        if (typed.isEmpty()) return;   // OK on an empty field: nothing was asked for
+
+        // Off the EDT, for the reason the include dialog goes the same way: this waits
+        // for someone else's web server, and on the EDT the window would not repaint -
+        // not even to show the "Fetching URL: ..." line explaining the wait.
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                insertUrl(frame, input, log, extend, typed);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();   // surfaces anything doInBackground threw
+                } catch (Exception ex) {
+                    log.gray("Insert URL failed: " + ex.getMessage());
+                }
+                log.gray("");   // closes the block, as an include does
+                input.requestFocusInWindow();
+            }
+        }.execute();
+    }
+
+    // Downloads one address and includes what came back. Runs on a background thread
+    // (see showInsertUrlDialog); the insertion itself goes through onEdt().
+    private static void insertUrl(JFrame frame, JTextArea input, LogView log,
+                                  boolean extend, String typed) {
+        // No sockets in the browser, and no way to borrow the page's client either:
+        // the HTTP bridge hands back a string with no headers, so there would be
+        // neither the bytes of an image nor the Content-Type this whole feature turns
+        // on. Said plainly rather than attempted and half-failing.
+        if (isCheerpJ()) {
+            urlRefused(frame, log, "Insert URL is not available in the browser",
+                    "Insert URL needs a network client of its own, which the browser build "
+                    + "does not have: the page's client returns text without response "
+                    + "headers, so neither an image's bytes nor its media type would "
+                    + "survive. Download the file and use Include instead.");
+            return;
+        }
+
+        // A bare "example.org/page" is what a paste from an address bar often looks
+        // like, and it has an obvious reading. Anything else keeps the scheme it was
+        // given, so a mistyped one is reported rather than papered over.
+        String address = typed.contains("://") ? typed : "https://" + typed;
+        if (!address.equals(typed)) log.gray("Reading \"" + typed + "\" as " + address);
+
+        URI uri;
+        try {
+            uri = URI.create(address);
+        } catch (IllegalArgumentException ex) {
+            urlRefused(frame, log, "Not a URL", "\"" + address + "\" is not a URL: "
+                    + ex.getMessage());
+            return;
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            urlRefused(frame, log, "Not a web address",
+                    "Only http and https addresses can be inserted; \"" + address
+                    + "\" is " + (scheme.isEmpty() ? "missing a scheme" : scheme + ":") + ".");
+            return;
+        }
+
+        log.gray("Fetching URL: " + address);
+        HttpResponse<byte[]> resp;
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(uri)
+                    .timeout(Duration.ofSeconds(URL_TIMEOUT_SECONDS))
+                    // Named, because a server that is given no User-Agent at all is a
+                    // server that sometimes answers 403 instead of the page.
+                    .header("User-Agent", "JRock/" + VERSION)
+                    .GET()
+                    .build();
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                    // Links move, and a link that has moved is still the link the user
+                    // pasted. NORMAL rather than ALWAYS: it declines an https address
+                    // that redirects to http, which is a downgrade nobody asked for.
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .build();
+            resp = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        } catch (Exception ex) {
+            urlRefused(frame, log, "Could not fetch the URL",
+                    "Could not fetch " + address + ": "
+                    + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            return;
+        }
+
+        // The address the bytes really came from, which is not always the one asked
+        // for. It names the file below; the link stays the address the user gave, that
+        // being the one they can go back to.
+        URI finalUri = resp.uri() == null ? uri : resp.uri();
+        if (!finalUri.equals(uri)) log.gray("Redirected to: " + finalUri);
+
+        if (resp.statusCode() != 200) {
+            urlRefused(frame, log, "The server refused the URL",
+                    "HTTP " + resp.statusCode() + " from " + finalUri
+                    + " - nothing was inserted.");
+            return;
+        }
+
+        String contentType = resp.headers().firstValue("content-type").orElse("");
+        String mime = mediaTypeOf(contentType);
+        String ext = URL_EXTENSIONS.get(mime);
+        if (ext == null) {
+            urlRefused(frame, log, "Unsupported media type",
+                    "The URL answered with " + (mime.isEmpty() ? "no media type" : mime)
+                    + ", which JRock cannot include. Only HTML pages and PNG, JPEG, GIF "
+                    + "or WEBP images can be inserted - nothing was saved.");
+            return;
+        }
+        boolean isImage = mime.startsWith("image/");
+
+        // An image is saved byte for byte: it is the file that gets sent. A page is
+        // decoded with the charset it declares and written back out as UTF-8, because
+        // that is how an included text file is read (see buildParts) - a page served as
+        // windows-1251 would otherwise reach the model as mojibake, which is the same
+        // failure the transport avoids for JSON.
+        byte[] body = resp.body();
+        byte[] bytes = body;
+        if (!isImage) {
+            java.nio.charset.Charset declared = charsetOf(contentType);
+            bytes = new String(body, declared).getBytes(StandardCharsets.UTF_8);
+            log.gray("Decoded as " + declared.name() + ", saved as UTF-8.");
+        }
+
+        Path dir = urlsDir();
+        Path out;
+        try {
+            Files.createDirectories(dir);
+            out = urlSaveTarget(dir, urlFileName(finalUri, ext), bytes);
+            if (Files.exists(out)) {
+                log.gray("Already saved from this URL: " + out);
+            } else {
+                Files.write(out, bytes);
+                log.gray("Saved " + fmtNum(bytes.length) + " bytes of " + mime + " to " + out);
+            }
+        } catch (IOException | RuntimeException ex) {
+            urlRefused(frame, log, "Could not save the download",
+                    "Could not save " + address + " into " + dir + ": " + ex.getMessage());
+            return;
+        }
+
+        String kind = isImage ? "img" : "txt";
+        boolean[] added = new boolean[1];
+        // Touches the prompt's document, so: on the EDT.
+        onEdt(() -> added[0] = includeOne(input, log, extend, out, kind, isImage,
+                hash -> "[](" + address + ")"));
+        log.gray("Inserted " + (added[0] ? 1 : 0) + " new @" + kind + " token(s) for "
+                + address + ".");
+    }
+
+    // Reports a URL insert that cannot go on: the reason in the log, where the rest of
+    // the fetch is recorded, and the same reason in a dialog - this one was asked for by
+    // hand, and the answer to it is that nothing was inserted.
+    private static void urlRefused(JFrame frame, LogView log, String title, String message) {
+        log.gray(message);
+        onEdt(() -> javax.swing.JOptionPane.showMessageDialog(frame, message, title,
+                javax.swing.JOptionPane.WARNING_MESSAGE));
+    }
+
+    // The media type out of a Content-Type header: lower-cased, without its
+    // parameters. "text/html; charset=utf-8" -> "text/html". "" when there is none.
+    private static String mediaTypeOf(String contentType) {
+        if (contentType == null) return "";
+        int semi = contentType.indexOf(';');
+        return (semi < 0 ? contentType : contentType.substring(0, semi)).trim().toLowerCase();
+    }
+
+    // The charset a Content-Type declares, or UTF-8 when it declares none - or names
+    // one this JVM has never heard of, which is not a reason to refuse the page.
+    private static java.nio.charset.Charset charsetOf(String contentType) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?i)charset\\s*=\\s*\"?([^\";\\s]+)")
+                .matcher(contentType == null ? "" : contentType);
+        if (m.find()) {
+            try {
+                return java.nio.charset.Charset.forName(m.group(1));
+            } catch (Exception ignored) {
+                // Unknown or malformed: fall through to UTF-8.
+            }
+        }
+        return StandardCharsets.UTF_8;
+    }
+
+    // The name a download is saved under: the last segment of the URL's path, with the
+    // extension its media type calls for.
+    //
+    //   https://example.org/a/article       -> article.html
+    //   https://example.org/pics/cat.png    -> cat.png
+    //   https://example.org/page.php        -> page.php.html
+    //   https://example.org/                -> example.org.html
+    //
+    // The existing name is kept whole and the extension added to it (as gs-pdf/ and
+    // rtf-md/ do), rather than replaced: ".php" is not what the file is, but it is part
+    // of what the file is called, and dropping it would make one name out of two pages.
+    // Anything a file system might object to becomes "-", and a very long name is cut.
+    private static String urlFileName(URI uri, String ext) {
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        while (path.endsWith("/")) path = path.substring(0, path.length() - 1);
+        String name = path.substring(path.lastIndexOf('/') + 1);
+        if (name.isEmpty()) name = uri.getHost() == null ? "download" : uri.getHost();
+
+        StringBuilder safe = new StringBuilder(name.length());
+        for (int i = 0; i < name.length() && safe.length() < URL_NAME_MAX; i++) {
+            char c = name.charAt(i);
+            safe.append(Character.isLetterOrDigit(c) || c == '.' || c == '-' || c == '_'
+                    ? c : '-');
+        }
+        // A name of nothing but dots is a name the file system reads as a directory.
+        String stem = safe.toString();
+        while (stem.startsWith(".")) stem = stem.substring(1);
+        if (stem.isEmpty() || stem.chars().allMatch(c -> c == '.')) stem = "download";
+
+        return stem.toLowerCase().endsWith("." + ext) ? stem : stem + "." + ext;
+    }
+
+    // Where a download goes in dir: its own name, or the name with "-2", "-3", ...
+    // before the extension when that is taken by DIFFERENT bytes. A name already held
+    // by these exact bytes is returned as it stands - the same page fetched twice is
+    // one file, and the caller then leaves it alone. Same rule as an include copy
+    // (see includeCopyTarget), on bytes that are not on disk yet.
+    private static Path urlSaveTarget(Path dir, String name, byte[] bytes) {
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        String ext  = dot > 0 ? name.substring(dot)   : "";
+        String hash = hashBytes(bytes);
+        Path target = dir.resolve(name);
+        for (int n = 2; Files.exists(target); n++) {
+            if (hash != null && hash.equals(hashFile(target))) return target;
+            target = dir.resolve(stem + "-" + n + ext);
+        }
+        return target;
     }
 
     // ---- Reload all includes (prompt menu) ---------------------------------
