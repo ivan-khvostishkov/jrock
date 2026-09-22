@@ -168,6 +168,19 @@ public class JRock {
     private static final int PDF_DPI_DEFAULT = 150;
     private static int pdfDpi = PDF_DPI_DEFAULT;
 
+    // "Save include copies" in the include dialog: when on, a chosen file is copied
+    // into JRock/includes/ and included from the copy, so the include survives
+    // whatever happens to the original.
+    //
+    // Which matters most where the original is least permanent: in the browser build
+    // an uploaded file lands in CheerpJ's /uploads, and that is gone after a reload -
+    // taking the path INCLUDES remembers with it, so "Reload all includes" would find
+    // a file that no longer exists. A copy under JRock/ is in the folder the user
+    // owns, next to the log that names it. Remembered for the session (like the rest
+    // of the settings), off by default: a copy of every include is not what someone
+    // attaching files from a folder they keep wants.
+    private static boolean saveIncludeCopies = false;
+
     // Working directory = the process current directory. When JRock is launched
     // from the "JRock here!" context menu, Explorer starts it in the clicked
     // folder, so the CWD is already correct with no extra flags. The window
@@ -527,6 +540,7 @@ public class JRock {
     private static Path gsPdfDir()         { return jrockDir().resolve("gs-pdf"); }
     private static Path rtfMdDir()         { return jrockDir().resolve("rtf-md"); }
     private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
+    private static Path includesDir()      { return jrockDir().resolve("includes"); }
 
     // Resolves the effective API key: the in-memory override from the Configure
     // dialog first, then the BEDROCK_API_KEY env var. Returns null when neither is
@@ -710,6 +724,15 @@ public class JRock {
     private static final java.util.regex.Pattern INCLUDE_TOKEN =
             java.util.regex.Pattern.compile("@(img|txt) ([0-9a-f]{" + HASH_LEN + "})(?![0-9a-f])");
 
+    // The include's own log line, read back: "Included @img <hash> from <path>", as
+    // written by includeOne. The log is the only record of where an included file was
+    // - INCLUDES itself is not persisted - so "Reload all includes" recovers the
+    // mapping by reading the transcript it kept (see reloadAllIncludes). The two must
+    // stay in step; the line is written in exactly one place for that reason.
+    private static final java.util.regex.Pattern INCLUDE_LOG_LINE =
+            java.util.regex.Pattern.compile(
+                    "Included @(img|txt) ([0-9a-f]{" + HASH_LEN + "}) from (.+)");
+
     // The first HASH_LEN hex digits of a file's SHA-256. Null on read failure.
     private static String hashFile(Path p) {
         try {
@@ -855,6 +878,17 @@ public class JRock {
             for (Entry e : entries) {
                 if (e.dialog) out.add(new String[] { e.role, e.text });
             }
+            return out;
+        }
+
+        // Every entry in order, as {role, text} pairs with role null for a gray line:
+        // dialogHistory() without the filter. "Reload all includes" needs both kinds
+        // and needs them interleaved, because an include line is what says where a
+        // file was, and the message under it is what says the file was used - and a
+        // second include of the same hash later moves it (see reloadAllIncludes).
+        java.util.List<String[]> timeline() {
+            java.util.List<String[]> out = new ArrayList<>();
+            for (Entry e : entries) out.add(new String[] { e.dialog ? e.role : null, e.text });
             return out;
         }
 
@@ -1548,7 +1582,7 @@ public class JRock {
                 addMenuItem(logMenu, "Export selected Markdown as RTF...",
                         () -> exportSelectedMarkdown(frame, log, false));
         javax.swing.JMenuItem exportDocxItem =
-                addMenuItem(logMenu, "Export selected Markdown as DOCX...",
+                addMenuItem(logMenu, "Export selected Markdown with images as DOCX...",
                         () -> exportSelectedMarkdown(frame, log, true));
         // The log pane is read-only, so Copy is the only clipboard verb it needs.
         logMenu.addSeparator();
@@ -1572,6 +1606,11 @@ public class JRock {
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
         addMenuItem(promptMenu, "Include text, image, PDF, RTF or DOCX file...",
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
+        // Next to it, the repair for a conversation that outlived the session that
+        // started it: the includes are read back out of the log rather than attached
+        // again one by one (see reloadAllIncludes).
+        addMenuItem(promptMenu, "Reload all includes",
+                () -> reloadAllIncludes(input, log));
         addMenuItem(promptMenu, "Load prompt from file...",
                 () -> loadPromptInto(frame, input, log));
         addMenuItem(promptMenu, "Save prompt copy as...",
@@ -2551,6 +2590,12 @@ public class JRock {
     private static final String TEXT_FILTER_LABEL =
             "Text files as is (*.txt, *.csv, *.html, *.java, *.rtf)";
 
+    // The image formats ImageHeader can read a size out of, which is also the set the
+    // DOCX export can place: named once, because two filters in the include dialog
+    // offer the same files under different terms.
+    private static final String[] IMAGE_EXTENSIONS = { "png", "jpg", "jpeg", "gif", "webp" };
+    private static final String IMAGE_FILTER_SUFFIX = " (png, jpg, jpeg, gif, webp)";
+
     // Loads a prompt from a user-chosen file (read-only) into the input area.
     // The document listener then autosaves the loaded text to jrock-prompt.txt.
     //
@@ -2598,7 +2643,8 @@ public class JRock {
     // Markdown (with the JDK's own RTF reader and XML parser). Each included file is hashed, remembered as
     // hash -> path in the non-persistent INCLUDES map, logged (with image
     // dimensions where applicable), and gets an "@txt <hash>" / "@img <hash>"
-    // token inserted at the prompt cursor.
+    // token inserted at the prompt cursor - an image optionally with a Markdown
+    // "![](<hash>)" reference above it, which is what the DOCX export places.
     private static void showIncludeDialog(JFrame frame, JTextArea input, LogView log,
                                           boolean extend) {
         javax.swing.JFileChooser chooser =
@@ -2607,7 +2653,14 @@ public class JRock {
         chooser.setAcceptAllFileFilterUsed(false);
         javax.swing.filechooser.FileNameExtensionFilter imageFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
-                        "Image files (png, jpg, jpeg, gif, webp)", "png", "jpg", "jpeg", "gif", "webp");
+                        "Image files" + IMAGE_FILTER_SUFFIX, IMAGE_EXTENSIONS);
+        // The same files, with one line more in the prompt: a Markdown "![](<hash>)"
+        // above the token. The model reads it as a picture belonging to the text, and
+        // writes it back into its answer where the picture belongs - which is what the
+        // DOCX export then places (see exportSelectedMarkdown).
+        javax.swing.filechooser.FileNameExtensionFilter imageRefFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "Image with a Markdown reference" + IMAGE_FILTER_SUFFIX, IMAGE_EXTENSIONS);
         javax.swing.filechooser.FileNameExtensionFilter textFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         TEXT_FILTER_LABEL, TEXT_EXTENSIONS);
@@ -2622,6 +2675,7 @@ public class JRock {
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         "DOCX as Markdown text (*.docx)", "docx");
         chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
+        chooser.addChoosableFileFilter(imageRefFilter);
         chooser.addChoosableFileFilter(textFilter);
         chooser.addChoosableFileFilter(pdfTextFilter);
         chooser.addChoosableFileFilter(pdfImageFilter);
@@ -2630,8 +2684,22 @@ public class JRock {
         chooser.setFileFilter(imageFilter);            // default selection = image
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
+        // The one option that belongs with the files rather than in Configure: whether
+        // to keep a copy of what is being included (see saveIncludeCopies). The chooser
+        // hands it a whole panel of its own, so it sits at the top of it rather than
+        // being centred against the file list.
+        javax.swing.JCheckBox saveCopies =
+                new javax.swing.JCheckBox("Save include copies", saveIncludeCopies);
+        saveCopies.setToolTipText("Copy each chosen file into JRock/includes/ first, "
+                + "and include it from there");
+        javax.swing.JPanel accessory = new javax.swing.JPanel(new BorderLayout());
+        accessory.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 8, 4, 0));
+        accessory.add(saveCopies, BorderLayout.NORTH);
+        chooser.setAccessory(accessory);
+
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         includeChooserDir.remember(chooser);
+        saveIncludeCopies = saveCopies.isSelected();   // remembered for the session
 
         java.io.File[] selected = chooser.getSelectedFiles();
         if (selected == null || selected.length == 0) return;
@@ -2640,7 +2708,8 @@ public class JRock {
         boolean pdf = chosen == pdfTextFilter || chosen == pdfImageFilter;
         boolean rtf = chosen == rtfMarkdownFilter;
         boolean docx = chosen == docxMarkdownFilter;
-        boolean isImage = chosen == imageFilter;
+        boolean isImage = chosen == imageFilter || chosen == imageRefFilter;
+        boolean markdownRef = chosen == imageRefFilter;
 
         // Process each chosen file in turn, all under the selected filter's kind.
         //
@@ -2664,10 +2733,15 @@ public class JRock {
                     } else if (docx) {
                         includeDocxAsMarkdown(input, log, extend, file);
                     } else {
+                        // The copy, if one was asked for, happens here and not inside
+                        // includeOne: what the three conversions above include is
+                        // already a file they wrote under JRock/ themselves, so only
+                        // the file the user picked directly needs copying.
+                        final Path included = includeCopyOf(file, log);
                         // Left on the EDT: hashing and reading a plain include is
                         // quick, and this is what it always did.
-                        onEdt(() -> includeOne(input, log, extend, file,
-                                isImage ? "img" : "txt", isImage));
+                        onEdt(() -> includeOne(input, log, extend, included,
+                                isImage ? "img" : "txt", isImage, markdownRef));
                     }
                 }
                 return null;
@@ -2709,12 +2783,78 @@ public class JRock {
         }
     }
 
+    // With "Save include copies" on, copies the file into JRock/includes/ and returns
+    // the copy, which is then what gets included. Off, or on a file that already lives
+    // there, returns the file itself.
+    //
+    // A failed copy is reported and the original included anyway: the point of the
+    // option is to keep the include available later, and refusing the include now
+    // would be a worse answer to "the copy didn't work" than including the file where
+    // it lies. Runs off the EDT with the rest of the include (it reads and writes a
+    // whole file, which on a 40 MB photograph is not instant).
+    private static Path includeCopyOf(Path file, LogView log) {
+        if (!saveIncludeCopies) return file;
+        Path dir = includesDir();
+        try {
+            // Already a copy (a re-include of something under JRock/includes/, or a
+            // file the user browsed to there): copying it again would only make
+            // "photo-2.png" out of "photo.png".
+            if (file.toAbsolutePath().normalize().startsWith(dir.toAbsolutePath().normalize())) {
+                return file;
+            }
+            Files.createDirectories(dir);
+            Path target = includeCopyTarget(dir, file);
+            if (Files.exists(target)) {
+                log.gray("Include copy already saved: " + target);
+            } else {
+                Files.copy(file, target);
+                log.gray("Copied for the include: " + file + " -> " + target);
+            }
+            return target;
+        } catch (IOException | RuntimeException ex) {
+            log.gray("Could not copy " + file + " into " + dir + ": " + ex.getMessage()
+                    + " - including the file where it is.");
+            return file;
+        }
+    }
+
+    // Where a copy of file goes in dir: its own name, or the name with "-2", "-3", ...
+    // before the extension when that is taken by a DIFFERENT file. A name taken by a
+    // file with the same bytes is returned as it stands - that copy has already been
+    // saved, and including two identical files under two names would be nothing but
+    // two names for one include.
+    private static Path includeCopyTarget(Path dir, Path file) {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        String ext  = dot > 0 ? name.substring(dot)   : "";
+        String hash = hashFile(file);
+        Path target = dir.resolve(name);
+        for (int n = 2; Files.exists(target); n++) {
+            if (hash != null && hash.equals(hashFile(target))) return target;
+            target = dir.resolve(stem + "-" + n + ext);
+        }
+        return target;
+    }
+
     // Registers one file as an include (hash -> path), logs it (with image
     // dimensions when applicable), and inserts its "@kind <hash>" token at the
     // cursor unless already referenced (dedup, also across prior turns in extend
     // mode). Returns true if a token was inserted.
     private static boolean includeOne(JTextArea input, LogView log, boolean extend,
                                       Path file, String kind, boolean isImage) {
+        return includeOne(input, log, extend, file, kind, isImage, false);
+    }
+
+    // As above, and with markdownRef it also writes a Markdown image reference,
+    // "![](<hash>)", on the line above the token - two lines for one file.
+    //
+    // The token is what JRock sends; the reference is what the model sees as a picture
+    // sitting in the text, so its answer can put the picture back where it belongs and
+    // the DOCX export can place it there (see MarkdownExport).
+    private static boolean includeOne(JTextArea input, LogView log, boolean extend,
+                                      Path file, String kind, boolean isImage,
+                                      boolean markdownRef) {
         String hash = hashFile(file);
         if (hash == null) {
             log.gray("Include failed: could not read " + file);
@@ -2723,7 +2863,10 @@ public class JRock {
         // Always (re)register the hash -> path mapping. After a restart this makes
         // an existing "@kind <hash>" token in the (recovered) prompt valid again.
         INCLUDES.put(hash, file);
+        // The one place this line is written: INCLUDE_LOG_LINE reads it back when the
+        // includes are reloaded from the log, so its wording is part of the format.
         log.gray("Included @" + kind + " " + hash + " from " + file);
+        if (markdownRef) log.gray("With a Markdown reference above it: ![](" + hash + ")");
 
         long fileBytes = -1;
         try { fileBytes = Files.size(file); } catch (IOException ignore) { /* best-effort */ }
@@ -2775,14 +2918,119 @@ public class JRock {
             return false;
         }
 
-        // Insert "@kind <hash>\n" at the cursor (no leading newline).
+        // Insert "@kind <hash>\n" at the cursor (no leading newline), preceded by the
+        // Markdown reference when one was asked for.
+        String insert = (markdownRef ? "![](" + hash + ")\n" : "") + token + "\n";
         int pos = input.getCaretPosition();
         try {
-            input.getDocument().insertString(pos, token + "\n", null);
+            input.getDocument().insertString(pos, insert, null);
         } catch (BadLocationException ex) {
-            input.append(token + "\n");   // fallback: append at end
+            input.append(insert);   // fallback: append at end
         }
         return true;
+    }
+
+    // ---- Reload all includes (prompt menu) ---------------------------------
+    // Rebuilds INCLUDES out of the log, so a conversation can be carried on after a
+    // restart without attaching every file again.
+    //
+    // The map of hash -> path is deliberately not persisted, and a restart therefore
+    // loses it - while the prompt and the whole transcript are recovered from disk, so
+    // the tokens that need the map are all still there. That is the broken state this
+    // repairs: the log says "Included @img <hash> from <path>" for every include ever
+    // made, which is the same information the map held.
+    //
+    // It is read top to bottom, treating the log as the history it is:
+    //
+    //   an include line          -> remember hash -> path, replacing an earlier path
+    //                               for that hash (the file was re-included, perhaps
+    //                               from somewhere else)
+    //   a message with a token   -> that hash is wanted, at the path remembered for it
+    //                               AT THIS POINT - so a later include of the same
+    //                               hash doesn't rewrite what an earlier message meant
+    //
+    // The current prompt is read last, being the newest thing there is: after a restart
+    // its recovered tokens are usually the whole reason for doing this.
+    //
+    // Nothing is hashed here. Whether each file is still the file it was is exactly
+    // what verifyIncludes checks on send, one hash per token, and repeating it now
+    // would only be slower and no more certain - the answer can change between the two
+    // moments anyway. What this does check is that the file is still there, because a
+    // path in the log that no longer exists is the one problem the user can do
+    // something about before sending.
+    private static void reloadAllIncludes(JTextArea input, LogView log) {
+        java.util.Map<String, Path> remembered = new java.util.HashMap<>();
+        java.util.Map<String, String> kinds = new java.util.LinkedHashMap<>();   // hash -> img/txt
+        java.util.Map<String, Path> wanted = new java.util.LinkedHashMap<>();    // hash -> path
+
+        java.util.List<String[]> steps = new ArrayList<>(log.timeline());
+        steps.add(new String[] { ROLE_HUMAN, input.getText() });
+        for (String[] step : steps) {
+            String text = step[1];
+            if (text == null || text.isEmpty()) continue;
+            if (step[0] == null) {
+                // A gray line. Only one of them is a record of an include, and it is
+                // its own whole line.
+                java.util.regex.Matcher m = INCLUDE_LOG_LINE.matcher(text.trim());
+                if (m.matches()) remembered.put(m.group(2), Paths.get(m.group(3)));
+                continue;
+            }
+            // A message, from either side: the model's answer can carry a reference
+            // too, having been given one to write back (and the DOCX export needs the
+            // file for it). Both spellings count - the token JRock sends, and the
+            // Markdown reference that stands for the picture in the text.
+            java.util.regex.Matcher tokens = INCLUDE_TOKEN.matcher(text);
+            while (tokens.find()) {
+                kinds.put(tokens.group(2), tokens.group(1));
+                if (remembered.containsKey(tokens.group(2))) {
+                    wanted.put(tokens.group(2), remembered.get(tokens.group(2)));
+                }
+            }
+            java.util.regex.Matcher refs = MarkdownExport.IMAGE_REF.matcher(text);
+            while (refs.find()) {
+                kinds.putIfAbsent(refs.group(1), "img");
+                if (remembered.containsKey(refs.group(1))) {
+                    wanted.put(refs.group(1), remembered.get(refs.group(1)));
+                }
+            }
+        }
+
+        if (kinds.isEmpty()) {
+            log.gray("Reload all includes: nothing refers to an include - "
+                    + "no @img/@txt token in the log or the prompt.");
+            log.gray("");
+            return;
+        }
+
+        int reloaded = 0, missing = 0, unknown = 0;
+        for (java.util.Map.Entry<String, String> e : kinds.entrySet()) {
+            String hash = e.getKey(), token = "@" + e.getValue() + " " + hash;
+            Path path = wanted.get(hash);
+            if (path == null) {
+                // No include line for it anywhere above: the log was cleared, or the
+                // hash came from somewhere other than an include of this session.
+                log.gray("No include recorded for " + token + " - attach the file again "
+                        + "with Ctrl+I (the log may have been cleared since).");
+                unknown++;
+            } else if (!Files.exists(path)) {
+                // Still registered: the mapping is what the log recorded, and saying so
+                // now is more use than dropping it and repeating "is not known" later.
+                INCLUDES.put(hash, path);
+                log.gray("Reloaded " + token + " from " + path
+                        + " - but that file is not there any more.");
+                missing++;
+            } else {
+                INCLUDES.put(hash, path);
+                log.gray("Reloaded " + token + " from " + path);
+                reloaded++;
+            }
+        }
+        log.gray("Reload all includes: " + fmtNum(reloaded) + " reloaded"
+                + (missing > 0 ? ", " + fmtNum(missing) + " with a missing file" : "")
+                + (unknown > 0 ? ", " + fmtNum(unknown) + " not recorded in the log" : "")
+                + " (of " + fmtNum(kinds.size()) + " referred to). "
+                + "Each file is checked again, by its hash, on send.");
+        log.gray("");
     }
 
     // An image's dimensions, read straight out of its header.
@@ -3894,7 +4142,8 @@ public class JRock {
     //
     // DOCX is the one to export for anything that will be typeset, because it carries
     // named paragraph styles a layout application can map onto its own (see the
-    // README's PDF section). RTF is the fallback that nearly everything opens.
+    // README's PDF section) - and the session's pictures, placed where the answer put
+    // them. RTF is the fallback that nearly everything opens, text only.
     //
     // Both writers are built here out of strings. For DOCX there is no alternative in
     // a bare JDK, and none needed: the format is a ZIP of XML parts, so java.util.zip
@@ -3914,15 +4163,23 @@ public class JRock {
     // whole log is mostly JRock's own status lines, and a document made of those is
     // not a document anyone wants. The conversion itself cannot fail (see
     // MarkdownExport), so what the log reports afterwards is what was written.
+    //
+    // The DOCX also carries the pictures: the session's includes are handed to the
+    // converter, so a "![](<hash>)" in the selection is placed as the image it names
+    // and an "@img <hash>" becomes that image's file name. The RTF keeps the simpler
+    // job - text only, both tags left as the text they are - because a picture in an
+    // RTF is the picture's bytes hex-encoded into the file, and the format is offered
+    // here as the one anything can open, not as the one to typeset from.
     private static void exportSelectedMarkdown(JFrame frame, LogView log, boolean asDocx) {
         String selection = log.selectedText();
         if (selection == null) return;   // the menu item is disabled without one
         String ext = asDocx ? "docx" : "rtf";
         String kind = asDocx ? "DOCX" : "RTF";
+        String what = asDocx ? "Markdown with images" : "Markdown";
 
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(logChooserDir.start());
-        chooser.setDialogTitle("Export selected Markdown as " + kind);
+        chooser.setDialogTitle("Export selected " + what + " as " + kind);
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 kind + " document (*." + ext + ")", ext));
@@ -3933,13 +4190,19 @@ public class JRock {
         // The extension belongs to the format, not to the typist: "notes" or
         // "notes.txt" holding a DOCX is a file nothing will open by double-click.
         Path target = withExtension(chooser.getSelectedFile().toPath(), ext);
-        MarkdownExport document = MarkdownExport.of(selection);
+        MarkdownExport document =
+                asDocx ? MarkdownExport.of(selection, INCLUDES) : MarkdownExport.of(selection);
+        // Anything the selection referred to and this could not place: said here, before
+        // the result line, because the export goes ahead either way and the reference is
+        // left in the text as it stands.
+        for (String warning : document.warnings()) log.gray(warning);
         try {
             byte[] bytes = asDocx ? document.docx() : document.rtf();
             Files.write(target, bytes);
             log.gray("Exported the selection as " + kind + ": " + target + " - "
                     + fmtNum(document.blocks()) + " block(s), "
                     + fmtNum(document.tables()) + " table(s), "
+                    + (asDocx ? fmtNum(document.images()) + " image(s), " : "")
                     + fmtNum(bytes.length) + " bytes.");
             if (document.simplified()) {
                 log.gray("Its Markdown could not be read as Markdown, so the lines went "
@@ -3975,8 +4238,9 @@ public class JRock {
     // this class itself and falls back to one paragraph per line, so an export always
     // produces a document and the log can say which of the two happened.
     //
-    // No widgets, no files: a String in and bytes out, which is what makes it testable
-    // without a GUI (see JRockMarkdownExportTest).
+    // No widgets: a String in and bytes out, which is what makes it testable without a
+    // GUI (see JRockMarkdownExportTest). The only files it reads are the images it is
+    // given the includes for, and only on the DOCX path.
     private static final class MarkdownExport {
 
         // Block kinds. `level` is the heading level for HEADING, and the nesting depth
@@ -3996,9 +4260,17 @@ public class JRock {
         /** Deepest indent honoured, so a runaway "          - x" stays on the page. */
         private static final int MAX_DEPTH = 5;
 
-        // The printable width of the A4 page set up below (11906 - 2 * 1134 twips),
-        // which is what a table's columns are shared out of.
-        private static final int TABLE_WIDTH = 9638;
+        // The page, in twips: A4 portrait with 2 cm margins. What is left of it is the
+        // text frame, which is what a table's columns are shared out of and what an
+        // image is fitted into.
+        private static final int PAGE_WIDTH = 11906, PAGE_HEIGHT = 16838, MARGIN = 1134;
+        private static final int TABLE_WIDTH = PAGE_WIDTH - 2 * MARGIN;    // 9638
+        private static final int FRAME_HEIGHT = PAGE_HEIGHT - 2 * MARGIN;  // 14570
+
+        // EMU (English Metric Units) are what a drawing is sized in: 914400 to the inch,
+        // so 635 to the twip, and 3048 for one pixel of a 300 dpi image.
+        private static final long EMU_PER_TWIP = 635;
+        private static final long EMU_PER_PIXEL_AT_300_DPI = 914400 / 300;
 
         private static final java.util.regex.Pattern HEADING_LINE =
                 java.util.regex.Pattern.compile("(#{1,6})\\s+(.*)");
@@ -4014,16 +4286,48 @@ public class JRock {
         /** A bullet for an unordered item; an ordered one keeps its own number. */
         private static final String BULLET = "\u2022";
 
+        // A JRock include referred to from the Markdown: "![](<hash>)" for the picture
+        // itself, and the hash on its own as the thing that has to be looked up.
+        private static final java.util.regex.Pattern IMAGE_REF =
+                java.util.regex.Pattern.compile("!\\[[^\\]\\n]*\\]\\(([0-9a-f]{" + HASH_LEN + "})\\)");
+        private static final java.util.regex.Pattern HASH_REF =
+                java.util.regex.Pattern.compile("[0-9a-f]{" + HASH_LEN + "}");
+
+        /** A line holding nothing but image references, which becomes a paragraph of them. */
+        private static final java.util.regex.Pattern IMAGE_LINE =
+                java.util.regex.Pattern.compile("(?:" + IMAGE_REF.pattern() + "\\s*)+");
+
         private final List<Block> blocks = new ArrayList<>();
         private List<Run> pending;         // body text being gathered across lines
         private boolean simplified;
 
-        private MarkdownExport() { }
+        // hash -> file for the session's includes, or null when this export does not
+        // place pictures at all (the RTF path). Then: every hash looked up so far, so a
+        // file is read once however often it is referred to; the images the document
+        // actually places, in the order it places them, which is the order of the media
+        // parts and their relationship ids; and what could not be placed, for the log.
+        private final java.util.Map<String, Path> images;
+        private final java.util.Map<String, Image> resolved = new java.util.HashMap<>();
+        private final java.util.Map<String, Image> media = new java.util.LinkedHashMap<>();
+        private final List<String> warnings = new ArrayList<>();
+        private int drawings;              // one id per placement, which a .docx wants unique
 
-        /** Parses the Markdown. Never throws: worst case, every line is a paragraph. */
-        static MarkdownExport of(String markdown) {
+        private MarkdownExport(java.util.Map<String, Path> images) { this.images = images; }
+
+        /** Parses the Markdown, placing no pictures. Never throws. */
+        static MarkdownExport of(String markdown) { return of(markdown, null); }
+
+        /**
+         * Parses the Markdown. Never throws: worst case, every line is a paragraph.
+         *
+         * @param includes hash -&gt; file of the session's includes, so that a
+         *                 "![](&lt;hash&gt;)" can be placed as a picture and an
+         *                 "@img &lt;hash&gt;" written as that file's name; null to do
+         *                 neither and leave both as the text they are.
+         */
+        static MarkdownExport of(String markdown, java.util.Map<String, Path> includes) {
             String text = markdown == null ? "" : markdown;
-            MarkdownExport document = new MarkdownExport();
+            MarkdownExport document = new MarkdownExport(includes);
             try {
                 document.parse(text);
             } catch (RuntimeException ex) {
@@ -4031,6 +4335,7 @@ public class JRock {
                 // drop the structure, and let the caller say so in the log.
                 document.blocks.clear();
                 document.pending = null;
+                document.media.clear();    // nothing is placed any more, so nothing is packed
                 document.simplified = true;
                 for (String line : text.split("\n", -1)) {
                     if (line.trim().isEmpty()) continue;
@@ -4052,22 +4357,72 @@ public class JRock {
         /** Whether the Markdown had to be given up on and written as plain lines. */
         boolean simplified() { return simplified; }
 
+        /** How many pictures the document places, i.e. how many go into the package. */
+        int images() { return media.size(); }
+
+        /** What was referred to and could not be placed, in the words the log uses. */
+        List<String> warnings() { return warnings; }
+
         // ---- the model ----
 
         /** One inline stretch of text and the three things this converter tracks. */
         private static final class Run {
             final String text;
             final boolean bold, italic, mono;
+            // A picture instead of the text, when this run is a placed image. The text is
+            // then the Markdown it came from, so a format that cannot place one - RTF -
+            // still says what was meant to be here.
+            final Image image;
 
             Run(String text, boolean bold, boolean italic, boolean mono) {
+                this(text, bold, italic, mono, null);
+            }
+
+            Run(String text, boolean bold, boolean italic, boolean mono, Image image) {
                 this.text = text;
                 this.bold = bold;
                 this.italic = italic;
                 this.mono = mono;
+                this.image = image;
             }
         }
 
         private static Run plain(String text) { return new Run(text, false, false, false); }
+
+        // One image the document places: the bytes that go into the package, the part
+        // name and content type the package has to describe them with, and the size the
+        // page gives the picture.
+        //
+        // That size is the whole of what is decided here, because nothing else decides
+        // it: a .docx states how big a picture IS, in EMU, and neither the Markdown nor
+        // the file says. So it is as wide as the text frame - unless that would stretch
+        // the pixels thinner than 300 dpi, in which case 300 dpi is the width it gets and
+        // the picture sits narrower than the frame. A tall image is held to the frame's
+        // height by the same rule, which is what keeps a portrait photograph on one page.
+        // All three limits are applied as one number, the EMU given to each pixel, so
+        // width and height cannot drift out of proportion whichever of them binds.
+        private static final class Image {
+            final String fileName, extension, mime;
+            final byte[] bytes;
+            final long cx, cy;             // the placed size, in EMU
+            int index, relId;              // assigned when the document first places it
+
+            Image(String fileName, String extension, String mime, byte[] bytes,
+                  int pixelWidth, int pixelHeight) {
+                this.fileName = fileName;
+                this.extension = extension;
+                this.mime = mime;
+                this.bytes = bytes;
+                long perPixel = Math.min(EMU_PER_PIXEL_AT_300_DPI,
+                        Math.min(TABLE_WIDTH * EMU_PER_TWIP / pixelWidth,
+                                 FRAME_HEIGHT * EMU_PER_TWIP / pixelHeight));
+                this.cx = Math.max(1, pixelWidth * perPixel);
+                this.cy = Math.max(1, pixelHeight * perPixel);
+            }
+
+            /** Its name inside the package, which is numbered rather than the file's own. */
+            String part() { return "image" + index + "." + extension; }
+        }
 
         private static final class Block {
             int kind = BODY;
@@ -4085,11 +4440,92 @@ public class JRock {
             int[] align = new int[0];        // -1 left, 0 centre, 1 right, per column
         }
 
+        // ---- the images ----
+
+        // The image included under this hash, ready to be placed, or null with a warning
+        // recorded. Each hash is looked up once: the same picture referred to twice is
+        // read from disk once, and a hash nothing is included under is complained about
+        // once.
+        private Image image(String hash) {
+            if (resolved.containsKey(hash)) return resolved.get(hash);
+            resolved.put(hash, null);
+            Path file = images.get(hash);
+            if (file == null) {
+                warn("No image is included under the hash " + hash);
+                return null;
+            }
+            int[] size = ImageHeader.size(file);
+            if (size == null) {
+                warn("Could not read the pixel size of " + file
+                        + ", so it is not a PNG, JPEG, GIF or WEBP this can place");
+                return null;
+            }
+            byte[] bytes;
+            try {
+                bytes = Files.readAllBytes(file);
+            } catch (IOException | RuntimeException ex) {
+                warn("Could not read " + file + ": " + ex);
+                return null;
+            }
+            String[] type = mediaType(bytes);
+            if (type == null) {
+                warn("The bytes of " + file + " are not a PNG, JPEG, GIF or WEBP");
+                return null;
+            }
+            Image image = new Image(file.getFileName().toString(), type[0], type[1], bytes,
+                    size[0], size[1]);
+            resolved.put(hash, image);
+            return image;
+        }
+
+        // The same, and counted in as one of the package's parts: a media part and a
+        // relationship exist because the document places the picture, so they are numbered
+        // here, at the first placement, and not again if it is placed twice.
+        private Image placed(String hash) {
+            Image image = image(hash);
+            if (image != null && image.relId == 0) {
+                image.index = media.size() + 1;
+                image.relId = image.index + 1;     // rId1 is styles.xml
+                media.put(hash, image);
+            }
+            return image;
+        }
+
+        // {extension, content type}, read from the bytes rather than from the name,
+        // because a package states what a part IS and the extension on disk is only what
+        // somebody typed. Null for anything else, which is then left as text: a .docx
+        // whose media part is not what its content type claims is a repair dialog.
+        private static String[] mediaType(byte[] bytes) {
+            if (magic(bytes, 0, 0x89, 'P', 'N', 'G')) return new String[] { "png", "image/png" };
+            if (magic(bytes, 0, 0xFF, 0xD8, 0xFF)) return new String[] { "jpeg", "image/jpeg" };
+            if (magic(bytes, 0, 'G', 'I', 'F', '8')) return new String[] { "gif", "image/gif" };
+            if (magic(bytes, 0, 'R', 'I', 'F', 'F') && magic(bytes, 8, 'W', 'E', 'B', 'P')) {
+                return new String[] { "webp", "image/webp" };
+            }
+            return null;
+        }
+
+        private static boolean magic(byte[] bytes, int at, int... expected) {
+            if (bytes.length < at + expected.length) return false;
+            for (int i = 0; i < expected.length; i++) {
+                if ((bytes[at + i] & 0xFF) != expected[i]) return false;
+            }
+            return true;
+        }
+
+        // A reference that could not be turned into a picture. Not a failure - the export
+        // goes on and the reference stays in the text - so it is said once, in a sentence
+        // the log can print as it stands.
+        private void warn(String problem) {
+            String line = problem + " - its reference is left in the text as it stands.";
+            if (!warnings.contains(line)) warnings.add(line);
+        }
+
         // ---- parsing ----
 
         private void parse(String markdown) {
-            String[] lines =
-                    markdown.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+            String[] lines = fileNames(markdown)
+                    .replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
             boolean fenced = false;
             int i = 0;
             while (i < lines.length) {
@@ -4117,6 +4553,12 @@ public class JRock {
                 } else if (text.indexOf('|') >= 0 && i + 1 < lines.length
                         && isTableDashes(lines[i + 1])) {
                     i = table(lines, i);
+                } else if (images != null && IMAGE_LINE.matcher(text).matches()) {
+                    // A picture on a line of its own gets a paragraph of its own, rather
+                    // than being swept into the sentence below it - which here is usually
+                    // the "@img" line the include wrote directly under the reference.
+                    block(BODY, 0).runs.addAll(inline(text));
+                    i++;
                 } else if ((m = ITEM_LINE.matcher(line)).matches()) {
                     Block item = block(ITEM, 1 + Math.min(m.group(1).length() / 2, MAX_DEPTH - 1));
                     String marker = m.group(2);
@@ -4137,6 +4579,36 @@ public class JRock {
                 }
             }
             endParagraph();
+        }
+
+        // "@img <hash>" -> the name the file has on disk. A hash is JRock's handle on an
+        // attachment and says nothing to whoever reads the page, whereas "IMG_4002.jpg"
+        // is what the picture above it is called. An "@txt" token is left alone - it
+        // stands for text that was sent, not for a file the document shows - and so is an
+        // "@img" whose hash nothing is included under, with a warning for the log.
+        private String fileNames(String markdown) {
+            if (images == null) return markdown;
+            java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(markdown);
+            StringBuffer out = new StringBuffer(markdown.length());
+            while (m.find()) {
+                Image image = "img".equals(m.group(1)) ? image(m.group(2)) : null;
+                m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(
+                        image == null ? m.group() : escaped(image.fileName)));
+            }
+            m.appendTail(out);
+            return out.toString();
+        }
+
+        // A file name written as Markdown that means itself: inline() has to read it back
+        // as the name, not as whatever markup its punctuation happens to spell.
+        private static String escaped(String name) {
+            StringBuilder out = new StringBuilder(name.length() + 4);
+            for (int i = 0; i < name.length(); i++) {
+                char c = name.charAt(i);
+                if ("\\`*_[]()!#|<>".indexOf(c) >= 0) out.append('\\');
+                out.append(c);
+            }
+            return out.toString();
         }
 
         /** Starts a block, closing any paragraph being gathered before it. */
@@ -4202,7 +4674,7 @@ public class JRock {
             return right ? 1 : -1;
         }
 
-        private static List<List<Run>> row(String line, int columns) {
+        private List<List<Run>> row(String line, int columns) {
             List<String> cells = cells(line);
             List<List<Run>> row = new ArrayList<>();
             for (int c = 0; c < columns; c++) {
@@ -4238,13 +4710,14 @@ public class JRock {
         }
 
         // Markdown's inline markup, as much of it as a document needs: **bold**,
-        // *italic*, `code`, [text](url) and a backslash escape.
+        // *italic*, `code`, [text](url), "![](<hash>)" for an included picture, and a
+        // backslash escape.
         //
         // An asterisk only opens next to a non-space and only closes after one, which
         // is the rule that keeps "2 * 3 * 4" out of italics; an underscore also needs a
         // non-word character on its outer side, which is what saves snake_case. Inside
         // `code` nothing else is markup at all.
-        private static List<Run> inline(String text) {
+        private List<Run> inline(String text) {
             List<Run> runs = new ArrayList<>();
             StringBuilder current = new StringBuilder();
             boolean bold = false, italic = false, mono = false;
@@ -4252,7 +4725,7 @@ public class JRock {
             while (i < text.length()) {
                 char c = text.charAt(i);
                 char next = i + 1 < text.length() ? text.charAt(i + 1) : '\0';
-                int afterLink;
+                int afterLink, afterImage;
                 if (c == '\\' && next != '\0' && !Character.isLetterOrDigit(next)
                         && !Character.isWhitespace(next)) {
                     current.append(next);
@@ -4270,9 +4743,12 @@ public class JRock {
                     flush(runs, current, bold, italic, mono);
                     italic = !italic;
                     i++;
+                } else if (!mono && images != null && c == '!' && next == '['
+                        && (afterImage = picture(text, i, runs, current, bold, italic)) > 0) {
+                    i = afterImage;
                 } else if (!mono && (c == '[' || (c == '!' && next == '['))
-                        // An image is written as its alt text and its URL, same as a
-                        // link: there is no picture to place, only what it was called.
+                        // Any other image is written as its alt text and its URL, same as
+                        // a link: there is no picture to place, only what it was called.
                         && (afterLink = link(text, c == '!' ? i + 1 : i, current)) > 0) {
                     i = afterLink;
                 } else {
@@ -4282,6 +4758,29 @@ public class JRock {
             }
             flush(runs, current, bold, italic, mono);
             return runs;
+        }
+
+        // The "![alt](<hash>)" at `at`, placed as the picture that hash names.
+        //
+        // Returns the index just past the reference, or -1 when what is there is not a
+        // reference to an include at all - an ordinary Markdown image, with a URL where
+        // the hash would be - which then goes on being written as its text, like a link.
+        //
+        // A hash nothing is included under is appended as the reference itself, character
+        // for character: the reader of the document at least sees that a picture was meant
+        // to be there, and the log says why it is not (see image()).
+        private int picture(String text, int at, List<Run> runs, StringBuilder current,
+                            boolean bold, boolean italic) {
+            java.util.regex.Matcher m = IMAGE_REF.matcher(text);
+            if (!m.find(at) || m.start() != at) return -1;
+            Image image = placed(m.group(1));
+            if (image == null) {
+                current.append(m.group());
+                return m.end();
+            }
+            flush(runs, current, bold, italic, false);
+            runs.add(new Run(m.group(), false, false, false, image));
+            return m.end();
         }
 
         // Appends the "[label](url)" at `at` as text the reader of a document can use:
@@ -4475,50 +4974,97 @@ public class JRock {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
         private static final String W_NS =
                 "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-        private static final String CONTENT_TYPES = XML_HEAD
+        private static final String R_NS =
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        private static final String RELS_NS =
+                "http://schemas.openxmlformats.org/package/2006/relationships";
+        // Declared on w:document only when there is a picture in it: r for the
+        // relationship a drawing points at, and the three DrawingML namespaces the
+        // drawing itself is written in.
+        private static final String DRAWING_NS = " xmlns:r=\"" + R_NS + "\""
+                + " xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/"
+                + "wordprocessingDrawing\""
+                + " xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\""
+                + " xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"";
+        private static final String PICTURE_URI =
+                "http://schemas.openxmlformats.org/drawingml/2006/picture";
+        private static final String CONTENT_TYPES_HEAD = XML_HEAD
                 + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/"
                 + "content-types\">"
                 + "<Default Extension=\"rels\" ContentType=\"application/"
                 + "vnd.openxmlformats-package.relationships+xml\"/>"
-                + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
-                + "<Override PartName=\"/word/document.xml\" ContentType=\"application/"
+                + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>";
+        private static final String CONTENT_TYPES_TAIL =
+                "<Override PartName=\"/word/document.xml\" ContentType=\"application/"
                 + "vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
                 + "<Override PartName=\"/word/styles.xml\" ContentType=\"application/"
                 + "vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
                 + "</Types>";
         private static final String ROOT_RELS = XML_HEAD
-                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/"
-                + "2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://"
-                + "schemas.openxmlformats.org/officeDocument/2006/relationships/"
-                + "officeDocument\" Target=\"word/document.xml\"/></Relationships>";
-        private static final String DOCUMENT_RELS = XML_HEAD
-                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/"
-                + "2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://"
-                + "schemas.openxmlformats.org/officeDocument/2006/relationships/styles\""
-                + " Target=\"styles.xml\"/></Relationships>";
+                + "<Relationships xmlns=\"" + RELS_NS + "\">"
+                + "<Relationship Id=\"rId1\" Type=\"" + R_NS + "/officeDocument\""
+                + " Target=\"word/document.xml\"/></Relationships>";
 
         /**
          * The document as a .docx: the five parts of the smallest package Word, Pages,
-         * LibreOffice and a layout application will all open.
+         * LibreOffice and a layout application will all open, plus one media part per
+         * picture it places.
          */
         byte[] docx() throws IOException {
             java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
             try (java.util.zip.ZipOutputStream zip =
                          new java.util.zip.ZipOutputStream(bytes)) {
-                entry(zip, "[Content_Types].xml", CONTENT_TYPES);
+                entry(zip, "[Content_Types].xml", contentTypes());
                 entry(zip, "_rels/.rels", ROOT_RELS);
-                entry(zip, "word/_rels/document.xml.rels", DOCUMENT_RELS);
+                entry(zip, "word/_rels/document.xml.rels", documentRels());
                 entry(zip, "word/styles.xml", styles());
                 entry(zip, "word/document.xml", documentXml());
+                for (Image image : media.values()) {
+                    entry(zip, "word/media/" + image.part(), image.bytes);
+                }
             }
             return bytes.toByteArray();
         }
 
         private static void entry(java.util.zip.ZipOutputStream zip, String name,
                                   String xml) throws IOException {
+            entry(zip, name, xml.getBytes(StandardCharsets.UTF_8));
+        }
+
+        private static void entry(java.util.zip.ZipOutputStream zip, String name,
+                                  byte[] content) throws IOException {
             zip.putNextEntry(new java.util.zip.ZipEntry(name));
-            zip.write(xml.getBytes(StandardCharsets.UTF_8));
+            zip.write(content);
             zip.closeEntry();
+        }
+
+        // Every extension in the package needs a content type, images included - and it
+        // has to be the type the bytes really are, which is what mediaType() reads.
+        private String contentTypes() {
+            StringBuilder xml = new StringBuilder(CONTENT_TYPES_HEAD);
+            java.util.Set<String> written = new java.util.HashSet<>();
+            for (Image image : media.values()) {
+                if (written.add(image.extension)) {
+                    xml.append("<Default Extension=\"").append(image.extension)
+                       .append("\" ContentType=\"").append(image.mime).append("\"/>");
+                }
+            }
+            return xml.append(CONTENT_TYPES_TAIL).toString();
+        }
+
+        // What word/document.xml is allowed to point at: the styles, and one image part
+        // per placed picture under the id the drawing names (see docxDrawing).
+        private String documentRels() {
+            StringBuilder xml = new StringBuilder(XML_HEAD);
+            xml.append("<Relationships xmlns=\"").append(RELS_NS).append("\">")
+               .append("<Relationship Id=\"rId1\" Type=\"").append(R_NS)
+               .append("/styles\" Target=\"styles.xml\"/>");
+            for (Image image : media.values()) {
+                xml.append("<Relationship Id=\"rId").append(image.relId).append("\" Type=\"")
+                   .append(R_NS).append("/image\" Target=\"media/").append(image.part())
+                   .append("\"/>");
+            }
+            return xml.append("</Relationships>").toString();
         }
 
         // The named styles, which are the point of exporting DOCX rather than RTF: a
@@ -4562,14 +5108,19 @@ public class JRock {
 
         private String documentXml() {
             StringBuilder xml = new StringBuilder(XML_HEAD);
-            xml.append("<w:document xmlns:w=\"").append(W_NS).append("\"><w:body>");
+            xml.append("<w:document xmlns:w=\"").append(W_NS).append('"');
+            if (!media.isEmpty()) xml.append(DRAWING_NS);
+            xml.append("><w:body>");
             for (Block block : blocks) docx(xml, block);
             // An empty paragraph to end on: a body whose last element is a table is
             // what Word repairs documents for, and an empty body needs something.
             xml.append("<w:p/>")
-               .append("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/>")
-               .append("<w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\"")
-               .append(" w:left=\"1134\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/>")
+               .append("<w:sectPr><w:pgSz w:w=\"").append(PAGE_WIDTH)
+               .append("\" w:h=\"").append(PAGE_HEIGHT).append("\"/>")
+               .append("<w:pgMar w:top=\"").append(MARGIN).append("\" w:right=\"")
+               .append(MARGIN).append("\" w:bottom=\"").append(MARGIN)
+               .append("\" w:left=\"").append(MARGIN)
+               .append("\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/>")
                .append("</w:sectPr></w:body></w:document>");
             return xml.toString();
         }
@@ -4658,9 +5209,13 @@ public class JRock {
             xml.append("</w:tbl>");
         }
 
-        private static void docxRuns(StringBuilder xml, List<Run> runs,
-                                     boolean allBold, boolean allItalic) {
+        private void docxRuns(StringBuilder xml, List<Run> runs,
+                              boolean allBold, boolean allItalic) {
             for (Run run : runs) {
+                if (run.image != null) {
+                    docxDrawing(xml, run.image);
+                    continue;
+                }
                 boolean bold = run.bold || allBold;
                 boolean italic = run.italic || allItalic;
                 xml.append("<w:r>");
@@ -4680,6 +5235,37 @@ public class JRock {
             }
         }
 
+        // A picture in the text flow: wp:inline, as opposed to the floating wp:anchor a
+        // word processor uses for a picture text wraps around. Its size is stated twice,
+        // as the frame the page gives it (wp:extent) and as the picture's own extent
+        // inside that frame (a:ext), which is what makes it fill the frame exactly.
+        //
+        // The element order is the schema's, not a preference: a .docx whose children come
+        // in another order is a document Word offers to repair. The ids only have to be
+        // unique within the document, so they are simply counted.
+        private void docxDrawing(StringBuilder xml, Image image) {
+            int id = ++drawings;
+            xml.append("<w:r><w:drawing>")
+               .append("<wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">")
+               .append("<wp:extent cx=\"").append(image.cx).append("\" cy=\"")
+               .append(image.cy).append("\"/>")
+               .append("<wp:docPr id=\"").append(id).append("\" name=\"Picture ").append(id)
+               .append("\" descr=\"").append(attr(image.fileName)).append("\"/>")
+               .append("<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/>")
+               .append("</wp:cNvGraphicFramePr>")
+               .append("<a:graphic><a:graphicData uri=\"").append(PICTURE_URI).append("\">")
+               .append("<pic:pic><pic:nvPicPr><pic:cNvPr id=\"").append(id)
+               .append("\" name=\"").append(attr(image.fileName)).append("\"/>")
+               .append("<pic:cNvPicPr/></pic:nvPicPr>")
+               .append("<pic:blipFill><a:blip r:embed=\"rId").append(image.relId).append("\"/>")
+               .append("<a:stretch><a:fillRect/></a:stretch></pic:blipFill>")
+               .append("<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"")
+               .append(image.cx).append("\" cy=\"").append(image.cy).append("\"/></a:xfrm>")
+               .append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>")
+               .append("</pic:pic></a:graphicData></a:graphic>")
+               .append("</wp:inline></w:drawing></w:r>");
+        }
+
         // Text as XML content. The control characters XML 1.0 cannot carry are dropped
         // rather than written: a model's answer is not guaranteed clean, and one stray
         // byte would make the whole part unreadable and the document unopenable.
@@ -4693,6 +5279,11 @@ public class JRock {
                 else if (c == '\t' || c == '\n' || c >= ' ') out.append(c);
             }
             return out.toString();
+        }
+
+        /** The same, for an attribute value, where a quote would end the attribute. */
+        private static String attr(String text) {
+            return xml(text).replace("\"", "&quot;");
         }
     }
 

@@ -1,22 +1,27 @@
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import javax.imageio.ImageIO;
 import javax.swing.text.DefaultStyledDocument;
 import javax.swing.text.rtf.RTFEditorKit;
 import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Exporting a log selection as RTF and DOCX, and reading a DOCX back as Markdown.
@@ -26,6 +31,11 @@ import org.junit.jupiter.api.Test;
  * themselves - the RTF is read back by the JDK's {@code RTFEditorKit}, and the DOCX is
  * unzipped and parsed as XML - because a document that only this code can read is not a
  * document anyone can use.
+ * <p>
+ * The DOCX also carries the session's pictures, so the includes are handed in here as the
+ * map JRock keeps them in: what is checked then is the package (the image bytes, its
+ * content type, the relationship the drawing points through) and the arithmetic that
+ * decides how big the picture is printed, which nothing else in the pipeline decides.
  *
  * @see JRockRtfIncludeTest for the same conversion the other way round, through the GUI
  */
@@ -71,6 +81,12 @@ class JRockMarkdownExportTest {
     private static final String[] DOCX_PARTS = {
             "[Content_Types].xml", "_rels/.rels", "word/_rels/document.xml.rels",
             "word/styles.xml", "word/document.xml" };
+
+    /** A hash of the shape JRock gives an include: twelve lowercase hex digits. */
+    private static final String HASH = "0123456789ab";
+
+    @TempDir
+    Path dir;
 
     @Test
     @DisplayName("the RTF is ASCII, reads back in Swing's own RTF reader, and has the table")
@@ -196,6 +212,120 @@ class JRockMarkdownExportTest {
         }
     }
 
+    @Test
+    @DisplayName("an included image is packed into the DOCX, pointed at, and named in the text")
+    void placesTheImagesTheSelectionRefersTo() throws Exception {
+        // What the new include filter writes into the prompt, and what the model hands
+        // back in its answer: the picture, then the token that says which file it was.
+        Path png = png("IMG_4002.png", 1000, 500);
+        String markdown = String.join("\n",
+                "Here is the photograph:",
+                "",
+                "![](" + HASH + ")",
+                "@img " + HASH,
+                "");
+
+        Object document = export(markdown, Collections.singletonMap(HASH, png));
+        assertThat(warnings(document)).describedAs("nothing to complain about").isEmpty();
+        assertThat(images(document)).describedAs("pictures placed").isEqualTo(1);
+        Map<String, byte[]> parts = unzip(docx(document));
+
+        // 1. The bytes are in the package, untouched, under a part named for the package
+        //    rather than for the file - and the package says what kind of part it is.
+        assertThat(parts.keySet()).contains("word/media/image1.png");
+        assertThat(parts.get("word/media/image1.png")).isEqualTo(Files.readAllBytes(png));
+        assertThat(text(parts.get("[Content_Types].xml")))
+                .contains("<Default Extension=\"png\" ContentType=\"image/png\"/>");
+
+        // 2. The drawing points at it through a relationship, which is the only way a
+        //    .docx refers to anything. rId1 is styles.xml, so a picture starts at rId2.
+        assertThat(text(parts.get("word/_rels/document.xml.rels")))
+                .contains("Id=\"rId2\"").contains("Target=\"media/image1.png\"")
+                .contains("/relationships/image");
+        String body = text(parts.get("word/document.xml"));
+        assertThat(body).describedAs("word/document.xml")
+                .contains("<w:drawing>").contains("r:embed=\"rId2\"")
+                // Declared where it is used, and only when there is a picture to declare
+                // it for.
+                .contains("xmlns:pic=");
+
+        // 3. 1000 px across a 6.69 in text frame would be 149 dpi, so the picture is
+        //    placed at 300 dpi instead and comes out narrower than the frame: 1000/300 in
+        //    = 3048 EMU per pixel, and the height follows the same factor.
+        assertThat(body).describedAs("the placed size")
+                .contains("<wp:extent cx=\"3048000\" cy=\"1524000\"/>")
+                .contains("<a:ext cx=\"3048000\" cy=\"1524000\"/>");
+
+        // 4. And the token below it became the name of the file, because a hash is
+        //    JRock's handle on an attachment and says nothing to a reader.
+        assertThat(body).contains("IMG_4002.png").doesNotContain(HASH);
+        assertThatCode(() -> parse(parts.get("word/document.xml")))
+                .describedAs("a document.xml with a drawing in it is still well-formed XML")
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("the page decides the size: text frame, or 300 dpi, whichever is smaller")
+    void sizesEveryImageForTheA4PageAtNoLessThan300Dpi() throws Exception {
+        // The text frame of A4 with 2 cm margins: 9638 x 14570 twips, which is 635 EMU
+        // each. A picture gets as much of it as it can have without being stretched below
+        // 300 dpi - so one of three limits binds, and which one depends on the shape.
+        //
+        // Wide and large: the frame's width binds (6120130 EMU / 4000 px = 1530 each).
+        assertThat(extentOf(4000, 2000)).isEqualTo("cx=\"6120000\" cy=\"3060000\"");
+        // Tall and large: the frame's height binds (9251950 / 4000 = 2312 each), which is
+        // what keeps a portrait photograph on the page it was placed on.
+        assertThat(extentOf(500, 4000)).isEqualTo("cx=\"1156000\" cy=\"9248000\"");
+        // Small: 300 dpi binds (3048 EMU per pixel), and the picture sits well inside the
+        // frame rather than being blown up into a blur.
+        assertThat(extentOf(300, 200)).isEqualTo("cx=\"914400\" cy=\"609600\"");
+    }
+
+    @Test
+    @DisplayName("a reference to something not included is a warning, not a failed export")
+    void leavesUnplaceableReferencesAsTheTextTheyAre() throws Exception {
+        // Three ways a reference can fail to be a picture: a hash from another session
+        // (the includes do not survive a restart), an include that is not an image at
+        // all, and an @img token for either of them.
+        Path notAnImage = dir.resolve("notes.txt");
+        Files.write(notAnImage, "plain text".getBytes(StandardCharsets.UTF_8));
+        String other = "ffffffffffff";
+        String markdown = String.join("\n",
+                "![](" + HASH + ")",
+                "@img " + HASH,
+                "",
+                "![](" + other + ")",
+                "",
+                "![alt](http://example.com/cat.png)",
+                "");
+
+        Object document = export(markdown, Collections.singletonMap(other, notAnImage));
+        assertThat(images(document)).describedAs("nothing placeable, so nothing placed")
+                .isEqualTo(0);
+        assertThat(warnings(document)).describedAs("what the log is told")
+                .hasSize(2)
+                .anySatisfy(line -> assertThat(line)
+                        .contains("No image is included under the hash " + HASH)
+                        .endsWith("its reference is left in the text as it stands."))
+                .anySatisfy(line -> assertThat(line).contains("notes.txt")
+                        .contains("not a PNG, JPEG, GIF or WEBP"));
+
+        Map<String, byte[]> parts = unzip(docx(document));
+        assertThat(parts.keySet()).describedAs("no media part for a picture there is none of")
+                .containsExactlyInAnyOrder(DOCX_PARTS);
+        String body = text(parts.get("word/document.xml"));
+        assertThat(body).describedAs("word/document.xml")
+                .doesNotContain("<w:drawing>")
+                // Left exactly as it stands, so the reader sees that something was meant
+                // to be here - and the @img token too, since there is no file to name.
+                .contains("![](" + HASH + ")")
+                .contains("@img " + HASH)
+                .contains("![](" + other + ")")
+                // An ordinary Markdown image is not a JRock reference at all, and goes on
+                // being written the way a link is: its text, then its address.
+                .contains("alt (http://example.com/cat.png)");
+    }
+
     // ---- the classes under test, which are private to JRock ----
 
     /** {@code JRock.MarkdownExport.of(markdown)}: the parsed document. */
@@ -204,6 +334,14 @@ class JRockMarkdownExportTest {
                 .getDeclaredMethod("of", String.class);
         of.setAccessible(true);
         return of.invoke(null, markdown);
+    }
+
+    /** The same, with the session's includes, which is what the DOCX export passes. */
+    private static Object export(String markdown, Map<String, Path> includes) throws Exception {
+        Method of = Class.forName("JRock$MarkdownExport")
+                .getDeclaredMethod("of", String.class, Map.class);
+        of.setAccessible(true);
+        return of.invoke(null, markdown, includes);
     }
 
     private static byte[] rtf(Object document) throws Exception {
@@ -220,6 +358,33 @@ class JRockMarkdownExportTest {
 
     private static boolean simplified(Object document) throws Exception {
         return (Boolean) call(document, "simplified");
+    }
+
+    private static int images(Object document) throws Exception {
+        return (Integer) call(document, "images");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> warnings(Object document) throws Exception {
+        return (List<String>) call(document, "warnings");
+    }
+
+    /** The wp:extent of the one picture in a document that places an image of this size. */
+    private String extentOf(int width, int height) throws Exception {
+        Path file = png(width + "x" + height + ".png", width, height);
+        Object document = export("![](" + HASH + ")", Collections.singletonMap(HASH, file));
+        String body = text(unzip(docx(document)).get("word/document.xml"));
+        int at = body.indexOf("<wp:extent ");
+        assertThat(at).describedAs("a wp:extent in " + body).isNotNegative();
+        return body.substring(at + "<wp:extent ".length(), body.indexOf("/>", at));
+    }
+
+    /** A real PNG of exactly this pixel size, which is what the placement is read from. */
+    private Path png(String name, int width, int height) throws Exception {
+        Path file = dir.resolve(name);
+        assertThat(ImageIO.write(new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB),
+                "png", file.toFile())).describedAs("the JDK wrote the PNG").isTrue();
+        return file;
     }
 
     private static Object call(Object document, String name) throws Exception {

@@ -32,7 +32,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   multi-select supported.
 - **Markdown export** of an answer as **RTF or DOCX**, written in-process — the model replies in
   Markdown, and a selected reply becomes a document a word processor, or a layout application,
-  opens with its headings and tables intact ([**Markdown export**](#markdown-export-rtf-and-docx)).
+  opens with its headings, tables and **the pictures it was given** intact
+  ([**Markdown export**](#markdown-export-rtf-and-docx)).
 - **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
   workflow, which is Bedrock Prompt management and Flows without the cloud
   ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)).
@@ -191,8 +192,10 @@ images, while a text document is better via RTF or DOCX, where headings, bold, i
 `.docx` — tables survive into the Markdown as structure the model reads.
 
 **And the other direction: making a PDF.** Select the answer in the log, long-tap (or right-click)
-and pick **Export selected Markdown as DOCX...** — the Markdown becomes a real document, headings
-and tables and all, under [named paragraph styles](#markdown-export-rtf-and-docx). Place that in
+and pick **Export selected Markdown with images as DOCX...** — the Markdown becomes a real
+document, headings and tables and all (and the photographs from the phone's camera roll, if they
+were included with a [Markdown reference](#multimodal-includes-ctrli) and the model wrote it back),
+under [named paragraph styles](#markdown-export-rtf-and-docx). Place that in
 **InDesign**, which imports a Word file by mapping its style names onto your own paragraph styles,
 and the PDF that comes out is typeset rather than printed from a text editor. **Export selected
 Markdown as RTF...** is the lower standard for the same idea: no style names, but anything that
@@ -331,8 +334,13 @@ Attach **text or image** files to a prompt (and convert **PDFs**, **RTFs** or **
 into either):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers six kinds:
+   once, and the dropdown offers seven kinds:
    - **Image files** (png, jpg, jpeg, gif, webp)
+   - **Image with a Markdown reference** (the same files) — one line more in the prompt: a
+     Markdown `![](<hash>)` above the token. The model reads it as a picture belonging to the
+     text and writes it back into its answer where the picture belongs, which is what
+     [**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) then
+     places
    - **Text files as is** (txt, csv, html, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
    - **PDF as text pages** — converts the PDF to one text file per page
@@ -342,8 +350,9 @@ into either):
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart you must re-include files to reuse them.
 3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor (one per file / per PDF
-   page). Duplicate tokens for the same file are not added again (also checked across prior
-   turns in Extend mode).
+   page), preceded by a `![](<hash>)` line under the Markdown-reference filter. Duplicate
+   tokens for the same file are not added again (also checked across prior turns in Extend
+   mode).
 4. The log records each include with stats (locale-formatted numbers):
    - **Images**: dimensions, total pixel count, and file size in bytes.
    - **Text**: symbol count (Unicode code points) and file size in bytes.
@@ -594,20 +603,20 @@ without the surrounding transcript.
 
 The model answers in Markdown. Select an answer in the log, right-click, and two more items
 write that answer out as a document: **Export selected Markdown as RTF...** and **Export
-selected Markdown as DOCX...**. Both are greyed out without a selection — there is nothing to
-export but a selection — and a save dialog gives the file the right extension whatever you type
-into it. Not mobile-only, and not desktop-only: it is the same code in a browser tab, because
-both converters are built in and neither starts a process.
+selected Markdown with images as DOCX...**. Both are greyed out without a selection — there is
+nothing to export but a selection — and a save dialog gives the file the right extension whatever
+you type into it. Not mobile-only, and not desktop-only: it is the same code in a browser tab,
+because both converters are built in and neither starts a process.
 
 - **RTF** is written by hand as plain ASCII: every character above it becomes a `\u` control
   word, so no encoding anywhere can change what the file says. Swing's `RTFEditorKit` reads the
   import direction but does *not* write this one — its writer has no notion of a table, and a
   table is half of what a document is for.
 - **DOCX** is a five-part OOXML package (`[Content_Types].xml`, two `_rels`, `word/styles.xml`,
-  `word/document.xml`) zipped with `java.util.zip`. The paragraphs carry **named styles** —
-  Normal, Heading 1–6, Code, Quote — and the page is A4 with 2 cm margins, which is why this is
-  the format to export for typesetting: a layout application imports a document by mapping style
-  *names* onto its own.
+  `word/document.xml`) zipped with `java.util.zip`, plus one `word/media/` part per picture it
+  places. The paragraphs carry **named styles** — Normal, Heading 1–6, Code, Quote — and the page
+  is A4 with 2 cm margins, which is why this is the format to export for typesetting: a layout
+  application imports a document by mapping style *names* onto its own.
 
 What the Markdown becomes, in both:
 
@@ -632,6 +641,47 @@ A `.docx` written here reads back through **DOCX as Markdown text** as the same 
 or take the two honest differences a round trip has: a table's header row was written bold, so
 it comes back as bold markup, and column alignment is layout the import doesn't read.
 
+### Images in the DOCX
+
+The DOCX export is the one that carries pictures, which is what *with images* in its name means.
+It works on the two things an include leaves in the text, and the model repeats in its answer:
+
+| In the Markdown | In the DOCX |
+|---|---|
+| `![](<hash>)` of an **included** image | the picture itself, zipped into the package as a `word/media/` part and placed as an inline drawing |
+| `@img <hash>` of an **included** image | the file's **base name**, `IMG_4002.jpg`, as text — the token named a file, and the document says which |
+| either one, for a hash **not included** in this session | the line exactly as it stands, plus a warning in the log |
+
+**Nothing about an image stops an export.** A hash whose file was never included — a restart
+forgets the includes, and the model can invent a hash as easily as a word — is left in the text
+as the text it is, and the log says which hash and why once, however many times it occurs. The
+same goes for an include that is not an image at all (a `@txt` file the model referenced as a
+picture) or a file whose bytes are not a PNG, JPEG, GIF or WEBP: the reference stays, the export
+finishes. The log line counts the pictures it did place along with the blocks and tables.
+
+**Sizes are physical, and resolution is the limit.** The page is A4 portrait with 2 cm margins,
+so the text frame is 17 × 25.7 cm, and an image is placed as large as it can be without falling
+below **300 dpi** in either direction:
+
+- A picture big enough in pixels fills the text frame — the width for a landscape one, the height
+  for a portrait one, whichever runs out first.
+- A picture too small for that is placed at exactly 300 dpi instead, so it takes up *less* than
+  the frame and stays sharp rather than being blown up into a blur. A 300 × 200 px image becomes
+  2.54 × 1.69 cm, not a page-wide smudge.
+- Width and height are scaled by one and the same factor in every case, so nothing is ever
+  distorted. That factor is an integer number of EMU per pixel (the smallest of the three
+  limits), which is why the aspect ratio cannot drift as it would with two independent divisions.
+
+The pixel dimensions come from the same header reader the include stats use, and the media part's
+extension and content type are decided by **sniffing the file's magic bytes**, not by trusting its
+name: a `.png` that is really a JPEG would otherwise produce a package whose content types lie,
+and Word answers that with a repair dialog rather than a document.
+
+**The RTF export keeps the simplified logic**: no pictures, and `![](<hash>)` and `@img <hash>`
+are written out as the text they are. An RTF has no package to put a picture in — the bytes would
+have to be hex-dumped into the file itself — and the format is there for anything that opens an
+RTF, not for typesetting.
+
 ## Context menus (right-click / long tap)
 
 Right-clicking (or long-tapping on touch devices) opens a context menu:
@@ -640,8 +690,8 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   on the **selection only**, and the menu says so (*Save selected text as...*, *Print
   selected text...*). A partial export doesn't count as saving the log, so Clear log still
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
-  *Export selected Markdown as DOCX...*, need a selection to mean anything and are greyed out
-  without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
+  *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
+  greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
 - **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), Load prompt
   from file..., Save prompt copy as...
 - **Top bar (empty area)** — Move & resize window...; in the **browser**, also Show/hide
@@ -802,13 +852,24 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   The document is written by hand (`FormattedDocx`), zip entries and all. A second test renames
   a text file to `.docx` and checks the log says there is no `word/document.xml` in it and that
   no `JRock/docx-md/` is created.
+- **`JRockImageRefIncludeTest`** includes one PNG twice through the real dialog, under each of the
+  two filters that offer images, and checks the one line that is the whole difference: *Image with
+  a Markdown reference* leaves `![](<hash>)` above the `@img` token and says so in the log, *Image
+  files* leaves the token alone.
 - **`JRockMarkdownExportTest`** takes the other direction, without a window: it exports a
   Markdown selection and checks each format against something other than itself. The RTF must be
   all ASCII, must read back through the JDK's **own `RTFEditorKit`** with its bold run, bullet
   and umlaut intact, and must contain the table that reader cannot see. The DOCX must be exactly
   five parts, each **well-formed XML**, with its styles *named* (`w:val="heading 1"`) and its
   header row marked as one. Then a **round trip**: exported as DOCX, read back by the importer,
-  and equal to the Markdown it started as. The last test feeds it markup that is wrong or isn't
+  and equal to the Markdown it started as. Then the pictures: a real PNG handed to the export as
+  an include must come out **byte-identical** in `word/media/image1.png`, declared in the content
+  types, related as `rId2`, placed as a `<w:drawing>` — and the `@img` token must have become
+  `IMG_4002.png`, with the hash nowhere in the document. The **sizes** are asserted in EMU against
+  the arithmetic by hand, 4000 × 2000 px and 500 × 4000 px filling the frame's width and height
+  and 300 × 200 px placed at exactly one inch across. An unplaceable reference — an unknown hash,
+  an include that is a `.txt`, an ordinary `![alt](url)` — must leave the text alone, add no media
+  part, and warn once for each. The last test feeds it markup that is wrong or isn't
   markup — a lone `*`, `snake_case`, ragged pipes, an unclosed link, an unclosed fence, a NUL —
   and checks it still exports, still reads, and that the control character was dropped rather
   than written into the XML.

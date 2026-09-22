@@ -19,9 +19,11 @@ import java.util.concurrent.TimeUnit;
 import javax.swing.AbstractButton;
 import javax.swing.Action;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JMenuItem;
 import javax.swing.JRootPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextPane;
@@ -89,7 +91,7 @@ abstract class JRockGuiFixture {
      */
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
             "workingDir", "promptsDir", "promptsDirNote", "apiKeyOverride", "REGION",
-            "regionSource", "MODEL_ID", "availableModels", "pdfDpi");
+            "regionSource", "MODEL_ID", "availableModels", "pdfDpi", "saveIncludeCopies");
 
     private final Map<String, Object> savedConfig = new LinkedHashMap<>();
 
@@ -392,6 +394,17 @@ abstract class JRockGuiFixture {
      * conversion is expected to refuse, where the line to wait for is the refusal.
      */
     protected void chooseInTheIncludeDialog(String filterDescription, Path... files) {
+        chooseInTheIncludeDialog(filterDescription, chooser -> { }, files);
+    }
+
+    /**
+     * The same, with a look at the open dialog before it is approved: for the options
+     * that live in the chooser itself rather than in Configure, which have to be set
+     * while it is up and are read once it is dismissed.
+     */
+    protected void chooseInTheIncludeDialog(String filterDescription,
+                                            java.util.function.Consumer<JFileChooserFixture> whileOpen,
+                                            Path... files) {
         pressCtrl(KeyEvent.VK_I);
 
         JFileChooserFixture chooser =
@@ -419,7 +432,80 @@ abstract class JRockGuiFixture {
         assertThat(currentFilterOf(chooser)).describedAs("the chooser's filter")
                 .isSameAs(filter);
 
+        whileOpen.accept(chooser);
         approveWith(chooser, files);
+    }
+
+    /**
+     * The include dialog's own checkbox, found by the label the user reads.
+     * <p>
+     * It is JRock's accessory panel rather than anything the chooser provides, so it is
+     * looked for in the dialog's hierarchy - and only there, so the window's own
+     * checkboxes (Extend conversation) cannot match it.
+     */
+    protected JCheckBox checkBoxIn(JFileChooserFixture chooser, final String label) {
+        return robot.finder().find(chooser.target(),
+                new GenericTypeMatcher<JCheckBox>(JCheckBox.class) {
+                    @Override
+                    protected boolean isMatching(JCheckBox candidate) {
+                        return label.equals(candidate.getText());
+                    }
+                });
+    }
+
+    /**
+     * Puts a checkbox in the given state, leaving it alone if it is in it already.
+     * <p>
+     * Read and clicked in the one EDT task, because the answer to "is it ticked?"
+     * decides whether to click it: a checkbox that remembers a session-wide setting
+     * (see {@link #checkBoxIn}) comes up ticked the second time round, and a click
+     * then would turn it off. Unlike {@link #press}, this one opens no dialog, so
+     * there is nothing for an invokeAndWait to deadlock behind.
+     */
+    protected static void tick(final AbstractButton box, final boolean on) {
+        GuiActionRunner.execute(new GuiTask() {
+            @Override
+            protected void executeInEDT() {
+                if (box.isSelected() != on) box.doClick(0);
+            }
+        });
+    }
+
+    /**
+     * Invokes an item of the prompt's context menu by its label.
+     * <p>
+     * A popup menu belongs to no window until it is shown, and what shows it is the
+     * prompt's own mouse listener - so the way to it is a popup-trigger event delivered
+     * to the prompt, which is what a right-click is once the operating system has
+     * decided where it went. Dispatched to the component rather than injected, and the
+     * item pressed rather than clicked, for the reasons given in {@link #press}.
+     * <p>
+     * The menu is dismissed afterwards, so the next lookup can only find a menu this
+     * opened.
+     */
+    protected void chooseInThePromptMenu(final String label) {
+        final JTextComponent prompt = promptArea().target();
+        GuiActionRunner.execute(new GuiTask() {
+            @Override
+            protected void executeInEDT() {
+                prompt.dispatchEvent(new java.awt.event.MouseEvent(prompt,
+                        java.awt.event.MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                        0, 4, 4, 1, true));      // popupTrigger = true
+            }
+        });
+        JMenuItem item = robot.finder().find(new GenericTypeMatcher<JMenuItem>(JMenuItem.class) {
+            @Override
+            protected boolean isMatching(JMenuItem candidate) {
+                return label.equals(candidate.getText()) && candidate.isShowing();
+            }
+        });
+        press(item);
+        GuiActionRunner.execute(new GuiTask() {
+            @Override
+            protected void executeInEDT() {
+                javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath();
+            }
+        });
     }
 
     /**
