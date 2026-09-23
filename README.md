@@ -50,8 +50,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   ([**Markdown export**](#markdown-export-rtf-and-docx)).
 - **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
   workflow, which is Bedrock Prompt management and Flows without the cloud
-  ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)) — and a
-  single-file **automation** that runs such a chain by driving the real window, so you watch it
+  ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)) — and single-file
+  **automations** that run such a chain by driving the real window, so you watch it
   work and carry on the conversation when it's done
   ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
 - **Keyboard-driven**, with a Configure dialog for API key, region, model and working directory.
@@ -116,9 +116,9 @@ since otherwise the flag would pin every future launch to today's folder. So the
 follows you into every folder; see
 [Explorer right-click integration](#windows-explorer-right-click-integration).
 
-For a ready-made one, point it at **`automation-samples/`** in this repository — two prompts
-that chain into a document-archiving workflow, the automation that runs that chain end to end,
-and a template for a library of your own. See
+For a ready-made one, point it at **`automation-samples/`** in this repository — three prompts,
+two of which chain into a document-archiving workflow, and the two agents that run them, plus
+a template for a library of your own. See
 [Prompt library and chaining](#prompt-library-and-chaining-automation-samples).
 
 `--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file. The
@@ -889,8 +889,8 @@ there for it, a chain can also run itself: see
 
 ### The samples
 
-`automation-samples/` holds two prompts that chain, an automation that runs the chain, and
-doubles as a template for a prompts directory of your own:
+`automation-samples/` holds three prompts — two that chain and one that stands alone — the two
+agents that run them, and doubles as a template for a prompts directory of your own:
 
 - **`jrock-prompt-doc-to-ascii.txt`** — turn a document into plain text that keeps its layout:
   ASCII rules for tables, right-aligned text kept right-aligned to a fixed column, centred text
@@ -902,10 +902,18 @@ doubles as a template for a prompts directory of your own:
   `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890`. Titles and counterparties are
   normalised to English and Latin-1 and shortened to the name people actually use
   (*Beitragsservice* → `GEZ`, *Bayerische Landesbank* → `BayernLB`).
+- **`jrock-prompt-translate-to-english.txt`** — translate a document into English and answer
+  with **nothing but the translation**, after one `Translated from: <language>` line. All of it,
+  not a summary; the original's paragraphs, headings, lists, tables and page separators kept;
+  numbers, dates, amounts, reference numbers, addresses and URLs copied rather than
+  reformatted; names transliterated with the original in parentheses the first time, and terms
+  with no English equivalent given the same treatment (*income tax return
+  (Einkommensteuererklaerung)*). What cannot be read becomes `[unreadable]` instead of a guess,
+  and what can — a stamp, a signature, a handwritten note — is translated and marked as such.
 
-Both end in bare `@img` / `@txt` lines. Those are **placeholders, not tokens** — a real include
-token carries a 12-hex-digit hash, so a bare one is only ever sent as the text it is. They mark
-where the attachments belong: put the cursor on that line and press Ctrl+I.
+All three end in bare `@img` / `@txt` lines. Those are **placeholders, not tokens** — a real
+include token carries a 12-hex-digit hash, so a bare one is only ever sent as the text it is.
+They mark where the attachments belong: put the cursor on that line and press Ctrl+I.
 
 ### The scenario: a PDF you can find again
 
@@ -933,12 +941,12 @@ The result is a PDF you can identify from the file listing alone, and a text twi
 ### Using them
 
 Point JRock's prompts directory at the folder — `--prompts-dir` on the command line, or the
-**Prompts directory** row in [Configure](#configure-dialog-top-left-button) — and both prompts
-are two keystrokes away from any working directory. On Windows, installing the
+**Prompts directory** row in [Configure](#configure-dialog-top-left-button) — and all three
+prompts are two keystrokes away from any working directory. On Windows, installing the
 ["JRock here!" entries](#windows-explorer-right-click-integration) with it set bakes it in, so
 the library follows you into whichever folder you right-click.
 
-These two are worth reading before they're worth running: the useful part is not the wording but
+They are worth reading before they're worth running: the useful part is not the wording but
 the shape — one prompt per step, the step's input left as an include token at the bottom, and
 an output narrow enough to be the next step's input. Copy the folder and rewrite the contents
 for your own documents. The `jrock-prompt-*.txt` names are only a convention, matching the
@@ -1009,6 +1017,47 @@ It fails by saying why, in the log and in one dialog: no Bedrock key, initialisa
 finished, no Ghostscript (so nothing was included, which is a stop rather than a request that
 asks about a document and attaches none of it), a reply that never came back. Nothing is
 overwritten — an existing `document.txt` becomes `document-2.txt`, and the same on rename.
+
+### A second agent: translating (`JRockTranslateToEnglish.java`)
+
+One pass instead of two, and the shorter half of why both samples are here:
+
+```
+java -cp jrock.jar JRockTranslateToEnglish.java Rechnung.pdf
+java -cp jrock.jar JRockTranslateToEnglish.java --working-dir D:\HPScan   # it asks which file
+```
+
+It loads `jrock-prompt-translate-to-english.txt`, includes the document, sends, and writes the
+reply beside the original as **`<name>-en.txt`** (`-en-2.txt` if that one exists — nothing is
+overwritten, and nothing existing is touched at all, so unlike the inventory it has no question
+to ask and runs straight through). The summary names the language the model says it translated
+from, read back off that first line.
+
+**The document can be any kind JRock can include**, and the include kind comes from the
+extension: `.pdf` as page images, `.docx` and `.rtf` converted to Markdown text, `.txt` `.md`
+`.csv` `.html` `.log` `.java` as they are, and `.png` `.jpg` `.jpeg` `.gif` `.webp` as pictures.
+Which is what makes this one worth [installing as an
+agent](#windows-agents-one-automation-per-folder): that right-click entry hands over whatever
+file you clicked, of any type, so a scan, a Word document and a photograph of a page all
+translate from the same menu item. An extension it has no include for is a stop naming the ones
+that work — before the window opens, not after a minute of Ghostscript.
+
+The `.txt` next to the original is an archive copy, not the only place the answer is. The
+translation is in the transcript, which is the point of driving the real window: select it there
+and **Export selected Markdown with images as DOCX...** turns it into a document, in
+[either A4 orientation](#markdown-export-rtf-and-docx) — a translated letter usually wants to
+end up as a letter.
+
+Its one real limit is that a reply is one reply: a very long document can run into the model's
+own output limit, and what comes back then is a translation that stops in the middle rather than
+an error. JRock sends no `max_tokens` of its own, on purpose — any number it guessed would
+truncate some model's useful output — so the ceiling is whatever the chosen model applies. Split
+the document, or choose a model with more room.
+
+The two files are also worth reading side by side. The plumbing — the flags, `ownDirectory()`,
+`check()`, `reply()`, the dialogs on the event dispatch thread — is the same twice, because an
+automation *is* a prompt, an include and a send; what differs is the chain around them. Copy
+whichever is closer to yours.
 
 ### The automation API
 
@@ -1288,11 +1337,13 @@ Which is why an entry is per **(agent, folder)** pair, not per agent. Install th
 automation from two folders and you get two entries, with two sets of settings:
 
 ```
-JRock agent: Doc Inventory (HPScan)...        one model, 300 dpi
-JRock agent: Doc Inventory (Documents)...     another model, 150 dpi
+JRock agent: Doc Inventory (HPScan)...          one model, 300 dpi
+JRock agent: Doc Inventory (Documents)...       another model, 150 dpi
+JRock agent: Translate To English (HPScan)...   the same folder, the other agent
 ```
 
-The label is built from the file name: `JRockDocInventory.java` → `Doc Inventory`, camel case
+The label is built from the file name: `JRockDocInventory.java` → `Doc Inventory`,
+`JRockTranslateToEnglish.java` → `Translate To English`, camel case
 split into words, the `JRock` prefix moved to the front so every agent sits next to *JRock
 here!* in a menu full of other applications' verbs, and the working folder's name in
 parentheses. The registry key name adds a short hash of the working directory's path, so two
@@ -1355,7 +1406,7 @@ For robustness the build runs on **three operating systems** and publishes three
 
 Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
 (`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
-`JRock.java`, the sample prompts and the automation script) and `automation-samples/` loose
+`JRock.java`, the sample prompts and the automation scripts) and `automation-samples/` loose
 beside it, so the samples can be read without unpacking anything — and so an
 [automation](#automating-the-chain-jrockdocinventoryjava) is one `cp jrock.jar
 automation-samples/` away from running. Because the build is reproducible, the `jrock.jar`
