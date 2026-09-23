@@ -160,11 +160,13 @@ as WebAssembly), so nothing runs on a server.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
 - **The page gets out of the way — and comes back.** A few seconds after launch the page hides
   its own header and footer, giving the Swing display the whole tab. That is what the **Hide
-  these bars after launch** checkbox beside *Run JRock* says it will do — ticked by default, and
-  there so the disappearance is something you were told about rather than something that
-  happened to you. To check the checksum again, the top-bar context menu has **Show/hide the
-  page header & footer**: it calls one function in the page, which flips the chrome and reports
-  which way it went. The page owns that state, so JRock never has to guess.
+  header and footer after launch** checkbox says it will do — ticked by default, and there so the
+  disappearance is something you were told about rather than something that happened to you. It
+  sits in the main area under the text about the checksum and the Configure dialog, with the note
+  that brings them back, and not in the header: a label that long *was* the header on a phone.
+  To check the checksum again, the top-bar context menu has **Show/hide the page header &
+  footer**: it calls one function in the page, which flips the chrome and reports which way it
+  went. The page owns that state, so JRock never has to guess.
 - **Copy and paste reach other apps.** CheerpJ gives the JVM a clipboard of its own that
   nothing else can see, so JRock goes through the browser's clipboard instead: text moves
   between JRock and your mail or notes, by Ctrl+C/X/V or from the context menus. A browser
@@ -203,7 +205,10 @@ tap because that is how a phone reaches everything the Ctrl shortcuts do.*
 The UX is a little clumsy, and worth knowing about before you judge it:
 
 - The on-screen keyboard sometimes needs a tap on the window **outside** the text area before it
-  will come up.
+  will come up. For a **masked** field it may not come up at all, which is why the
+  [Configure dialog's](#configure-dialog-top-left-button) API key row is an ordinary field in the
+  browser and carries its own **Paste** button — the one row a phone cannot type its way out of.
+  Every other row there has a long-tap menu with Copy, Paste and Select all.
 - Scroll bars, text selection and the menus are Swing's own, drawn for a desktop and driven by a
   fingertip. It takes some learning — but you do get used to it.
 - **Several files in one include** need the file dialog's **File Name** box: a tap selects one
@@ -1102,11 +1107,19 @@ that you cannot.
   the working directory again. Leaving the row untouched changes nothing, so moving the
   working directory alone doesn't pin prompts to the folder you just left. A directory that
   doesn't exist yet is created.
-- **Bedrock API key** — write-only: left blank, it keeps the current key; type a value to
-  replace it. What you type is written to `JRock/bedrock-key.txt` in the working directory,
-  which is where it's read from at startup. The key is never displayed. In the browser this
-  row is absent: the key belongs to the page (see [HTTP transport](#http-transport)) and is
-  changed there.
+- **Bedrock API key** — write-only: left blank, it keeps the current key; type or paste a value
+  to replace it. What you enter is **trimmed** and written to `JRock/bedrock-key.txt` in the
+  working directory, which is where it's read from at startup — trimmed because a pasted key
+  arrives with whatever the page copied around it, and no Bedrock key has a space or a newline
+  in it. The key is never displayed. The row disappears only when the hosting page holds the
+  credentials itself (see [HTTP transport](#http-transport)): then there is no key of JRock's to
+  change.
+  In the browser the row is a **plain, unmasked field with its own Paste button**. The mask is
+  what a phone's CheerpJ build will not raise a keyboard for — the region field beside it, same
+  dialog, does come up — and a row you cannot fill in is worse than one whose text can be read
+  over your shoulder; the button then works whatever the keyboard does, since a key is pasted
+  and never typed from memory. Its menu is **Paste** alone: a key that goes in does not need to
+  come back out.
 - **Region** — free text. Kept in `JRock/jrock-config.txt`, so it survives a restart.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
   `JRock/jrock-config.txt` too — as is the **Images DPI** below, which is what makes one
@@ -1127,6 +1140,12 @@ that you cannot.
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
   long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
   only when it is **off**, so nobody counts on a backup that isn't being taken.
+
+Every row above has a **right-click — or, on a touch screen, a long-press — menu** with Copy,
+Paste and Select all (the model's is on the combo's editor, which is what a tap lands on). On a
+phone there is no Ctrl+V, and *Select all* is in there because a field that already holds a
+region, a model or a path is a field whose contents are in the way of the one being pasted over
+it. The API key row is the exception, with Paste alone.
 
 Applying re-runs the session init (working directory reported first, then models loaded,
 ending with `Ready.`). Changing the working directory reloads **both the log and the prompt**

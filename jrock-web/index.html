@@ -40,21 +40,10 @@
     header a.brand:hover { text-decoration: underline; }
     header .spacer { flex: 1; }
 
-    /* Keep the checkbox and the Run button together on one line (no wrapping). */
-    .controls { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; flex: 0 0 auto; }
-
-    /* The one choice this page offers, small and quiet beside the Run button. */
-    .controls label.check {
-      display: flex; align-items: center; gap: 5px; cursor: pointer;
-      font-size: 12px; color: var(--muted); white-space: nowrap;
-    }
-    .controls label.check input { margin: 0; accent-color: var(--brand); cursor: pointer; }
-
     /* Narrow screens: smaller title so the single-line header fits comfortably. */
     @media (max-width: 520px) {
       header { gap: 8px; padding: 10px 12px; }
       header h1 { font-size: 14px; }
-      .controls label.check { font-size: 11px; }
     }
     button {
       font-size: 13px; padding: 6px 12px; cursor: pointer;
@@ -85,6 +74,15 @@
       color: #9aa4a8; font-size: 14px; text-align: center; padding: 24px;
       max-width: 560px; line-height: 1.5;
     }
+    #display-wrap .placeholder p { margin: 0 0 14px; }
+    #display-wrap .placeholder p.hint { font-size: 12px; margin: 8px 0 0; }
+    /* The one choice this page offers, under the text that says what to check before
+       pressing Run - and not in the header, where a label that long was the header. */
+    label.check {
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+      color: #c3cbce;
+    }
+    label.check input { margin: 0; accent-color: var(--brand); cursor: pointer; }
     /* On this dark panel the default link blue glares; a shade brighter than the
        text around it is enough, the underline being what marks it as a link. */
     #display-wrap .placeholder a { color: #c3cbce; }
@@ -109,13 +107,7 @@
   <header>
     <h1><a class="brand" href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock</a> in the browser</h1>
     <span class="spacer"></span>
-    <div class="controls">
-      <label class="check" for="hideChrome"
-             title="A few seconds after JRock starts, this page's header and footer are hidden so the app gets the whole tab. Bring them back any time from JRock's own window menu: right-click the empty area of its top bar.">
-        <input id="hideChrome" type="checkbox" checked /> Hide these bars after launch
-      </label>
-      <button id="runBtn" disabled>Run JRock</button>
-    </div>
+    <button id="runBtn" disabled>Run JRock</button>
   </header>
 
   <div id="info">
@@ -125,16 +117,27 @@
 
   <div id="display-wrap">
     <div class="placeholder" id="placeholder">
-      Compare the SHA-256 above with the build hashes published in the
-      <a href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock
-      repository</a> (and optionally download the JAR to hash it yourself), then press
-      <b>Run JRock</b>. Your Bedrock region and API key go into JRock's own
-      <b>Configure</b> dialog, exactly as on the desktop: they are kept in this browser's
-      storage, so they are still there after a reload.
+      <p>
+        Compare the SHA-256 above with the build hashes published in the
+        <a href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock
+        repository</a> (and optionally download the JAR to hash it yourself), then press
+        <b>Run JRock</b>. Your Bedrock region and API key go into JRock's own
+        <b>Configure</b> dialog, exactly as on the desktop: they are kept in this browser's
+        storage, so they are still there after a reload.
+      </p>
+      <label class="check" for="hideChrome">
+        <input id="hideChrome" type="checkbox" checked /> Hide header and footer after launch
+      </label>
+      <p class="hint">
+        A few seconds after JRock starts, this page's header and footer are hidden so the app
+        gets the whole tab. To bring them back - to check the checksum, or to read the page's
+        own log - long-press, or right-click, the empty area at the top of JRock's window and
+        choose <b>Show/hide the page header &amp; footer</b>.
+      </p>
     </div>
   </div>
 
-  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own HTTP <code>fetch()</code>, with the API key JRock holds: type it into JRock's Configure dialog, and it is saved in /files/JRock/bedrock-key.txt inside this browser's own storage, where a reload finds it again. A short-term key can be generated in the <a href="https://console.aws.amazon.com/bedrock-mantle/api-keys" target="_blank" rel="noopener">AWS console</a>. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
+  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own HTTP <code>fetch()</code>, with the API key JRock holds: put it into JRock's Configure dialog - that row is unmasked here and has its own Paste button - and it is saved in /files/JRock/bedrock-key.txt inside this browser's own storage, where a reload finds it again. A short-term key can be generated in the <a href="https://console.aws.amazon.com/bedrock-mantle/api-keys" target="_blank" rel="noopener">AWS console</a>. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
 
   <script>
     (function () {
@@ -280,9 +283,9 @@
       // --- Page chrome: the header, the verification panel, the bottom bar ------
       //
       // All of it is hidden shortly after launch to give the Swing display the
-      // whole tab - if the checkbox beside Run asked for it, which it does by
-      // default. Not always what you want (the checksum is up there), so JRock's
-      // window menu can ask for it back, through the single function below.
+      // whole tab - if the checkbox under the placeholder text asked for it, which
+      // it does by default. Not always what you want (the checksum is up there), so
+      // JRock's window menu can ask for it back, through the single function below.
       //
       // The page owns the state, and one call flips it - the Java side never has
       // to know or guess which way round things currently are.
@@ -632,6 +635,9 @@
         if (started || !jarBytes) return;
         started = true;
         runBtn.disabled = true;
+        // The checkbox lives in the placeholder, which is about to go, so the answer is
+        // read while it is still on the page rather than off a detached element.
+        var hideChrome = hideChromeBox.checked;
         infoEl.style.display = "none";          // hide verification panel
         if (placeholder) placeholder.remove();
 
@@ -661,12 +667,12 @@
 
           log("Running JRock ... (first run downloads the Java runtime; please wait)");
           // Once the app is up, hide the chrome after 5s to give the Swing display all
-          // the space - unless the checkbox beside Run was unticked, which is the answer
-          // to "where did the page go?" being decided before it happens rather than
-          // afterwards. Going through setChromeHidden (rather than hiding the elements
-          // directly) is what makes JRock's toggle exact: the page knows the chrome is
-          // away, so the first toggle brings it back.
-          if (hideChromeBox.checked) {
+          // the space - unless the checkbox was unticked, which is the answer to "where
+          // did the page go?" being decided before it happens rather than afterwards.
+          // Going through setChromeHidden (rather than hiding the elements directly) is
+          // what makes JRock's toggle exact: the page knows the chrome is away, so the
+          // first toggle brings it back.
+          if (hideChrome) {
             setTimeout(function () { setChromeHidden(true); }, 5000);
           }
           var code = await cheerpjRunJar(JAR_PATH);
