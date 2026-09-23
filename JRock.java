@@ -2835,11 +2835,29 @@ public class JRock {
         javax.swing.JPanel promptsRow =
                 dirRow(frame, promptsF, "Choose prompts & agents directory");
 
-        javax.swing.JPasswordField keyF = new javax.swing.JPasswordField(24); // never prefilled
-        // An API key is never typed: it is pasted from wherever it was issued. No log
-        // here - a modal dialog has none to write to (see addPasteMenu).
+        // The key row: masked on the desktop, and a PLAIN field in the browser. On a
+        // phone CheerpJ raises the on-screen keyboard for the region field next to it
+        // and not for this one, and the echo character is the only difference between
+        // the two - so the mask is what makes the row impossible to fill in, and a row
+        // you cannot fill in is worse than one whose text can be read over your
+        // shoulder. It opens blank, is never prefilled, is never written back into the
+        // dialog, and is gone when the dialog closes.
+        javax.swing.text.JTextComponent keyF = isCheerpJ()
+                ? new javax.swing.JTextField(24)
+                : new javax.swing.JPasswordField(24);
+        // An API key is never typed from memory: it is pasted from wherever it was
+        // issued. Paste alone - a key that goes in does not need to come back out, and
+        // Select all has nothing to select in a field that opens empty. No log here: a
+        // modal dialog has none to write to (see addPasteMenu).
         addPasteMenu(keyF, null);
         javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
+        // Copy, Paste and Select all on every row a value is put into, because on a
+        // phone there is no Ctrl+V - and Select all because a field that already holds a
+        // region, a model or a path is a field whose contents are in the way of the one
+        // being pasted over it (see addCopyPasteMenu). No log, as above.
+        addCopyPasteMenu(cwdF, null);
+        addCopyPasteMenu(promptsF, null);
+        addCopyPasteMenu(regionF, null);
         // In the browser the API key belongs to the hosting page, so JRock has no
         // key to show or set: the row is left out entirely rather than offered as a
         // field that would have no effect.
@@ -2853,6 +2871,12 @@ public class JRock {
         modelF.setFont(modelF.getFont().deriveFont(java.awt.Font.PLAIN));  // not bold
         modelF.getEditor().getEditorComponent()
                 .setFont(modelF.getFont().deriveFont(java.awt.Font.PLAIN));
+        // The menu goes on the combo's EDITOR and not on the combo: the editor is the
+        // text component, it is what a tap lands on, and it is what a paste has to reach.
+        java.awt.Component modelEditor = modelF.getEditor().getEditorComponent();
+        if (modelEditor instanceof javax.swing.text.JTextComponent) {
+            addCopyPasteMenu((javax.swing.text.JTextComponent) modelEditor, null);
+        }
 
         // Image resolution: a fixed list, so not editable - unlike the model, an
         // arbitrary number here has no meaning worth supporting.
@@ -2889,7 +2913,9 @@ public class JRock {
         addRow(fields, c, row++, "Working directory:", cwdRow);
         addRow(fields, c, row++, "Prompts & agents:", promptsRow);
         if (!hostKey) {
-            addRow(fields, c, row++, "Bedrock API key:", keyF);
+            // In the browser the row carries a Paste button of its own - see pasteRow.
+            addRow(fields, c, row++, "Bedrock API key:",
+                    isCheerpJ() ? pasteRow(keyF) : keyF);
         }
         addRow(fields, c, row++, "AWS region:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
@@ -2908,9 +2934,19 @@ public class JRock {
             + "to each request itself - so it is never handed to the JVM. Change it "
             + "on the page.\n\n"
             : "The API key field is intentionally blank and write-only: leave it empty "
-            + "to keep the current key; type a value to replace it. What you type is "
-            + "written to JRock/bedrock-key.txt in the working directory, which is "
-            + "where it is read from at startup. The key is never displayed.\n\n"
+            + "to keep the current key; type or paste a value to replace it. What you "
+            + "enter is written to JRock/bedrock-key.txt in the working directory, which "
+            + "is where it is read from at startup. The stored key is never shown here, "
+            + "and what you enter is trimmed - a pasted key brings the page's spaces "
+            + "and newlines with it.\n\n"
+            + "Every row above has a right-click - or, on a touch screen, a long-press - "
+            + "menu with Copy, Paste and Select all; the API key row has Paste alone. "
+            + (isCheerpJ()
+               ? "In the browser that row is also the one field left unmasked, and it has "
+               + "a Paste button of its own: CheerpJ brings up no on-screen keyboard for "
+               + "a masked field, so on a phone there would otherwise be no way to fill "
+               + "it in at all.\n\n"
+               : "\n\n")
             + "The region, the model and the images DPI are kept in "
             + "JRock/jrock-config.txt beside it, so they survive a restart. Both files "
             + "belong to the working directory and are plain text you can edit "
@@ -3061,13 +3097,19 @@ public class JRock {
         // Written to the working folder's key file, which is the one place a key is
         // ever written: the folder it was typed for is the folder that keeps it (see
         // "Settings files").
+        //
+        // Trimmed, because a key that was pasted arrives with whatever the page copied
+        // around it, and no Bedrock key has a space or a newline in it.
         if (!hostKey) {
-            char[] key = keyF.getPassword();
-            if (key.length > 0) {
-                apiKey = new String(key);
+            char[] typed = (keyF instanceof javax.swing.JPasswordField)
+                    ? ((javax.swing.JPasswordField) keyF).getPassword()
+                    : keyF.getText().toCharArray();
+            String key = new String(typed).trim();
+            java.util.Arrays.fill(typed, '\0');   // wipe the transient char[]
+            if (!key.isEmpty()) {
+                apiKey = key;
                 saveKeyQuietly(apiKey);
             }
-            java.util.Arrays.fill(key, '\0');   // wipe the transient char[]
         }
 
         // Region + model (free text).
@@ -3115,6 +3157,27 @@ public class JRock {
         javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(4, 0));
         panel.add(field, BorderLayout.CENTER);
         panel.add(browse, BorderLayout.EAST);
+        return panel;
+    }
+
+    // A field with a "Paste" button beside it, the way dirRow gives one a "Browse..."
+    // button. For the browser only, and for the API key row in particular.
+    //
+    // The long-press menu (addPasteMenu) is already on that field, and on a phone a long
+    // press is a gesture competing with the browser's own - the iOS text callout, the
+    // drag-and-drop pick-up - so it is not something to depend on for the one row that
+    // has no other way in. A directory row has Browse..., a region and a model can be
+    // typed once the keyboard is up; a key can only be pasted. A button is one tap.
+    private static javax.swing.JPanel pasteRow(javax.swing.text.JTextComponent field) {
+        JButton paste = new JButton("Paste");
+        paste.setToolTipText("Paste the key from the browser's clipboard");
+        paste.addActionListener(ev -> {
+            clipboardPaste(field, null);        // no log to write to in a modal dialog
+            field.requestFocusInWindow();
+        });
+        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(4, 0));
+        panel.add(field, BorderLayout.CENTER);
+        panel.add(paste, BorderLayout.EAST);
         return panel;
     }
 
