@@ -1003,20 +1003,21 @@ public class JRock {
 
     // ---- Multimodal includes (Ctrl+I) --------------------------------------
     // Non-persistent map of file hash -> path. Cleared on restart (users must
-    // re-include files to reuse them). Text and images share this map; the token
-    // kind (@img/@txt) in the prompt disambiguates how each is sent.
+    // re-include files to reuse them). Text, images and audio share this map; the token
+    // kind (@img/@txt/@audio) in the prompt disambiguates how each is sent.
     private static final java.util.Map<String, Path> INCLUDES = new java.util.HashMap<>();
 
     // Hex digits kept from a file's SHA-256. Enough to identify a handful of
     // attachments per session without the token dominating the prompt and the log.
     private static final int HASH_LEN = 12;
 
-    // Prompt token that stands in for an included file: "@img <hash>" or "@txt <hash>".
-    // Hash is a shortened hex SHA-256. Matched anywhere in the prompt. The trailing
-    // lookahead requires the hash to end there, so a longer hex run isn't read as a
-    // token plus leftover text.
+    // Prompt token that stands in for an included file: "@img <hash>", "@txt <hash>" or
+    // "@audio <hash>". Hash is a shortened hex SHA-256. Matched anywhere in the prompt.
+    // The trailing lookahead requires the hash to end there, so a longer hex run isn't
+    // read as a token plus leftover text.
     private static final java.util.regex.Pattern INCLUDE_TOKEN =
-            java.util.regex.Pattern.compile("@(img|txt) ([0-9a-f]{" + HASH_LEN + "})(?![0-9a-f])");
+            java.util.regex.Pattern.compile(
+                    "@(img|txt|audio) ([0-9a-f]{" + HASH_LEN + "})(?![0-9a-f])");
 
     // The include's own log line, read back: "Included @img <hash> from <path>", as
     // written by includeOne. The log is the only record of where an included file was
@@ -1025,7 +1026,7 @@ public class JRock {
     // stay in step; the line is written in exactly one place for that reason.
     private static final java.util.regex.Pattern INCLUDE_LOG_LINE =
             java.util.regex.Pattern.compile(
-                    "Included @(img|txt) ([0-9a-f]{" + HASH_LEN + "}) from (.+)");
+                    "Included @(img|txt|audio) ([0-9a-f]{" + HASH_LEN + "}) from (.+)");
 
     // The first HASH_LEN hex digits of a file's SHA-256. Null on read failure.
     private static String hashFile(Path p) {
@@ -1942,8 +1943,8 @@ public class JRock {
             @Override public void actionPerformed(ActionEvent e) { printLog(frame, output); }
         });
 
-        // Ctrl+I includes a text or image file: hashes it, remembers hash -> path,
-        // and inserts an "@img <hash>" / "@txt <hash>" token at the prompt cursor.
+        // Ctrl+I includes a text, image or audio file: hashes it, remembers hash -> path,
+        // and inserts an "@img" / "@txt" / "@audio <hash>" token at the prompt cursor.
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "jrock-include");
         frame.getRootPane().getActionMap().put("jrock-include", new AbstractAction() {
@@ -2037,7 +2038,7 @@ public class JRock {
 
         // Prompt area: Include... / Load prompt... / Save prompt copy...
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
-        addMenuItem(promptMenu, "Include text, image, PDF, RTF or DOCX file...",
+        addMenuItem(promptMenu, "Include text, image, audio, PDF, RTF or DOCX file...",
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected(), false));
         // The same dialog, the same filters, one thing more: the chosen file is copied
         // into JRock/includes/ and included from the copy, which is the include that
@@ -2391,8 +2392,8 @@ public class JRock {
         return null;
     }
 
-    // Removes the bare "@img" / "@txt" lines a sample prompt ends with, leaving the
-    // caret at the end of what is left. Returns how many lines it removed.
+    // Removes the bare "@img" / "@txt" / "@audio" lines a sample prompt ends with, leaving
+    // the caret at the end of what is left. Returns how many lines it removed.
     //
     // Those lines are placeholders and not tokens - a token carries a 12-hex-digit
     // hash - so left in place they are sent as the two words they are. A person reads
@@ -2407,7 +2408,7 @@ public class JRock {
             java.util.List<String> keep = new ArrayList<>();
             for (String line : live.input.getText().split("\n", -1)) {
                 String bare = line.trim();
-                if (bare.equals("@img") || bare.equals("@txt")) {
+                if (bare.equals("@img") || bare.equals("@txt") || bare.equals("@audio")) {
                     removed[0]++;
                 } else {
                     keep.add(line);
@@ -2435,6 +2436,7 @@ public class JRock {
     //   "img"    an image file, as a picture
     //   "imgref" the same, with a Markdown "![](<hash>)" reference above the token
     //   "txt"    a text file, as it is
+    //   "audio"  a recording (wav, mp3, m4a), as an input_audio part
     //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
     //   "rtf"    an RTF, converted to Markdown text
     //   "docx"   a DOCX, converted to Markdown text
@@ -2464,10 +2466,12 @@ public class JRock {
                     break;
                 case "img":
                 case "imgref":
+                case "audio":
                 case "txt": {
-                    boolean image = !kind.equals("txt");
+                    boolean image = kind.equals("img") || kind.equals("imgref");
                     onEdt(() -> includeOne(live.input, live.log, false, path,
-                            image ? "img" : "txt", image, kind.equals("imgref")));
+                            image ? "img" : kind.equals("audio") ? "audio" : "txt",
+                            image, kind.equals("imgref")));
                     break;
                 }
                 default:
@@ -2979,7 +2983,7 @@ public class JRock {
         // (no space-padding). The "Shortcuts" border title keeps the default bold.
         String[][] keys = {
             {"Ctrl+Enter", "Send message (call a Bedrock model)"},
-            {"Ctrl+I", "Include a text, image, PDF, RTF or DOCX file"},
+            {"Ctrl+I", "Include a text, image, audio, PDF, RTF or DOCX file"},
             {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
             {"Ctrl+U", "Fetch a URL and include what it answers with"},
             {"Ctrl+D", "Toggle Dialog only"},
@@ -4397,6 +4401,19 @@ public class JRock {
     private static final String[] IMAGE_EXTENSIONS = { "png", "jpg", "jpeg", "gif", "webp" };
     private static final String IMAGE_FILTER_SUFFIX = " (png, jpg, jpeg, gif, webp)";
 
+    // The audio formats the include dialog offers, which are also the ones AudioHeader
+    // can read a header out of.
+    //
+    // wav and mp3 are what the chat API documents for an "input_audio" part - its format
+    // field is an enum of exactly those two ("Currently supports "wav" and "mp3""). m4a
+    // is in the list anyway, because it is what a phone's voice memo and most dictation
+    // apps hand back, and the endpoint is the only authority on whether it takes one:
+    // nothing in the API documents an m4a either way. So JRock sends it, says in the log
+    // that it is doing something undocumented, and lets the answer be the answer - see
+    // audioFormat and the note includeOne writes.
+    private static final String[] AUDIO_EXTENSIONS = { "wav", "mp3", "m4a" };
+    private static final String AUDIO_FILTER_SUFFIX = " (wav, mp3, m4a)";
+
     // The chooser's "File name" field: the first text field in it, every look and feel
     // putting that one first and the rest of the chooser having none. Found by looking
     // rather than by asking the UI delegate, which keeps it in a protected field of its
@@ -4463,11 +4480,12 @@ public class JRock {
     }
 
     // ---- Include file (Ctrl+I) ---------------------------------------------
-    // Lets the user pick a text or image file, a PDF to convert (via Ghostscript)
+    // Lets the user pick a text, image or audio file, a PDF to convert (via Ghostscript)
     // into per-page text or per-page images, or an RTF or DOCX to convert into
     // Markdown (with the JDK's own RTF reader and XML parser). Each included file is hashed, remembered as
-    // hash -> path in the non-persistent INCLUDES map, logged (with image
-    // dimensions where applicable), and gets an "@txt <hash>" / "@img <hash>"
+    // hash -> path in the non-persistent INCLUDES map, logged (with image dimensions or
+    // a recording's own header where applicable), and gets an "@txt <hash>" /
+    // "@img <hash>" / "@audio <hash>"
     // token inserted at the prompt cursor - an image optionally with a Markdown
     // "![](<hash>)" reference above it, which is what the DOCX export places.
     //
@@ -4508,9 +4526,17 @@ public class JRock {
         javax.swing.filechooser.FileNameExtensionFilter docxMarkdownFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         "DOCX as Markdown text (*.docx)", "docx");
+        // A recording, sent as itself: the model is given the audio, not a transcript of
+        // it made here. There is nothing to convert and nothing to rasterise - the file
+        // goes out base64 in an "input_audio" part, the way an image goes out in an
+        // "image_url" one (see AUDIO_EXTENSIONS and buildParts).
+        javax.swing.filechooser.FileNameExtensionFilter audioFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "Audio files" + AUDIO_FILTER_SUFFIX, AUDIO_EXTENSIONS);
         chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
         chooser.addChoosableFileFilter(imageRefFilter);
         chooser.addChoosableFileFilter(textFilter);
+        chooser.addChoosableFileFilter(audioFilter);
         chooser.addChoosableFileFilter(pdfImageFilter);
         chooser.addChoosableFileFilter(rtfMarkdownFilter);
         chooser.addChoosableFileFilter(docxMarkdownFilter);
@@ -4532,6 +4558,7 @@ public class JRock {
         boolean rtf = chosen == rtfMarkdownFilter;
         boolean docx = chosen == docxMarkdownFilter;
         boolean isImage = chosen == imageFilter || chosen == imageRefFilter;
+        boolean isAudio = chosen == audioFilter;
         boolean markdownRef = chosen == imageRefFilter;
 
         // Process each chosen file in turn, all under the selected filter's kind.
@@ -4565,7 +4592,8 @@ public class JRock {
                         // Left on the EDT: hashing and reading a plain include is
                         // quick, and this is what it always did.
                         onEdt(() -> includeOne(input, log, extend, included,
-                                isImage ? "img" : "txt", isImage, markdownRef));
+                                isImage ? "img" : isAudio ? "audio" : "txt",
+                                isImage, markdownRef));
                     }
                 }
                 return null;
@@ -4995,6 +5023,25 @@ public class JRock {
                 log.gray("Image: (dimensions not in the header)"
                         + (fileBytes >= 0 ? "; " + fmtNum(fileBytes) + " bytes" : ""));
             }
+        } else if ("audio".equals(kind)) {
+            // A recording's own header, the way an image include reports its dimensions:
+            // what the file claims to be, how it was sampled, and how long it plays -
+            // the three things that say whether the right file was picked. Unreadable, or
+            // a format AudioHeader does not know: the byte count, which is all that is
+            // certain then (see AudioHeader).
+            String about = AudioHeader.describe(file, fileBytes);
+            log.gray("Audio: " + (about != null ? about : "(nothing readable in the header)")
+                    + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
+            // Said once per include, where the file was picked, rather than at send time
+            // among the request lines: the documented format values for an input_audio
+            // part are wav and mp3, and an m4a is JRock asking the endpoint a question
+            // nobody's documentation answers.
+            String format = audioFormat(file);
+            if (!format.equals("wav") && !format.equals("mp3")) {
+                log.gray("Sent as input_audio with format \"" + format + "\". The API "
+                        + "documents \"wav\" and \"mp3\" only, so if this one comes back "
+                        + "rejected, that is the endpoint's answer and not a fault here.");
+            }
         } else {
             // Text: symbol count (Unicode code points) + byte count.
             try {
@@ -5414,7 +5461,7 @@ public class JRock {
 
         if (kinds.isEmpty()) {
             log.gray("Reload all includes: nothing refers to an include - "
-                    + "no @img/@txt token in the log or the prompt.");
+                    + "no @img/@txt/@audio token in the log or the prompt.");
             log.gray("");
             return;
         }
@@ -5618,6 +5665,166 @@ public class JRock {
         // than saying the dimensions could not be read.
         private static int[] positive(int width, int height) {
             return (width > 0 && height > 0) ? new int[] { width, height } : null;
+        }
+    }
+
+    // What an audio include is, read out of the file's own header: the format, how it was
+    // sampled, and how long it plays.
+    //
+    // ImageHeader's counterpart, and for the same reasons: header arithmetic only, no
+    // decoder, no native library, nothing that behaves differently in the browser build -
+    // and the bytes JRock sends are untouched by all of it, so these numbers are only ever
+    // for the log. The byte-order helpers ARE ImageHeader's: a nested class can reach a
+    // sibling's private statics, so le16 and isAscii exist once and not twice.
+    //
+    // Two formats are read, of the three the include filter offers:
+    //
+    //   WAV  the RIFF chunks, walked for "fmt " (how it was sampled) and "data" (how much
+    //        of it there is), so the length is exact.
+    //   MP3  the first frame header after any ID3v2 tag - MPEG version, layer, bitrate,
+    //        sample rate. The length follows from the file size at that bitrate: exact for
+    //        a constant-bitrate file, an estimate for a variable one, and nothing in the
+    //        header says which, so it is always called one.
+    //   M4A  named, and nothing more. Its numbers live in a movie header nested inside
+    //        "moov", which sits wherever the writer put it - a box walk, a version byte
+    //        that moves two fields, a timescale. That is another thirty lines, and thirty
+    //        lines is what this class does not have; see the budget below.
+    //
+    // A format that is none of those, or a header that does not say: null, and the caller
+    // reports the byte count alone - which is the honest answer and is what the file is
+    // charged by anyway. That is also the deal this class is kept to: a hundred lines of
+    // arithmetic and not one more, so the moment a format needs more than that (an M4A's
+    // duration, a VBR header for an exact MP3 length, a "stsd" walk for a sample rate) the
+    // answer is the byte count, not a decoder inside JRock.
+    private static final class AudioHeader {
+        // Enough for a WAV's leading chunks, and for an ID3v2 tag's own length plus the
+        // frame sync behind it. Nothing here reads past the front of the file.
+        private static final int HEAD_BYTES = 4096;
+
+        // Layer III bitrates, in kbps, indexed by the header's 4-bit field: one table for
+        // MPEG 1, one for MPEG 2 and 2.5. Index 0 (free) and 15 (bad) are not bitrates.
+        private static final int[] MP3_V1 = { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128,
+                160, 192, 224, 256, 320, 0 };
+        private static final int[] MP3_V2 = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80,
+                96, 112, 128, 144, 160, 0 };
+
+        // Sample rates by MPEG version (1, 2, 2.5) and the header's 2-bit field.
+        private static final int[][] MP3_RATES = { { 44100, 48000, 32000 },
+                { 22050, 24000, 16000 }, { 11025, 12000, 8000 } };
+
+        private AudioHeader() { }   // static-only: there is no per-file state to hold
+
+        // One line about the file, or null when its header says nothing this can read.
+        // bytes is the file's size, which is what the two estimates are made from.
+        static String describe(Path file, long bytes) {
+            try {
+                byte[] h = head(file, HEAD_BYTES);
+                if (ImageHeader.isAscii(h, 0, "RIFF") && ImageHeader.isAscii(h, 8, "WAVE")) {
+                    return wav(h, bytes);
+                }
+                if (ImageHeader.isAscii(h, 4, "ftyp")) return "MPEG-4 audio (m4a)";
+                return mp3(h, bytes);
+            } catch (IOException ex) {
+                return null;
+            }
+        }
+
+        // The first count bytes, or as many as there are.
+        private static byte[] head(Path file, int count) throws IOException {
+            try (java.io.InputStream in = Files.newInputStream(file)) {
+                byte[] buf = new byte[count];
+                int n = 0;
+                for (int r; n < count && (r = in.read(buf, n, count - n)) >= 0; ) n += r;
+                return (n == count) ? buf : java.util.Arrays.copyOf(buf, n);
+            }
+        }
+
+        // WAV: chunk headers from byte 12 on, each an id, a little-endian length and a
+        // payload padded to an even boundary. "fmt " says how it was sampled, "data" how
+        // much of it follows - and "data" is where the walk stops, that payload being the
+        // recording itself.
+        private static String wav(byte[] h, long bytes) {
+            int channels = 0, bits = 0, byteRate = 0;
+            long rate = 0, dataBytes = -1;
+            for (int at = 12; at + 8 <= h.length; ) {
+                long size = le32(h, at + 4);
+                int body = at + 8;
+                if (ImageHeader.isAscii(h, at, "fmt ") && body + 16 <= h.length) {
+                    channels = ImageHeader.le16(h, body + 2);
+                    rate = le32(h, body + 4);
+                    byteRate = (int) le32(h, body + 8);
+                    bits = ImageHeader.le16(h, body + 14);
+                } else if (ImageHeader.isAscii(h, at, "data")) {
+                    dataBytes = size;
+                    break;
+                }
+                if (size <= 0 || size > h.length) break;   // nonsense, or past what was read
+                at = body + (int) size + (int) (size & 1);
+            }
+            if (rate <= 0 || channels <= 0) return null;
+            String about = "WAV, " + kHz(rate)
+                    + ", " + (channels == 1 ? "mono" : channels == 2 ? "stereo" : channels
+                            + " channels")
+                    + (bits > 0 ? ", " + bits + "-bit" : "");
+            if (byteRate <= 0) return about;
+            about += ", " + fmtNum(byteRate * 8L / 1000) + " kbps";
+            // 44 bytes is the smallest WAV header there is, so that estimate is only
+            // reached when a tag chunk pushed "data" past the bytes read above.
+            long audio = (dataBytes > 0) ? dataBytes : bytes - 44;
+            return (audio <= 0) ? about
+                    : about + ", " + clock(audio / (double) byteRate)
+                            + (dataBytes > 0 ? "" : " (estimated)");
+        }
+
+        // MP3: the first frame header, which is 11 bits of 1 followed by the fields. Only
+        // Layer III is read - that is what an .mp3 is - and a byte pair that looks like a
+        // sync but says something else is skipped rather than believed.
+        private static String mp3(byte[] h, long bytes) {
+            int at = 0;
+            // An ID3v2 tag comes first when there is one: 10 bytes, then a length written
+            // 7 bits to the byte (the 8th is always 0, so a tag cannot spell a frame sync).
+            if (ImageHeader.isAscii(h, 0, "ID3") && h.length >= 10) {
+                at = 10 + (((h[6] & 0x7F) << 21) | ((h[7] & 0x7F) << 14)
+                        | ((h[8] & 0x7F) << 7) | (h[9] & 0x7F));
+            }
+            for (; at >= 0 && at + 4 <= h.length; at++) {
+                if ((h[at] & 0xFF) != 0xFF || (h[at + 1] & 0xE0) != 0xE0) continue;
+                int version = (h[at + 1] >> 3) & 3;     // 3 = MPEG 1, 2 = MPEG 2, 0 = 2.5
+                int layer = (h[at + 1] >> 1) & 3;       // 1 = Layer III
+                int bitrateIx = (h[at + 2] >> 4) & 15;
+                int rateIx = (h[at + 2] >> 2) & 3;
+                if (layer != 1 || version == 1 || rateIx == 3
+                        || bitrateIx == 0 || bitrateIx == 15) continue;
+                int kbps = (version == 3 ? MP3_V1 : MP3_V2)[bitrateIx];
+                long rate = MP3_RATES[version == 3 ? 0 : version == 2 ? 1 : 2][rateIx];
+                String about = "MP3 (MPEG " + (version == 3 ? "1" : version == 2 ? "2" : "2.5")
+                        + " Layer III), " + kHz(rate)
+                        + ", " + (((h[at + 3] >> 6) & 3) == 3 ? "mono" : "stereo")
+                        + ", " + kbps + " kbps";
+                return (bytes <= at) ? about
+                        : about + ", " + clock((bytes - at) * 8.0 / (kbps * 1000))
+                                + " at that bitrate";
+            }
+            return null;
+        }
+
+        private static long le32(byte[] b, int at) {
+            return ImageHeader.le16(b, at) | ((long) ImageHeader.le16(b, at + 2) << 16);
+        }
+
+        // 44100 -> "44.1 kHz", 48000 -> "48 kHz": nobody reads a sample rate in hertz.
+        private static String kHz(long rate) {
+            return (rate % 1000 == 0) ? (rate / 1000) + " kHz"
+                    : String.format(java.util.Locale.ROOT, "%.1f kHz", rate / 1000.0);
+        }
+
+        // Seconds as m:ss, or h:mm:ss once there is an hour of it.
+        private static String clock(double seconds) {
+            long total = Math.round(seconds);
+            return (total >= 3600)
+                    ? String.format(java.util.Locale.ROOT, "%d:%02d:%02d",
+                            total / 3600, (total % 3600) / 60, total % 60)
+                    : String.format(java.util.Locale.ROOT, "%d:%02d", total / 60, total % 60);
         }
     }
 
@@ -8280,16 +8487,33 @@ public class JRock {
 
     // A content part destined for the OpenAI multimodal "content" array.
     private static final class Part {
-        final boolean image;      // true = image_url part, false = text part
+        final boolean image;      // true = image_url part, false = text or input_audio
         final String text;        // text part: the literal text
         final String dataUrl;     // image part: "data:<mime>;base64,<...>"
-        final String maskHash;    // image/text include hash for masking, or null
-        Part(boolean image, String text, String dataUrl, String maskHash) {
+        final String maskHash;    // image/text/audio include hash for masking, or null
+        // Audio part: the base64 and the format name that go into "input_audio", or null
+        // for every other kind of part. Bare base64 and not a data URL, which is what
+        // that part is specified to carry - the format travels in its own field beside it
+        // rather than as a MIME type inside the string.
+        final String base64;
+        final String audioFormat;
+        Part(boolean image, String text, String dataUrl, String maskHash,
+             String base64, String audioFormat) {
             this.image = image; this.text = text; this.dataUrl = dataUrl; this.maskHash = maskHash;
+            this.base64 = base64; this.audioFormat = audioFormat;
         }
-        static Part text(String t)                  { return new Part(false, t, null, null); }
-        static Part includedText(String t, String h){ return new Part(false, t, null, h); }
-        static Part image(String url, String h)     { return new Part(true, null, url, h); }
+        static Part text(String t) {
+            return new Part(false, t, null, null, null, null);
+        }
+        static Part includedText(String t, String h) {
+            return new Part(false, t, null, h, null, null);
+        }
+        static Part image(String url, String h) {
+            return new Part(true, null, url, h, null, null);
+        }
+        static Part audio(String b64, String format, String h) {
+            return new Part(false, null, null, h, b64, format);
+        }
     }
 
     // Splits the prompt into ordered content parts, expanding @img/@txt tokens.
@@ -8313,6 +8537,13 @@ public class JRock {
                 String b64 = java.util.Base64.getEncoder().encodeToString(bytes);
                 String mime = imageMime(path);
                 parts.add(Part.image("data:" + mime + ";base64," + b64, hash));
+            } else if (kind.equals("audio")) {
+                // The recording as it is, base64, in an "input_audio" part - no transcript
+                // made here, no re-encoding, nothing but the bytes and the name of the
+                // format they are in (see audioFormat).
+                byte[] bytes = Files.readAllBytes(path);
+                parts.add(Part.audio(java.util.Base64.getEncoder().encodeToString(bytes),
+                        audioFormat(path), hash));
             } else {
                 String content = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
                 parts.add(Part.includedText(content, hash));
@@ -8334,13 +8565,30 @@ public class JRock {
         return "image/jpeg";   // jpg/jpeg and default
     }
 
+    // The name that goes into an input_audio part's "format" field: the file's own
+    // extension, lowercased.
+    //
+    // Not a MIME type and not a table of them - that field is a short format name, and the
+    // two the API documents ("wav", "mp3") are spelled exactly like the extensions. So an
+    // extension is the answer, and an m4a is sent as "m4a" rather than translated into
+    // something the endpoint was never told to expect either; includeOne says as much in
+    // the log when the format is not one of the documented two. No extension at all -> the
+    // default is "wav", that being the one format with a header you can be sure of.
+    private static String audioFormat(Path p) {
+        String n = p.getFileName().toString();
+        int dot = n.lastIndexOf('.');
+        String ext = (dot > 0 && dot < n.length() - 1)
+                ? n.substring(dot + 1).toLowerCase(java.util.Locale.ROOT) : "";
+        return ext.isEmpty() ? "wav" : ext;
+    }
+
     // Emits the OpenAI "content" value for one user turn into the real (sb) and
     // masked (masked) builders: a JSON string when it's a single plain-text part,
-    // otherwise an array of text/image_url parts. In the masked copy, included
-    // text/image content is replaced by "<txt|img masked <hash>>" and ordinary
-    // prompt text by "<input masked>".
+    // otherwise an array of text/image_url/input_audio parts. In the masked copy,
+    // included text/image/audio content is replaced by "<txt|img|audio masked <hash>>"
+    // and ordinary prompt text by "<input masked>".
     // Appends the REAL "content" value for one user turn: a JSON string when it's
-    // a single plain-text part, otherwise an array of text/image_url parts.
+    // a single plain-text part, otherwise an array of text/image_url/input_audio parts.
     private static void appendRealContent(StringBuilder sb, java.util.List<Part> parts) {
         if (isSinglePlainText(parts)) {
             sb.append("\"").append(jsonEscape(parts.get(0).text)).append("\"");
@@ -8353,6 +8601,13 @@ public class JRock {
             if (p.image) {
                 sb.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
                         .append(jsonEscape(p.dataUrl)).append("\"}}");
+            } else if (p.audioFormat != null) {
+                // Base64 and a format name, both already free of anything JSON would have
+                // to escape - but escaped all the same, because the alternative is a rule
+                // about this one string that the next reader has to take on trust.
+                sb.append("{\"type\":\"input_audio\",\"input_audio\":{\"data\":\"")
+                        .append(jsonEscape(p.base64)).append("\",\"format\":\"")
+                        .append(jsonEscape(p.audioFormat)).append("\"}}");
             } else {
                 sb.append("{\"type\":\"text\",\"text\":\"")
                         .append(jsonEscape(p.text)).append("\"}");
@@ -8361,9 +8616,9 @@ public class JRock {
         sb.append("]");
     }
 
-    // Appends the MASKED "content" value for one user turn, mirroring the real
-    // shape but replacing content: included text/image -> "<txt|img masked <hash>>",
-    // ordinary prompt text -> "<input masked>".
+    // Appends the MASKED "content" value for one user turn, mirroring the real shape but
+    // replacing content: an included text/image/recording -> "<txt|img|audio masked
+    // <hash>>", ordinary prompt text -> "<input masked>".
     private static void appendMaskedContent(StringBuilder sb, java.util.List<Part> parts) {
         if (isSinglePlainText(parts)) {
             sb.append("\"<input masked>\"");
@@ -8376,6 +8631,13 @@ public class JRock {
             if (p.image) {
                 sb.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
                         .append("<img masked ").append(p.maskHash).append(">").append("\"}}");
+            } else if (p.audioFormat != null) {
+                // The format is kept and the recording is not: the masked copy is there to
+                // be read, and a minute of audio is about a megabyte of base64.
+                sb.append("{\"type\":\"input_audio\",\"input_audio\":{\"data\":\"")
+                        .append("<audio masked ").append(p.maskHash).append(">")
+                        .append("\",\"format\":\"").append(jsonEscape(p.audioFormat))
+                        .append("\"}}");
             } else {
                 String maskTxt = (p.maskHash != null)
                         ? "<txt masked " + p.maskHash + ">"

@@ -27,8 +27,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Everything local & transparent.** No server-side session state; all history lives in
   plain files under a `JRock/` folder you own and can inspect.
 - **Crash-safe persistence** of the prompt and the full conversation.
-- **Multimodal includes** (text and image files, plus PDF-to-page-images via Ghostscript and
-  RTF/DOCX-to-Markdown with no external tool at all) referenced by hash; multi-select
+- **Multimodal includes** (text, image and audio files, plus PDF-to-page-images via Ghostscript
+  and RTF/DOCX-to-Markdown with no external tool at all) referenced by hash; multi-select
   supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
   read on, so no tokens are spent on pixels nobody sees — and every include **reloaded from the
   log** in one menu item after a restart
@@ -563,11 +563,11 @@ gswin64 -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -o C:\scans\scan0166.Merged.
 
 ## Multimodal includes (Ctrl+I)
 
-Attach **text or image** files to a prompt (and convert **PDFs**, **RTFs** or **DOCX** documents
-into either):
+Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs** or **DOCX**
+documents into either):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers six kinds:
+   once, and the dropdown offers seven kinds:
    - **Image files** (png, jpg, jpeg, gif, webp)
    - **Image with a Markdown reference** (the same files) — one line more in the prompt: a
      Markdown `![](<hash>)` above the token. The model reads it as a picture belonging to the
@@ -576,6 +576,8 @@ into either):
      places
    - **Text files as is** (txt, csv, html, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
+   - **Audio files** (wav, mp3, m4a) — the recording itself, sent as an
+     [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
    - **PDF as page images** — converts the PDF to one PNG per page
    - **RTF as Markdown text** — converts the RTF to one Markdown file
    - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
@@ -589,13 +591,15 @@ into either):
    (not persisted), so after a restart the files have to be attached again — or their paths read
    back out of the log with **Reload all includes**
    ([below](#includes-that-outlive-the-session)).
-3. A token `@img <hash>` or `@txt <hash>` is inserted at the cursor (one per file / per PDF
-   page), preceded by a `![](<hash>)` line under the Markdown-reference filter. Duplicate
-   tokens for the same file are not added again (also checked across prior turns in Extend
-   mode).
+3. A token `@img <hash>`, `@txt <hash>` or `@audio <hash>` is inserted at the cursor (one per
+   file / per PDF page), preceded by a `![](<hash>)` line under the Markdown-reference filter.
+   Duplicate tokens for the same file are not added again (also checked across prior turns in
+   Extend mode).
 4. The log records each include with stats (locale-formatted numbers):
    - **Images**: dimensions, total pixel count, and file size in bytes.
    - **Text**: symbol count (Unicode code points) and file size in bytes.
+   - **Audio**: what the header says — format, sample rate, channels, bitrate, playing time —
+     and file size in bytes.
 
 Image dimensions are read **straight out of the file header** — the PNG, GIF, WEBP and JPEG
 headers all state the size in a documented place — rather than by decoding the image (an
@@ -608,6 +612,55 @@ outright over a line of log text. It is also less work: a 40 MB photo is no long
 full just to say how big it is. If a header can't be read, the include still happens and the
 log says the dimensions were unavailable — the bytes sent to the model are the file itself
 either way, so none of this touches what the model receives.
+
+### What an audio include is sent as
+
+An audio include is **not** an image: nothing is downscaled, nothing is converted, and there is
+no Markdown-reference variant, because there is no picture to place in an answer. The bytes on
+disk are base64-encoded and sent as an `input_audio` content part beside the text:
+
+```json
+{"type":"input_audio","input_audio":{"data":"UklGRiQ...","format":"wav"}}
+```
+
+The `format` is the file's own extension, lower-cased. That matters, because
+[the API's schema](https://github.com/openai/openai-openapi) lists exactly two values for that
+field — `wav` and `mp3`. `m4a` is documented for the *transcription* endpoint and not for this
+one, and Mistral's Voxtral takes no format field at all (it decodes with libsndfile, which has
+no AAC at all). The filter offers m4a anyway, because a phone records m4a and finding out costs
+one request; the log says so on include, and a refusal coming back is the endpoint's answer, not
+a fault in JRock:
+
+```
+Audio: MPEG-4 audio (m4a), 1,214,633 bytes
+Sent as input_audio with format "m4a". The API documents "wav" and "mp3" only, so if this one comes back rejected, that is the endpoint's answer and not a fault here.
+```
+
+What the log reports is read **straight out of the header**, by an `AudioHeader` class that is
+`ImageHeader`'s counterpart and exists for the same reasons: arithmetic on the first few
+kilobytes, no decoder, no native library, nothing that behaves differently in the browser build
+(the byte-order helpers are literally `ImageHeader`'s — a nested class can reach a sibling's
+private statics). Two of the three formats say enough to be worth reading:
+
+| Format | Read from | Example log line |
+|---|---|---|
+| **WAV** | the RIFF chunks, walked for `fmt ` and `data` — so the playing time is exact | `Audio: WAV, 44.1 kHz, stereo, 16-bit, 1,411 kbps, 0:32, 5,644,844 bytes` |
+| **MP3** | the first frame header after any ID3v2 tag; the playing time follows from the file size at that bitrate, which is why it says *at that bitrate* | `Audio: MP3 (MPEG 1 Layer III), 44.1 kHz, stereo, 128 kbps, 1:15 at that bitrate, 1,207,296 bytes` |
+| **M4A** | the `ftyp` box, and nothing else: it is **named**, and the byte count is the rest | `Audio: MPEG-4 audio (m4a), 1,214,633 bytes` |
+
+That last row is a budget, not an oversight. An M4A's numbers live in a movie header nested
+inside `moov`, which sits wherever the writer put it, behind a box walk and a version byte that
+moves two fields — thirty more lines of layout arithmetic for one gray line of log. The whole
+class is **a hundred lines** and stays there: when a format needs more than that, the answer is
+the byte count, which is honest and is what the file is charged by anyway. A header that says
+nothing readable gets the same treatment — *(nothing readable in the header)*, plus the bytes.
+
+Everything else is the machinery the other kinds already use: the same hash, the same
+deduplication, the same re-check of every file on send, the same **Reload all includes**. One
+place does differ — the [masked request dump](#conversation-log) prints
+`<audio masked <hash>>` where the base64 would be, for the same reason images are masked: a
+minute of audio is about a megabyte of it. **Fetch URL** does not download audio; audio comes
+from Ctrl+I.
 
 ### Fetching a URL
 
@@ -733,10 +786,10 @@ is read top to bottom as the history it is:
 
 | In the log | What it means |
 |---|---|
-| `Included @img <hash> from <path>` | remember `<hash>` → `<path>`, replacing an earlier path for that hash — the file was included again, perhaps from somewhere else |
+| `Included @img <hash> from <path>` (or `@txt`, or `@audio`) | remember `<hash>` → `<path>`, replacing an earlier path for that hash — the file was included again, perhaps from somewhere else |
 | a message (yours or the model's) referring to a hash | that hash is wanted, at the path remembered for it **at that point**, so a later include cannot rewrite what an earlier message meant |
 
-Both spellings of a reference count: the `@img`/`@txt` token, and the `![](<hash>)` a
+Both spellings of a reference count: the `@img`/`@txt`/`@audio` token, and the `![](<hash>)` a
 [Markdown-reference include](#multimodal-includes-ctrli) leaves — an answer carrying one needs
 the file to export as a DOCX with the picture in it. The current prompt is read last, being the
 newest thing there is, and after a restart its recovered tokens are usually the whole reason for
@@ -860,7 +913,8 @@ font sizes:
 On send, every referenced include is verified (known hash **and** the file still hashes the
 same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid
 includes are expanded into a **multi-part message**: text segments become text parts, `@img`
-becomes a base64 image part, `@txt` becomes a text part with the file's contents. In Extend mode,
+becomes a base64 image part, `@txt` becomes a text part with the file's contents, `@audio`
+becomes a base64 [`input_audio` part](#what-an-audio-include-is-sent-as). In Extend mode,
 includes in prior turns are expanded too.
 
 ## Prompt library and chaining (`automation-samples/`)
@@ -1090,8 +1144,8 @@ thread** — they say so rather than deadlocking if you do.
 | `automationAwaitReady(long millis)` | Blocks until the window is up and the model list is in. Returns why not — including the missing API key. |
 | `automationBegin(String what)` | Takes the window: prompt read-only, Send held, Extend off, and a log line saying so. Refuses if an automation is already running. |
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
-| `automationDropPlaceholders()` | Removes the bare `@img` / `@txt` placeholder lines, and returns how many. The include tokens go at the end of the prompt. |
-| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
+| `automationDropPlaceholders()` | Removes the bare `@img` / `@txt` / `@audio` placeholder lines, and returns how many. The include tokens go at the end of the prompt. |
+| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
@@ -1279,7 +1333,7 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
-- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Include
+- **Prompt area** — Include text, image, audio, PDF, RTF or DOCX file... (multi-select), *Include
   with copy...* (the same dialog, keeping a copy of each file under `JRock/includes/` — see
   [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
   URL...* (which downloads an address into `JRock/urls/` and includes it as text or as a
@@ -1410,7 +1464,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
-| Ctrl+I | Include text/image files, a PDF, an RTF or a DOCX (multi-select) |
+| Ctrl+I | Include text/image/audio files, a PDF, an RTF or a DOCX (multi-select) |
 | Ctrl+Shift+I | The same, keeping a copy of each file under `JRock/includes/` |
 | Ctrl+U | Fetch a URL and include what it answers with |
 | Ctrl+D | Toggle Dialog only |
