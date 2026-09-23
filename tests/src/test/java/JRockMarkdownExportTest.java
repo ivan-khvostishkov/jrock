@@ -282,6 +282,37 @@ class JRockMarkdownExportTest {
     }
 
     @Test
+    @DisplayName("landscape turns the page AND everything measured against it")
+    void laysTheDocumentOutForWhicheverA4WasAskedFor() throws Exception {
+        // The page itself, stated both ways a reader might read it: the two dimensions
+        // swapped, and w:orient - one reader looks at the numbers, another at the word.
+        String portrait = text(unzip(docx(export(MARKDOWN))).get("word/document.xml"));
+        assertThat(portrait).describedAs("the portrait page")
+                .contains("<w:pgSz w:w=\"11906\" w:h=\"16838\"/>")
+                .doesNotContain("w:orient");
+        String landscape =
+                text(unzip(docx(export(MARKDOWN, null, true))).get("word/document.xml"));
+        assertThat(landscape).describedAs("the landscape page")
+                .contains("<w:pgSz w:w=\"16838\" w:h=\"11906\" w:orient=\"landscape\"/>");
+
+        // And the text frame with it, which is the half of this that a hardcoded portrait
+        // layout would get wrong: a table is shared out of 14570 twips on a landscape
+        // page, not out of the 9638 of a page it is not on.
+        assertThat(portrait).describedAs("the portrait table").contains("<w:tblW w:w=\"9638\"");
+        assertThat(landscape).describedAs("the landscape table")
+                .contains("<w:tblW w:w=\"14570\"");
+
+        // A picture too, and this is the reason to export landscape at all: a wide one is
+        // placed against the wide side of the frame (9251950 EMU / 4000 px = 2312 each),
+        // so it comes out half again as large as the same picture on a portrait page.
+        assertThat(extentOf(4000, 2000, true)).isEqualTo("cx=\"9248000\" cy=\"4624000\"");
+        assertThat(extentOf(4000, 2000, false)).isEqualTo("cx=\"6120000\" cy=\"3060000\"");
+        // A tall one on a landscape page is held to the frame's height, which is now the
+        // page's short side (6120130 / 4000 = 1530) - one page still, not two.
+        assertThat(extentOf(500, 4000, true)).isEqualTo("cx=\"765000\" cy=\"6120000\"");
+    }
+
+    @Test
     @DisplayName("a reference to something not included is a warning, not a failed export")
     void leavesUnplaceableReferencesAsTheTextTheyAre() throws Exception {
         // Three ways a reference can fail to be a picture: a hash from another session
@@ -344,6 +375,15 @@ class JRockMarkdownExportTest {
         return of.invoke(null, markdown, includes);
     }
 
+    /** And with the page the save dialog asked for: landscape A4 instead of portrait. */
+    private static Object export(String markdown, Map<String, Path> includes,
+                                 boolean landscape) throws Exception {
+        Method of = Class.forName("JRock$MarkdownExport")
+                .getDeclaredMethod("of", String.class, Map.class, boolean.class);
+        of.setAccessible(true);
+        return of.invoke(null, markdown, includes, landscape);
+    }
+
     private static byte[] rtf(Object document) throws Exception {
         return (byte[]) call(document, "rtf");
     }
@@ -371,8 +411,14 @@ class JRockMarkdownExportTest {
 
     /** The wp:extent of the one picture in a document that places an image of this size. */
     private String extentOf(int width, int height) throws Exception {
+        return extentOf(width, height, false);
+    }
+
+    /** The same, on whichever A4 the export was asked for. */
+    private String extentOf(int width, int height, boolean landscape) throws Exception {
         Path file = png(width + "x" + height + ".png", width, height);
-        Object document = export("![](" + HASH + ")", Collections.singletonMap(HASH, file));
+        Object document = export("![](" + HASH + ")",
+                Collections.singletonMap(HASH, file), landscape);
         String body = text(unzip(docx(document)).get("word/document.xml"));
         int at = body.indexOf("<wp:extent ");
         assertThat(at).describedAs("a wp:extent in " + body).isNotNegative();
