@@ -3,10 +3,18 @@
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
-//     java -cp jrock.jar JRockDocInventory.java [document.pdf]
+//     java -cp jrock.jar JRockDocInventory.java [--working-dir <dir>]
+//                                               [--prompts-dir <dir>] [document.pdf]
 //
-// Without the argument it asks for the PDF in a file chooser. The two prompts it needs
-// it finds beside itself, in this directory.
+// Without the document it asks for the PDF in a file chooser, opened in the working
+// directory. The two prompts it needs it finds beside itself, in this directory.
+//
+// The flags are JRock's and are passed straight through (see parseArgs): --working-dir
+// names the folder whose settings it is to use - that folder's model, its images DPI,
+// its Bedrock key - whatever directory the process was started in. JRock's window menu
+// installs an Explorer right-click entry for exactly this ("Install agent"), which is
+// what lets one agent work on a file anywhere on the disk with one folder's settings,
+// and lets the same agent be installed from several folders with settings of their own.
 //
 // COPY jrock.jar HERE FIRST. It is not in the repository - the repository carries no
 // jars - and nothing downloads it: take it from a "Reproducible build" artifact, or
@@ -54,6 +62,11 @@ public final class JRockDocInventory {
     // The two prompts, expected beside this file.
     private static final String PROMPT_ASCII = "jrock-prompt-doc-to-ascii.txt";
     private static final String PROMPT_NAME = "jrock-prompt-doc-inventory.txt";
+
+    // JRock's own flags, spelled out here because this automation both reads them and
+    // passes them on (see parseArgs).
+    private static final String WORKING_DIR_FLAG = "--working-dir";
+    private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
 
     // Starting a JVM's worth of Swing and fetching the model list, on a cold machine.
     private static final long READY_TIMEOUT_MS = 120_000;
@@ -106,17 +119,17 @@ public final class JRockDocInventory {
     // The whole chain, start to finish. Returns what to report, or null when there was
     // nothing to do; throws Stop with the reason for anything else.
     private static String run(String[] args) throws IOException {
+        Args told = parseArgs(args);
         Path here = ownDirectory();
         System.out.println("Automation directory: " + here);
+        System.out.println("Working directory:    " + told.workingDir);
         System.out.println("Driving JRock from:   " + jrockCame());
         Path ascii = mustExist(here.resolve(PROMPT_ASCII));
         Path inventory = mustExist(here.resolve(PROMPT_NAME));
 
         // The document. Asked for before JRock is started, so a cancelled chooser
         // leaves nothing behind at all.
-        Path pdf = (args.length > 0 && !args[0].isBlank())
-                ? Paths.get(args[0]).toAbsolutePath().normalize()
-                : choosePdf();
+        Path pdf = (told.document != null) ? told.document : choosePdf(told.workingDir);
         if (pdf == null) {
             System.out.println("No document chosen - nothing to do.");
             return null;
@@ -128,7 +141,7 @@ public final class JRockDocInventory {
         // The real entry point, which shows the window on the event dispatch thread and
         // returns at once. Everything after this runs on THIS thread, which is what the
         // automation API asks for - every one of its methods blocks.
-        JRock.main(new String[0]);
+        JRock.main(told.forJRock.toArray(new String[0]));
         check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
         check(JRock.automationBegin("doc inventory of " + pdf.getFileName()));
 
@@ -173,6 +186,70 @@ public final class JRockDocInventory {
         Path twinNow = renameTo(twin, base);
         System.out.println("Renamed to " + pdfNow + " and " + twinNow);
         return "renamed to " + pdfNow.getFileName() + " and " + twinNow.getFileName();
+    }
+
+    // ---- The command line --------------------------------------------------
+    // What this automation was told, sorted into what JRock is to be started with and
+    // what this automation keeps for itself.
+    //
+    // The division matters in one direction in particular: the flags are passed on, and
+    // the bare argument is NOT. JRock reads a bare argument as a prompt file to load,
+    // so handing it the document would load a PDF as the prompt and leave nothing to
+    // work on. The working directory is kept as well as passed on, because the file
+    // chooser opens in it.
+    private static final class Args {
+        private final java.util.List<String> forJRock = new java.util.ArrayList<>();
+        private Path workingDir = Paths.get("").toAbsolutePath().normalize();
+        private Path document = null;
+    }
+
+    // Both spellings of a flag - "--working-dir <dir>" and "--working-dir=<dir>" - as
+    // JRock itself accepts both. A flag this automation does not know goes through
+    // untouched: JRock may know it, and a launcher that grew a flag should not have to
+    // wait for every agent to be edited.
+    private static Args parseArgs(String[] args) {
+        Args parsed = new Args();
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if (arg == null || arg.isBlank()) continue;
+            String flag = flagOf(arg);
+            if (flag.equals(WORKING_DIR_FLAG) || flag.equals(PROMPTS_DIR_FLAG)) {
+                String value = valueOf(arg);
+                if (value == null) {
+                    if (i + 1 >= args.length) {
+                        throw new Stop(flag + " needs a directory after it.");
+                    }
+                    value = args[++i];
+                    parsed.forJRock.add(flag);
+                    parsed.forJRock.add(value);
+                } else {
+                    parsed.forJRock.add(arg);   // one word, passed on as one word
+                }
+                if (flag.equals(WORKING_DIR_FLAG)) {
+                    parsed.workingDir = Paths.get(value).toAbsolutePath().normalize();
+                }
+            } else if (arg.startsWith("-")) {
+                parsed.forJRock.add(arg);
+            } else if (parsed.document == null) {
+                parsed.document = Paths.get(arg).toAbsolutePath().normalize();
+            } else {
+                throw new Stop("one document at a time, and two were given:\n\n"
+                        + parsed.document + "\n" + Paths.get(arg).toAbsolutePath());
+            }
+        }
+        return parsed;
+    }
+
+    // "--flag=value" in two halves: the flag, and the value or null when the argument
+    // carried none (the value is then the next argument).
+    private static String flagOf(String arg) {
+        int eq = arg.indexOf('=');
+        return eq < 0 ? arg : arg.substring(0, eq);
+    }
+
+    private static String valueOf(String arg) {
+        int eq = arg.indexOf('=');
+        return eq < 0 ? null : arg.substring(eq + 1);
     }
 
     // ---- Where the files are -----------------------------------------------
@@ -300,13 +377,14 @@ public final class JRockDocInventory {
     // ---- Dialogs -----------------------------------------------------------
     // The PDF, chosen in a file chooser with one filter and no "All files": this
     // automation converts a PDF and has nothing to say about anything else. It opens in
-    // the working directory, which is the folder being filed, not this one. Null when
-    // the chooser was cancelled.
-    private static Path choosePdf() {
+    // the working directory - the folder being filed, not this one, and not the folder
+    // Explorer happened to start the process in either (that is what --working-dir
+    // overrides). Null when the chooser was cancelled.
+    private static Path choosePdf(Path startIn) {
         Path[] chosen = { null };
         onEdt(() -> {
             javax.swing.JFileChooser chooser =
-                    new javax.swing.JFileChooser(Paths.get("").toAbsolutePath().toFile());
+                    new javax.swing.JFileChooser(startIn.toFile());
             chooser.setDialogTitle("Choose the PDF to inventory");
             chooser.setAcceptAllFileFilterUsed(false);
             chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(

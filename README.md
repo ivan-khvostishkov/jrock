@@ -82,6 +82,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
    java JRock.java --prompts-dir D:\prompts
    # ...and then name a prompt in it directly:
    java JRock.java --prompts-dir D:\prompts review.txt
+   # work in a folder other than the one you launched from (see Agents):
+   java JRock.java --working-dir D:\HPScan
    ```
 
 4. Type a prompt and press **Ctrl+Enter** (or the **Send** button).
@@ -123,6 +125,20 @@ and a template for a library of your own. See
 directory is reported in the startup log whenever it isn't just the working directory —
 including when the path isn't usable, in which case it's reported and ignored rather than
 silently applied.
+
+The **agents** — the `.java` automations that drive JRock through those prompts — live in the
+same directory, which is why the Configure row is labelled **Prompts & agents** and why
+**Install agent** browses it. See [Agents](#windows-agents-one-automation-per-folder).
+
+### `--working-dir`
+
+`--working-dir <dir>` (or `=<dir>`) names the folder JRock works in — its `JRock/` files, its
+settings, its key — regardless of the directory the process was started in. A plain launch needs
+it about as often as never: the working directory *is* where you launched from. What needs it is
+an **agent**, because Explorer starts a right-click command in the folder that was clicked, and
+an agent's whole point is to use one particular folder's settings on a file that may be anywhere
+else. Reported in the startup log when it was given; a path that isn't a directory is reported
+and ignored.
 
 ## JRock Web (in the browser)
 
@@ -383,8 +399,8 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   each clock that was sent (see [**Clock**](#clock)). These are never modified or deleted (not
   even by Clear log). `cat`-ing the operator's and the assistant's in order reproduces the
   dialog-only transcript.
-- `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the region and model
-  (see [**Settings files**](#settings-files)).
+- `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the region, model and
+  images DPI (see [**Settings files**](#settings-files)).
 - `JRock/gs-pdf/` — per-page text/image files produced when a PDF is included via Ghostscript
   (see Multimodal includes).
 - `JRock/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
@@ -411,8 +427,13 @@ from inside the running application, and different for every way of launching it
   place to put one; a key is never copied into a folder it wasn't typed for. It gets a file of
   its own because it's a credential: it can be locked down, kept out of a copy of the
   configuration, or deleted on its own.
-- **`JRock/jrock-config.txt`** — the **region** and the **model**, so the next start comes up
-  the way you left it. Seeded with the settings in effect when the folder has none.
+- **`JRock/jrock-config.txt`** — the **region**, the **model** and the **images DPI**, so the
+  next start comes up the way you left it. Seeded with the settings in effect when the folder
+  has none. Per folder rather than per user on purpose: it is what lets one folder's
+  [agent](#windows-agents-one-automation-per-folder) run on one model, and another folder's run
+  on a different one — or at a different DPI. An `images-dpi$` that isn't one of the values the
+  Configure dropdown offers is reported in the startup log and ignored, since that dropdown
+  could only show it as something else and then write that back.
 
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser the
@@ -433,6 +454,9 @@ us-east-1
 
 model$
 xai.grok-4.3
+
+images-dpi$
+150
 ```
 
 A value being a whole line of its own is the whole point: it can be cut and pasted **as a line**
@@ -901,12 +925,19 @@ The eight steps above are a loop you run per document, and the third file in
 
 ```
 java -cp jrock.jar JRockDocInventory.java document.pdf   # no argument: it asks for the PDF
+java -cp jrock.jar JRockDocInventory.java --working-dir D:\HPScan   # that folder's settings
 ```
 
 It reads the same two prompts out of its own directory, converts the PDF to page images, sends,
 saves the reply as `document.txt` beside the PDF, sends *that* with the inventory prompt, and
 offers to rename both files to the name that comes back. Then a "Finished" dialog, and the
 window is yours.
+
+JRock's flags are passed straight through, and the document is not — a bare argument is a prompt
+file to JRock, so the two are told apart on the way in. That is what
+[**Install agent**](#windows-agents-one-automation-per-folder) installs: one right-click command
+with `--working-dir` and no document (so the chooser asks, in that folder), one with the clicked
+file appended.
 
 **Copy `jrock.jar` into `automation-samples/` first.** Nothing downloads it: take it from a
 [reproducible build](#reproducible-builds) artifact, or build it with
@@ -980,8 +1011,8 @@ that you cannot.
 
 - **Working directory** (with a Browse button) — reroutes JRock's own files to the chosen
   folder. The OS-level process working directory is unchanged.
-- **Prompts directory** (with a Browse button) — where Ctrl+O and Ctrl+S open, always (see
-  [the prompts directory](#the-prompts-directory)). It shows the path actually in effect, so
+- **Prompts & agents** (with a Browse button) — where Ctrl+O, Ctrl+S and **Install agent** open,
+  always (see [the prompts directory](#the-prompts-directory)). It shows the path actually in effect, so
   on a plain launch it shows the working directory; set it back to that to have prompts follow
   the working directory again. Leaving the row untouched changes nothing, so moving the
   working directory alone doesn't pin prompts to the folder you just left. A directory that
@@ -993,7 +1024,9 @@ that you cannot.
   changed there.
 - **Region** — free text. Kept in `JRock/jrock-config.txt`, so it survives a restart.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
-  `JRock/jrock-config.txt` too.
+  `JRock/jrock-config.txt` too — as is the **Images DPI** below, which is what makes one
+  folder's [agent](#windows-agents-one-automation-per-folder) a different agent from the same
+  automation installed from another folder.
 - **Images DPI** — how fine a picture JRock keeps, per inch of page: 72 / 96 (screen), **150**
   (documents, the default), 203 (fax/receipt), 300 (print). The image is what the model actually
   sees, so this is a real trade-off — too low and small print is unreadable, too high and you pay
@@ -1143,7 +1176,7 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   separator (see [**merging duplex scans**](#merging-duplex-scans-ghostscript)), then Backup
   log... and Load from backup... (see [**backup and restore**](#backup-and-restore)), then Move &
   resize window...; in the **browser**, also Show/hide the page header & footer; on **Windows**,
-  Install / Uninstall the "JRock here!" Explorer entry (see below).
+  Install / Uninstall the "JRock here!" Explorer entry and Install / Uninstall agent (see below).
 
 ## Windows: Explorer right-click integration
 
@@ -1184,6 +1217,47 @@ Details:
   (`jrock-context-menu-install.reg` / `jrock-context-menu-uninstall.reg`), and each action is
   recorded in the log.
 - On **Windows 11** the entries may appear under **"Show more options"**.
+
+## Windows: agents, one automation per folder
+
+The same menu offers **Install agent (Explorer menu)...** and **Uninstall agent (Explorer
+menu)...**: the same idea for the `.java`
+[automations](#the-automation-api) that live beside the prompts. Install browses the
+[prompts & agents directory](#the-prompts-directory) for `.java` files only, and writes **one
+entry with two commands** for the automation you pick:
+
+- **inside or on a folder** — the agent runs with **no argument**, so it asks which file to work
+  on. Its own file chooser opens in the working directory it was installed for.
+- **on a file of any type, in any folder** — the agent gets **that file's full path** as its
+  single argument, and works on it.
+
+Both commands are `javaw -cp jrock.jar <agent>.java --working-dir <the folder you installed
+from>`, plus `--prompts-dir` when one is set. The `--working-dir` flag is the whole trick:
+Explorer starts a right-click command in the folder that was **clicked**, which is the opposite
+of what an agent needs. An agent belongs to the folder it was installed from — that folder's
+model, its images DPI, its Bedrock key, all in that folder's
+[`JRock/jrock-config.txt`](#settings-files) — and may be run on a document anywhere on the disk.
+
+Which is why an entry is per **(agent, folder)** pair, not per agent. Install the same
+automation from two folders and you get two entries, with two sets of settings:
+
+```
+JRock agent: Doc Inventory (HPScan)...        one model, 300 dpi
+JRock agent: Doc Inventory (Documents)...     another model, 150 dpi
+```
+
+The label is built from the file name: `JRockDocInventory.java` → `Doc Inventory`, camel case
+split into words, the `JRock` prefix moved to the front so every agent sits next to *JRock
+here!* in a menu full of other applications' verbs, and the working folder's name in
+parentheses. The registry key name adds a short hash of the working directory's path, so two
+folders with the same name stay apart and **Uninstall agent** addresses exactly what Install
+wrote — pick the same file from the same folder to remove it. Same as the entries above: per-user
+`HKEY_CURRENT_USER`, `javaw` so no console appears, and the applied registry file kept for
+inspection under `JRock/` as `jrock-agent-<name>-install.reg` / `-uninstall.reg`.
+
+Installing an agent needs `jrock.jar` itself — an agent is compiled against JRock at run time,
+and a class path is a jar, never a `.java` file. A JRock running from source says so instead of
+writing an entry that could not work.
 
 ## Per-folder window title & icon
 
