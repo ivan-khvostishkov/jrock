@@ -8,7 +8,8 @@ resolving `javax.swing` - well before anything needs an Apple signing identity.
 
 The point is to have that failure printed in a CI log, from a real iOS toolchain on
 a real macOS runner, rather than argued about. See the
-[Mobile builds (experimental)](../.github/workflows/mobile.yml) workflow.
+[Mobile builds (experimental)](../.github/workflows/mobile.yml) workflow, which is
+run by hand from the Actions tab - there is no sense in failing it on every push.
 
 ## What is here
 

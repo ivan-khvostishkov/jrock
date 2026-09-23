@@ -11,15 +11,17 @@ name: Mobile builds (experimental)
 # statement of what a native port would have to replace. See android/README.md and
 # ios/README.md for the list.
 #
-# Neither job blocks anything else - "Reproducible build" and "Tests" are separate
-# workflows, and those are the ones that must be green.
+# MANUAL ONLY - workflow_dispatch and nothing else. A job that is expected to fail
+# has no business failing on every push: it marks each commit with a red X, and the
+# two workflows whose colour actually means something ("Reproducible build" and
+# "Tests") get read past. The statement above is worth keeping, but it is worth
+# re-checking when the mobile projects or the Swing surface change, not sixty times
+# a week. Run it from the Actions tab.
 #
 # No Gradle wrapper anywhere in the repository, because the repository carries no
 # jars, so both jobs install Gradle themselves.
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 jobs:
