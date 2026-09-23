@@ -403,6 +403,17 @@ conversation*, and never read back from disk: what goes with the request is alwa
 it appears verbatim (unmasked) in the raw request dump - the point of logging a clock being to
 see what time was actually sent.
 
+**One request shape does not get a system message: one with
+[audio](#what-an-audio-include-is-sent-as) in it.** There the clock is folded into the user's
+own content, as a text part in front of the prompt (and behind the recording), and the dump says
+so above the request. A model that listens may refuse the two together — Voxtral does, with
+*"Found system messages at indexes [0] and audio chunks in messages at indexes [1]. This is not
+allowed prior to the tokenizer version 13"*, which is
+[mistral-common's own validator](https://github.com/mistralai/mistral-common/blob/main/src/mistral_common/protocol/instruct/validator.py)
+talking; its model card is blunter still: *"System prompts are not yet supported"*. Folded rather
+than dropped, because what day it is can be exactly what the question about the recording turns
+on, and a line of text in front of the question is somewhere it can still be read.
+
 ## Persistence (crash recovery + full local history)
 
 Everything lives under a **`JRock/`** subfolder of the working directory:
@@ -623,6 +634,24 @@ disk are base64-encoded and sent as an `input_audio` content part beside the tex
 {"type":"input_audio","input_audio":{"data":"UklGRiQ...","format":"wav"}}
 ```
 
+**The recording goes first in the message**, ahead of your question, whatever order the prompt
+wrote them in — and ahead of a [folded clock](#clock), if that is in there too:
+
+```json
+{"role":"user","content":[
+  {"type":"input_audio","input_audio":{"data":"UklGRiQ...","format":"wav"}},
+  {"type":"text","text":"<clock><now>2026-09-23 11:39:03 +02:00 Europe/Berlin</now></clock>\n\n"},
+  {"type":"text","text":"transcribe me the audio"}]}
+```
+
+That order is not cosmetic. Voxtral's
+[own examples](https://huggingface.co/mistralai/Voxtral-Mini-3B-2507) put the audio chunks before
+the text chunk in every single one, and with the question first a 3B Voxtral answered *"I'd be
+happy to help! Please provide the audio you'd like me to transcribe"* — with the recording
+sitting in the same message, behind the question, counted in `prompt_tokens` and all. Text parts
+keep their own order among themselves, because a prompt's segments and the files between them
+only mean anything in the order they were written; a recording has no such place in a sentence.
+
 The `format` is the file's own extension, lower-cased. That matters, because
 [the API's schema](https://github.com/openai/openai-openapi) lists exactly two values for that
 field — `wav` and `mp3`. `m4a` is documented for the *transcription* endpoint and not for this
@@ -656,11 +685,22 @@ the byte count, which is honest and is what the file is charged by anyway. A hea
 nothing readable gets the same treatment — *(nothing readable in the header)*, plus the bytes.
 
 Everything else is the machinery the other kinds already use: the same hash, the same
-deduplication, the same re-check of every file on send, the same **Reload all includes**. One
-place does differ — the [masked request dump](#conversation-log) prints
-`<audio masked <hash>>` where the base64 would be, for the same reason images are masked: a
-minute of audio is about a megabyte of it. **Fetch URL** does not download audio; audio comes
-from Ctrl+I.
+deduplication, the same re-check of every file on send, the same **Reload all includes**. Two
+places differ. The [masked request dump](#conversation-log) prints `<audio masked <hash>>` where
+the base64 would be, for the same reason images are masked: a minute of audio is about a megabyte
+of it. And the [**Clock**](#clock) travels inside the message rather than as a `system` one,
+because a model that listens may refuse a system message beside audio — with a line above the
+dump saying it did:
+
+```
+Clock: sent as a text part inside the message, not as a system message - this request carries audio, and a model that listens may refuse a system message beside it.
+```
+
+An `@audio` token in an *earlier* turn counts too, so Extend mode drops the system message for
+the whole conversation once a recording is anywhere in it — the validator that refuses the
+combination reads the entire message list, not just the last message.
+
+**Fetch URL** does not download audio; audio comes from Ctrl+I.
 
 ### Fetching a URL
 
