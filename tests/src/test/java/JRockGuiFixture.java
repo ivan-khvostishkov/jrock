@@ -91,7 +91,7 @@ abstract class JRockGuiFixture {
      */
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
             "workingDir", "promptsDir", "promptsDirNote", "apiKey", "REGION",
-            "regionSource", "MODEL_ID", "availableModels", "pdfDpi", "autoBackupLog");
+            "regionSource", "MODEL_ID", "availableModels", "imagesDpi", "autoBackupLog");
 
     private final Map<String, Object> savedConfig = new LinkedHashMap<>();
 

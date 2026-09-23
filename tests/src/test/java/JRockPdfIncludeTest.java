@@ -60,8 +60,8 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
         Path pdf = A4Pdf.writeTwoPages(workingDirectory().resolve("two-page-a4.pdf"));
 
         chooseDpiInConfigureDialog();
-        assertThat(field("pdfDpi").get(null))
-                .describedAs("the configured PDF image DPI").isEqualTo(DPI);
+        assertThat(field("imagesDpi").get(null))
+                .describedAs("the configured Images DPI").isEqualTo(DPI);
 
         includeThroughTheDialog(PDF_IMAGE_FILTER, CONVERSION_TIMEOUT_SECONDS, pdf);
 

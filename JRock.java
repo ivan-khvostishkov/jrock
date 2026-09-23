@@ -175,16 +175,24 @@ public class JRock {
     // cannot appear on screen (or in a screenshot of it).
     private static String apiKey = null;
 
-    // Resolution Ghostscript rasterises PDF pages at (-r), when a PDF is included
-    // as page images rather than as text. Settable in the Configure dialog.
+    // How fine a picture JRock keeps, in dots per inch of page. Settable in the
+    // Configure dialog ("Images DPI").
     //
-    // It is a real trade-off, which is why it is worth exposing: a page image is
-    // what the model actually sees, so too low and small print becomes unreadable,
-    // while too high costs tokens and time for detail no model needs. 150 reads
-    // ordinary documents reliably and stays modest in size, so it is the default.
-    private static final int[] PDF_DPI_OPTIONS = { 72, 96, 150, 203, 300 };
-    private static final int PDF_DPI_DEFAULT = 150;
-    private static int pdfDpi = PDF_DPI_DEFAULT;
+    // It is a real trade-off, which is why it is worth exposing: the image is what the
+    // model actually sees, so too low and small print becomes unreadable, while too
+    // high costs tokens and time for detail no model needs. 150 reads ordinary
+    // documents reliably and stays modest in size, so it is the default.
+    //
+    // One number for two jobs, because they are the same question asked twice:
+    //   - a PDF included as page images is rasterised at it (Ghostscript's -r, where
+    //     the page's physical size is the PDF's own business);
+    //   - an image included WITH A COPY is downscaled to it, the page it is measured
+    //     against being A4 with 2 cm margins - the same page the DOCX export lays a
+    //     picture out on (see downscaledCopy, and MarkdownExport.Image for the export's
+    //     own, deliberately separate, 300 dpi ceiling).
+    private static final int[] IMAGES_DPI_OPTIONS = { 72, 96, 150, 203, 300 };
+    private static final int IMAGES_DPI_DEFAULT = 150;
+    private static int imagesDpi = IMAGES_DPI_DEFAULT;
 
     // "Autobackup log" in the Configure dialog: when on, a spell of inactivity in the
     // prompt takes a backup of the whole JRock folder (see the idle timer in
@@ -270,6 +278,11 @@ public class JRock {
     private static final ChooserDir includeChooserDir = new ChooserDir(() -> workingDir);
 
     private static final ChooserDir logChooserDir     = new ChooserDir(() -> workingDir);
+
+    // The duplex merge's own, because scans are not includes: a batch of them lives in
+    // whatever folder the scanner drops them in, and that folder is the one both of its
+    // dialogs should keep coming back to (see mergeDuplexScans).
+    private static final ChooserDir scanChooserDir     = new ChooserDir(() -> workingDir);
 
     // Derived endpoints/paths (recomputed from the mutable config above).
     private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
@@ -1268,6 +1281,7 @@ public class JRock {
         // Every file chooser starts fresh in the (possibly new) working directory.
         includeChooserDir.reset();
         logChooserDir.reset();
+        scanChooserDir.reset();
 
         // Recover any previous log from disk FIRST. loadFromDisk() replaces the
         // entry list (rebuild -> setText), so it must run before we log anything
@@ -1321,8 +1335,8 @@ public class JRock {
         // Only when it has been changed: silent for everyone on the default, but
         // applying the dialog re-runs this report, so a change is acknowledged.
         // Every conversion logs its full Ghostscript command line anyway, -r and all.
-        if (pdfDpi != PDF_DPI_DEFAULT) {
-            log.gray("PDF page images: " + pdfDpi + " dpi (default " + PDF_DPI_DEFAULT + ")");
+        if (imagesDpi != IMAGES_DPI_DEFAULT) {
+            log.gray("Images DPI: " + imagesDpi + " dpi (default " + IMAGES_DPI_DEFAULT + ")");
         }
         // Same rule, and the more important one to say out loud: a backup that is not
         // being taken is worth a line, so nobody counts on one that was switched off.
@@ -1943,15 +1957,20 @@ public class JRock {
         useBrowserClipboard(output, log, false);   // read-only: copy only
         useBrowserClipboard(input, log, true);
 
-        // Window chrome (empty area of the top bar, e.g. right of Configure): the
-        // backup pair, then Move & resize window...; in the browser, also show/hide the
-        // page's own header and footer; on Windows, install/uninstall the "Open JRock
-        // here" folder context-menu entry.
+        // Window chrome (empty area of the top bar, e.g. right of Configure): the duplex
+        // merge, then the backup pair, then Move & resize window...; in the browser, also
+        // show/hide the page's own header and footer; on Windows, install/uninstall the
+        // "Open JRock here" folder context-menu entry.
         //
-        // Backup and restore lead the menu, above the separator, because they are about
-        // the work rather than about the window - and because they are the two items
-        // here that a hurry would look for.
+        // The duplex merge leads the menu, alone above its separator, because it is the
+        // only item here that does something to documents rather than to JRock; backup
+        // and restore come next, above their own separator, because they are about the
+        // work rather than about the window - and because they are the items a hurry
+        // would look for.
         javax.swing.JPopupMenu windowMenu = new javax.swing.JPopupMenu();
+        addMenuItem(windowMenu, "Merge two-sided (duplex) PDF scans...",
+                () -> mergeDuplexScans(frame, log));
+        windowMenu.addSeparator();
         addMenuItem(windowMenu, "Backup log...", () -> backupLog(frame, log, sendGate, true));
         addMenuItem(windowMenu, "Load from backup...",
                 () -> showRestoreDialog(frame, input, log, sendGate));
@@ -2240,15 +2259,16 @@ public class JRock {
         modelF.getEditor().getEditorComponent()
                 .setFont(modelF.getFont().deriveFont(java.awt.Font.PLAIN));
 
-        // PDF page-image resolution: a fixed list, so not editable - unlike the
-        // model, an arbitrary number here has no meaning worth supporting.
+        // Image resolution: a fixed list, so not editable - unlike the model, an
+        // arbitrary number here has no meaning worth supporting.
         javax.swing.JComboBox<Integer> dpiF = new javax.swing.JComboBox<>();
-        for (int dpi : PDF_DPI_OPTIONS) dpiF.addItem(dpi);
-        dpiF.setSelectedItem(pdfDpi);
+        for (int dpi : IMAGES_DPI_OPTIONS) dpiF.addItem(dpi);
+        dpiF.setSelectedItem(imagesDpi);
         dpiF.setFont(dpiF.getFont().deriveFont(java.awt.Font.PLAIN));
-        dpiF.setToolTipText("Resolution Ghostscript rasterises PDF pages at, when a "
-                + "PDF is included as images (72/96 screen, 150 documents, 203 fax/"
-                + "receipt, 300 print). Higher is sharper but costs more tokens.");
+        dpiF.setToolTipText("How fine a picture to keep, per inch of page (72/96 "
+                + "screen, 150 documents, 203 fax/receipt, 300 print). PDF pages are "
+                + "rasterised at it, and \"Include with copy...\" downscales an image "
+                + "to it. Higher is sharper but costs more tokens.");
         // Autobackup, on the same line: a checkbox says what it is in its own label, so
         // it costs no row of its own, and the space next to a three-digit dropdown is
         // otherwise empty.
@@ -2278,7 +2298,7 @@ public class JRock {
         }
         addRow(fields, c, row++, "AWS region:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
-        addRow(fields, c, row++, "PDF image DPI:", dpiRow);
+        addRow(fields, c, row++, "Images DPI:", dpiRow);
 
         // A plain (non-bold) font derived from the default label font, reused for
         // the notes, shortcuts and titled-border titles so nothing renders bold.
@@ -2458,9 +2478,9 @@ public class JRock {
         String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
 
-        // PDF page-image resolution: picked from the list, so always valid.
+        // Image resolution: picked from the list, so always valid.
         Object dpi = dpiF.getSelectedItem();
-        if (dpi instanceof Integer) { pdfDpi = (Integer) dpi; }
+        if (dpi instanceof Integer) { imagesDpi = (Integer) dpi; }
 
         // Autobackup: the idle timer reads this when it next fires, so a change here
         // applies to the spell of inactivity that starts the moment this dialog closes.
@@ -3543,8 +3563,11 @@ public class JRock {
         javax.swing.filechooser.FileNameExtensionFilter textFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         TEXT_FILTER_LABEL, TEXT_EXTENSIONS);
-        javax.swing.filechooser.FileNameExtensionFilter pdfTextFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter("PDF as text pages (*.pdf)", "pdf");
+        // Page images and nothing else, for a PDF: Ghostscript's txtwrite is a poor
+        // reader of a real document - it takes the text operators as they come and
+        // hands back something a model has to guess at. A PDF whose text matters is
+        // better turned into RTF or DOCX in Acrobat and included under one of those
+        // filters, where the headings and tables survive as structure.
         javax.swing.filechooser.FileNameExtensionFilter pdfImageFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter("PDF as page images (*.pdf)", "pdf");
         javax.swing.filechooser.FileNameExtensionFilter rtfMarkdownFilter =
@@ -3556,7 +3579,6 @@ public class JRock {
         chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
         chooser.addChoosableFileFilter(imageRefFilter);
         chooser.addChoosableFileFilter(textFilter);
-        chooser.addChoosableFileFilter(pdfTextFilter);
         chooser.addChoosableFileFilter(pdfImageFilter);
         chooser.addChoosableFileFilter(rtfMarkdownFilter);
         chooser.addChoosableFileFilter(docxMarkdownFilter);
@@ -3574,8 +3596,7 @@ public class JRock {
         java.io.File[] selected = chooser.getSelectedFiles();
         if (selected == null || selected.length == 0) return;
         javax.swing.filechooser.FileFilter chosen = chooser.getFileFilter();
-        boolean asImages = chosen == pdfImageFilter;
-        boolean pdf = chosen == pdfTextFilter || chosen == pdfImageFilter;
+        boolean pdf = chosen == pdfImageFilter;
         boolean rtf = chosen == rtfMarkdownFilter;
         boolean docx = chosen == docxMarkdownFilter;
         boolean isImage = chosen == imageFilter || chosen == imageRefFilter;
@@ -3597,7 +3618,7 @@ public class JRock {
                 for (java.io.File f : files) {
                     Path file = f.toPath();
                     if (pdf) {
-                        includePdf(frame, input, log, extend, file, asImages);
+                        includePdf(frame, input, log, extend, file);
                     } else if (rtf) {
                         includeRtfAsMarkdown(input, log, extend, file);
                     } else if (docx) {
@@ -3607,7 +3628,8 @@ public class JRock {
                         // includeOne: what the three conversions above include is
                         // already a file they wrote under JRock/ themselves, so only
                         // the file the user picked directly needs copying.
-                        final Path included = copies ? includeCopyOf(file, log) : file;
+                        final Path included =
+                                copies ? includeCopyOf(file, log, isImage) : file;
                         // Left on the EDT: hashing and reading a plain include is
                         // quick, and this is what it always did.
                         onEdt(() -> includeOne(input, log, extend, included,
@@ -3667,7 +3689,11 @@ public class JRock {
     // include now would be a worse answer to "the copy didn't work" than including the
     // file where it lies. Runs off the EDT with the rest of the include (it reads and
     // writes a whole file, which on a 40 MB photograph is not instant).
-    private static Path includeCopyOf(Path file, LogView log) {
+    //
+    // An image gets one thing more: a copy is a new file, which is the moment at which
+    // it can be made no larger than it needs to be - see downscaledCopy. isImage says
+    // whether to try, the filter the user chose being what decides that.
+    private static Path includeCopyOf(Path file, LogView log, boolean isImage) {
         Path dir = includesDir();
         try {
             // Already a copy (a re-include of something under JRock/includes/, or a
@@ -3677,6 +3703,10 @@ public class JRock {
                 return file;
             }
             Files.createDirectories(dir);
+            if (isImage) {
+                Path smaller = downscaledCopy(dir, file, log);
+                if (smaller != null) return smaller;
+            }
             Path target = includeCopyTarget(dir, file);
             if (Files.exists(target)) {
                 log.gray("Include copy already saved: " + target);
@@ -3698,17 +3728,213 @@ public class JRock {
     // saved, and including two identical files under two names would be nothing but
     // two names for one include.
     private static Path includeCopyTarget(Path dir, Path file) {
-        String name = file.getFileName().toString();
+        return includeCopyTarget(dir, file.getFileName().toString(), hashFile(file));
+    }
+
+    // The same, for a copy that is not a copy of any file yet: the downscaled one, which
+    // is written to a temporary file and named after what came out of the scaling rather
+    // than after the file that went in. So the name to aim for and the bytes to compare
+    // against are passed in, and the numbering and the "same bytes" rule are one piece
+    // of code for both kinds of copy.
+    private static Path includeCopyTarget(Path dir, String name, String hash) {
         int dot = name.lastIndexOf('.');
         String stem = dot > 0 ? name.substring(0, dot) : name;
         String ext  = dot > 0 ? name.substring(dot)   : "";
-        String hash = hashFile(file);
         Path target = dir.resolve(name);
         for (int n = 2; Files.exists(target); n++) {
             if (hash != null && hash.equals(hashFile(target))) return target;
             target = dir.resolve(stem + "-" + n + ext);
         }
         return target;
+    }
+
+    // A copy of an image no bigger than the page it is going to be read on, or null when
+    // it is already no bigger than that - in which case the caller copies the file as it
+    // stands, byte for byte.
+    //
+    // Why downscale at all: an image costs tokens by the pixel, and a phone photograph
+    // or a 600 dpi scan carries several times more of them than anything will be seen
+    // through. The page a picture is laid out on is A4 with 2 cm margins - the DOCX
+    // export's text frame - so at "Images DPI" dots to the inch that page has room for a
+    // definite number of dots each way, and past that number nobody reads the detail:
+    // the export shrinks the picture to fit the frame, the model is shown small print
+    // that was already as fine as it was going to get, and the extra pixels are paid for
+    // twice, once in tokens and once in the time spent sending them.
+    //
+    // Only for "Include with copy...", deliberately. A plain include is a pointer at a
+    // file JRock does not own, and rewriting somebody's photograph is not what "include
+    // this file" asks for; a copy under JRock/includes/ is JRock's own file, made for
+    // this purpose - and it says in its name what it is: "IMG_4002-1004x753.png".
+    //
+    // The export's own 300 dpi ceiling (MarkdownExport.Image) is left exactly as it was:
+    // that one decides how big a picture is PRINTED, which is the page's business rather
+    // than the token bill's, and an image already trimmed to the setting is under it.
+    private static Path downscaledCopy(Path dir, Path file, LogView log) {
+        int[] size = ImageHeader.size(file);
+        if (size == null) return null;              // size unknown: copy it as it is
+        int[] room = a4Pixels(imagesDpi);
+        if (size[0] <= room[0] && size[1] <= room[1]) return null;   // small enough
+
+        String name = file.getFileName().toString();
+        String format = imageWriteFormat(name);
+        if (format == null) {
+            log.gray("Copied at full size: " + name + " is " + size[0] + " x " + size[1]
+                    + ", more than A4 at " + imagesDpi + " dpi has room for (" + room[0]
+                    + " x " + room[1] + "), but rewriting that format would change what "
+                    + "the file is.");
+            return null;
+        }
+
+        // The arithmetic the export sizes a picture with, for the same reason: one factor
+        // for both directions, so whichever of them binds, the other cannot drift out of
+        // proportion.
+        double factor = Math.min((double) room[0] / size[0], (double) room[1] / size[1]);
+        int width  = Math.max(1, (int) Math.round(size[0] * factor));
+        int height = Math.max(1, (int) Math.round(size[1] * factor));
+
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        String ext  = dot > 0 ? name.substring(dot)   : "";
+        Path scratch = null;
+        try {
+            // Written to a temporary file in the same folder first, because the name the
+            // copy ends up under depends on its bytes: includeCopyTarget hands back the
+            // copy that is already there when the bytes match, and a scaled image's
+            // bytes are not the original's.
+            scratch = Files.createTempFile(dir, "scaling-", ext.isEmpty() ? ".tmp" : ext);
+            writeScaled(file, scratch, format, width, height);
+            Path target = includeCopyTarget(dir, stem + "-" + width + "x" + height + ext,
+                    hashFile(scratch));
+            if (Files.exists(target)) {
+                Files.delete(scratch);
+                log.gray("Include copy already saved: " + target);
+            } else {
+                Files.move(scratch, target);
+                log.gray("Downscaled for the include: " + size[0] + " x " + size[1]
+                        + " -> " + width + " x " + height + ", which is what A4 at "
+                        + imagesDpi + " dpi has room for.");
+                // The line a full-size copy writes too, and on purpose: it is what says
+                // where an include came from.
+                log.gray("Copied for the include: " + file + " -> " + target);
+            }
+            scratch = null;
+            return target;
+        } catch (IOException | RuntimeException | LinkageError ex) {
+            // LinkageError on purpose: in the browser, reading a JPEG goes looking for
+            // the native colour-management library and throws an Error rather than an
+            // exception (see ImageHeader, which is header arithmetic for that reason).
+            // An image that cannot be scaled is still an image to copy, so this is a
+            // note on the way past, not a failed include.
+            log.gray("Could not downscale " + name + " (" + ex + ") - copying it at full "
+                    + "size.");
+            if (scratch != null) {
+                try {
+                    Files.deleteIfExists(scratch);
+                } catch (IOException ignore) { /* a stray scaling- file, nothing worse */ }
+            }
+            return null;
+        }
+    }
+
+    // How many pixels A4 has room for at that resolution: the text frame the DOCX export
+    // lays a picture out in - A4 portrait less its 2 cm margins - measured in dots
+    // instead of twips. Read from the export's own constants, so the two cannot drift
+    // apart on what "the page" is.
+    private static int[] a4Pixels(int dpi) {
+        final int twipsPerInch = 1440;         // a twip is 1/20 point, a point 1/72 inch
+        long across = Math.round(MarkdownExport.TABLE_WIDTH * (double) dpi / twipsPerInch);
+        long down   = Math.round(MarkdownExport.FRAME_HEIGHT * (double) dpi / twipsPerInch);
+        return new int[] { (int) Math.max(1, across), (int) Math.max(1, down) };
+    }
+
+    // The ImageIO format a copy of this file should be written back as, or null for one
+    // this JVM has no business rewriting.
+    //
+    // PNG and JPEG only, which is what a scan, a screenshot and a photograph are. GIF is
+    // left out because a GIF may be an animation and ImageIO would hand back its first
+    // frame - a downscale that quietly throws the rest of the file away. WEBP is left
+    // out because the JDK has no reader for it at all. Both are copied at full size
+    // instead, which keeps the file the file the user chose.
+    private static String imageWriteFormat(String name) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".png")) return "png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "jpeg";
+        return null;
+    }
+
+    // Reads source, scales it to width x height and writes it to target in that format.
+    //
+    // Halved repeatedly and then drawn to the exact size, rather than scaled in one step:
+    // a single bilinear draw reads four pixels out of the dozens each output pixel
+    // covers, and small print comes out as aliased crumbs - which is the very detail the
+    // resolution is being chosen for. Every halving averages everything it passes over,
+    // so nothing is dropped unseen, and the last step is at most a factor of two.
+    private static void writeScaled(Path source, Path target, String format,
+                                    int width, int height) throws IOException {
+        java.awt.image.BufferedImage full = javax.imageio.ImageIO.read(source.toFile());
+        if (full == null) throw new IOException("no reader for " + source.getFileName());
+        // JPEG has no alpha channel and its writer refuses an image that has one, so a
+        // transparent PNG saved as JPEG is drawn onto white - which is the page a scan
+        // came off, and better than the black an ignored alpha channel leaves.
+        boolean alpha = !"jpeg".equals(format) && full.getColorModel().hasAlpha();
+        java.awt.image.BufferedImage current = full;
+        while (current.getWidth() / 2 >= width && current.getHeight() / 2 >= height) {
+            current = drawnInto(current, current.getWidth() / 2, current.getHeight() / 2,
+                    alpha);
+        }
+        writeImage(drawnInto(current, width, height, alpha), format, target);
+    }
+
+    // One scaling step: source drawn smoothly into a new image of exactly that size.
+    private static java.awt.image.BufferedImage drawnInto(
+            java.awt.image.BufferedImage source, int width, int height, boolean alpha) {
+        java.awt.image.BufferedImage out = new java.awt.image.BufferedImage(width, height,
+                alpha ? java.awt.image.BufferedImage.TYPE_INT_ARGB
+                      : java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = out.createGraphics();
+        try {
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                    java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING,
+                    java.awt.RenderingHints.VALUE_RENDER_QUALITY);
+            if (!alpha) {
+                g.setColor(java.awt.Color.WHITE);
+                g.fillRect(0, 0, width, height);
+            }
+            g.drawImage(source, 0, 0, width, height, null);
+        } finally {
+            g.dispose();   // a Graphics2D holds native resources until it is let go
+        }
+        return out;
+    }
+
+    // Writes one image file in the given ImageIO format.
+    //
+    // JPEG has its quality set rather than taking ImageIO's default of 0.75: what this
+    // writes are scans and screenshots, where 0.75 leaves rings around small print, and
+    // legibility is the whole reason for keeping the pixels that are kept.
+    private static void writeImage(java.awt.image.BufferedImage image, String format,
+                                   Path file) throws IOException {
+        if (!"jpeg".equals(format)) {
+            if (!javax.imageio.ImageIO.write(image, format, file.toFile())) {
+                throw new IOException("no " + format + " writer in this JVM");
+            }
+            return;
+        }
+        java.util.Iterator<javax.imageio.ImageWriter> writers =
+                javax.imageio.ImageIO.getImageWritersByFormatName(format);
+        if (!writers.hasNext()) throw new IOException("no JPEG writer in this JVM");
+        javax.imageio.ImageWriter writer = writers.next();
+        try (javax.imageio.stream.ImageOutputStream out =
+                javax.imageio.ImageIO.createImageOutputStream(file.toFile())) {
+            javax.imageio.ImageWriteParam params = writer.getDefaultWriteParam();
+            params.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+            params.setCompressionQuality(0.92f);
+            writer.setOutput(out);
+            writer.write(null, new javax.imageio.IIOImage(image, null, null), params);
+        } finally {
+            writer.dispose();
+        }
     }
 
     // Registers one file as an include (hash -> path), logs it (with image
@@ -4400,38 +4626,26 @@ public class JRock {
         }
     }
 
-    // Converts a PDF to per-page files with Ghostscript, then includes
-    // each produced page. asImages=false -> text pages (txtwrite), true -> PNG
-    // page images. Output files are written under JRock/gs-pdf/, named
-    // "<pdfname>.gs.NNN.txt" / "<pdfname>.gs.NNN.png". If Ghostscript isn't on
-    // PATH, points the user to the download page and does nothing else.
+    // Rasterises a PDF to one PNG per page with Ghostscript, then includes each
+    // produced page. Output files are written under JRock/gs-pdf/, named
+    // "<pdfname>.gs.NNN.png". If Ghostscript isn't on PATH, points the user to the
+    // download page and does nothing else.
+    //
+    // Page images rather than extracted text: see the filters in showIncludeDialog for
+    // why the text half of this was taken out again.
     //
     // Runs on a background thread (see showIncludeDialog): it waits for Ghostscript,
     // which on a large PDF takes a long time. Anything touching a widget goes
     // through onEdt().
     private static void includePdf(JFrame frame, JTextArea input, LogView log,
-                                   boolean extend, Path pdf, boolean asImages) {
+                                   boolean extend, Path pdf) {
         String gs = findGhostscript();
         if (gs == null) {
-            // Name the executable the current platform actually looks for.
-            String exe = isWindows() ? "gswin64" : "gs";
-            log.gray("Ghostscript (" + exe + ") was not found on PATH. Install it from "
-                    + "https://ghostscript.com/ to convert PDFs, then try again.");
-            onEdt(() -> {
-                javax.swing.JOptionPane.showMessageDialog(frame,
-                        "Ghostscript (" + exe + ") is required to convert PDFs but was not found "
-                            + "on your PATH.\n\nInstall it from https://ghostscript.com/ and "
-                            + "restart JRock (or your shell) so " + exe + " is on PATH.",
-                        "Ghostscript not found", javax.swing.JOptionPane.WARNING_MESSAGE);
-                openUrl("https://ghostscript.com/");
-            });
+            ghostscriptMissing(frame, log, "convert PDFs");
             return;
         }
 
-        String ext = asImages ? "png" : "txt";
-        String device = asImages ? "png16m" : "txtwrite";
-
-        // Output goes to JRock/gs-pdf/. Page files are named "<pdfname>.gs.NNN.<ext>"
+        // Output goes to JRock/gs-pdf/. Page files are named "<pdfname>.gs.NNN.png"
         // (pdf name kept as a prefix so pages from different PDFs don't collide).
         Path outDir = gsPdfDir();
         try {
@@ -4442,7 +4656,7 @@ public class JRock {
         }
         String base = pdf.getFileName().toString();
         String prefix = base + ".gs.";
-        String suffix = "." + ext;
+        String suffix = ".png";
         // Ghostscript expands %03d in the output path to the page number.
         String outPattern = outDir.resolve(prefix + "%03d" + suffix).toString();
 
@@ -4466,8 +4680,8 @@ public class JRock {
         // The windowed build gets no -sstdout at all, deliberately: it honours the
         // redirect, and its own window - the whole reason for preferring it - would
         // then sit there empty.
-        cmd.add("-sDEVICE=" + device);
-        if (asImages) { cmd.add("-r" + pdfDpi); }   // page raster resolution (Configure)
+        cmd.add("-sDEVICE=png16m");
+        cmd.add("-r" + imagesDpi);                  // page raster resolution (Configure)
         cmd.add("-o"); cmd.add(outPattern);
         cmd.add(pdf.toAbsolutePath().toString());
 
@@ -4533,12 +4747,11 @@ public class JRock {
             final Path p = page;
             // Inserts the token into the prompt's document, so: on the EDT.
             boolean[] added = new boolean[1];
-            onEdt(() -> added[0] =
-                    includeOne(input, log, extend, p, asImages ? "img" : "txt", asImages));
+            onEdt(() -> added[0] = includeOne(input, log, extend, p, "img", true));
             if (added[0]) inserted++;
         }
-        log.gray("Inserted " + inserted + " new @" + (asImages ? "img" : "txt")
-                + " token(s) for " + pdf.getFileName() + ".");
+        log.gray("Inserted " + inserted + " new @img token(s) for "
+                + pdf.getFileName() + ".");
         // No requestFocusInWindow here: the caller's done() puts focus back on the
         // prompt once the whole batch is finished, on the EDT where it belongs.
     }
@@ -4550,9 +4763,18 @@ public class JRock {
     // is what a long conversion needs - a native window that is visibly working,
     // rather than a hidden console. The console builds stay as the fallback, for an
     // installation that ships only those. Elsewhere there is one "gs" and no choice.
-    private static String findGhostscript() {
+    private static String findGhostscript() { return findGhostscript(true); }
+
+    // The same, asked the other way round: windowed=false prefers the CONSOLE build,
+    // whose messages come back on a pipe and can therefore be read (see pdfPageCount).
+    // Both lists end in whatever else is installed, so a machine carrying only one of
+    // the two builds still gets an answer - and a caller that needed the other kind
+    // finds out by not getting the number it asked for.
+    private static String findGhostscript(boolean windowed) {
         String[] names = isWindows()
-                ? new String[] { "gswin64", "gswin32", "gswin64c", "gswin32c", "gs" }
+                ? (windowed
+                    ? new String[] { "gswin64", "gswin32", "gswin64c", "gswin32c", "gs" }
+                    : new String[] { "gswin64c", "gswin32c", "gswin64", "gswin32", "gs" })
                 : new String[] { "gs" };
         String path = System.getenv("PATH");
         String[] dirs = path == null ? new String[0] : path.split(java.io.File.pathSeparator);
@@ -4569,6 +4791,28 @@ public class JRock {
         return null;
     }
 
+    // Says Ghostscript is missing - in the log, in a dialog, and by opening the download
+    // page, which is the one thing there is to do about it. "task" finishes the sentence
+    // "Ghostscript is required to <task>", so the message names what was being attempted
+    // rather than PDFs in general.
+    //
+    // Safe from either thread: the dialog goes through onEdt, which runs it straight away
+    // when the caller is already on the EDT.
+    private static void ghostscriptMissing(JFrame frame, LogView log, String task) {
+        // Name the executable the current platform actually looks for.
+        String exe = isWindows() ? "gswin64" : "gs";
+        log.gray("Ghostscript (" + exe + ") was not found on PATH. Install it from "
+                + "https://ghostscript.com/ to " + task + ", then try again.");
+        onEdt(() -> {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Ghostscript (" + exe + ") is required to " + task + " but was not "
+                        + "found on your PATH.\n\nInstall it from https://ghostscript.com/ "
+                        + "and restart JRock (or your shell) so " + exe + " is on PATH.",
+                    "Ghostscript not found", javax.swing.JOptionPane.WARNING_MESSAGE);
+            openUrl("https://ghostscript.com/");
+        });
+    }
+
     // Whether that command is one of Ghostscript's windowed Windows builds.
     //
     // The naming is Ghostscript's own and has been stable for decades: gswin64 is the
@@ -4579,6 +4823,330 @@ public class JRock {
         String name = Paths.get(command).getFileName().toString().toLowerCase();
         if (name.endsWith(".exe")) name = name.substring(0, name.length() - 4);
         return name.startsWith("gswin") && !name.endsWith("c");
+    }
+
+    // ---- Duplex scan merge (Ghostscript) -----------------------------------
+    // Merges the two passes of a double-sided scan into one PDF.
+    //
+    // A sheet-feed scanner with no duplex unit takes a two-sided batch in two goes: the
+    // first pass gives the fronts in order, and then the stack goes back into the feeder
+    // as it came out of it - so the second pass gives the backs in reverse, the back of
+    // the last sheet first. Two PDFs, neither of them readable on its own, and
+    // interleaving them by hand is a job nobody does twice.
+    //
+    // Which is all this is: front 1, back N, front 2, back N-1, ... written out as one
+    // document. By the Ghostscript that PDF includes already need, so there is no pdftk,
+    // no Python and nothing else to install.
+    //
+    // First in the window menu because it is the one item there that is a tool rather
+    // than a setting - and the one somebody comes to this menu looking for.
+    //
+    // Runs on the EDT as far as its two dialogs; the counting and the merge, which wait
+    // for a subprocess each, go to a worker.
+    private static void mergeDuplexScans(JFrame frame, LogView log) {
+        String gs = findGhostscript();              // windowed where there is one
+        if (gs == null) {
+            ghostscriptMissing(frame, log, "merge duplex scans");
+            return;
+        }
+
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(scanChooserDir.start());
+        chooser.setDialogTitle("Merge duplex scans: the front pass, then the back pass");
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "PDF files (*.pdf)", "pdf"));
+        chooser.setMultiSelectionEnabled(true);
+        // Both names in the File Name box, in quotes, is how a touch device selects two
+        // files - a tap selects one and there is no Shift to hold (see addCopyPasteMenu).
+        addCopyPasteMenu(findFileNameField(chooser), log);
+        if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        scanChooserDir.remember(chooser);
+
+        java.io.File[] picked = chooser.getSelectedFiles();
+        int count = (picked == null) ? 0 : picked.length;
+        if (count != 2) {
+            duplexWarn(frame, "Pick exactly two PDF files - the front pass and the back "
+                    + "pass. " + count + " were selected.");
+            return;
+        }
+        // The order is the chooser's own, which hands back what it selected in the order
+        // it lists it - so scan0166.pdf comes before scan0167.pdf, the way the scanner
+        // wrote them. Both are logged before anything runs, and the front one names the
+        // merged file, so a pair taken the wrong way round shows before the merge as
+        // well as in it.
+        final Path front = picked[0].toPath().toAbsolutePath().normalize();
+        final Path back  = picked[1].toPath().toAbsolutePath().normalize();
+        if (front.equals(back)) {
+            duplexWarn(frame, "The front pass and the back pass are the same file.");
+            return;
+        }
+
+        javax.swing.JFileChooser save =
+                new javax.swing.JFileChooser(scanChooserDir.start());
+        save.setDialogTitle("Save the merged PDF as");
+        save.setSelectedFile(scanChooserDir.startFile(mergedScanName(front)));
+        save.setAcceptAllFileFilterUsed(false);
+        save.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "PDF files (*.pdf)", "pdf"));
+        addCopyPasteMenu(findFileNameField(save), log);
+        if (save.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        scanChooserDir.remember(save);
+        // The dialog says .pdf; a name typed without it gets it anyway.
+        final Path out = withExtension(save.getSelectedFile().toPath(), "pdf")
+                .toAbsolutePath().normalize();
+        if (out.equals(front) || out.equals(back)) {
+            duplexWarn(frame, "That name is one of the two scans, which the merge reads "
+                    + "as it writes. Choose another.");
+            return;
+        }
+
+        log.gray("Duplex merge, front pass: " + front);
+        log.gray("Duplex merge, back pass (in reverse): " + back);
+        final String command = gs;
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                runDuplexMerge(frame, log, command, front, back, out);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();   // surfaces anything doInBackground threw
+                } catch (Exception ex) {
+                    log.gray("The duplex merge failed: " + ex.getMessage());
+                }
+                log.gray("");   // closes the block, one per merge
+            }
+        }.execute();
+    }
+
+    // Counts the pages of both passes, then interleaves them into out with Ghostscript.
+    //
+    // Runs off the EDT: it waits for two or three subprocesses, and on a long document
+    // the merge is minutes. Everything it says goes into the log, which is why it can;
+    // a refusal also gets a dialog, through duplexNote.
+    private static void runDuplexMerge(JFrame frame, LogView log, String gs,
+                                       Path front, Path back, Path out) {
+        // The page count is asked of the CONSOLE build, whose answer comes back on a
+        // pipe; the merge itself runs the windowed one where there is one, for the
+        // progress window. One installation, two executables.
+        String gsConsole = findGhostscript(false);
+        int sheets = pdfPageCount(gsConsole, front, log);
+        int backs  = pdfPageCount(gsConsole, back, log);
+        if (sheets < 1 || backs < 1) {
+            duplexNote(frame, log, "Ghostscript would not say how many pages "
+                    + (sheets < 1 ? front : back).getFileName() + " has, so its pages "
+                    + "cannot be paired with the other pass's.");
+            return;
+        }
+        if (sheets != backs) {
+            duplexNote(frame, log, "The two passes have different page counts: "
+                    + front.getFileName() + " has " + sheets + ", " + back.getFileName()
+                    + " has " + backs + ". Both passes feed the same sheets, so one of "
+                    + "these is not the file it was taken for - merging them would put "
+                    + "the wrong back on every front.");
+            return;
+        }
+
+        // Both passes named relative to the folder they share, where they share one.
+        // Length is the whole reason: every sheet names both files again, and Windows
+        // stops accepting a command line at 32767 characters - which a few hundred
+        // sheets with long paths would reach.
+        Path dir = front.getParent();
+        boolean relative = dir != null && dir.equals(back.getParent());
+        String frontArg = relative ? front.getFileName().toString() : front.toString();
+        String backArg  = relative ? back.getFileName().toString()  : back.toString();
+
+        boolean windowed = isWindowedGhostscript(gs);
+        java.util.List<String> cmd = new java.util.ArrayList<>();
+        cmd.add(gs);
+        cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
+        if (!windowed) cmd.add("-sstdout=%stderr");   // see includePdf for why
+        cmd.add("-sDEVICE=pdfwrite");
+        cmd.add("-o"); cmd.add(out.toString());
+        // The shuffle itself. Ghostscript reads its arguments in order, so a
+        // -dFirstPage / -dLastPage pair in front of a named file picks one page out of
+        // that file - and pdfwrite writes the pages in the order they are interpreted.
+        // Front 1, back N, front 2, back N-1, ... which is sheet 1 front, sheet 1 back,
+        // sheet 2 front, ... because the second pass came out in reverse.
+        for (int sheet = 1; sheet <= sheets; sheet++) {
+            cmd.add("-dFirstPage=" + sheet);
+            cmd.add("-dLastPage=" + sheet);
+            cmd.add(frontArg);
+            int reverse = sheets + 1 - sheet;
+            cmd.add("-dFirstPage=" + reverse);
+            cmd.add("-dLastPage=" + reverse);
+            cmd.add(backArg);
+        }
+        int length = String.join(" ", cmd).length();
+        if (isWindows() && length > 30_000) {
+            duplexNote(frame, log, sheets + " sheets need a " + fmtNum(length)
+                    + "-character command line, which is past what Windows accepts "
+                    + "(32767). Put the two scans in a folder with a short path, or "
+                    + "scan the batch in two halves.");
+            return;
+        }
+
+        // Not the command line itself: it names both files once per sheet, which for a
+        // full feeder is thousands of characters of the same two names.
+        log.gray("Merging with Ghostscript (" + gs + "): " + front.getFileName()
+                + " pages 1.." + sheets + " interleaved with " + back.getFileName()
+                + " pages " + sheets + "..1, into " + out);
+        if (windowed) {
+            // Said plainly, because the log falls silent for the whole merge and the
+            // window is somewhere else on screen - possibly behind this one.
+            log.gray("Ghostscript reports its progress in its own window; it closes "
+                    + "when the merge finishes.");
+        }
+        int code;
+        try {
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            if (relative) pb.directory(dir.toFile());
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            // Drained so the process cannot block on a full pipe, and echoed. The
+            // windowed build writes nothing here - its messages go to its window.
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (!line.isBlank()) log.gray("gs: " + line.trim());
+                }
+            }
+            code = p.waitFor();
+        } catch (IOException ex) {
+            duplexNote(frame, log, "Ghostscript failed to run: " + ex.getMessage());
+            return;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            duplexNote(frame, log, "The merge was interrupted; " + out
+                    + " is whatever Ghostscript had written by then.");
+            return;
+        }
+        if (code != 0) {
+            duplexNote(frame, log, "Ghostscript exited with code " + code + ", so " + out
+                    + " is not a finished merge."
+                    + (windowed ? " It reported the reason in its own window." : ""));
+            return;
+        }
+
+        long size = -1;
+        try {
+            size = Files.size(out);
+        } catch (IOException ignore) { /* the line below simply says less */ }
+        log.gray("Merged " + (2 * sheets) + " pages into " + out
+                + (size < 0 ? "" : " (" + fmtNum(size) + " bytes)"));
+        // Said out loud, because the shell one-liner this replaces ended in an rm.
+        log.gray("The two scans are untouched; look through the merge before deleting "
+                + "them.");
+    }
+
+    // The default name for a merge: "scan0166.Merged.pdf" beside "scan0166.pdf". The
+    // front pass names it because its page 1 is the merged document's page 1.
+    private static String mergedScanName(Path front) {
+        String name = front.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return (dot > 0 ? name.substring(0, dot) : name) + ".Merged.pdf";
+    }
+
+    // How many pages a PDF has, or -1 when Ghostscript would not say.
+    //
+    // Asked of the console build, whose answer comes back on a pipe. Two ways, because
+    // the one that is instant is the one a modern Ghostscript dropped:
+    //
+    //   1. runpdfbegin / pdfpagecount - a PostScript one-liner that reads the page tree
+    //      and looks at no page at all, so it answers at once however long the document
+    //      is. It belongs to the PostScript PDF interpreter, which Ghostscript 10
+    //      replaced with one written in C, and there it fails.
+    //   2. Failing that, interpret the file with no output device and read the number
+    //      out of "Processing pages 1 through N." - a line every version has printed
+    //      for decades. It costs a pass over the whole document, which on a scan of
+    //      photographs is a moment rather than nothing.
+    //
+    // The file is handed to the first one as a Ghostscript string parameter rather than
+    // written into the PostScript, so a Windows path full of backslashes needs no
+    // escaping. -dNOSAFER goes with it because SAFER will not let a PostScript program
+    // open a file at all - not even one the user picked in a chooser a moment ago. The
+    // second names the file as an ordinary input, which SAFER allows.
+    private static int pdfPageCount(String gsConsole, Path pdf, LogView log) {
+        if (gsConsole == null) return -1;
+        String path = pdf.toAbsolutePath().toString();
+        int quick = gsNumber(java.util.Arrays.asList(
+                gsConsole, "-q", "-dNODISPLAY", "-dBATCH", "-dNOSAFER",
+                "-sJRockPdf=" + path,
+                "-c", "JRockPdf (r) file runpdfbegin pdfpagecount = quit"), null);
+        if (quick > 0) return quick;
+        log.gray("Ghostscript would not count the pages of " + pdf.getFileName()
+                + " from its page tree (a version 10 build cannot); reading the file "
+                + "through to count them instead.");
+        return gsNumber(java.util.Arrays.asList(
+                gsConsole, "-dNODISPLAY", "-dBATCH", "-dNOPAUSE", "-dSAFER", path),
+                "Processing pages 1 through ");
+    }
+
+    // Runs a Ghostscript command that is expected to name a number, and returns the
+    // last number it named, or -1.
+    //
+    // needle null: the number is a line of its own, which is what "=" prints. Otherwise
+    // it follows that text on a line, as in "Processing pages 1 through 12.". Output and
+    // errors are read as one stream and nothing is echoed: both of these are questions
+    // put to Ghostscript, and the first one is expected to fail half the time.
+    private static int gsNumber(java.util.List<String> cmd, String needle) {
+        int found = -1;
+        try {
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    String text = line.trim();
+                    int at = (needle == null) ? 0 : text.indexOf(needle);
+                    if (at < 0) continue;
+                    int number = leadingInt(needle == null
+                            ? text : text.substring(at + needle.length()));
+                    if (number > 0) found = number;
+                }
+            }
+            p.waitFor();
+        } catch (IOException ex) {
+            return -1;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return -1;
+        }
+        return found;
+    }
+
+    // The number at the start of text, or -1 when it does not start with one. Anything
+    // after the digits is ignored: Ghostscript's line ends in a full stop.
+    private static int leadingInt(String text) {
+        int end = 0;
+        while (end < text.length() && Character.isDigit(text.charAt(end))) end++;
+        if (end == 0) return -1;
+        try {
+            return Integer.parseInt(text.substring(0, end));
+        } catch (NumberFormatException ex) {
+            return -1;   // more digits than an int holds, which no document has
+        }
+    }
+
+    // Says why a merge did not happen, in the log and in a dialog. Called from the
+    // worker, so the dialog goes through onEdt.
+    private static void duplexNote(JFrame frame, LogView log, String message) {
+        log.gray(message);
+        onEdt(() -> duplexWarn(frame, message));
+    }
+
+    // The same dialog on its own, for the two dialogs' own refusals: those happen on
+    // the EDT, before there is anything in the log worth a line.
+    private static void duplexWarn(JFrame frame, String message) {
+        javax.swing.JOptionPane.showMessageDialog(frame, message,
+                "Merge duplex scans", javax.swing.JOptionPane.WARNING_MESSAGE);
     }
 
     // ---- RTF as Markdown ---------------------------------------------------

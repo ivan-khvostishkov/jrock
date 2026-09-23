@@ -27,11 +27,15 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Everything local & transparent.** No server-side session state; all history lives in
   plain files under a `JRock/` folder you own and can inspect.
 - **Crash-safe persistence** of the prompt and the full conversation.
-- **Multimodal includes** (text and image files, plus PDF-to-text/PDF-to-images via
-  Ghostscript and RTF/DOCX-to-Markdown with no external tool at all) referenced by hash;
-  multi-select supported, with optional **copies kept under `JRock/`** and every include
-  **reloaded from the log** in one menu item after a restart
+- **Multimodal includes** (text and image files, plus PDF-to-page-images via Ghostscript and
+  RTF/DOCX-to-Markdown with no external tool at all) referenced by hash; multi-select
+  supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
+  read on, so no tokens are spent on pixels nobody sees — and every include **reloaded from the
+  log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
+- **Merge two-sided (duplex) scans** — the two passes a sheet feeder produces, the fronts in
+  order and the backs in reverse, interleaved into one PDF by the same Ghostscript
+  ([**merging duplex scans**](#merging-duplex-scans-ghostscript)).
 - **Fetch a URL** (Ctrl+U), not just a file: an address is downloaded into `JRock/urls/` and
   attached as text or as a picture according to the `Content-Type` it answered with, with a
   Markdown link to where it came from above the token ([**fetching a URL**](#fetching-a-url)).
@@ -186,10 +190,11 @@ review, and the phone gets the same client as the desktop, with the same plain f
 
 ### Working with PDFs
 
-The two PDF filters are the one thing a phone doesn't get. Java ships no PDF support of its own, so
+The PDF filter is the one thing a phone doesn't get, and so is the
+[duplex merge](#merging-duplex-scans-ghostscript). Java ships no PDF support of its own, so
 JRock converts with [Ghostscript](#pdf-conversion-ghostscript) as a subprocess — and there is no
-process to start under a browser JVM, CheerpJ having no operating system beneath it. The filters are
-still in the dropdown, and picking one there gets you the same "not found" note as a desktop without
+process to start under a browser JVM, CheerpJ having no operating system beneath it. The filter is
+still in the dropdown, and picking it there gets you the same "not found" note as a desktop without
 Ghostscript installed. Two ways round, both of which work in a browser exactly as they do on the
 desktop:
 
@@ -444,13 +449,67 @@ after the cursor last moved in the prompt, it takes a backup with the dated defa
 dialog at all. Once per idle spell, not every five minutes - a window left open overnight has one
 backup, and the next keystroke arms it again.
 
+## Merging duplex scans (Ghostscript)
+
+**Right-click the empty area of the top bar → Merge two-sided (duplex) PDF scans...** — the first
+item in that menu, alone above its separator.
+
+A sheet feeder with no duplex unit takes a two-sided batch in two goes: the first pass gives the
+fronts, in order, and then the stack goes back into the feeder exactly as it came out of it — so
+the second pass gives the **backs in reverse**, the back of the last sheet first. Two PDFs, neither
+of them readable on its own, and interleaving them by hand is a job nobody does twice. This is the
+`pdftk A=front B=back shuffle A1 BN A2 B(N-1) ...` one-liner, done with the **Ghostscript** a PDF
+include already needs — no pdftk, no Python, nothing else to install:
+
+1. A **multi-select file chooser**, filtered to PDFs. Pick exactly **two**: the **front pass
+   first**, the **back pass second** — `scan0166.pdf` then `scan0167.pdf`, the order the scanner
+   wrote them in and the order the chooser hands them back in. On a touch device, both names in
+   the File Name box in quotes selects two files without a Shift key
+   ([context menus](#context-menus-right-click--long-tap)).
+2. A **save dialog** for the merged file, offering `<front-name>.Merged.pdf` in the folder you
+   were just in — the front pass names it, its page 1 being the merged document's page 1.
+3. Both passes are counted, and the merge runs: **front 1, back N, front 2, back N−1, …** — which
+   is sheet 1 front, sheet 1 back, sheet 2 front, … because the second pass came out backwards.
+   Ghostscript reads its arguments in order, so a `-dFirstPage`/`-dLastPage` pair in front of each
+   named file picks one page out of it, and `pdfwrite` writes them in the order they are
+   interpreted:
+
+```
+gswin64 -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -o C:\scans\scan0166.Merged.pdf
+        -dFirstPage=1 -dLastPage=1 scan0166.pdf  -dFirstPage=12 -dLastPage=12 scan0167.pdf
+        -dFirstPage=2 -dLastPage=2 scan0166.pdf  -dFirstPage=11 -dLastPage=11 scan0167.pdf  ...
+```
+
+- **The page count comes first, and from the other Ghostscript.** The windowed build shows its
+  progress in a window but writes nothing to a pipe, so the count is asked of the **console**
+  build (`gswin64c`) instead: `runpdfbegin pdfpagecount`, a PostScript one-liner that reads the
+  page tree and looks at no page at all. Ghostscript 10 replaced that interpreter, and there it
+  fails — so the fallback is to interpret the file with no output device and read the number out
+  of `Processing pages 1 through N.`, a line every version has printed for decades. That costs one
+  pass over the document; the quick answer costs nothing.
+- **The merge itself runs the windowed build** (`gswin64`, not `gswin64c`), which reports its
+  progress in its own window and closes when it finishes — the log says so, since it has nothing
+  to echo. The log line summarises the command rather than printing it: a full feeder names both
+  files a few hundred times over.
+- **A mismatch is refused, not merged.** Both passes feed the same sheets, so different page
+  counts mean one of the two files is not the pass it was taken for — merging them would put the
+  wrong back on every front. Picking one file, or the same file twice, or a merged name that is
+  one of the scans, is refused the same way. Ghostscript is run from the folder the scans share,
+  with bare file names, because every sheet names both files again and Windows stops accepting a
+  command line at 32767 characters — past that the tool says so and suggests a shorter path or
+  half the batch.
+- **Nothing is deleted.** The shell one-liner this replaces ended in an `rm`; this ends in a line
+  saying the two scans are untouched and to look through the merge before deleting them.
+- Not in the [browser](#jrock-web-in-the-browser): there is no subprocess to start there, so the
+  item answers with the same "Ghostscript not found" note as a desktop without it installed.
+
 ## Multimodal includes (Ctrl+I)
 
 Attach **text or image** files to a prompt (and convert **PDFs**, **RTFs** or **DOCX** documents
 into either):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers seven kinds:
+   once, and the dropdown offers six kinds:
    - **Image files** (png, jpg, jpeg, gif, webp)
    - **Image with a Markdown reference** (the same files) — one line more in the prompt: a
      Markdown `![](<hash>)` above the token. The model reads it as a picture belonging to the
@@ -459,14 +518,15 @@ into either):
      places
    - **Text files as is** (txt, csv, html, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
-   - **PDF as text pages** — converts the PDF to one text file per page
    - **PDF as page images** — converts the PDF to one PNG per page
    - **RTF as Markdown text** — converts the RTF to one Markdown file
    - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
 
    **Ctrl+Shift+I** (**Include with copy...** in the prompt's context menu) opens the very
    same dialog, with one difference: each chosen file is copied under `JRock/includes/` first
-   and included from the copy ([why](#includes-that-outlive-the-session)).
+   and included from the copy ([why](#includes-that-outlive-the-session)) — and an image bigger
+   than the page it will be read on is **downscaled as it is copied**, to the
+   [**Images DPI**](#configure-dialog-top-left-button) the Configure dialog was left on.
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart the files have to be attached again — or their paths read
    back out of the log with **Reload all includes**
@@ -554,7 +614,7 @@ they stand for: sending says `Included @img <hash> is not known`, and the conver
 until every file is attached again. Two things fix that, and they are meant to be used together.
 
 **Include with copy...** — a second item in the prompt's context menu, **Ctrl+Shift+I**, right
-under the plain include. It opens the same dialog, with the same seven filters and the same
+under the plain include. It opens the same dialog, with the same six filters and the same
 multi-select, and does one thing more: a chosen file is **copied into `JRock/includes/` first and
 included from the copy**, so the log's line points inside the folder you own:
 
@@ -573,6 +633,28 @@ under `JRock/` themselves). A copy that fails is reported and the original inclu
 the item is there to keep a file within reach, not to refuse the include. It matters most in
 the [browser](#jrock-web-in-the-browser), where an uploaded file lands in CheerpJ's `/uploads`
 and is gone after a reload, taking the only path the log recorded with it.
+
+**And a copy is JRock's own file, so an oversized image is downscaled into it.** The page a
+picture is read on is A4 less 2 cm margins — the [DOCX export's](#images-in-the-docx) text
+frame — which at the [**Images DPI**](#configure-dialog-top-left-button) in Configure has room
+for a definite number of dots each way: 1004 × 1518 at the default 150. A phone photograph or a
+600 dpi scan carries several times that, and the extra pixels are paid for twice, once in tokens
+and once in the time spent sending them, without anybody ever seeing them. So the copy is scaled
+to fit, and says its new size in its name:
+
+```
+Downscaled for the include: 4032 x 3024 -> 1004 x 753, which is what A4 at 150 dpi has room for.
+Copied for the include: C:\photos\IMG_4002.jpg -> C:\demo\JRock\includes\IMG_4002-1004x753.jpg
+```
+
+One factor for both directions, so whichever of width and height binds, the picture keeps its
+proportions; the reduction is done by repeated halving, because a single bilinear step reads four
+pixels out of the dozens each new pixel covers and turns small print into aliased crumbs. JPEGs
+are written back at quality 0.92 rather than ImageIO's default 0.75, legibility being the whole
+reason for keeping the pixels that are kept. **PNG and JPEG only**: a GIF may be an animation
+(ImageIO would hand back its first frame) and the JDK cannot read WEBP at all, so both are copied
+at full size with a line saying why. A picture already within the page is copied byte for byte,
+and a plain include is never rewritten — that file is not JRock's.
 
 **Reload all includes** — an item in the prompt's context menu, which rebuilds the map from the
 log. The log recorded every include ever made, which is the same information the map held, so it
@@ -605,9 +687,17 @@ before sending.
 
 ### PDF conversion (Ghostscript)
 
-Selecting a PDF filter runs **Ghostscript** to convert the PDF, one file per page, then
+Selecting the PDF filter runs **Ghostscript** to convert the PDF, one page image per page, then
 includes each produced page. Ghostscript must be on your PATH: `gswin64` on Windows, `gs` on
 macOS and Linux.
+
+**Page images and nothing else.** There was a *PDF as text pages* filter, on Ghostscript's
+`txtwrite` device, and it is gone: `txtwrite` takes the text operators as they come and hands
+back something a model has to guess at — no headings, no tables, columns interleaved. A PDF whose
+text matters is better turned into RTF or DOCX in Acrobat and included under
+[**RTF as Markdown text** or **DOCX as Markdown
+text**](#rtf-and-docx-conversion-no-external-tool), where the structure survives as structure.
+A scan has no text layer to extract in the first place, and goes as page images.
 
 A long conversion says so while it runs, rather than after. The command line is logged before
 Ghostscript is started, and the conversion happens off the UI thread so the window stays
@@ -616,13 +706,12 @@ alive. On **Windows** JRock runs the **windowed** build (`gswin64.exe`, preferri
 Everywhere else the console `gs` is run with `-q` omitted, and its progress — `Page 1`,
 `Page 2`, … — is echoed into the log as `gs:` lines while it works.
 
-- Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.txt` (text pages via
-  the `txtwrite` device) or `<pdfname>.gs.NNN.png` (page images at the **PDF image DPI** set
-  in Configure — 150 by default).
+- Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.png` — page images at
+  the **Images DPI** set in Configure (150 by default), the page's physical size being the
+  PDF's own business.
 - The exact Ghostscript command and its output are echoed to the log.
 - If Ghostscript isn't found on your PATH, JRock logs a note, shows a dialog, and opens
-  https://ghostscript.com/ so you can install it. (Text extraction quality depends on the
-  PDF; for an LLM, page-image includes are a reliable fallback for tricky PDFs.)
+  https://ghostscript.com/ so you can install it.
 
 ![A PDF converted to two page images, attached by hash, and read back by the model](images/pdf-page-images.png)
 
@@ -757,9 +846,8 @@ of every document for reading and further automation.
 
 1. **Ctrl+O** → `jrock-prompt-pdf-to-ascii.txt`.
 2. **Ctrl+I** → the PDF, with the **PDF as page images** filter. Ghostscript rasterises it, one
-   PNG per page, and each page's `@img` token lands in the prompt. Page images rather than
-   `txtwrite` text because layout is the whole question here, and a scan has no text layer at
-   all.
+   PNG per page, and each page's `@img` token lands in the prompt. Page images because layout is
+   the whole question here, and a scan has no text layer at all.
 3. **Ctrl+Enter**. The reply is the document as plain text.
 4. **Select that reply in the log and press Ctrl+L** — with a selection, Ctrl+L saves *just the
    selection* ("Save selected text as"), so you get the document and not the transcript around
@@ -807,12 +895,16 @@ text file.
 - **Region** — free text. Kept in `JRock/jrock-config.txt`, so it survives a restart.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
   `JRock/jrock-config.txt` too.
-- **PDF image DPI** — the resolution Ghostscript rasterises PDF pages at (`-r`) when a PDF is
-  included as images: 72 / 96 (screen), **150** (documents, the default), 203 (fax/receipt),
-  300 (print). A page image is what the model actually sees, so this is a real trade-off —
-  too low and small print is unreadable, too high and you pay tokens for detail no model
-  needs. Only reported at startup when it isn't the default; every conversion logs its full
-  Ghostscript command line regardless.
+- **Images DPI** — how fine a picture JRock keeps, per inch of page: 72 / 96 (screen), **150**
+  (documents, the default), 203 (fax/receipt), 300 (print). The image is what the model actually
+  sees, so this is a real trade-off — too low and small print is unreadable, too high and you pay
+  tokens for detail no model needs. One number for two jobs, because it is the same question asked
+  twice: a PDF included as page images is rasterised at it (Ghostscript's `-r`, the page's
+  physical size being the PDF's own business), and an image included with
+  [**Include with copy...**](#includes-that-outlive-the-session) is downscaled to it, measured
+  against A4 less 2 cm margins. Only reported at startup when it isn't the default; every PDF
+  conversion logs its full Ghostscript command line regardless, and every downscale says what it
+  did.
 - **Autobackup log** — on the same line as the DPI dropdown, and **on by default**: after five
   minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
@@ -948,10 +1040,11 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   one thing in particular: the include dialog is multi-select, but a tap selects a single file
   and there is no Shift to hold. Several names typed or pasted into that box, each in quotes —
   `"cat.png" "dog.png"` — is how a phone attaches more than one file at a time.
-- **Top bar (empty area)** — Backup log... and Load from backup... (see [**backup and
-  restore**](#backup-and-restore)), then Move & resize window...; in the **browser**, also Show/hide
-  the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
-  entry (see below).
+- **Top bar (empty area)** — Merge two-sided (duplex) PDF scans... first, on its own above a
+  separator (see [**merging duplex scans**](#merging-duplex-scans-ghostscript)), then Backup
+  log... and Load from backup... (see [**backup and restore**](#backup-and-restore)), then Move &
+  resize window...; in the **browser**, also Show/hide the page header & footer; on **Windows**,
+  Install / Uninstall the "JRock here!" Explorer entry (see below).
 
 ## Windows: Explorer right-click integration
 
@@ -1087,7 +1180,7 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   for the session report to run again, and reopens the dialog to check the key is **not
   shown back** — the field is write-only, and the failure mode is a credential appearing on
   screen. It also checks the key never reaches the log.
-- **`JRockPdfIncludeTest`** sets **PDF image DPI** to 300 in the Configure dialog, then
+- **`JRockPdfIncludeTest`** sets **Images DPI** to 300 in the Configure dialog, then
   includes a two-page A4 PDF through the real include dialog with the *PDF as page images*
   filter — and checks Ghostscript was asked for `-r300`, that two pages came back, that the
   prompt gained **two `@img` tokens**, and that both PNGs really are **2480 × 3508 px**. The
@@ -1129,6 +1222,9 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   copied and no `JRock/includes/` is created.
   A third test includes two *different* files both called `photo.png` and checks that neither is
   lost (the second becomes `photo-2.png`), and that the same file again is not copied a third time.
+  A fourth includes a 3000 × 2000 PNG and measures the copy: at the default **Images DPI** of 150
+  A4 has room for 1004 × 1518 dots, so the copy has to be `big-1004x669.png` and really be that
+  size, the include has to point at it, and the original has to be left as it was.
 - **`JRockReloadIncludesTest`** includes a PNG and a text file, throws the hash → path map away by
   reflection — which is the state a restart leaves, minus the restart — and invokes **Reload all
   includes** from the prompt's context menu. The map has to come back identical, each entry named

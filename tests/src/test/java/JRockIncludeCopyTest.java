@@ -21,6 +21,10 @@ import org.junit.jupiter.api.Test;
  * under {@code JRock/includes/} is in the folder the user owns - so what is checked here
  * is that the include is registered against the copy, not against the original.
  * <p>
+ * A copy is also JRock's own file, which is where an oversized image gets downscaled to
+ * the <b>Images DPI</b> the Configure dialog was left on: the last test measures the copy
+ * and the original, one being the point of the other being left alone.
+ * <p>
  * Offline, like the rest: no API key is set, so JRock skips its model-list fetch, and
  * nothing here sends a message.
  *
@@ -110,6 +114,39 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
         try (java.util.stream.Stream<Path> saved = Files.list(copies)) {
             assertThat(saved).describedAs("what is under JRock/includes/").hasSize(2);
         }
+    }
+
+    @Test
+    @DisplayName("an image too big for A4 at the Images DPI is downscaled as it is copied")
+    void downscalesAnOversizedImageIntoTheCopy() throws Exception {
+        awaitReadyCount(1);
+
+        // A4 less its 2 cm margins is 9638 x 14570 twips, so at the default 150 dpi the
+        // page has room for 1004 x 1518 dots. 3000 x 2000 is past that, and the width is
+        // what binds: 1004 across, and 669 down to keep the proportions.
+        Path original = png("photos", "big.png", 3000, 2000);
+        includeWithCopies(true, original, "Downscaled for the include: ");
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .contains("Downscaled for the include: 3000 x 2000 -> 1004 x 669");
+
+        // 1. The copy says its new size in its name, and really is that size.
+        Path copy = workingDirectory().resolve("JRock").resolve("includes")
+                .resolve("big-1004x669.png");
+        assertThat(copy).describedAs("the downscaled copy, named after its size").exists();
+        BufferedImage scaled = ImageIO.read(copy.toFile());
+        assertThat(scaled).describedAs("decoded " + copy.getFileName()).isNotNull();
+        assertThat(scaled.getWidth()).describedAs("the copy's width").isEqualTo(1004);
+        assertThat(scaled.getHeight()).describedAs("the copy's height").isEqualTo(669);
+
+        // 2. And it is the copy that was included, the original being left as it was -
+        //    which is what makes rewriting an image safe to do at all.
+        assertThat(includes().values()).describedAs("the files registered as includes")
+                .containsExactly(copy);
+        BufferedImage untouched = ImageIO.read(original.toFile());
+        assertThat(untouched.getWidth()).describedAs("the original's width, untouched")
+                .isEqualTo(3000);
+        assertThat(untouched.getHeight()).describedAs("the original's height, untouched")
+                .isEqualTo(2000);
     }
 
     /**
