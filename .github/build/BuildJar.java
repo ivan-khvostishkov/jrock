@@ -37,10 +37,15 @@ public class BuildJar {
     private static final String SRC_ZIP    = "jrock-src.zip";
     private static final String MAIN_CLASS = "JRock";
 
-    // Shipped alongside the source: the sample prompts. They are part of what JRock
-    // is for rather than part of how it is built, and a download that has the
-    // application but none of them starts from an empty prompt.
+    // Shipped alongside the source: the sample prompts and the automation scripts that
+    // chain them. They are part of what JRock is for rather than part of how it is
+    // built, and a download that has the application but none of them starts from an
+    // empty prompt.
     private static final String SAMPLES_DIR = "automation-samples";
+
+    // The folder JRock keeps its own files in, under whichever directory it runs in -
+    // which can be the samples directory itself. Never packed; see the walk below.
+    private static final String RUNTIME_DIR = "JRock";
 
     // Fixed timestamp so output never depends on build time or machine.
     // 2026-01-01T00:00:00Z. (Reproducible-builds convention: SOURCE_DATE_EPOCH.)
@@ -100,15 +105,28 @@ public class BuildJar {
         // has to be reproducible too, and a directory listing's order is the file
         // system's business.
         //
-        // Build output is skipped, because running an automation means copying
-        // jrock.jar into that directory by hand (see JRockDocInventory.java) and a
-        // developer's local copy of the jar - or a stray .class from compiling a script
-        // in place - must not change this zip's checksum.
+        // What is packed is the SOURCE that belongs there - prompts and automation
+        // scripts - and nothing else, because that directory is also somewhere JRock
+        // RUNS. Two kinds of file appear in it that must never enter this zip:
+        //
+        //   - build output: enabling automations means copying jrock.jar in by hand
+        //     (see JRockDocInventory.java), and a local copy of the jar - or a stray
+        //     .class from compiling a script in place - would change the checksum.
+        //   - a JRock/ folder, which an automation run in that directory creates. It
+        //     holds the conversation log, the message files, and bedrock-key.txt. That
+        //     is somebody's API key and somebody's documents; they are not source, and
+        //     an artifact is the last place they should turn up.
+        //
+        // Both are skipped by name, not by luck: CI checks out a clean tree and would
+        // never notice either of them.
         List<String[]> samples = new ArrayList<>();   // {relName, absPath}
         Path samplesDir = Paths.get(SAMPLES_DIR);
         if (Files.isDirectory(samplesDir)) {
             try (var stream = Files.walk(samplesDir)) {
                 stream.filter(Files::isRegularFile).filter(p -> {
+                    for (Path part : samplesDir.relativize(p)) {
+                        if (part.toString().equals(RUNTIME_DIR)) return false;
+                    }
                     String n = p.getFileName().toString().toLowerCase(Locale.ROOT);
                     return !n.endsWith(".jar") && !n.endsWith(".class");
                 }).forEach(p -> samples.add(new String[] {

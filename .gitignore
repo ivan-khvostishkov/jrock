@@ -39,6 +39,10 @@ ios/**/build/
 .gradle/
 local.properties
 
-# Classes from the CI step that compiles automation-samples/*.java on its own
+# Classes from the CI step that compiles automation-samples/*.java against the jar
 out-automation/
+
+# Checksums BuildJar writes beside the jar (the jar itself is covered by *.jar)
+jrock.jar.sha256
+jrock.jar.md5
 
