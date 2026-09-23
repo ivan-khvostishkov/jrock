@@ -266,10 +266,12 @@ minimal MobiVM project that compiles the same file ahead of time into an iOS bin
 each, pulling the single source file out of the repository root, which keeps its no-build-descriptor
 rule intact. Neither one works: Android stops at `javac` on the first `javax.swing` import, and
 MobiVM stops in the AOT compiler while linking. The
-[Mobile builds (experimental)](.github/workflows/mobile.yml) workflow runs both on every push — on
+[Mobile builds (experimental)](.github/workflows/mobile.yml) workflow builds both — on
 `ubuntu-latest` and on a `macos-latest` runner with Xcode — and is left red rather than hidden behind
 `continue-on-error`, so the missing piece is a line in a log anybody can read instead of a claim in a
-README. The two directories' own READMEs list, in order of size, what replacing it would mean.
+README. It is **manual**, run from the Actions tab: a job that is expected to fail would otherwise put
+a red X on every commit and teach you to read past the two workflows whose colour means something.
+The two directories' own READMEs list, in order of size, what replacing it would mean.
 
 Which is also why it would be worth more than JRock. A Swing backend on native mobile primitives
 would make plain Java a cross-platform UI target again — desktop, iOS and Android from one source —

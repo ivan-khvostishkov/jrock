@@ -7,7 +7,8 @@ on the first `javax.swing` import.
 
 The point is to have that failure printed in a CI log, from a real Android
 toolchain, rather than argued about. See the
-[Mobile builds (experimental)](../.github/workflows/mobile.yml) workflow.
+[Mobile builds (experimental)](../.github/workflows/mobile.yml) workflow, which is
+run by hand from the Actions tab - there is no sense in failing it on every push.
 
 ## What is here
 
