@@ -1096,6 +1096,20 @@ public class JRock {
             return out;
         }
 
+        // The stamp of the most recent message of that role, or null when there is
+        // none yet. This is the whole of the "reference" a send hands an automation
+        // back (see automationSend): the stamp already IS the name of the file the
+        // body was written to, so there is nothing else to remember.
+        //
+        // EDT only, like every other reader of the entry list.
+        String lastStamp(String role) {
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                Entry e = entries.get(i);
+                if (e.dialog && role.equals(e.role)) return e.stamp;
+            }
+            return null;
+        }
+
         // Loads and renders entries parsed from the main log file. Does NOT
         // rewrite the file (loading shouldn't trigger a save). Returns the number
         // of entries loaded.
@@ -1278,6 +1292,11 @@ public class JRock {
     // promptSourceNote is logged only when non-null (startup); on reconfigure the
     // prompt is untouched so it's omitted.
     private static void initSession(LogView log, String promptSourceNote) {
+        // Not ready while the report is being written, and ready again when it ends.
+        // The Configure dialog runs this a second time, so an automation that arrives
+        // mid-reconfiguration waits for the new session rather than the old one (see
+        // automationAwaitReady).
+        sessionReady = false;
         // Every file chooser starts fresh in the (possibly new) working directory.
         includeChooserDir.reset();
         logChooserDir.reset();
@@ -1370,6 +1389,9 @@ public class JRock {
                 log.gray("");
                 log.gray("Ready.");
                 log.gray("");
+                // The same word, for a program: this is the moment the window can be
+                // used, and the moment automationAwaitReady returns.
+                sessionReady = true;
             }
         }.execute();
     }
@@ -1562,6 +1584,7 @@ public class JRock {
             if (prompt.isEmpty()) {
                 log.gray("Nothing to send - type a prompt first...");
                 log.gray("");
+                sendFinished("the prompt is empty.");
                 return;
             }
             sendGate.accept(false);
@@ -1591,6 +1614,7 @@ public class JRock {
                 log.gray(includeError);
                 log.gray("");
                 sendGate.accept(true);
+                sendFinished(includeError);
                 return;
             }
 
@@ -1601,11 +1625,14 @@ public class JRock {
                 String via = card.mantleMessagesPath() != null
                         ? "the Anthropic Messages API (" + card.mantleMessagesPath() + ")"
                         : "an API JRock does not implement";
+                String why = "model \"" + MODEL_ID + "\" is not served via Chat Completions "
+                        + "on bedrock-mantle; it uses " + via + ".";
                 log.gray("Model \"" + MODEL_ID + "\" is not served via Chat Completions on "
                         + "bedrock-mantle; it uses " + via + ", which JRock does not implement "
                         + "yet. Choose a Chat-Completions-capable model.");
                 log.gray("");
                 sendGate.accept(true);
+                sendFinished(why);
                 return;
             }
 
@@ -1635,12 +1662,16 @@ public class JRock {
 
                 @Override
                 protected void done() {
+                    // Whatever comes out of the block below, one of the two is what an
+                    // automation waiting on this send is told (see sendFinished).
+                    String failure = "the reply was lost.";
                     try {
                         String[] result = get();
                         // result[0] = "1" success / "0" failure.
                         // result[1] = model reply (success) or error text (failure).
                         // result[2] = raw request/response/stats -> always gray, or null.
                         boolean ok = "1".equals(result[0]);
+                        failure = ok ? null : result[1];
                         if (ok) {
                             // The reply is its own block, so the blank line here
                             // closes the "Calling ..." one. A real reply is dialog:
@@ -1661,10 +1692,12 @@ public class JRock {
                             log.gray("");        // closes the raw request/response/stats block
                         }
                     } catch (Exception ex) {
+                        failure = "ERROR: " + ex.getMessage();
                         log.gray("ERROR: " + ex.getMessage());
                         log.gray("");
                     }
                     sendGate.accept(true);
+                    sendFinished(failure);
                 }
             }.execute();
         });
@@ -1990,6 +2023,11 @@ public class JRock {
         }
         attachPopup(topBar, windowMenu);
 
+        // The window is now complete, so publish its parts for the automation API -
+        // last, and only once, so nothing can be driven from outside before all of it
+        // exists (see the Automation API section).
+        ui = new Ui(frame, input, log, send, extendMode, sendGate);
+
         frame.setVisible(true);
     }
 
@@ -2051,6 +2089,439 @@ public class JRock {
         addEditItem(menu, "Select all", field, field::selectAll);
         attachPopup(field, menu);
         useBrowserClipboard(field, log, true);
+    }
+
+    // ---- Automation API (public) -------------------------------------------
+    // The window, driven from outside it: a program in the same JVM does what a user
+    // would do by hand - load a prompt, include a file, press Send, read the reply -
+    // while the user watches it happen. See automation-samples/ for one that chains
+    // the two sample prompts into a document archive.
+    //
+    // Why a public API at all. Chaining prompts is a habit rather than a one-off (see
+    // "Prompt library and chaining" in the README), and the alternatives are both
+    // worse: a second, headless code path that sends requests JRock's own window never
+    // sees, or a robot clicking at screen coordinates. These methods go through the
+    // very same code the menu items and the Send button go through, so the
+    // conversions, the log lines, the JRock/messages/ files and the token bill are the
+    // ones the application always produces - and the log is the record of the
+    // automation as much as of the conversation.
+    //
+    // The shape is deliberately plain: static methods, String arguments, String or
+    // String[] results, null for "nothing went wrong". An automation is a single .java
+    // file run with `java Automation.java`, which has no way to put jrock.jar on its
+    // own compile classpath, so it loads the jar at run time and reaches these methods
+    // by reflection - and reflection is only bearable against a surface built out of
+    // types every class loader already shares.
+    //
+    // Every one of them must be called from a thread that is NOT the event dispatch
+    // thread. They block, and two of them block for a long time: an include of a PDF
+    // waits for Ghostscript, a send waits for Bedrock. On the EDT that is a frozen
+    // window, and for a send it is a deadlock - the reply is delivered by the EDT.
+
+    // The window's own parts, published by createAndShowGui once all of them exist.
+    // One object rather than six fields so there is no moment at which half a window
+    // is visible to a caller; volatile because it is written on the EDT and read from
+    // the automation's thread.
+    private static final class Ui {
+        final JFrame frame;
+        final JTextArea input;
+        final LogView log;
+        final JButton send;
+        final javax.swing.JCheckBox extend;
+        final java.util.function.Consumer<Boolean> sendGate;
+
+        Ui(JFrame frame, JTextArea input, LogView log, JButton send,
+           javax.swing.JCheckBox extend, java.util.function.Consumer<Boolean> sendGate) {
+            this.frame = frame; this.input = input; this.log = log;
+            this.send = send; this.extend = extend; this.sendGate = sendGate;
+        }
+    }
+
+    private static volatile Ui ui;
+
+    // How often automationAwaitReady looks again, in milliseconds. Startup is measured
+    // in seconds, so there is nothing to gain from looking harder than ten times one.
+    private static final long AUTOMATION_POLL_MS = 100;
+
+    // False while the session report is being written, true once it ends - which is
+    // the moment the window can be used (see initSession).
+    private static volatile boolean sessionReady = false;
+
+    // Held for as long as an automation is driving the window. What it buys is the
+    // read-only prompt: the prompt is the automation's workspace between steps, and a
+    // line typed into it would be sent as part of the next request.
+    private static volatile boolean automating = false;
+
+    // What "Extend conversation" was set to before the automation turned it off, so
+    // automationEnd can put it back exactly as the user left it.
+    //
+    // Off for the duration, because a chain sends independent prompts: pass two of the
+    // sample chain asks for a file name, and with extend on it would resend every page
+    // image pass one attached - paying for the whole document twice to answer a
+    // question about a page of text.
+    private static boolean automationExtendWas = false;
+
+    // One send, waited for. The latch is made by automationSend before it presses the
+    // button and counted down by sendFinished wherever the send path stops; the failure
+    // is null when the reply arrived.
+    private static volatile java.util.concurrent.CountDownLatch sendLatch;
+    private static volatile String sendFailure;
+
+    // Tells whoever is waiting for a send that it is over, with null for "the reply is
+    // in the log" and otherwise the reason it is not. Called from every point the send
+    // path can stop at - an empty prompt, a stale include, a model JRock cannot call,
+    // and the worker's own end - so an automation finds out at once instead of at its
+    // timeout.
+    //
+    // Queued rather than run, even though every caller is already on the EDT: LogView
+    // writes each entry through invokeLater, so the lines this send produced - and the
+    // message files written with them - are still on the queue when the send path gets
+    // here. Going through the queue too puts the signal behind them, which is what
+    // lets automationSend read the stamps it came for.
+    private static void sendFinished(String failure) {
+        java.util.concurrent.CountDownLatch latch = sendLatch;
+        if (latch == null) return;      // nobody is automating; a user pressed Send
+        SwingUtilities.invokeLater(() -> {
+            sendFailure = failure;
+            latch.countDown();
+        });
+    }
+
+    // JRock's own window, for an automation whose dialogs should belong to it rather
+    // than float on their own. Null until the window exists.
+    public static JFrame automationWindow() {
+        Ui live = ui;
+        return live == null ? null : live.frame;
+    }
+
+    // Enters automation mode: the prompt goes read-only, Send is held between steps,
+    // and "Extend conversation" is turned off. Returns null, or why it refused.
+    //
+    // what finishes the sentence "Automation started: ", so the transcript says which
+    // automation this was - the log being the only record of it afterwards.
+    public static String automationBegin(String what) {
+        String problem = offEdt();
+        if (problem != null) return problem;
+        Ui live = ui;
+        if (live == null) return "JRock has no window yet - call main() and wait for it.";
+        if (automating) return "an automation is already running.";
+        automating = true;
+        onEdt(() -> {
+            automationExtendWas = live.extend.isSelected();
+            live.extend.setSelected(false);
+            live.input.setEditable(false);
+            live.sendGate.accept(false);
+        });
+        live.log.gray("Automation started: " + what);
+        live.log.gray("The prompt is read-only and Send is held until it finishes; "
+                + "\"Extend conversation\" is off for the duration.");
+        live.log.gray("");
+        return null;
+    }
+
+    // Waits until the window exists and its session report has finished - the model
+    // list fetched, "Ready." printed - and then answers the one question an automation
+    // has to ask before it converts anything: can this JRock call a model at all?
+    // Returns null when it can, and otherwise why not.
+    //
+    // The key is checked here rather than left to the first send because of the order
+    // the work comes in: the first send is after a PDF has been rasterised page by
+    // page, which is minutes of Ghostscript spent to find out there was never a
+    // credential to send the result with.
+    public static String automationAwaitReady(long timeoutMillis) {
+        String problem = offEdt();
+        if (problem != null) return problem;
+        long deadline = System.currentTimeMillis() + Math.max(0, timeoutMillis);
+        while (ui == null || !sessionReady) {
+            if (System.currentTimeMillis() > deadline) {
+                return "JRock was not ready within " + timeoutMillis + " ms.";
+            }
+            try {
+                Thread.sleep(AUTOMATION_POLL_MS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return "interrupted while waiting for JRock to be ready.";
+            }
+        }
+        // In the browser the page holds the credential and the JVM never sees one, so
+        // that counts as having a key - it is the transport that would know otherwise.
+        if (resolveApiKey() == null && !http().hostHoldsCredentials()) {
+            return "no Bedrock API key is set. Put one in JRock/bedrock-key.txt, or "
+                    + "type it into the Configure dialog, and run this again.";
+        }
+        return null;
+    }
+
+    // Loads a prompt file into the prompt area, exactly as Ctrl+O does, and leaves the
+    // caret at the end of it so whatever is included next is appended. Returns null,
+    // or why that file is not a prompt.
+    public static String automationLoadPrompt(String file) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        Path source = Paths.get(file).toAbsolutePath().normalize();
+        String loaded = readFileQuietly(source);
+        if (loaded == null) return "could not read " + source;
+        // The same guard Ctrl+O applies, and for the same reason: a prompt is text, and
+        // an image loaded as one fills the prompt area with rubbish.
+        if (looksBinary(loaded)) return source + " does not look like a text file.";
+        onEdt(() -> {
+            live.input.setText(loaded);      // triggers the autosave, as Ctrl+O does
+            live.input.setCaretPosition(live.input.getDocument().getLength());
+        });
+        live.log.gray("Loaded prompt from (read-only): " + source);
+        return null;
+    }
+
+    // Removes the bare "@img" / "@txt" lines a sample prompt ends with, leaving the
+    // caret at the end of what is left. Returns how many lines it removed.
+    //
+    // Those lines are placeholders and not tokens - a token carries a 12-hex-digit
+    // hash - so left in place they are sent as the two words they are. A person reads
+    // them as "the attachments belong here" and presses Ctrl+I on one; a program has to
+    // be told, and this is the telling. Call it after automationLoadPrompt and before
+    // the includes.
+    public static int automationDropPlaceholders() {
+        if (requireAutomation() != null) return 0;
+        Ui live = ui;
+        int[] removed = { 0 };
+        onEdt(() -> {
+            java.util.List<String> keep = new ArrayList<>();
+            for (String line : live.input.getText().split("\n", -1)) {
+                String bare = line.trim();
+                if (bare.equals("@img") || bare.equals("@txt")) {
+                    removed[0]++;
+                } else {
+                    keep.add(line);
+                }
+            }
+            if (removed[0] == 0) return;
+            String text = String.join("\n", keep);
+            // The tokens are inserted AT the caret, each with its own newline after it,
+            // so the caret has to sit at the start of a line - which at the end of the
+            // text means the text has to end with one.
+            if (!text.endsWith("\n")) text = text + "\n";
+            live.input.setText(text);
+            live.input.setCaretPosition(live.input.getDocument().getLength());
+        });
+        if (removed[0] > 0) {
+            live.log.gray("Dropped " + removed[0] + " placeholder line(s) from the prompt; "
+                    + "the include tokens go at the end of it.");
+        }
+        return removed[0];
+    }
+
+    // Includes one file in the prompt under the kind the include dialog's filters stand
+    // for, and returns null - or why nothing was included:
+    //
+    //   "img"    an image file, as a picture
+    //   "imgref" the same, with a Markdown "![](<hash>)" reference above the token
+    //   "txt"    a text file, as it is
+    //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
+    //   "rtf"    an RTF, converted to Markdown text
+    //   "docx"   a DOCX, converted to Markdown text
+    //
+    // Blocks for as long as the conversion takes, which for a long PDF is minutes.
+    //
+    // "nothing was included" is a failure here and not a shrug, because the next step
+    // is a send: Ghostscript missing, or a PDF it could not read, would otherwise go
+    // out as a prompt that asks about a document and attaches none of it.
+    public static String automationInclude(String file, String kind) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        Path path = Paths.get(file).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(path)) return "not a file: " + path;
+        int before = promptTokenCount(live);
+        try {
+            switch (kind) {
+                case "pdf":
+                    includePdf(live.frame, live.input, live.log, false, path);
+                    break;
+                case "rtf":
+                    includeRtfAsMarkdown(live.input, live.log, false, path);
+                    break;
+                case "docx":
+                    includeDocxAsMarkdown(live.input, live.log, false, path);
+                    break;
+                case "img":
+                case "imgref":
+                case "txt": {
+                    boolean image = !kind.equals("txt");
+                    onEdt(() -> includeOne(live.input, live.log, false, path,
+                            image ? "img" : "txt", image, kind.equals("imgref")));
+                    break;
+                }
+                default:
+                    return "unknown include kind \"" + kind + "\".";
+            }
+        } catch (RuntimeException ex) {
+            return "including " + path + " failed: " + ex;
+        }
+        live.log.gray("");   // closes the include block, as the dialog's own done() does
+        int after = promptTokenCount(live);
+        if (after == before) {
+            return "nothing was included from " + path + " - the log says why.";
+        }
+        live.log.gray("Included " + (after - before) + " file(s) from " + path.getFileName()
+                + " as \"" + kind + "\".");
+        live.log.gray("");
+        return null;
+    }
+
+    // Sends the prompt as it stands and waits for the reply: the Send button pressed,
+    // and the answer logged and written to its own file, exactly as by hand.
+    //
+    // Returns four strings, in the shape callModel uses for the same reason - a result
+    // and a reason travel together:
+    //
+    //   [0] "1" when the reply arrived, "0" when it did not
+    //   [1] the stamp of the request's message file, or null if none was written
+    //   [2] the stamp of the reply's message file, or null
+    //   [3] why it failed, or null
+    //
+    // A stamp is what automationMessageFile turns into a path under JRock/messages/.
+    // Both are compared with what was there before the send, so a step that logged no
+    // message of a kind reports null for it rather than the previous turn's file.
+    //
+    // A timeout leaves the request in flight - there is nothing here that could recall
+    // it - so an automation that times out should stop rather than send again.
+    public static String[] automationSend(long timeoutMillis) {
+        String problem = requireAutomation();
+        if (problem != null) return new String[] { "0", null, null, problem };
+        Ui live = ui;
+        String[] before = new String[2];
+        onEdt(() -> {
+            before[0] = live.log.lastStamp(ROLE_HUMAN);
+            before[1] = live.log.lastStamp(ROLE_ASSISTANT);
+        });
+
+        sendFailure = null;
+        java.util.concurrent.CountDownLatch latch =
+                new java.util.concurrent.CountDownLatch(1);
+        sendLatch = latch;
+        String[] refused = { null };
+        // The hold automationBegin put on Send comes off for exactly as long as the
+        // click takes, and on the EDT, where no user event can land in between. Another
+        // hold - a backup running - leaves the button disabled even then, and that is
+        // reported rather than waited out.
+        onEdt(() -> {
+            live.sendGate.accept(true);
+            if (live.send.isEnabled()) {
+                live.send.doClick();
+            } else {
+                live.sendGate.accept(false);
+                refused[0] = "Send is not available - something else is holding it.";
+            }
+        });
+
+        String failure = refused[0];
+        if (failure == null) {
+            try {
+                failure = latch.await(Math.max(0, timeoutMillis),
+                        java.util.concurrent.TimeUnit.MILLISECONDS)
+                        ? sendFailure
+                        : "no reply within " + timeoutMillis + " ms.";
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                failure = "interrupted while waiting for the reply.";
+            }
+            onEdt(() -> live.sendGate.accept(false));   // held again between the steps
+        }
+        sendLatch = null;
+
+        String[] after = new String[2];
+        onEdt(() -> {
+            after[0] = live.log.lastStamp(ROLE_HUMAN);
+            after[1] = live.log.lastStamp(ROLE_ASSISTANT);
+        });
+        return new String[] {
+                failure == null ? "1" : "0",
+                newStamp(after[0], before[0]),
+                newStamp(after[1], before[1]),
+                failure };
+    }
+
+    // The file one of a send's stamps names, under JRock/messages/, as an absolute path
+    // - or null when the stamp is not a stamp, the role is not a role, or the file is
+    // not there. role is "operator" for the request and "assistant" for the reply,
+    // which is what those files are called.
+    //
+    // A path and not the text, on purpose: the reply is already a file on disk, written
+    // once and never modified, so an automation that wants it can read it - and an
+    // automation that only wants to check the request was logged need not. The stamp is
+    // validated by parsing it and rebuilding the name from the parsed value, the same
+    // guard resolveReference uses, so nothing derived from it can leave that directory.
+    public static String automationMessageFile(String role, String stamp) {
+        if (stamp == null) return null;
+        String want = "assistant".equals(role) ? ROLE_ASSISTANT
+                : "operator".equals(role) ? ROLE_HUMAN : null;
+        if (want == null) return null;
+        try {
+            LocalDateTime dt = LocalDateTime.parse(stamp, STAMP_FMT);
+            Path file = messageFile(want, dt.format(STAMP_FMT));
+            return Files.isRegularFile(file) ? file.toAbsolutePath().toString() : null;
+        } catch (DateTimeParseException ex) {
+            return null;
+        }
+    }
+
+    // Leaves automation mode: the prompt is editable again, Send is released, and
+    // "Extend conversation" goes back to what the user had it at. note finishes the
+    // sentence "Automation finished: ", or is null for the sentence on its own.
+    //
+    // The window stays open with the whole run in its log, and the conversation can be
+    // carried on by hand from where the automation left off - which is the point of
+    // driving the real window instead of a headless copy of it.
+    public static void automationEnd(String note) {
+        Ui live = ui;
+        if (live == null || !automating) return;
+        onEdt(() -> {
+            live.input.setEditable(true);
+            live.extend.setSelected(automationExtendWas);
+            live.sendGate.accept(true);
+        });
+        automating = false;
+        live.log.gray(note == null ? "Automation finished."
+                                  : "Automation finished: " + note);
+        live.log.gray("The prompt is editable again - carry on from here.");
+        live.log.gray("");
+    }
+
+    // Refuses a call made from the event dispatch thread. Every public method above
+    // blocks; see the section comment for what that would do on the EDT.
+    private static String offEdt() {
+        return SwingUtilities.isEventDispatchThread()
+                ? "the automation API must not be called on the event dispatch thread."
+                : null;
+    }
+
+    // The same, plus the two things every step after automationBegin needs: a window
+    // to drive, and an automation that has actually been started.
+    private static String requireAutomation() {
+        String problem = offEdt();
+        if (problem != null) return problem;
+        if (ui == null) return "JRock has no window yet - call main() and wait for it.";
+        if (!automating) return "no automation is running - call automationBegin first.";
+        return null;
+    }
+
+    // How many include tokens the prompt holds, which is how automationInclude knows
+    // whether the conversion it just ran put anything there.
+    private static int promptTokenCount(Ui live) {
+        int[] count = { 0 };
+        onEdt(() -> {
+            java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(live.input.getText());
+            while (m.find()) count[0]++;
+        });
+        return count[0];
+    }
+
+    // The stamp a send just produced for one role: the one the log holds now, unless it
+    // is the stamp that was already there - in which case this send wrote no message of
+    // that role, and there is no file to point an automation at.
+    private static String newStamp(String now, String before) {
+        return (now == null || now.equals(before)) ? null : now;
     }
 
     // ---- Clipboard ---------------------------------------------------------

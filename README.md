@@ -50,7 +50,10 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   ([**Markdown export**](#markdown-export-rtf-and-docx)).
 - **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
   workflow, which is Bedrock Prompt management and Flows without the cloud
-  ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)).
+  ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)) — and a
+  single-file **automation** that runs such a chain by driving the real window, so you watch it
+  work and carry on the conversation when it's done
+  ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
 - **Keyboard-driven**, with a Configure dialog for API key, region, model and working directory.
 
 ## Requirements
@@ -112,7 +115,8 @@ follows you into every folder; see
 [Explorer right-click integration](#windows-explorer-right-click-integration).
 
 For a ready-made one, point it at **`automation-samples/`** in this repository — two prompts
-that chain into a document-archiving workflow, and a template for a library of your own. See
+that chain into a document-archiving workflow, the automation that runs that chain end to end,
+and a template for a library of your own. See
 [Prompt library and chaining](#prompt-library-and-chaining-automation-samples).
 
 `--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file. The
@@ -827,18 +831,20 @@ is an [`@txt` / `@img` include token](#multimodal-includes-ctrli); and chaining 
 | IAM permissions, service quotas, per-node billing | files |
 
 Nothing to deploy, nothing to keep in sync with a region, and the whole workflow is
-greppable. What you give up is automation: a flow runs itself, whereas this is two keystrokes
-between the steps — which is also where you get to read the intermediate result before it
-becomes the next prompt's input.
+greppable. By hand it is two keystrokes between the steps — which is also where you get to read
+the intermediate result before it becomes the next prompt's input. When you'd rather not be
+there for it, a chain can also run itself: see
+[Automating the chain](#automating-the-chain-jrockdocinventoryjava).
 
 ### The samples
 
-`automation-samples/` holds two prompts that chain, and doubles as a template for a prompts
-directory of your own:
+`automation-samples/` holds two prompts that chain, an automation that runs the chain, and
+doubles as a template for a prompts directory of your own:
 
-- **`jrock-prompt-pdf-to-ascii.txt`** — turn a scanned or printed PDF into plain text that
-  keeps its layout: ASCII rules for tables, right-aligned text kept right-aligned to a fixed
-  column, centred text centred, one separator line per page.
+- **`jrock-prompt-doc-to-ascii.txt`** — turn a document into plain text that keeps its layout:
+  ASCII rules for tables, right-aligned text kept right-aligned to a fixed column, centred text
+  centred, one separator line per page. Written for a scanned or printed PDF, included as page
+  images.
 - **`jrock-prompt-doc-inventory.txt`** — read a document and answer with **nothing but a file
   name**, following one convention:
   `<date>-<counterparty>-<what it is>-<document number>`, e.g.
@@ -855,7 +861,7 @@ where the attachments belong: put the cursor on that line and press Ctrl+I.
 The point of chaining these two is an archive whose file names mean something, plus a text copy
 of every document for reading and further automation.
 
-1. **Ctrl+O** → `jrock-prompt-pdf-to-ascii.txt`.
+1. **Ctrl+O** → `jrock-prompt-doc-to-ascii.txt`.
 2. **Ctrl+I** → the PDF, with the **PDF as page images** filter. Ghostscript rasterises it, one
    PNG per page, and each page's `@img` token lands in the prompt. Page images because layout is
    the whole question here, and a scan has no text layer at all.
@@ -887,6 +893,75 @@ an output narrow enough to be the next step's input. Copy the folder and rewrite
 for your own documents. The `jrock-prompt-*.txt` names are only a convention, matching the
 `jrock-prompt.txt` autosave and the `jrock-prompt-copy.txt` that Ctrl+S offers; JRock loads any
 text file.
+
+### Automating the chain (`JRockDocInventory.java`)
+
+The eight steps above are a loop you run per document, and the third file in
+`automation-samples/` runs them for you. It is one Java file, started the way JRock is:
+
+```
+java JRockDocInventory.java document.pdf     # or with no argument, and it asks for the PDF
+```
+
+It reads the same two prompts out of its own directory, converts the PDF to page images, sends,
+saves the reply as `document.txt` beside the PDF, sends *that* with the inventory prompt, and
+offers to rename both files to the name that comes back. Then a "Finished" dialog, and the
+window is yours.
+
+**Copy `jrock.jar` into `automation-samples/` first.** Nothing downloads it: take it from a
+[reproducible build](#reproducible-builds) artifact, or build it with
+`java .github/build/BuildJar.java`, and put it next to the script. That copy is what enables
+automations, and it is deliberately a manual act — an automation directory is a jar, some
+prompts and the scripts that chain them, all files you put there yourself. The jar is in
+`.gitignore` and the build tool skips `.jar` files in that directory, so a local copy changes
+nothing about the repository or the reproducible source zip.
+
+What it does *not* do is run headless. It starts the real window and drives it, so:
+
+- the prompt fills with include tokens page by page as Ghostscript rasterises the PDF, and the
+  log reports every step, exactly as if you were typing;
+- **the prompt is read-only while the automation runs** — a keystroke landing in a prompt that
+  is about to be sent is the one failure mode here that would be silent, so the field is locked,
+  Send is held, and both are released at the end;
+- **Extend conversation is forced off** for the duration (and restored afterwards), so pass two
+  asks about a text file and not about pass one's page images all over again;
+- both turns stay in the transcript, and when the dialog closes the prompt is editable and the
+  conversation is there to be continued by hand — asking the model *about* the document it just
+  read is usually the next thing you want.
+
+It fails by saying why, in the log and in one dialog: no Bedrock key, initialisation that never
+finished, no Ghostscript (so nothing was included, which is a stop rather than a request that
+asks about a document and attaches none of it), a reply that never came back. Nothing is
+overwritten — an existing `document.txt` becomes `document-2.txt`, and the same on rename.
+
+### The automation API
+
+`JRock.java` exposes the handful of `public static` methods the script uses. They take and
+return nothing but `String`, `String[]`, `long` and `int`, and a `null` return means *fine* —
+anything else is a sentence saying what went wrong. That shape is not squeamishness, it is the
+launcher: `java JRockDocInventory.java` compiles the script with nothing on its classpath, so a
+script cannot name a JRock type. It loads the jar in a `URLClassLoader` and calls these by
+reflection, which is one small helper and no compile-time dependency in either direction.
+
+| Method | What it does |
+|---|---|
+| `automationAwaitReady(long millis)` | Blocks until the window is up and the model list is in. Returns why not — including the missing API key. |
+| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, Extend off, and a log line saying so. Refuses if an automation is already running. |
+| `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
+| `automationDropPlaceholders()` | Removes the bare `@img` / `@txt` placeholder lines, and returns how many. The include tokens go at the end of the prompt. |
+| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
+| `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
+| `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
+| `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
+| `automationEnd(String note)` | Gives the window back: prompt editable, Send released, and a log line saying so. |
+
+The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the
+name of the file the message was written to (see
+[Persistence](#persistence-crash-recovery--full-local-history)).
+So an automation reads the answer out of `JRock/messages/<stamp>-assistant.txt` — the same file
+you would open yourself — after checking that the request's own file is there, which is what
+makes the pair trustworthy. No new state, no separate transcript, nothing an automation can see
+that you cannot.
 
 ## Configure dialog (top-left button)
 
@@ -1145,8 +1220,10 @@ For robustness the build runs on **three operating systems** and publishes three
 
 Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
 (`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
-`JRock.java` and the sample prompts) and `automation-samples/` loose beside it, so the samples
-can be read without unpacking anything. Because the build is reproducible, the `jrock.jar`
+`JRock.java`, the sample prompts and the automation script) and `automation-samples/` loose
+beside it, so the samples can be read without unpacking anything — and so an
+[automation](#automating-the-chain-jrockdocinventoryjava) is one `cp jrock.jar
+automation-samples/` away from running. Because the build is reproducible, the `jrock.jar`
 inside all three archives is identical.
 
 To verify and run JRock from a build artifact, unzip it, then:

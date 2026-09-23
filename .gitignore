@@ -31,8 +31,14 @@ JRock/
 target/
 
 # Gradle output for the experimental mobile targets in android/ and ios/ (build/
-# also holds the copy of JRock.java their copyJRockSource task makes)
-build/
+# also holds the copy of JRock.java their copyJRockSource task makes). Scoped to
+# those two trees on purpose: a bare "build/" matches at any depth, and would
+# also swallow .github/build/, which is source and is tracked.
+android/**/build/
+ios/**/build/
 .gradle/
 local.properties
+
+# Classes from the CI step that compiles automation-samples/*.java on its own
+out-automation/
 

@@ -23,6 +23,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
@@ -94,14 +95,23 @@ public class BuildJar {
         System.out.println("SHA-256: " + sha);
         System.out.println("MD5:     " + md5);
 
-        // The sample prompts, as forward-slash names under automation-samples/ and
-        // sorted for the same reason the classes are: the zip has to be reproducible
-        // too, and a directory listing's order is the file system's business.
+        // The sample prompts and automation scripts, as forward-slash names under
+        // automation-samples/ and sorted for the same reason the classes are: the zip
+        // has to be reproducible too, and a directory listing's order is the file
+        // system's business.
+        //
+        // Build output is skipped, because running an automation means copying
+        // jrock.jar into that directory by hand (see JRockDocInventory.java) and a
+        // developer's local copy of the jar - or a stray .class from compiling a script
+        // in place - must not change this zip's checksum.
         List<String[]> samples = new ArrayList<>();   // {relName, absPath}
         Path samplesDir = Paths.get(SAMPLES_DIR);
         if (Files.isDirectory(samplesDir)) {
             try (var stream = Files.walk(samplesDir)) {
-                stream.filter(Files::isRegularFile).forEach(p -> samples.add(new String[] {
+                stream.filter(Files::isRegularFile).filter(p -> {
+                    String n = p.getFileName().toString().toLowerCase(Locale.ROOT);
+                    return !n.endsWith(".jar") && !n.endsWith(".class");
+                }).forEach(p -> samples.add(new String[] {
                         SAMPLES_DIR + "/"
                                 + samplesDir.relativize(p).toString().replace('\\', '/'),
                         p.toString() }));
