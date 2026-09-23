@@ -171,8 +171,10 @@ as WebAssembly), so nothing runs on a server.
   may ask permission the first time a page reads the clipboard, and some refuse reads
   outright — paste then falls back to whatever was last copied inside JRock, and says so.
 - **Image includes work too.** A browser JVM has no native libraries, so nothing here may
-  depend on one — JRock reads an image's dimensions from its header rather than decoding it
-  (see [Multimodal includes](#multimodal-includes-ctrli)).
+  depend on one — JRock reads an image's dimensions from its header rather than decoding it, and
+  the downscale **Include with copy...** does is handed to the page, whose `canvas` decodes and
+  re-encodes pictures in native code where CheerpJ's `ImageIO` and `Graphics2D` cannot (see
+  [Multimodal includes](#multimodal-includes-ctrli)).
 - **Fetch URL works too**, through the same page client as the Bedrock calls — one more method on
   `window.myBrowserHttp`, returning the bytes and the `Content-Type` so a picture stays a picture
   (see [fetching a URL](#fetching-a-url)). The browser's own rule applies: a site that does not
@@ -195,8 +197,8 @@ unmodified `jrock.jar`, so there is nothing to install and no app store in the w
 *Edge on an iPhone, with the page's own header and footer left showing: the jar's size and SHA-256
 to check before typing a key, and a footer log ending in `GET .../v1/models -> 200` — a real Bedrock
 call from a phone. In the window, the session report (`/files`, the page's `fetch()` as the transport,
-the key held by the page) and the prompt's context menu, opened with a long tap because that is how
-a phone reaches everything the Ctrl shortcuts do.*
+the key read from `/files/JRock/bedrock-key.txt`) and the prompt's context menu, opened with a long
+tap because that is how a phone reaches everything the Ctrl shortcuts do.*
 
 The UX is a little clumsy, and worth knowing about before you judge it:
 
@@ -704,6 +706,15 @@ reason for keeping the pixels that are kept. **PNG and JPEG only**: a GIF may be
 (ImageIO would hand back its first frame) and the JDK cannot read WEBP at all, so both are copied
 at full size with a line saying why. A picture already within the page is copied byte for byte,
 and a plain include is never rewritten — that file is not JRock's.
+
+**In the browser the page scales it.** CheerpJ's JVM has no image pipeline to do this with:
+`ImageIO.read` on a JPEG goes looking for the native colour-management library it cannot load,
+and its `Graphics2D` resamples nothing — so the log used to promise a downscale and the copy
+came out at full size. A browser, on the other hand, decodes, resamples and encodes PNG and
+JPEG in native code as a matter of course, so JRock hands the picture to the page over the
+[bridge](#http-transport) and gets it back smaller: `canvas`, the same repeated halving, the
+same 0.92 for JPEG. A page without that function (an older `jrock-web`) means a full-size copy
+and a line saying so, the same as any other scaling that could not be done.
 
 **Reload all includes** — an item in the prompt's context menu, which rebuilds the map from the
 log. The log recorded every include ever made, which is the same information the map held, so it

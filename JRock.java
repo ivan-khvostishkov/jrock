@@ -4688,11 +4688,11 @@ public class JRock {
             scratch = null;
             return target;
         } catch (IOException | RuntimeException | LinkageError ex) {
-            // LinkageError on purpose: in the browser, reading a JPEG goes looking for
-            // the native colour-management library and throws an Error rather than an
-            // exception (see ImageHeader, which is header arithmetic for that reason).
-            // An image that cannot be scaled is still an image to copy, so this is a
-            // note on the way past, not a failed include.
+            // LinkageError on purpose: an ImageIO read can go looking for a native
+            // colour-management library the JVM cannot load and throw an Error rather
+            // than an exception (see ImageHeader, which is header arithmetic for that
+            // reason). An image that cannot be scaled is still an image to copy, so this
+            // is a note on the way past, not a failed include.
             log.gray("Could not downscale " + name + " (" + ex + ") - copying it at full "
                     + "size.");
             if (scratch != null) {
@@ -4732,13 +4732,69 @@ public class JRock {
 
     // Reads source, scales it to width x height and writes it to target in that format.
     //
+    // Two implementations of the same sentence, because the browser cannot run the
+    // desktop's one at all - see scaledByBrowser for what it does instead and why.
+    private static void writeScaled(Path source, Path target, String format,
+                                    int width, int height) throws IOException {
+        if (isCheerpJ()) {
+            scaledByBrowser(source, target, format, width, height);
+        } else {
+            scaledByImageIo(source, target, format, width, height);
+        }
+    }
+
+    // In the browser: the page's canvas does the work.
+    //
+    // Nothing of the path below is available here. ImageIO.read on a JPEG goes looking
+    // for the native colour-management library a browser JVM cannot load (ImageHeader
+    // says more), and CheerpJ's Graphics2D.drawImage does not resample - so this used to
+    // log a downscale and hand over the picture at full size, which is what the log line
+    // promising fewer pixels was measured against. Writing a decoder in Java instead
+    // means writing a JPEG decoder: Huffman tables, an inverse DCT, chroma upsampling,
+    // and an encoder to match. Every browser already has all of that, in native code,
+    // behind two calls - so the picture goes out as base64 and comes back smaller.
+    //
+    // A failure here is an IOException like any other, and the caller's answer to one is
+    // to copy the file at full size with a note saying so.
+    private static void scaledByBrowser(Path source, Path target, String format,
+                                        int width, int height) throws IOException {
+        String framed;
+        try {
+            framed = browserScaleImage(
+                    java.util.Base64.getEncoder().encodeToString(Files.readAllBytes(source)),
+                    width, height, "jpeg".equals(format) ? "image/jpeg" : "image/png");
+        } catch (Throwable ex) {
+            // No scaler on this page at all: an older jrock-web, or some other host.
+            throw new IOException("this page has no image scaler in its bridge ("
+                    + ex.getClass().getSimpleName() + ")", ex);
+        }
+        String[] reply = bridgeReply(framed);
+        if (!"1".equals(reply[0])) {
+            throw new IOException(reply[1].isBlank()
+                    ? "the page's image scaler gave no reason" : reply[1].trim());
+        }
+        byte[] scaled;
+        try {
+            scaled = java.util.Base64.getMimeDecoder().decode(reply[1].trim());
+        } catch (IllegalArgumentException ex) {
+            throw new IOException("the page's image scaler returned something that is "
+                    + "not base64: " + ex.getMessage(), ex);
+        }
+        if (scaled.length == 0) {
+            throw new IOException("the page's image scaler returned no bytes");
+        }
+        Files.write(target, scaled);
+    }
+
+    // On any normal JVM: ImageIO in, Graphics2D through, ImageIO out.
+    //
     // Halved repeatedly and then drawn to the exact size, rather than scaled in one step:
     // a single bilinear draw reads four pixels out of the dozens each output pixel
     // covers, and small print comes out as aliased crumbs - which is the very detail the
     // resolution is being chosen for. Every halving averages everything it passes over,
     // so nothing is dropped unseen, and the last step is at most a factor of two.
-    private static void writeScaled(Path source, Path target, String format,
-                                    int width, int height) throws IOException {
+    private static void scaledByImageIo(Path source, Path target, String format,
+                                        int width, int height) throws IOException {
         java.awt.image.BufferedImage full = javax.imageio.ImageIO.read(source.toFile());
         if (full == null) throw new IOException("no reader for " + source.getFileName());
         // JPEG has no alpha channel and its writer refuses an image that has one, so a
@@ -8389,6 +8445,18 @@ public class JRock {
     // One call FLIPS the state, so JRock never has to track it: the page owns the
     // chrome, including whether it is currently there.
     static native String browserToggleChrome();
+
+    // Downscaling an image, over the same bridge and the same "<ok>\n<rest>" format.
+    // The browser JVM has no image pipeline to speak of - ImageIO.read wants a native
+    // library CheerpJ cannot load (see ImageHeader) and CheerpJ's Graphics2D resamples
+    // nothing - while the browser decodes, resamples and encodes PNG and JPEG for a
+    // living. So the page does it, on a canvas.
+    //   browserScaleImage("<base64 in>", width, height, "image/png"|"image/jpeg")
+    //       -> "1\n<base64 out>", or "0\n<reason>".
+    // Base64 both ways, for the reason browserHttpFetch has it: the bridge carries
+    // Java Strings, and a JPEG put through one is a JPEG no longer.
+    static native String browserScaleImage(String base64, int width, int height,
+                                           String mime);
 
     // The browser transport: hands each request to the page's JavaScript client.
     private static final class BrowserHttpTransport implements HttpTransport {

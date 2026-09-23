@@ -552,6 +552,63 @@
         }
       }
 
+      // Image downscaling for "Include with copy...": JRock sends a picture and the size
+      // it wants, this page decodes, resamples and re-encodes it on a canvas, and the
+      // smaller picture goes back. The browser's JVM has no working ImageIO and its
+      // Graphics2D resamples nothing, so without this the include was copied at full
+      // size - all the pixels, all the tokens.
+      //
+      // The reply is "1\n<base64>" or "0\n<reason>"; a reason means JRock copies the
+      // file unchanged and says so in its log.
+      async function Java_JRock_browserScaleImage(lib, base64, width, height, mime) {
+        try {
+          if (!(width > 0) || !(height > 0)) return "0\nasked for a size of " + width
+              + " x " + height;
+          var type = (mime === "image/jpeg") ? "image/jpeg" : "image/png";
+          var blob = new Blob([bytesOfBase64(base64)], { type: type });
+          var img = await createImageBitmap(blob);
+
+          // Halved a step at a time, exactly as the desktop does it: one draw straight
+          // down to the target reads four pixels out of the dozens each output pixel
+          // covers, and small print - the detail the resolution is chosen for - comes
+          // out as aliased crumbs. imageSmoothingQuality asks for the best resampling
+          // the browser has at each step.
+          var canvas = null;
+          var source = img, sw = img.width, sh = img.height;
+          while (Math.floor(sw / 2) >= width && Math.floor(sh / 2) >= height) {
+            canvas = drawnInto(source, Math.floor(sw / 2), Math.floor(sh / 2), type);
+            source = canvas; sw = canvas.width; sh = canvas.height;
+          }
+          canvas = drawnInto(source, width, height, type);
+          img.close();
+
+          var out = await new Promise(function (resolve) {
+            canvas.toBlob(resolve, type, 0.92);   // 0.92: the desktop's JPEG quality
+          });
+          if (!out) return "0\nthe browser would not encode the scaled image as " + type;
+          return "1\n" + base64OfBytes(new Uint8Array(await out.arrayBuffer()));
+        } catch (e) {
+          return "0\n" + ((e && e.message) ? e.message : String(e));
+        }
+      }
+
+      // One scaling step: source drawn into a canvas of exactly that size. JPEG has no
+      // alpha channel, so a transparent PNG on its way to one is drawn onto white -
+      // which is the page a scan came off, and better than black.
+      function drawnInto(source, width, height, type) {
+        var canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        var ctx = canvas.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        if (type === "image/jpeg") {
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, width, height);
+        }
+        ctx.drawImage(source, 0, 0, width, height);
+        return canvas;
+      }
+
       // Bytes -> base64, in chunks: String.fromCharCode.apply is given the arguments one
       // per byte, and a whole image at once overflows the argument list.
       function base64OfBytes(bytes) {
@@ -560,6 +617,14 @@
           parts += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
         }
         return btoa(parts);
+      }
+
+      // And back: base64 -> bytes, for a picture arriving from the Java side.
+      function bytesOfBase64(base64) {
+        var raw = atob(String(base64 || "").replace(/\s+/g, ""));
+        var bytes = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        return bytes;
       }
 
       // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
@@ -583,7 +648,8 @@
               Java_JRock_browserHttpFetch: Java_JRock_browserHttpFetch,
               Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
               Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
-              Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome
+              Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome,
+              Java_JRock_browserScaleImage: Java_JRock_browserScaleImage
             }
           });
 
