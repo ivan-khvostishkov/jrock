@@ -187,8 +187,9 @@ public class JRock {
     //   - a PDF included as page images is rasterised at it (Ghostscript's -r, where
     //     the page's physical size is the PDF's own business);
     //   - an image included WITH A COPY is downscaled to it, the page it is measured
-    //     against being A4 with 2 cm margins - the same page the DOCX export lays a
-    //     picture out on (see downscaledCopy, and MarkdownExport.Image for the export's
+    //     against being A4 portrait with 2 cm margins - the same page the DOCX export
+    //     lays a picture out on, in the orientation that is enough for either of them
+    //     (see a4Pixels and downscaledCopy, and MarkdownExport.Image for the export's
     //     own, deliberately separate, 300 dpi ceiling).
     private static final int[] IMAGES_DPI_OPTIONS = { 72, 96, 150, 203, 300 };
     private static final int IMAGES_DPI_DEFAULT = 150;
@@ -4708,6 +4709,13 @@ public class JRock {
     // lays a picture out in - A4 portrait less its 2 cm margins - measured in dots
     // instead of twips. Read from the export's own constants, so the two cannot drift
     // apart on what "the page" is.
+    //
+    // Portrait on purpose, although the export can also write landscape (where the frame
+    // is the same two numbers the other way round): an include is copied long before
+    // anybody picks an orientation in the save dialog, so the budget has to be the one
+    // that is enough for either. Portrait is that one - it is the narrower frame, so a
+    // copy cut to it is never stretched to fill a landscape page; it is placed at 300 dpi
+    // and sits a little narrower than the frame instead.
     private static int[] a4Pixels(int dpi) {
         final int twipsPerInch = 1440;         // a twip is 1/20 point, a point 1/72 inch
         long across = Math.round(MarkdownExport.TABLE_WIDTH * (double) dpi / twipsPerInch);
@@ -6858,6 +6866,13 @@ public class JRock {
     // job - text only, both tags left as the text they are - because a picture in an
     // RTF is the picture's bytes hex-encoded into the file, and the format is offered
     // here as the one anything can open, not as the one to typeset from.
+    //
+    // The DOCX also asks WHICH A4: the file-type dropdown holds portrait and landscape,
+    // because the orientation is a property of the document being written and the save
+    // dialog is the last moment anybody is asked anything. A wide table or a landscape
+    // photograph is the case for it - both are laid out to fit the text frame, and on a
+    // portrait page that frame is the narrow way round. Two filters with the same
+    // extension, so the name typed is unaffected by which one is picked.
     private static void exportSelectedMarkdown(JFrame frame, LogView log, boolean asDocx) {
         String selection = log.selectedText();
         if (selection == null) return;   // the menu item is disabled without one
@@ -6869,17 +6884,32 @@ public class JRock {
                 new javax.swing.JFileChooser(logChooserDir.start());
         chooser.setDialogTitle("Export selected " + what + " as " + kind);
         chooser.setAcceptAllFileFilterUsed(false);
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                kind + " document (*." + ext + ")", ext));
+        javax.swing.filechooser.FileNameExtensionFilter landscapeFilter = null;
+        if (asDocx) {
+            javax.swing.filechooser.FileNameExtensionFilter portraitFilter =
+                    new javax.swing.filechooser.FileNameExtensionFilter(
+                            "DOCX document as A4 portrait (*.docx)", ext);
+            landscapeFilter = new javax.swing.filechooser.FileNameExtensionFilter(
+                    "DOCX document as A4 landscape (*.docx)", ext);
+            chooser.addChoosableFileFilter(portraitFilter);
+            chooser.addChoosableFileFilter(landscapeFilter);
+            chooser.setFileFilter(portraitFilter);          // the usual page, so the default
+        } else {
+            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                    kind + " document (*." + ext + ")", ext));
+        }
         chooser.setSelectedFile(logChooserDir.startFile("jrock-selection." + ext));
         if (chooser.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         logChooserDir.remember(chooser);
+        boolean landscape = asDocx && chooser.getFileFilter() == landscapeFilter;
+        if (asDocx) kind = "DOCX (A4 " + (landscape ? "landscape" : "portrait") + ")";
 
         // The extension belongs to the format, not to the typist: "notes" or
         // "notes.txt" holding a DOCX is a file nothing will open by double-click.
         Path target = withExtension(chooser.getSelectedFile().toPath(), ext);
-        MarkdownExport document =
-                asDocx ? MarkdownExport.of(selection, INCLUDES) : MarkdownExport.of(selection);
+        MarkdownExport document = asDocx
+                ? MarkdownExport.of(selection, INCLUDES, landscape)
+                : MarkdownExport.of(selection);
         // Anything the selection referred to and this could not place: said here, before
         // the result line, because the export goes ahead either way and the reference is
         // left in the text as it stands.
@@ -6948,9 +6978,10 @@ public class JRock {
         /** Deepest indent honoured, so a runaway "          - x" stays on the page. */
         private static final int MAX_DEPTH = 5;
 
-        // The page, in twips: A4 portrait with 2 cm margins. What is left of it is the
-        // text frame, which is what a table's columns are shared out of and what an
-        // image is fitted into.
+        // The page, in twips: A4 with 2 cm margins, named the way it is printed - the
+        // short side across, the long side down. What is left of it is the text frame,
+        // which is what a table's columns are shared out of and what an image is fitted
+        // into.
         private static final int PAGE_WIDTH = 11906, PAGE_HEIGHT = 16838, MARGIN = 1134;
         private static final int TABLE_WIDTH = PAGE_WIDTH - 2 * MARGIN;    // 9638
         private static final int FRAME_HEIGHT = PAGE_HEIGHT - 2 * MARGIN;  // 14570
@@ -7000,13 +7031,32 @@ public class JRock {
         private final List<String> warnings = new ArrayList<>();
         private int drawings;              // one id per placement, which a .docx wants unique
 
-        private MarkdownExport(java.util.Map<String, Path> images) { this.images = images; }
+        // The page this document is laid out on. Landscape turns A4 on its side, and that
+        // is the whole of it: the two page dimensions swap, and so do the frame's - which
+        // is why every number below is read from these four fields and not from the
+        // constants. A layout measured against PAGE_WIDTH would be a portrait layout on a
+        // landscape page: a table 9638 twips wide in a frame of 14570, and a picture
+        // fitted to a height that is now the width.
+        //
+        // Instance fields rather than constants because one session exports both, one
+        // after the other, and a document's page is a property of that document.
+        private final boolean landscape;
+        private final int pageWidth, pageHeight, frameWidth, frameHeight;
+
+        private MarkdownExport(java.util.Map<String, Path> images, boolean landscape) {
+            this.images = images;
+            this.landscape = landscape;
+            this.pageWidth   = landscape ? PAGE_HEIGHT : PAGE_WIDTH;
+            this.pageHeight  = landscape ? PAGE_WIDTH  : PAGE_HEIGHT;
+            this.frameWidth  = pageWidth  - 2 * MARGIN;
+            this.frameHeight = pageHeight - 2 * MARGIN;
+        }
 
         /** Parses the Markdown, placing no pictures. Never throws. */
         static MarkdownExport of(String markdown) { return of(markdown, null); }
 
         /**
-         * Parses the Markdown. Never throws: worst case, every line is a paragraph.
+         * Parses the Markdown for a portrait page. Never throws.
          *
          * @param includes hash -&gt; file of the session's includes, so that a
          *                 "![](&lt;hash&gt;)" can be placed as a picture and an
@@ -7014,8 +7064,20 @@ public class JRock {
          *                 neither and leave both as the text they are.
          */
         static MarkdownExport of(String markdown, java.util.Map<String, Path> includes) {
+            return of(markdown, includes, false);
+        }
+
+        /**
+         * Parses the Markdown. Never throws: worst case, every line is a paragraph.
+         *
+         * @param includes  as above.
+         * @param landscape A4 on its side, which the DOCX states and lays out to; the RTF
+         *                  declares no page of its own, so it is always written portrait.
+         */
+        static MarkdownExport of(String markdown, java.util.Map<String, Path> includes,
+                                 boolean landscape) {
             String text = markdown == null ? "" : markdown;
-            MarkdownExport document = new MarkdownExport(includes);
+            MarkdownExport document = new MarkdownExport(includes, landscape);
             try {
                 document.parse(text);
             } catch (RuntimeException ex) {
@@ -7089,6 +7151,12 @@ public class JRock {
         // height by the same rule, which is what keeps a portrait photograph on one page.
         // All three limits are applied as one number, the EMU given to each pixel, so
         // width and height cannot drift out of proportion whichever of them binds.
+        //
+        // The frame is passed in rather than read from the constants, because which way
+        // round it is depends on the page: on a landscape A4 the room across is 14570
+        // twips and the room down 9638, the exact opposite of a portrait one. A landscape
+        // photograph therefore comes out larger on a landscape page - it is the width
+        // that binds, and there is more of it - which is the reason to export one.
         private static final class Image {
             final String fileName, extension, mime;
             final byte[] bytes;
@@ -7096,14 +7164,14 @@ public class JRock {
             int index, relId;              // assigned when the document first places it
 
             Image(String fileName, String extension, String mime, byte[] bytes,
-                  int pixelWidth, int pixelHeight) {
+                  int pixelWidth, int pixelHeight, int frameWidth, int frameHeight) {
                 this.fileName = fileName;
                 this.extension = extension;
                 this.mime = mime;
                 this.bytes = bytes;
                 long perPixel = Math.min(EMU_PER_PIXEL_AT_300_DPI,
-                        Math.min(TABLE_WIDTH * EMU_PER_TWIP / pixelWidth,
-                                 FRAME_HEIGHT * EMU_PER_TWIP / pixelHeight));
+                        Math.min(frameWidth * EMU_PER_TWIP / pixelWidth,
+                                 frameHeight * EMU_PER_TWIP / pixelHeight));
                 this.cx = Math.max(1, pixelWidth * perPixel);
                 this.cy = Math.max(1, pixelHeight * perPixel);
             }
@@ -7161,7 +7229,7 @@ public class JRock {
                 return null;
             }
             Image image = new Image(file.getFileName().toString(), type[0], type[1], bytes,
-                    size[0], size[1]);
+                    size[0], size[1], frameWidth, frameHeight);
             resolved.put(hash, image);
             return image;
         }
@@ -7598,7 +7666,9 @@ public class JRock {
                 for (int c = 1; c <= columns; c++) {
                     rtf.append("\\clbrdrt\\brdrs\\brdrw10\\clbrdrl\\brdrs\\brdrw10")
                        .append("\\clbrdrb\\brdrs\\brdrw10\\clbrdrr\\brdrs\\brdrw10")
-                       .append("\\cellx").append(TABLE_WIDTH * c / columns);
+                       // frameWidth, which on this path is always A4 portrait's: RTF is
+                       // written without a page of its own, so there is no other to use.
+                       .append("\\cellx").append(frameWidth * c / columns);
                 }
                 rtf.append('\n');
                 List<List<Run>> row = table.rows.get(r);
@@ -7802,9 +7872,14 @@ public class JRock {
             for (Block block : blocks) docx(xml, block);
             // An empty paragraph to end on: a body whose last element is a table is
             // what Word repairs documents for, and an empty body needs something.
+            // The section: the page, and the margins that leave the text frame every
+            // width above was measured against. Landscape says so as well as measuring
+            // it - a reader that only looks at w:orient would print the right way round,
+            // and one that only looks at the two dimensions already has them.
             xml.append("<w:p/>")
-               .append("<w:sectPr><w:pgSz w:w=\"").append(PAGE_WIDTH)
-               .append("\" w:h=\"").append(PAGE_HEIGHT).append("\"/>")
+               .append("<w:sectPr><w:pgSz w:w=\"").append(pageWidth)
+               .append("\" w:h=\"").append(pageHeight)
+               .append(landscape ? "\" w:orient=\"landscape\"/>" : "\"/>")
                .append("<w:pgMar w:top=\"").append(MARGIN).append("\" w:right=\"")
                .append(MARGIN).append("\" w:bottom=\"").append(MARGIN)
                .append("\" w:left=\"").append(MARGIN)
@@ -7862,8 +7937,8 @@ public class JRock {
 
         private void docxTable(StringBuilder xml, Table table) {
             int columns = Math.max(1, table.columns);
-            int width = TABLE_WIDTH / columns;
-            xml.append("<w:tbl><w:tblPr><w:tblW w:w=\"").append(TABLE_WIDTH)
+            int width = frameWidth / columns;      // the frame of THIS page, not of A4 portrait
+            xml.append("<w:tbl><w:tblPr><w:tblW w:w=\"").append(frameWidth)
                .append("\" w:type=\"dxa\"/><w:tblBorders>");
             for (String side : new String[] { "top", "left", "bottom", "right",
                                               "insideH", "insideV" }) {

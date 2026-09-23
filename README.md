@@ -705,7 +705,11 @@ are written back at quality 0.92 rather than ImageIO's default 0.75, legibility 
 reason for keeping the pixels that are kept. **PNG and JPEG only**: a GIF may be an animation
 (ImageIO would hand back its first frame) and the JDK cannot read WEBP at all, so both are copied
 at full size with a line saying why. A picture already within the page is copied byte for byte,
-and a plain include is never rewritten — that file is not JRock's.
+and a plain include is never rewritten — that file is not JRock's. The page here is A4 **portrait**
+even though the [export](#markdown-export-rtf-and-docx) can also write landscape: a copy is made
+long before anybody picks an orientation in a save dialog, and portrait is the frame that is enough
+for either — cut to it, a picture is placed at 300 dpi on a landscape page rather than stretched to
+fill it.
 
 **In the browser the page scales it.** CheerpJ's JVM has no image pipeline to do this with:
 `ImageIO.read` on a JPEG goes looking for the native colour-management library it cannot load,
@@ -1112,6 +1116,12 @@ because both converters are built in and neither starts a process.
   places. The paragraphs carry **named styles** — Normal, Heading 1–6, Code, Quote — and the page
   is A4 with 2 cm margins, which is why this is the format to export for typesetting: a layout
   application imports a document by mapping style *names* onto its own.
+- **Which A4** is the DOCX save dialog's file-type dropdown: **DOCX document as A4 portrait** or
+  **as A4 landscape**. Same extension either way, so what you type is unaffected; the orientation
+  is a property of the document, and the save dialog is the last moment anybody is asked anything.
+  Landscape is worth having for a wide table or a landscape photograph, both of which are laid out
+  to fit the text frame — and on a portrait page that frame is the narrow way round. The log line
+  says which one it wrote.
 
 What the Markdown becomes, in both:
 
@@ -1154,12 +1164,16 @@ same goes for an include that is not an image at all (a `@txt` file the model re
 picture) or a file whose bytes are not a PNG, JPEG, GIF or WEBP: the reference stays, the export
 finishes. The log line counts the pictures it did place along with the blocks and tables.
 
-**Sizes are physical, and resolution is the limit.** The page is A4 portrait with 2 cm margins,
-so the text frame is 17 × 25.7 cm, and an image is placed as large as it can be without falling
-below **300 dpi** in either direction:
+**Sizes are physical, and resolution is the limit.** The page is A4 with 2 cm margins, so the
+text frame is 17 × 25.7 cm portrait and 25.7 × 17 cm landscape, and an image is placed as large as
+it can be without falling below **300 dpi** in either direction:
 
 - A picture big enough in pixels fills the text frame — the width for a landscape one, the height
-  for a portrait one, whichever runs out first.
+  for a portrait one, whichever runs out first. **Both frame dimensions come from the orientation
+  the export was asked for**, so a landscape picture on a landscape page is placed against the
+  25.7 cm width rather than against the 17 cm of a page it isn't on. A table's columns are shared
+  out of the same frame, and the section states the page both ways a reader might read it: the two
+  dimensions swapped, and `w:orient="landscape"`.
 - A picture too small for that is placed at exactly 300 dpi instead, so it takes up *less* than
   the frame and stays sharp rather than being blown up into a blur. A 300 × 200 px image becomes
   2.54 × 1.69 cm, not a page-wide smudge.
