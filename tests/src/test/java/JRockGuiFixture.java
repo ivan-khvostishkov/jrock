@@ -91,8 +91,7 @@ abstract class JRockGuiFixture {
      */
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
             "workingDir", "promptsDir", "promptsDirNote", "apiKey", "REGION",
-            "regionSource", "MODEL_ID", "availableModels", "pdfDpi", "saveIncludeCopies",
-            "autoBackupLog");
+            "regionSource", "MODEL_ID", "availableModels", "pdfDpi", "autoBackupLog");
 
     private final Map<String, Object> savedConfig = new LinkedHashMap<>();
 
@@ -269,8 +268,21 @@ abstract class JRockGuiFixture {
      * dismissing it is what the caller does next.
      */
     protected void pressCtrl(final int keyCode) {
+        pressShortcut(KeyStroke.getKeyStroke(keyCode, InputEvent.CTRL_DOWN_MASK));
+    }
+
+    /**
+     * The same, for the Ctrl+Shift+&lt;key&gt; half of a pair: Ctrl+Shift+I is Ctrl+I
+     * with a copy kept, and the two are separate bindings.
+     */
+    protected void pressCtrlShift(final int keyCode) {
+        pressShortcut(KeyStroke.getKeyStroke(keyCode,
+                InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
+    }
+
+    /** Fires whatever the window has bound to the given keystroke. */
+    private void pressShortcut(final KeyStroke shortcut) {
         final JFrame frame = (JFrame) window.target();
-        final KeyStroke shortcut = KeyStroke.getKeyStroke(keyCode, InputEvent.CTRL_DOWN_MASK);
         final Action action = GuiActionRunner.execute(new GuiQuery<Action>() {
             @Override
             protected Action executeInEDT() {
@@ -395,18 +407,21 @@ abstract class JRockGuiFixture {
      * conversion is expected to refuse, where the line to wait for is the refusal.
      */
     protected void chooseInTheIncludeDialog(String filterDescription, Path... files) {
-        chooseInTheIncludeDialog(filterDescription, chooser -> { }, files);
+        chooseInTheIncludeDialog(filterDescription, false, files);
     }
 
     /**
-     * The same, with a look at the open dialog before it is approved: for the options
-     * that live in the chooser itself rather than in Configure, which have to be set
-     * while it is up and are read once it is dismissed.
+     * The same, through <em>Include with copy...</em> (Ctrl+Shift+I) when {@code copies}
+     * is set: the identical dialog, differing only in that each chosen file is copied
+     * into {@code JRock/includes/} and included from there.
      */
-    protected void chooseInTheIncludeDialog(String filterDescription,
-                                            java.util.function.Consumer<JFileChooserFixture> whileOpen,
+    protected void chooseInTheIncludeDialog(String filterDescription, boolean copies,
                                             Path... files) {
-        pressCtrl(KeyEvent.VK_I);
+        if (copies) {
+            pressCtrlShift(KeyEvent.VK_I);
+        } else {
+            pressCtrl(KeyEvent.VK_I);
+        }
 
         JFileChooserFixture chooser =
                 JFileChooserFinder.findFileChooser().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
@@ -433,43 +448,7 @@ abstract class JRockGuiFixture {
         assertThat(currentFilterOf(chooser)).describedAs("the chooser's filter")
                 .isSameAs(filter);
 
-        whileOpen.accept(chooser);
         approveWith(chooser, files);
-    }
-
-    /**
-     * The include dialog's own checkbox, found by the label the user reads.
-     * <p>
-     * It is JRock's accessory panel rather than anything the chooser provides, so it is
-     * looked for in the dialog's hierarchy - and only there, so the window's own
-     * checkboxes (Extend conversation) cannot match it.
-     */
-    protected JCheckBox checkBoxIn(JFileChooserFixture chooser, final String label) {
-        return robot.finder().find(chooser.target(),
-                new GenericTypeMatcher<JCheckBox>(JCheckBox.class) {
-                    @Override
-                    protected boolean isMatching(JCheckBox candidate) {
-                        return label.equals(candidate.getText());
-                    }
-                });
-    }
-
-    /**
-     * Puts a checkbox in the given state, leaving it alone if it is in it already.
-     * <p>
-     * Read and clicked in the one EDT task, because the answer to "is it ticked?"
-     * decides whether to click it: a checkbox that remembers a session-wide setting
-     * (see {@link #checkBoxIn}) comes up ticked the second time round, and a click
-     * then would turn it off. Unlike {@link #press}, this one opens no dialog, so
-     * there is nothing for an invokeAndWait to deadlock behind.
-     */
-    protected static void tick(final AbstractButton box, final boolean on) {
-        GuiActionRunner.execute(new GuiTask() {
-            @Override
-            protected void executeInEDT() {
-                if (box.isSelected() != on) box.doClick(0);
-            }
-        });
     }
 
     /**

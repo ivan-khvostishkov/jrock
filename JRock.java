@@ -195,19 +195,6 @@ public class JRock {
     // alone, and the top bar is for the two things that are toggled while working.
     private static boolean autoBackupLog = true;
 
-    // "Save include copies" in the include dialog: when on, a chosen file is copied
-    // into JRock/includes/ and included from the copy, so the include survives
-    // whatever happens to the original.
-    //
-    // Which matters most where the original is least permanent: in the browser build
-    // an uploaded file lands in CheerpJ's /uploads, and that is gone after a reload -
-    // taking the path INCLUDES remembers with it, so "Reload all includes" would find
-    // a file that no longer exists. A copy under JRock/ is in the folder the user
-    // owns, next to the log that names it. Remembered for the session (like the rest
-    // of the settings), off by default: a copy of every include is not what someone
-    // attaching files from a folder they keep wants.
-    private static boolean saveIncludeCopies = false;
-
     // Working directory = the process current directory. When JRock is launched
     // from the "JRock here!" context menu, Explorer starts it in the clicked
     // folder, so the CWD is already correct with no extra flags. The window
@@ -1808,7 +1795,21 @@ public class JRock {
                 KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "jrock-include");
         frame.getRootPane().getActionMap().put("jrock-include", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
-                showIncludeDialog(frame, input, log, extendMode.isSelected());
+                showIncludeDialog(frame, input, log, extendMode.isSelected(), false);
+            }
+        });
+
+        // Ctrl+Shift+I is the same include, keeping a copy: the file is copied into
+        // JRock/includes/ first and included from there, so the include outlives
+        // whatever happens to the original (see includeCopyOf). Shift because it is
+        // Ctrl+I with something added, not a different thing.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_I,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                "jrock-include-copy");
+        frame.getRootPane().getActionMap().put("jrock-include-copy", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showIncludeDialog(frame, input, log, extendMode.isSelected(), true);
             }
         });
 
@@ -1884,7 +1885,14 @@ public class JRock {
         // Prompt area: Include... / Load prompt... / Save prompt copy...
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
         addMenuItem(promptMenu, "Include text, image, PDF, RTF or DOCX file...",
-                () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
+                () -> showIncludeDialog(frame, input, log, extendMode.isSelected(), false));
+        // The same dialog, the same filters, one thing more: the chosen file is copied
+        // into JRock/includes/ and included from the copy, which is the include that
+        // still works after a restart (see includeCopyOf). A second menu item rather
+        // than a checkbox in the chooser, because a chooser has nowhere to put one
+        // except the accessory column down its right-hand side.
+        addMenuItem(promptMenu, "Include with copy...",
+                () -> showIncludeDialog(frame, input, log, extendMode.isSelected(), true));
         // The same include for a file that is not on this machine: the address is
         // fetched into JRock/urls/ and included from there, as text or as a picture
         // according to what it answered with (see fetchUrl).
@@ -1909,6 +1917,10 @@ public class JRock {
         javax.swing.JMenuItem copyItem  = addEditItem(promptMenu, "Copy",  input,
                 () -> clipboardCopy(input.getSelectedText(), log));
         addEditItem(promptMenu, "Paste", input, () -> clipboardPaste(input, log));
+        // Select all, which is also how a touch device clears the prompt: select the lot,
+        // then Backspace. There is no Ctrl+A to press, and dragging a selection from the
+        // top of a long prompt to the bottom of it on a phone is its own small ordeal.
+        addEditItem(promptMenu, "Select all", input, input::selectAll);
         javax.swing.JMenuItem undoItem  = addEditItem(promptMenu, "Undo",  input,
                 () -> { if (promptUndo.canUndo()) promptUndo.undo(); });
         javax.swing.JMenuItem redoItem  = addEditItem(promptMenu, "Redo",  input,
@@ -1997,6 +2009,27 @@ public class JRock {
     private static void addPasteMenu(javax.swing.text.JTextComponent field, LogView log) {
         javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
         addEditItem(menu, "Paste", field, () -> clipboardPaste(field, log));
+        attachPopup(field, menu);
+        useBrowserClipboard(field, log, true);
+    }
+
+    // The same for a field whose text is worth taking away as well as putting in: Copy
+    // and Paste, and Select all beside them because a field that is being pasted over is
+    // a field whose old contents are in the way.
+    //
+    // Written for a file chooser's "File name" line, where on a phone it is the only way
+    // to open more than one file at a time: multi-selection in the list wants Shift or
+    // Ctrl, and a touch screen has neither - so the names have to go in by hand, and by
+    // hand on a phone means pasted. The chooser's own syntax for several is each name in
+    // double quotes, separated by spaces: "a.png" "b.png".
+    private static void addCopyPasteMenu(javax.swing.text.JTextComponent field, LogView log) {
+        if (field == null) return;
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        addEditItem(menu, "Copy", field,
+                () -> clipboardCopy(field.getSelectedText() == null
+                        ? field.getText() : field.getSelectedText(), log));
+        addEditItem(menu, "Paste", field, () -> clipboardPaste(field, log));
+        addEditItem(menu, "Select all", field, field::selectAll);
         attachPopup(field, menu);
         useBrowserClipboard(field, log, true);
     }
@@ -2292,6 +2325,7 @@ public class JRock {
         String[][] keys = {
             {"Ctrl+Enter", "Send message (call a Bedrock model)"},
             {"Ctrl+I", "Include a text, image, PDF, RTF or DOCX file"},
+            {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
             {"Ctrl+U", "Fetch a URL and include what it answers with"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle Extend conversation"},
@@ -3411,23 +3445,25 @@ public class JRock {
     private static final String[] IMAGE_EXTENSIONS = { "png", "jpg", "jpeg", "gif", "webp" };
     private static final String IMAGE_FILTER_SUFFIX = " (png, jpg, jpeg, gif, webp)";
 
-    // Puts a row of one's own underneath a file chooser's own controls, answering whether
-    // there was room for it.
-    //
-    // A chooser has no official slot for this - only the accessory, which is a column down
-    // the right-hand side. What every stock look and feel does have is a BorderLayout on
-    // the chooser itself with NORTH and CENTER taken (the folder row, and the file list
-    // with the filename, filter and button rows beneath it) and SOUTH free, which is
-    // exactly the line wanted. A layout that does not look like that is left untouched and
-    // the caller told so, because a row appearing where the buttons used to be would be a
-    // worse outcome than a row in the accessory.
-    private static boolean addBelow(javax.swing.JFileChooser chooser,
-                                    javax.swing.JComponent row) {
-        if (!(chooser.getLayout() instanceof BorderLayout)) return false;
-        BorderLayout layout = (BorderLayout) chooser.getLayout();
-        if (layout.getLayoutComponent(BorderLayout.SOUTH) != null) return false;
-        chooser.add(row, BorderLayout.SOUTH);
-        return true;
+    // The chooser's "File name" field: the first text field in it, every look and feel
+    // putting that one first and the rest of the chooser having none. Found by looking
+    // rather than by asking the UI delegate, which keeps it in a protected field of its
+    // own in every look and feel.
+    private static javax.swing.text.JTextComponent findFileNameField(java.awt.Container root) {
+        for (java.awt.Component child : root.getComponents()) {
+            // Not a combo box's editor, which is a text field inside something that is
+            // not a field at all.
+            if (child instanceof javax.swing.JComboBox) continue;
+            if (child instanceof javax.swing.JTextField) {
+                return (javax.swing.JTextField) child;
+            }
+            if (child instanceof java.awt.Container) {
+                javax.swing.text.JTextComponent found =
+                        findFileNameField((java.awt.Container) child);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     // Loads a prompt from a user-chosen file (read-only) into the input area.
@@ -3482,11 +3518,17 @@ public class JRock {
     // dimensions where applicable), and gets an "@txt <hash>" / "@img <hash>"
     // token inserted at the prompt cursor - an image optionally with a Markdown
     // "![](<hash>)" reference above it, which is what the DOCX export places.
+    //
+    // With copies on (Ctrl+Shift+I, "Include with copy..."), each file the user picks
+    // directly is copied into JRock/includes/ first and included from the copy - see
+    // includeCopyOf. Everything else about the dialog is the same, which is the point
+    // of it being the same dialog.
     private static void showIncludeDialog(JFrame frame, JTextArea input, LogView log,
-                                          boolean extend) {
+                                          boolean extend, boolean copies) {
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(includeChooserDir.start());
-        chooser.setDialogTitle("Include file");
+        chooser.setDialogTitle(copies ? "Include file, with a copy under JRock"
+                                      : "Include file");
         chooser.setAcceptAllFileFilterUsed(false);
         javax.swing.filechooser.FileNameExtensionFilter imageFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
@@ -3521,26 +3563,13 @@ public class JRock {
         chooser.setFileFilter(imageFilter);            // default selection = image
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
-        // The one option that belongs with the files rather than in Configure: whether
-        // to keep a copy of what is being included (see saveIncludeCopies).
-        //
-        // On a line of its own under the chooser's own rows, left-aligned, rather than in
-        // the accessory panel a chooser offers: the accessory is a column down the
-        // right-hand side, and it takes its width off the file list - on a narrow dialog
-        // roughly a third of it, for one checkbox. If some look and feel leaves no room
-        // there, the accessory is used after all (see addBelow).
-        javax.swing.JCheckBox saveCopies =
-                new javax.swing.JCheckBox("Save include copies", saveIncludeCopies);
-        saveCopies.setToolTipText("Copy each chosen file into JRock/includes/ first, "
-                + "and include it from there");
-        javax.swing.JPanel optionRow = new javax.swing.JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        optionRow.add(saveCopies);
-        if (!addBelow(chooser, optionRow)) chooser.setAccessory(optionRow);
+        // A clipboard for the "File name" line, which on a touch screen is the only way
+        // to include several files at once - see addCopyPasteMenu for why, and for the
+        // "a.png" "b.png" the chooser expects there.
+        addCopyPasteMenu(findFileNameField(chooser), log);
 
         if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
         includeChooserDir.remember(chooser);
-        saveIncludeCopies = saveCopies.isSelected();   // remembered for the session
 
         java.io.File[] selected = chooser.getSelectedFiles();
         if (selected == null || selected.length == 0) return;
@@ -3578,7 +3607,7 @@ public class JRock {
                         // includeOne: what the three conversions above include is
                         // already a file they wrote under JRock/ themselves, so only
                         // the file the user picked directly needs copying.
-                        final Path included = includeCopyOf(file, log);
+                        final Path included = copies ? includeCopyOf(file, log) : file;
                         // Left on the EDT: hashing and reading a plain include is
                         // quick, and this is what it always did.
                         onEdt(() -> includeOne(input, log, extend, included,
@@ -3624,17 +3653,21 @@ public class JRock {
         }
     }
 
-    // With "Save include copies" on, copies the file into JRock/includes/ and returns
-    // the copy, which is then what gets included. Off, or on a file that already lives
-    // there, returns the file itself.
+    // Copies the file into JRock/includes/ and returns the copy, which is then what
+    // gets included; a file that already lives there is returned as it stands.
     //
-    // A failed copy is reported and the original included anyway: the point of the
-    // option is to keep the include available later, and refusing the include now
-    // would be a worse answer to "the copy didn't work" than including the file where
-    // it lies. Runs off the EDT with the rest of the include (it reads and writes a
-    // whole file, which on a 40 MB photograph is not instant).
+    // Why anyone would want that: the file JRock remembers is not always a file that
+    // stays. In the browser build an uploaded file lands in CheerpJ's /uploads, and
+    // that is gone after a reload - taking the path INCLUDES remembers with it, so
+    // "Reload all includes" would find a file that no longer exists. A copy under
+    // JRock/ is in the folder the user owns, next to the log that names it.
+    //
+    // A failed copy is reported and the original included anyway: the point of
+    // "Include with copy..." is to keep the include available later, and refusing the
+    // include now would be a worse answer to "the copy didn't work" than including the
+    // file where it lies. Runs off the EDT with the rest of the include (it reads and
+    // writes a whole file, which on a 40 MB photograph is not instant).
     private static Path includeCopyOf(Path file, LogView log) {
-        if (!saveIncludeCopies) return file;
         Path dir = includesDir();
         try {
             // Already a copy (a re-include of something under JRock/includes/, or a
@@ -3842,11 +3875,18 @@ public class JRock {
         // Ctrl+V to paste it with (see addPasteMenu).
         addPasteMenu(urlF, log);
 
+        // In the browser the fetching is the page's doing, and a page may only read an
+        // address that allows it - so the one failure worth warning about beforehand is
+        // said here rather than only in the reason that comes back.
+        String cors = isCheerpJ()
+                ? "<br>In the browser the page fetches it, so the address has to allow "
+                  + "cross-origin reads (CORS); plenty of sites do not."
+                : "";
         javax.swing.JLabel what = new javax.swing.JLabel(
                 "<html>A web page is included as text (@txt), an image as a picture (@img).<br>"
                 + "Accepted: HTML, PNG, JPEG, GIF and WEBP - whatever the address itself "
                 + "answers with.<br>The file is saved under JRock/urls/ and included from "
-                + "there.</html>");
+                + "there." + cors + "</html>");
 
         javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
         panel.add(what, BorderLayout.NORTH);
@@ -3891,19 +3931,6 @@ public class JRock {
     // (see showFetchUrlDialog); the insertion itself goes through onEdt().
     private static void fetchUrl(JFrame frame, JTextArea input, LogView log,
                                  boolean extend, String typed) {
-        // No sockets in the browser, and no way to borrow the page's client either:
-        // the HTTP bridge hands back a string with no headers, so there would be
-        // neither the bytes of an image nor the Content-Type this whole feature turns
-        // on. Said plainly rather than attempted and half-failing.
-        if (isCheerpJ()) {
-            urlRefused(frame, log, "Fetch URL is not available in the browser",
-                    "Fetch URL needs a network client of its own, which the browser build "
-                    + "does not have: the page's client returns text without response "
-                    + "headers, so neither an image's bytes nor its media type would "
-                    + "survive. Download the file and use Include instead.");
-            return;
-        }
-
         // A bare "example.org/page" is what a paste from an address bar often looks
         // like, and it has an obvious reading. Anything else keeps the scheme it was
         // given, so a mistyped one is reported rather than papered over.
@@ -3926,46 +3953,46 @@ public class JRock {
             return;
         }
 
+        // Through the transport, which is how every other request goes out: on a normal
+        // JVM its own HttpClient, and in the browser the hosting page's client, one method
+        // along from the one Bedrock is called through (see HttpTransport.fetch).
         log.gray("Fetching URL: " + address);
-        HttpResponse<byte[]> resp;
+        UrlReply resp;
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(uri)
-                    .timeout(Duration.ofSeconds(URL_TIMEOUT_SECONDS))
-                    // Named, because a server that is given no User-Agent at all is a
-                    // server that sometimes answers 403 instead of the page.
-                    .header("User-Agent", "JRock/" + VERSION)
-                    .GET()
-                    .build();
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
-                    // Links move, and a link that has moved is still the link the user
-                    // pasted. NORMAL rather than ALWAYS: it declines an https address
-                    // that redirects to http, which is a downgrade nobody asked for.
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .build();
-            resp = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            resp = http().fetch(address, URL_TIMEOUT_SECONDS);
         } catch (Exception ex) {
+            // The browser's failures arrive already explained, in words meant to be read
+            // (a CORS refusal, a timeout); the JVM's arrive as an exception, which needs
+            // its type to make sense of.
+            String why = (ex instanceof IOException && ex.getMessage() != null)
+                    ? ex.getMessage()
+                    : ex.getClass().getSimpleName() + ": " + ex.getMessage();
             urlRefused(frame, log, "Could not fetch the URL",
-                    "Could not fetch " + address + ": "
-                    + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                    "Could not fetch " + address + ": " + why);
             return;
         }
 
         // The address the bytes really came from, which is not always the one asked
         // for. It names the file below; the link stays the address the user gave, that
         // being the one they can go back to.
-        URI finalUri = resp.uri() == null ? uri : resp.uri();
+        URI finalUri = uri;
+        try {
+            if (resp.finalUrl != null && !resp.finalUrl.isBlank()) {
+                finalUri = URI.create(resp.finalUrl);
+            }
+        } catch (IllegalArgumentException ignored) {
+            finalUri = uri;      // whatever it answered with, it is not a URI we can use
+        }
         if (!finalUri.equals(uri)) log.gray("Redirected to: " + finalUri);
 
-        if (resp.statusCode() != 200) {
+        if (resp.status != 200) {
             urlRefused(frame, log, "The server refused the URL",
-                    "HTTP " + resp.statusCode() + " from " + finalUri
+                    "HTTP " + resp.status + " from " + finalUri
                     + " - nothing was inserted.");
             return;
         }
 
-        String contentType = resp.headers().firstValue("content-type").orElse("");
+        String contentType = resp.contentType;
         String mime = mediaTypeOf(contentType);
         String ext = URL_EXTENSIONS.get(mime);
         if (ext == null) {
@@ -3982,7 +4009,7 @@ public class JRock {
         // that is how an included text file is read (see buildParts) - a page served as
         // windows-1251 would otherwise reach the model as mojibake, which is the same
         // failure the transport avoids for JSON.
-        byte[] body = resp.body();
+        byte[] body = resp.body;
         byte[] bytes = body;
         if (!isImage) {
             java.nio.charset.Charset declared = charsetOf(contentType);
@@ -6772,11 +6799,36 @@ public class JRock {
         HttpReply(int status, String body) { this.status = status; this.body = body; }
     }
 
+    // One downloaded address: the bytes, the media type they were served as, and where
+    // they really came from after any redirect. Everything Fetch URL decides from (see
+    // fetchUrl), and all three are needed: a picture is bytes, what kind of thing it is
+    // comes from the Content-Type rather than from the URL, and the name it is saved
+    // under comes from the address that answered.
+    private static final class UrlReply {
+        final int status;
+        final String contentType;
+        final String finalUrl;
+        final byte[] body;
+        UrlReply(int status, String contentType, String finalUrl, byte[] body) {
+            this.status = status;
+            this.contentType = (contentType == null) ? "" : contentType;
+            this.finalUrl = finalUrl;
+            this.body = body;
+        }
+    }
+
     private interface HttpTransport {
         // Sends one request and returns its status + body. A null body means no
         // request body. Throws on any transport-level failure.
         HttpReply send(String method, String url, List<String[]> headers,
                        String body, int timeoutSeconds) throws Exception;
+
+        // Fetches one address that is NOT a Bedrock endpoint, as bytes. Separate from
+        // send() because the two are asked different things: send() carries JSON to an
+        // endpoint this application knows, with credentials attached and a text answer
+        // expected, while this one carries nothing, goes wherever it is told, and has to
+        // bring back the response's own media type and an image's bytes intact.
+        UrlReply fetch(String url, int timeoutSeconds) throws Exception;
 
         // True when the HOST holds the Bedrock credentials and adds the
         // Authorization header itself. That is the browser case: the API key is
@@ -6816,6 +6868,31 @@ public class JRock {
             return new HttpReply(resp.statusCode(), resp.body());
         }
 
+        @Override
+        public UrlReply fetch(String url, int timeoutSeconds) throws Exception {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(timeoutSeconds))
+                    // Named, because a server that is given no User-Agent at all is a
+                    // server that sometimes answers 403 instead of the page.
+                    .header("User-Agent", "JRock/" + VERSION)
+                    .GET()
+                    .build();
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                    // Links move, and a link that has moved is still the link the user
+                    // pasted. NORMAL rather than ALWAYS: it declines an https address
+                    // that redirects to http, which is a downgrade nobody asked for.
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .build();
+            HttpResponse<byte[]> resp =
+                    client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            return new UrlReply(resp.statusCode(),
+                    resp.headers().firstValue("content-type").orElse(""),
+                    resp.uri() == null ? url : resp.uri().toString(),
+                    resp.body());
+        }
+
         @Override public boolean hostHoldsCredentials() { return false; }
         @Override public String describe() { return "java.net.http.HttpClient"; }
     }
@@ -6842,6 +6919,16 @@ public class JRock {
     static native String browserHttpSend(String method, String url,
                                          String headersJson, String body,
                                          int timeoutSeconds);
+
+    // Fetch URL (Ctrl+U) over the same bridge: any address, no credentials, and the
+    // answer as bytes rather than as text.
+    //   browserHttpFetch() -> "<status>\n<content-type>\n<final url>\n<base64 body>",
+    //                         or "0\n<reason>" when the request never completed.
+    // Base64 because this carries pictures: the bridge hands over a Java String, and
+    // a PNG put through one is a PNG no longer. Three header lines rather than a JSON
+    // object, for the same reason the rest of this bridge has none - each side reads
+    // what it needs with indexOf.
+    static native String browserHttpFetch(String url, int timeoutSeconds);
 
     // Clipboard, over the same bridge and the same "<ok>\n<rest>" wire format.
     // CheerpJ gives the JVM a clipboard of its own, private to the tab's Java
@@ -6913,6 +7000,56 @@ public class JRock {
                         ? "Browser HTTP request failed (no reason reported)." : bodyText);
             }
             return new HttpReply(status, bodyText);
+        }
+
+        // Fetch URL, through the page's client as well - the same client, one method
+        // along (see browserHttpFetch). The page is the only thing in a browser tab that
+        // can reach the network at all, so there is nothing else for this to be.
+        //
+        // What the browser cannot do anything about is the other end: a page may only
+        // read an address that permits a cross-origin request, so a site without CORS
+        // headers refuses this where the desktop build simply downloads it. That failure
+        // arrives as a reason from the page, and is reported as it stands.
+        @Override
+        public UrlReply fetch(String url, int timeoutSeconds) throws Exception {
+            String framed;
+            try {
+                framed = browserHttpFetch(url, timeoutSeconds);
+            } catch (Throwable ex) {
+                throw new IOException("This page's HTTP bridge cannot fetch other "
+                        + "addresses (an older jrock-web page does not have it): "
+                        + ex.getClass().getSimpleName() + ": " + ex.getMessage(), ex);
+            }
+            if (framed == null || framed.isEmpty()) {
+                throw new IOException("Browser HTTP bridge returned an empty reply.");
+            }
+
+            // "<status>\n<content-type>\n<final url>\n<base64>", or "0\n<reason>".
+            String[] lines = framed.split("\n", 4);
+            int status;
+            try {
+                status = Integer.parseInt(lines[0].trim());
+            } catch (NumberFormatException ex) {
+                throw new IOException("Browser HTTP bridge returned a malformed reply: "
+                        + framed);
+            }
+            if (status == 0) {
+                String why = (lines.length > 1) ? lines[1].trim() : "";
+                throw new IOException(why.isEmpty()
+                        ? "Browser fetch failed (no reason reported)." : why);
+            }
+            if (lines.length < 4) {
+                throw new IOException("Browser HTTP bridge returned a short reply: "
+                        + framed);
+            }
+            byte[] body;
+            try {
+                body = java.util.Base64.getMimeDecoder().decode(lines[3].trim());
+            } catch (IllegalArgumentException ex) {
+                throw new IOException("Browser HTTP bridge returned a body that is not "
+                        + "base64: " + ex.getMessage(), ex);
+            }
+            return new UrlReply(status, lines[1].trim(), lines[2].trim(), body);
         }
 
         @Override public boolean hostHoldsCredentials() { return true; }

@@ -12,12 +12,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Includes files with the include dialog's <em>Save include copies</em> checkbox on and
- * off, and checks where each include ended up pointing.
+ * Includes files through <em>Include with copy...</em> (Ctrl+Shift+I) and through plain
+ * <em>Include</em> (Ctrl+I), and checks where each include ended up pointing.
  * <p>
- * The option exists because the file JRock remembers is not always a file that stays:
- * in the browser an uploaded one lives in CheerpJ's {@code /uploads} and is gone after a
- * reload, which leaves {@link JRockReloadIncludesTest} with a path it cannot open. A copy
+ * The second menu item exists because the file JRock remembers is not always a file that
+ * stays: in the browser an uploaded one lives in CheerpJ's {@code /uploads} and is gone after
+ * a reload, which leaves {@link JRockReloadIncludesTest} with a path it cannot open. A copy
  * under {@code JRock/includes/} is in the folder the user owns - so what is checked here
  * is that the include is registered against the copy, not against the original.
  * <p>
@@ -29,13 +29,12 @@ import org.junit.jupiter.api.Test;
 class JRockIncludeCopyTest extends JRockGuiFixture {
 
     private static final String IMAGE_FILTER = "Image files (png, jpg, jpeg, gif, webp)";
-    private static final String SAVE_COPIES = "Save include copies";
 
     /** Hashing and copying one small file; a slow CI runner needs the rest. */
     private static final long INCLUDE_TIMEOUT_SECONDS = 30;
 
     @Test
-    @DisplayName("with the checkbox ticked, the copy under JRock/includes/ is what is included")
+    @DisplayName("through Include with copy, the copy under JRock/includes/ is what is included")
     void copiesTheFileIntoJRockAndIncludesTheCopy() throws Exception {
         awaitReadyCount(1);
 
@@ -67,7 +66,7 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
     }
 
     @Test
-    @DisplayName("without it, the file is included where it lies and nothing is copied")
+    @DisplayName("through plain Include, the file is included where it lies and nothing is copied")
     void leavesTheFileWhereItIsWhenNotAsked() throws Exception {
         awaitReadyCount(1);
 
@@ -114,17 +113,15 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
     }
 
     /**
-     * Includes one file through the real dialog, with the checkbox in the given state,
-     * and waits for the line that says this include is over.
+     * Includes one file through the real dialog, opened by whichever of the two menu
+     * items was asked for, and waits for the line that says this include is over.
      * <p>
      * Which line that is, is the caller's business: the include's own lines are the same
      * words every time, so a second include can only be waited for on something the
      * first one did not already write.
      */
     private void includeWithCopies(final boolean copies, Path file, String until) {
-        chooseInTheIncludeDialog(IMAGE_FILTER,
-                chooser -> tick(checkBoxIn(chooser, SAVE_COPIES), copies),
-                file);
+        chooseInTheIncludeDialog(IMAGE_FILTER, copies, file);
         awaitLogLine(until, INCLUDE_TIMEOUT_SECONDS);
     }
 

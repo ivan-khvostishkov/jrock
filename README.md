@@ -145,6 +145,10 @@ as WebAssembly), so nothing runs on a server.
 - **Image includes work too.** A browser JVM has no native libraries, so nothing here may
   depend on one — JRock reads an image's dimensions from its header rather than decoding it
   (see [Multimodal includes](#multimodal-includes-ctrli)).
+- **Fetch URL works too**, through the same page client as the Bedrock calls — one more method on
+  `window.myBrowserHttp`, returning the bytes and the `Content-Type` so a picture stays a picture
+  (see [fetching a URL](#fetching-a-url)). The browser's own rule applies: a site that does not
+  allow cross-origin reads (**CORS**) cannot be fetched from a page, and is reported as refusing.
 
 ![JRock running in a browser tab, saving just the selected reply to the downloads folder](images/web-save-selection.png)
 
@@ -172,6 +176,9 @@ The UX is a little clumsy, and worth knowing about before you judge it:
   will come up.
 - Scroll bars, text selection and the menus are Swing's own, drawn for a desktop and driven by a
   fingertip. It takes some learning — but you do get used to it.
+- **Several files in one include** need the file dialog's **File Name** box: a tap selects one
+  file and there is no Shift to hold, so the names go in by hand, each in quotes —
+  `"cat.png" "dog.png"`. That box has its own long-tap menu with Copy, Paste and Select all.
 
 For an app like this that is a fair trade: one jar, one build, no per-platform code and no store
 review, and the phone gets the same client as the desktop, with the same plain files under
@@ -241,20 +248,29 @@ the **Sponsor** button at the top of this repository ;)
 
 ## HTTP transport
 
-JRock issues exactly two kinds of request (`GET /v1/models` and `POST /v1/chat/completions`).
-Which transport carries them is decided once at startup and reported in the log:
+JRock issues two kinds of request to the model (`GET /v1/models` and
+`POST /v1/chat/completions`), plus a plain `GET` of any address you give it with
+[Fetch URL](#fetching-a-url). Which transport carries them is decided once at startup and
+reported in the log:
 
 | Runtime | Transport | Credentials |
 |---|---|---|
 | Any normal JVM | `java.net.http.HttpClient` | `JRock/bedrock-key.txt`, written by the Configure dialog |
-| CheerpJ (browser) | the page's `window.myBrowserHttp.fetch` | held by the page; never passed to the JVM |
+| CheerpJ (browser) | the page's `window.myBrowserHttp` | held by the page; never passed to the JVM |
 
 In the browser there is no socket layer, so `HttpClient` cannot work at all and the hosting page
-provides the transport instead. Any host page can serve JRock by providing
-`window.myBrowserHttp.fetch(url, options)` resolving to `{ status, body }`;
-`jrock-web/index.html` is the reference implementation. It attaches the `Authorization` header
-itself, so the API key never reaches the JVM, and it reports the region it holds a key for, which
-JRock adopts at startup.
+provides the transport instead. Any host page can serve JRock by providing two functions on
+`window.myBrowserHttp`:
+
+- **`fetch(url, options)`** resolving to `{ status, body }` — the model calls, whose bodies are
+  JSON either way. It attaches the `Authorization` header itself, so the API key never reaches
+  the JVM, and it reports the region it holds a key for, which JRock adopts at startup.
+- **`fetchUrl(url, options)`** resolving to `{ status, contentType, url, bytes }` — an arbitrary
+  address, for which a body of *text* would not do: Fetch URL decides between a page and a
+  picture by the response's own `Content-Type`, and an image has to arrive as bytes
+  (`Uint8Array`) to be saved at all. No credentials are attached to these.
+
+`jrock-web/index.html` is the reference implementation of both.
 
 Credentials are deliberately **not** read from JVM system properties (`-Dname=value`) or from
 environment variables: a key passed on a command line leaks into shell history and process
@@ -448,9 +464,9 @@ into either):
    - **RTF as Markdown text** — converts the RTF to one Markdown file
    - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
 
-   The dialog also carries a **Save include copies** checkbox, which keeps a copy of each
-   chosen file under `JRock/includes/` and includes it from there
-   ([why](#includes-that-outlive-the-session)).
+   **Ctrl+Shift+I** (**Include with copy...** in the prompt's context menu) opens the very
+   same dialog, with one difference: each chosen file is copied under `JRock/includes/` first
+   and included from the copy ([why](#includes-that-outlive-the-session)).
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart the files have to be attached again — or their paths read
    back out of the log with **Reload all includes**
@@ -522,9 +538,13 @@ Details:
   address the bytes really came from is logged when it differs.
 - Because the file lands under `JRock/`, it is **already where the copies go** — a URL include
   survives a restart the same way, with **Reload all includes**.
-- **Not in the browser build.** It needs a network client of its own, and the page's client
-  returns text without response headers — so neither an image's bytes nor its media type would
-  survive. The item says so rather than half-working.
+- **In the browser it goes through the page**, `window.myBrowserHttp.fetchUrl` — the same
+  arrangement as the model calls, one more method on the same object, so both builds run the
+  identical code above this line. The reply carries the status, the `Content-Type`, the address
+  finally landed on and the bytes themselves, which is everything the rules above need. The one
+  difference is the browser's, not JRock's: a page it fetches must allow cross-origin reads
+  (**CORS**), and most sites do not. A site that refuses is named as such, and the dialog says so
+  before you try.
 
 ### Includes that outlive the session
 
@@ -533,22 +553,24 @@ the whole transcript *are* restored from disk. So the tokens come back and nothi
 they stand for: sending says `Included @img <hash> is not known`, and the conversation is stuck
 until every file is attached again. Two things fix that, and they are meant to be used together.
 
-**Save include copies** — a checkbox in the include dialog itself, on a line of its own under
-the file list (rather than in the accessory column down the right-hand side, which on a narrow
-dialog takes about a third of the width for one checkbox). With
-it on, a chosen file is **copied into `JRock/includes/` first and included from the copy**, so
-the log's line points inside the folder you own:
+**Include with copy...** — a second item in the prompt's context menu, **Ctrl+Shift+I**, right
+under the plain include. It opens the same dialog, with the same seven filters and the same
+multi-select, and does one thing more: a chosen file is **copied into `JRock/includes/` first and
+included from the copy**, so the log's line points inside the folder you own:
 
 ```
 Copied for the include: C:\photos\IMG_4002.jpg -> C:\demo\JRock\includes\IMG_4002.jpg
 Included @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
 ```
 
-It is off by default and remembered for the session. Two different files of the same name both
-survive, the second as `IMG_4002-2.jpg`; the same file twice is not copied twice. A file already
-under `JRock/includes/` is included where it is, and so is anything the conversions wrote (they
-write under `JRock/` themselves). A copy that fails is reported and the original included anyway —
-the option is there to keep a file within reach, not to refuse the include. It matters most in
+A menu item rather than a checkbox in the chooser, because a chooser has nowhere of its own to
+put one: the only slot it offers is the accessory, a column down the right-hand side that takes
+its width off the file list — on a narrow dialog about a third of it, for one checkbox, with the
+rest of the column empty. Two different files of the same name both survive, the second as
+`IMG_4002-2.jpg`; the same file twice is not copied twice. A file already under
+`JRock/includes/` is included where it is, and so is anything the conversions wrote (they write
+under `JRock/` themselves). A copy that fails is reported and the original included anyway —
+the item is there to keep a file within reach, not to refuse the include. It matters most in
 the [browser](#jrock-web-in-the-browser), where an uploaded file lands in CheerpJ's `/uploads`
 and is gone after a reload, taking the only path the log recorded with it.
 
@@ -911,13 +933,21 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
-- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Fetch
+- **Prompt area** — Include text, image, PDF, RTF or DOCX file... (multi-select), *Include
+  with copy...* (the same dialog, keeping a copy of each file under `JRock/includes/` — see
+  [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
   URL...* (which downloads an address into `JRock/urls/` and includes it as text or as a
   picture, according to what it answered with — see [**fetching a
   URL**](#fetching-a-url)), *Reload all includes* (which rebuilds the hash → path map from
-  the log, so a conversation survives a restart — see [**includes that outlive the
-  session**](#includes-that-outlive-the-session)), Load prompt from file..., Save prompt copy
-  as...
+  the log, so a conversation survives a restart), Load prompt from file..., Save prompt copy
+  as..., then Cut / Copy / Paste / **Select all** / Undo / Redo. Those last ones are there for
+  a touch device, which has no keyboard to press Ctrl+A on: *Select all* followed by Backspace
+  is how a prompt gets cleared with no keyboard at all, and dragging a selection from the top of
+  a long prompt to the bottom of it on a phone is its own small ordeal.
+- **The file name box of any file dialog** — Copy / Paste / Select all. Also for touch, and for
+  one thing in particular: the include dialog is multi-select, but a tap selects a single file
+  and there is no Shift to hold. Several names typed or pasted into that box, each in quotes —
+  `"cat.png" "dog.png"` — is how a phone attaches more than one file at a time.
 - **Top bar (empty area)** — Backup log... and Load from backup... (see [**backup and
   restore**](#backup-and-restore)), then Move & resize window...; in the **browser**, also Show/hide
   the page header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer
@@ -989,6 +1019,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
 | Ctrl+I | Include text/image files, a PDF, an RTF or a DOCX (multi-select) |
+| Ctrl+Shift+I | The same, keeping a copy of each file under `JRock/includes/` |
 | Ctrl+U | Fetch a URL and include what it answers with |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle Extend conversation |
@@ -1091,10 +1122,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   PNG has to land as `cat.png` **byte for byte**, with an `@img` token and its 120 × 80 read out
   of the saved file's header; and `application/json` has to be **refused by name**, in the log
   and in a dialog, leaving no `JRock/urls/` at all and the prompt untouched.
-- **`JRockIncludeCopyTest`** ticks the dialog's own **Save include copies** checkbox and checks
+- **`JRockIncludeCopyTest`** includes a file through **Include with copy...** and checks
   where the include then points: the copy line comes *before* the include it was made for, the
   copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what
-  the hash is registered against. Unticked, nothing is copied and no `JRock/includes/` is created.
+  the hash is registered against. Through plain **Include** it checks the other half: nothing is
+  copied and no `JRock/includes/` is created.
   A third test includes two *different* files both called `photo.png` and checks that neither is
   lost (the second becomes `photo-2.png`), and that the same file again is not copied a third time.
 - **`JRockReloadIncludesTest`** includes a PNG and a text file, throws the hash → path map away by

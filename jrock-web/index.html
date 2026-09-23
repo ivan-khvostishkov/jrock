@@ -216,16 +216,18 @@
       // --- The browser HTTP client JRock calls (window.myBrowserHttp) ---------
       //
       // In the browser there is no socket layer, so java.net.http.HttpClient
-      // cannot work: JRock detects that it is running under CheerpJ and routes its
-      // Bedrock requests here instead (see the JNI bridge further down).
+      // cannot work: JRock detects that it is running under CheerpJ and routes ALL of
+      // its requests here instead (see the JNI bridge further down) - Bedrock through
+      // `fetch`, and Fetch URL (Ctrl+U) through `fetchUrl` beside it.
       //
       // This object owns the credentials. The region and API key live ONLY here, in
       // this tab's JavaScript - they are never passed to the JVM (not as JVM
       // properties, not as anything else), and JRock never sees the key: the fetch
       // below attaches the Authorization header itself.
       //
-      // Replace `fetch` to change how requests are made - a different HTTP stack,
-      // extra headers, a proxy - as long as it resolves to { status, body }. That
+      // Replace either method to change how requests are made - a different HTTP
+      // stack, extra headers, a proxy - as long as `fetch` resolves to
+      // { status, body } and `fetchUrl` to { status, contentType, url, bytes }. That
       // is all JRock needs.
       window.myBrowserHttp = {
         region: "us-east-1",        // AWS region; JRock's default
@@ -248,6 +250,28 @@
           var resp = await window.fetch(url, options);
           if (resp.status === 401 || resp.status === 403) openKey();
           return { status: resp.status, body: await resp.text() };
+        },
+
+        // Fetches some OTHER address, for JRock's Fetch URL (Ctrl+U): a web page to
+        // include as text, or an image to include as a picture. Resolves to
+        // { status, contentType, url, bytes }.
+        //
+        // Deliberately not `fetch` above: this one carries no credentials at all. It
+        // goes to somebody else's site, and the Bedrock key has no business being
+        // offered to one. The answer comes back as bytes because a picture is bytes,
+        // and with its Content-Type because that is what JRock decides from.
+        //
+        // A page can only read an address that allows cross-origin requests, so a site
+        // that sends no CORS headers will refuse this - the browser's rule, not
+        // JRock's, and the reason is passed on as it stands.
+        fetchUrl: async function (url, options) {
+          var resp = await window.fetch(url, options);
+          return {
+            status: resp.status,
+            contentType: resp.headers.get("content-type") || "",
+            url: resp.url || url,
+            bytes: new Uint8Array(await resp.arrayBuffer())
+          };
         }
       };
 
@@ -573,6 +597,72 @@
         }
       }
 
+      // Fetch URL (Ctrl+U): any address, no credentials, the answer as bytes. Same
+      // client as the Bedrock one, one method along (myBrowserHttp.fetchUrl).
+      //
+      // The reply is "<status>\n<content-type>\n<final url>\n<base64 body>", or
+      // "0\n<reason>" if it never completed. Base64 because the bridge hands Java a
+      // string, and a PNG put through one is no longer a PNG.
+      async function Java_JRock_browserHttpFetch(lib, url, timeoutSeconds) {
+        var http = window.myBrowserHttp;
+        if (!http || typeof http.fetchUrl !== "function") {
+          return "0\nThis page provides no window.myBrowserHttp.fetchUrl to fetch the "
+               + "address with.";
+        }
+
+        var secs = timeoutSeconds > 0 ? timeoutSeconds : 60;
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, secs * 1000);
+
+        try {
+          var reply = await http.fetchUrl(url, {
+            method: "GET",
+            mode: "cors",
+            cache: "no-store",
+            credentials: "omit",              // somebody else's site: no cookies, no key
+            redirect: "follow",
+            signal: controller.signal
+          });
+          var status = (reply && typeof reply.status === "number") ? reply.status : 0;
+          if (!status) {
+            return "0\nThe page's HTTP client returned no status for " + url + ".";
+          }
+          var bytes = reply.bytes || new Uint8Array(0);
+          log("GET " + url + " -> " + status + " (" + bytes.length + " bytes)");
+          return status + "\n" + (reply.contentType || "") + "\n" + (reply.url || url)
+               + "\n" + base64OfBytes(bytes);
+        } catch (e) {
+          var why;
+          if (e && e.name === "AbortError") {
+            why = "The request timed out after " + secs + "s.";
+          } else {
+            why = (e && e.message) ? e.message : String(e);
+            // A fetch a page is not allowed to read rejects with a bare TypeError and
+            // says nothing further - the detail is in the console, not in the error - so
+            // name the near-certain cause rather than repeating "Failed to fetch".
+            if (e instanceof TypeError) {
+              why = "The browser would not fetch it (" + why + "). A page may only read "
+                  + "an address that allows cross-origin requests (CORS), and many sites "
+                  + "do not - on the desktop build the same address downloads normally.";
+            }
+          }
+          log("GET " + url + " -> failed: " + why);
+          return "0\n" + why;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      // Bytes -> base64, in chunks: String.fromCharCode.apply is given the arguments one
+      // per byte, and a whole image at once overflows the argument list.
+      function base64OfBytes(bytes) {
+        var CHUNK = 0x8000, parts = "";
+        for (var i = 0; i < bytes.length; i += CHUNK) {
+          parts += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        return btoa(parts);
+      }
+
       // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
       runBtn.addEventListener("click", async function () {
         if (started || !jarBytes) return;
@@ -591,6 +681,7 @@
             natives: {
               Java_JRock_browserHttpInfo: Java_JRock_browserHttpInfo,
               Java_JRock_browserHttpSend: Java_JRock_browserHttpSend,
+              Java_JRock_browserHttpFetch: Java_JRock_browserHttpFetch,
               Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
               Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
               Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome
