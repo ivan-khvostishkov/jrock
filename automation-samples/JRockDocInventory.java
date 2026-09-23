@@ -49,7 +49,9 @@
 // both answers stay in the transcript. The prompt is read-only until the automation is
 // finished and editable again afterwards - the conversation is there to be carried on
 // by hand, which is the point of driving the real window rather than a headless copy of
-// it. Copy this file and rewrite it for chains of your own.
+// it. Copy this file and rewrite it for chains of your own - and read
+// JRockTranslateToEnglish.java beside it, which is this same plumbing around a single
+// pass, and takes a document of any type rather than a PDF.
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
