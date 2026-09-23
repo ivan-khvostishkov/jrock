@@ -1256,8 +1256,10 @@ wrote — pick the same file from the same folder to remove it. Same as the entr
 inspection under `JRock/` as `jrock-agent-<name>-install.reg` / `-uninstall.reg`.
 
 Installing an agent needs `jrock.jar` itself — an agent is compiled against JRock at run time,
-and a class path is a jar, never a `.java` file. A JRock running from source says so instead of
-writing an entry that could not work.
+and a class path is a jar, never a `.java` file. The jar is looked for **beside the agent**
+first, which is where an automation directory keeps it anyway
+([copy it in yourself](#automating-the-chain-jrockdocinventoryjava)), and then the jar this JRock
+is running from. With neither, install says so instead of writing an entry that could not work.
 
 ## Per-folder window title & icon
 

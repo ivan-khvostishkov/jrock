@@ -3914,20 +3914,16 @@ public class JRock {
                 showAgentError(frame, log, "Could not find javaw.exe next to the running JVM.");
                 return;
             }
-            // An agent is compiled at run time against JRock, so the command needs a
-            // class path - and a class path is a jar or a directory of classes, never
-            // a .java file. Running JRock itself from source is fine; installing an
-            // agent from such an instance is not, and saying which file was found is
-            // what makes that fixable.
-            Path jar = ownJarOrSource();
-            if (jar == null || !jar.toString().toLowerCase().endsWith(".jar")) {
+            Path jar = agentJar(agent);
+            if (jar == null) {
                 showAgentError(frame, log,
                         "An agent runs as javaw -cp jrock.jar Agent.java, so installing "
                         + "one needs jrock.jar itself.\n\n"
-                        + (jar == null
-                            ? "No jrock.jar was found beside this instance."
-                            : "What was found beside this instance is " + jar + ".")
-                        + "\n\nBuild jrock.jar (or run JRock from it) and install again.");
+                        + "There is none beside " + agent.getFileName() + " in\n"
+                        + agent.getParent() + "\nand this JRock is not running from one "
+                        + "either.\n\n"
+                        + "Copy jrock.jar into the agent's directory - which is what "
+                        + "enables\nautomations there anyway - and install again.");
                 return;
             }
             String label = agentLabel(agent);
@@ -4043,6 +4039,26 @@ public class JRock {
             return null;
         }
         return chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
+    }
+
+    // The jar an agent's installed command will run against: jrock.jar in the AGENT's
+    // own directory first, and only then the jar this JRock is itself running from.
+    //
+    // That order is the one that matches how automations are set up: an automation
+    // directory holds the agent, the prompts it chains and a copy of jrock.jar, put
+    // there by hand (see the samples), and that copy is the one the agent is developed
+    // and run against. It is also the only one there is when JRock itself was started
+    // as `java JRock.java` - an agent needs a class path, and a class path is a jar or
+    // a directory of classes, never a .java file.
+    private static Path agentJar(Path agent) {
+        Path parent = agent.getParent();
+        if (parent != null) {
+            Path beside = parent.resolve("jrock.jar");
+            if (Files.isRegularFile(beside)) return beside.toAbsolutePath().normalize();
+        }
+        Path self = ownJarOrSource();
+        return (self != null && self.toString().toLowerCase().endsWith(".jar"))
+                ? self : null;
     }
 
     // The command Explorer runs: this jar on the class path, the agent as the source
@@ -8329,12 +8345,18 @@ public class JRock {
     // The wire format is deliberately trivial, so neither side needs a JSON parser
     // it doesn't already have:
     //   browserHttpInfo() -> a small flat JSON object describing the page's client
-    //                        ({"transport":...,"region":...}).
+    //                        ({"transport":...,"region":...,"credentials":...}).
     //   browserHttpSend() -> "<status>\n<body>". Status 0 means the request never
     //                        completed and the body is the reason, ready to show.
-    // Request headers travel in the other direction as a flat JSON object. The
-    // Authorization header is NOT among them: the page's client adds it, because
-    // the API key lives only in the page.
+    // Request headers travel in the other direction as a flat JSON object, the
+    // Authorization header among them - JRock holds the key in the browser exactly as
+    // it does on the desktop, in the working folder's JRock/bedrock-key.txt, which is
+    // what makes it outlive a reload.
+    //
+    // The two optional fields are for a page that wants it otherwise: "region" pins
+    // the region, and "credentials":"page" says the page holds the key and adds the
+    // Authorization header itself, so JRock sends none and never asks for one.
+    // JRock's own jrock-web page sets neither.
     static native String browserHttpInfo();
     static native String browserHttpSend(String method, String url,
                                          String headersJson, String body,
@@ -8372,10 +8394,20 @@ public class JRock {
     private static final class BrowserHttpTransport implements HttpTransport {
         private final String label;
 
+        // Whether the PAGE holds the Bedrock key, which is the page's own statement:
+        // "credentials":"page" in the info JSON above. JRock's own jrock-web page does
+        // not - the key is typed into the Configure dialog and kept in
+        // JRock/bedrock-key.txt like everywhere else, which is what makes it survive a
+        // reload instead of being asked for again by a JavaScript dialog. A page that
+        // does hold one says so, and then JRock sends no Authorization header and
+        // never reports a missing key.
+        private final boolean hostKey;
+
         BrowserHttpTransport(String info) {
             String reported = jsonStringField(info, "transport");
             this.label = (reported == null || reported.isBlank())
                     ? "browser HTTP bridge" : reported;
+            this.hostKey = "page".equals(jsonStringField(info, "credentials"));
         }
 
         @Override
@@ -8472,7 +8504,7 @@ public class JRock {
             return new UrlReply(status, lines[1].trim(), lines[2].trim(), body);
         }
 
-        @Override public boolean hostHoldsCredentials() { return true; }
+        @Override public boolean hostHoldsCredentials() { return hostKey; }
         @Override public String describe() { return label; }
     }
 
