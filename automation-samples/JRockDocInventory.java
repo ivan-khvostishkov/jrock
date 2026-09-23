@@ -328,24 +328,92 @@ public final class JRockDocInventory {
     }
 
     // ---- Files -------------------------------------------------------------
+    // A line that is nothing but a file name: name characters and spaces, no comma, no
+    // apostrophe, no colon - the punctuation of prose is what tells the two apart.
+    private static final java.util.regex.Pattern NAME_LINE =
+            java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9 ._-]{2,}");
+
+    // A file name sitting inside a line of text ("File name: 2020-07-27-FTS-3NDFL-..."):
+    // a run of name characters long enough not to be an ordinary word.
+    private static final java.util.regex.Pattern NAME_IN_LINE =
+            java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{6,}[A-Za-z0-9]");
+
+    // How many spaces a line may hold and still be read as a name rather than as prose.
+    private static final int NAME_MAX_SPACES = 4;
+
     // The file name, out of the second reply.
     //
-    // The prompt asks for nothing but the name and that is usually what comes back -
-    // but "usually" is not a contract, so the last non-blank line is taken and then
-    // reduced to something every file system here will accept. The order matters: the
-    // quoting comes off first, then an extension the prompt said not to add (otherwise
+    // The prompt asks for nothing but the name, and the name is normally the first line -
+    // but "normally" is not a contract, and a model that adds a sentence about the
+    // document used to win outright, because the LAST non-blank line was the one taken.
+    // A sentence reduced to name-safe characters is not a name:
+    //     2020-07-27-FTS-3NDFL-TaxReturn-2019
+    //
+    //     The document is Ivan Khvostishkov's personal Russian 3-NDFL income-tax ...
+    // came back as "The-document-is-Ivan-Khvostishkov-s-personal-Russian-3-NDFL-income-".
+    // So the reply is searched for the line that LOOKS like a file name, in two passes:
+    // one for a line that is a name entire, then one for a name embedded in a line. The
+    // first line that answers wins, the top of a reply being where the answer was asked
+    // for. Then an extension the prompt said not to add comes off (otherwise
     // "...-1234567890.pdf.pdf"), and only then the characters a name cannot hold.
+    //
+    // Nothing that looks like a name -> "", and the caller stops and shows the reply
+    // instead of inventing a name out of prose.
     private static String baseName(String answer) {
-        String line = "";
-        for (String candidate : answer.split("\n")) {
-            String trimmed = candidate.trim();
-            if (!trimmed.isEmpty()) line = trimmed;
+        String[] lines = answer.split("\n");
+        String found = "";
+        for (String line : lines) {
+            String plain = undecorated(line);
+            if (isNameLine(plain)) {
+                found = plain;
+                break;
+            }
         }
-        line = line.replaceAll("^[\"'`*_\\s]+", "").replaceAll("[\"'`*_\\s.]+$", "");
-        line = line.replaceAll("(?i)\\.(pdf|txt)$", "");
-        line = line.replaceAll("[^A-Za-z0-9._-]+", "-").replaceAll("-{2,}", "-");
-        if (line.length() > 120) line = line.substring(0, 120);
-        return line.replaceAll("^-+", "").replaceAll("-+$", "");
+        for (int i = 0; found.isEmpty() && i < lines.length; i++) {
+            java.util.regex.Matcher m = NAME_IN_LINE.matcher(undecorated(lines[i]));
+            while (m.find()) {
+                // The longest run in the line, and only one carrying a separator: a name
+                // is made of several parts, an English word is not.
+                if (m.group().matches(".*[._-].*") && m.group().length() > found.length()) {
+                    found = m.group();
+                }
+            }
+        }
+        String name = found.replaceAll("(?i)\\.(pdf|txt)$", "");
+        name = name.replaceAll("[^A-Za-z0-9._-]+", "-").replaceAll("-{2,}", "-");
+        if (name.length() > 120) name = name.substring(0, 120);
+        return name.replaceAll("^-+", "").replaceAll("-+$", "");
+    }
+
+    // Whether a whole (undecorated) line reads as a file name: the characters of one and
+    // nothing else, few enough spaces to be a name rather than a sentence, and either
+    // several parts or a decent length - which is what keeps a stray short word, the
+    // "json" of a code fence among them, from being taken for an answer.
+    private static boolean isNameLine(String plain) {
+        return NAME_LINE.matcher(plain).matches()
+                && spaces(plain) <= NAME_MAX_SPACES
+                && (plain.matches(".*[ ._-].*") || plain.length() >= 8);
+    }
+
+    // One line with its decoration off: the bullet or heading marker in front of it, a
+    // label like "Suggested file name:", the quotes, backticks or asterisks around the
+    // name, and the full stop after it.
+    private static String undecorated(String line) {
+        return line.trim()
+                .replaceAll("^[-*#>\\s]+", "")
+                .replaceAll("(?i)^(suggested|proposed|new|final)?\\s*(file ?name|name)"
+                        + "\\s*[:=]\\s*", "")
+                .replaceAll("^[\"'`*_\\s]+", "")
+                .replaceAll("[\"'`*_\\s.]+$", "");
+    }
+
+    // How many spaces a string holds.
+    private static int spaces(String s) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == ' ') n++;
+        }
+        return n;
     }
 
     // A file's name without its extension.

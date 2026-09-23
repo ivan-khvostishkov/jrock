@@ -954,6 +954,15 @@ saves the reply as `document.txt` beside the PDF, sends *that* with the inventor
 offers to rename both files to the name that comes back. Then a "Finished" dialog, and the
 window is yours.
 
+The name is **found** in that reply rather than assumed to be all of it: the prompt asks for
+nothing but the name, and a model that adds a sentence about the document anyway should not have
+that sentence turned into a file name. So the reply is searched for the line that looks like one
+— name characters and little else, few enough spaces to be a name rather than prose — and failing
+that, for a name embedded in a line (`File name: 2020-07-27-FTS-3NDFL-TaxReturn-2019`). The first
+line that answers wins, the top of a reply being where the answer was asked for. If nothing in
+the reply looks like a file name, the automation stops and shows you the reply, instead of
+renaming your documents to a sentence.
+
 JRock's flags are passed straight through, and the document is not — a bare argument is a prompt
 file to JRock, so the two are told apart on the way in. That is what
 [**Install agent**](#windows-agents-one-automation-per-folder) installs: one right-click command
