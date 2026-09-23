@@ -1,0 +1,19 @@
+// Where Gradle looks for the Android plugin and for libraries. google() first,
+// because that is the only place the Android Gradle plugin is published.
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'jrock-android'
+include ':app'

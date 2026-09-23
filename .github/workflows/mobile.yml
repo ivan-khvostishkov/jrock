@@ -1,0 +1,105 @@
+name: Mobile builds (experimental)
+
+# Tries to build JRock.java for Android (an APK) and for iOS (a MobiVM/RoboVM
+# ahead-of-time binary). Both are EXPECTED TO FAIL, and the failure is the output:
+# JRock is a Swing application, Android has no AWT or Swing at all, and MobiVM ships
+# none either, so Android stops at javac on the first javax.swing import and iOS
+# stops in the AOT compiler while linking.
+#
+# Deliberately NOT continue-on-error and NOT allowed to pass quietly: a red job with
+# a readable "package javax.swing does not exist" in it is a standing, checkable
+# statement of what a native port would have to replace. See android/README.md and
+# ios/README.md for the list.
+#
+# Neither job blocks anything else - "Reproducible build" and "Tests" are separate
+# workflows, and those are the ones that must be green.
+#
+# No Gradle wrapper anywhere in the repository, because the repository carries no
+# jars, so both jobs install Gradle themselves.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      # The Android Gradle Plugin 8.x requires JDK 17 to RUN, which is unrelated to
+      # the Java 11 bytecode it is configured to produce (android/app/build.gradle).
+      - name: Set up OpenJDK 17 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      # The Android SDK is already on the runner image, with its licences accepted,
+      # and ANDROID_HOME is already exported - so there is nothing to install. Printed
+      # because "SDK location not found" is the one setup failure that would otherwise
+      # look like the Swing failure this job is here to show.
+      - name: Show the Android SDK location
+        run: echo "ANDROID_HOME=$ANDROID_HOME"
+
+      - name: Assemble the debug APK (expected to fail on Swing)
+        working-directory: android
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      # Only reached if the build somehow succeeds - in which case the artifact is
+      # very much worth looking at, and this file needs rewriting.
+      - name: Upload the APK
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: jrock-android-debug
+          path: android/app/build/outputs/apk/debug/
+          if-no-files-found: warn
+
+  ios:
+    # MobiVM needs Xcode's linker and codesign, so this cannot run anywhere else.
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      # MobiVM 2.3.x compiles Java 11 bytecode and runs on a JDK 11, so unlike the
+      # Android job there is only one Java version in play here.
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Show the Xcode version
+        run: xcodebuild -version
+
+      # createIPA would also need a signing identity and a provisioning profile,
+      # neither of which is in this repository - but the AOT compiler fails on Swing
+      # long before it gets that far, which is the point.
+      - name: Compile ahead of time (expected to fail on Swing)
+        working-directory: ios
+        run: gradle --no-daemon --stacktrace build createIPA
+
+      # Only reached if the build somehow succeeds - see the note in the Android job.
+      - name: Upload the IPA
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: jrock-ios
+          path: ios/build/robovm/
+          if-no-files-found: warn

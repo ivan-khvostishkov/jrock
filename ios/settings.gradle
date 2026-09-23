@@ -1,0 +1,16 @@
+// Where Gradle looks for the RoboVM plugin and for the RoboVM runtime. Everything
+// MobiVM publishes lives on Maven Central, so there is nothing else to add.
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'jrock-ios'

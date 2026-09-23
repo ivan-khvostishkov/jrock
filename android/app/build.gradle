@@ -1,0 +1,56 @@
+// An Android APK out of the same single source file the desktop runs.
+//
+// This does NOT work yet, and is not expected to: JRock.java is a Swing
+// application, and Android has no AWT and no Swing at all - the APK stops at
+// javac, on the first javax.swing import. That failure is the point of this
+// module: it names, in a CI log anybody can read, exactly what a native Android
+// JRock would have to replace (see ../README.md).
+//
+// Minimal on purpose. No AndroidX, no resources, no themes, no icons: one
+// activity, one manifest, and the root JRock.java compiled beside it.
+
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+android {
+    namespace 'com.nosuchblogger.jrock'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.nosuchblogger.jrock'
+        // 26 (Oreo) is where java.time and the rest of JRock's Java 8+ API surface
+        // is present without desugaring, which is one fewer thing in the way of the
+        // failure this module is here to show.
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.8.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    sourceSets {
+        main {
+            // The copied JRock.java (see below), beside this module's own activity.
+            java.srcDir layout.buildDirectory.dir('generated/jrock')
+        }
+    }
+}
+
+// JRock.java lives in the repository root, as one file with no build descriptor -
+// which is the whole point of it, and not something this module should change. It
+// is copied into the build directory rather than added as a source directory,
+// because a source directory two levels up would drag tests/ and the samples in
+// with it.
+def copyJRock = tasks.register('copyJRockSource', Copy) {
+    from rootProject.file('../JRock.java')
+    into layout.buildDirectory.dir('generated/jrock')
+}
+
+tasks.named('preBuild') {
+    dependsOn copyJRock
+}

@@ -30,3 +30,9 @@ JRock/
 # creates, since surefire runs the app with its working directory in here)
 target/
 
+# Gradle output for the experimental mobile targets in android/ and ios/ (build/
+# also holds the copy of JRock.java their copyJRockSource task makes)
+build/
+.gradle/
+local.properties
+

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  What MobiVM's ahead-of-time compiler needs to know: which class starts the app,
+  which platform to emit, and where the plist is. Nothing else - no forced classes,
+  no frameworks, no resources, because there are none yet.
+
+  mainClass is JRock, in the default package, which is why it has no dots. The AOT
+  compiler follows it and stops on javax.swing, which is the expected outcome.
+-->
+<config>
+    <executableName>JRock</executableName>
+    <mainClass>JRock</mainClass>
+    <os>ios</os>
+    <arch>arm64</arch>
+    <target>ios</target>
+    <iosInfoPList>Info.plist.xml</iosInfoPList>
+</config>

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One activity and nothing else. No permissions either: JRock talks to Bedrock over
+  HTTPS, which needs none on Android, and everything it writes belongs in the app's
+  own files directory.
+
+  android:name has no leading dot because JRockActivity is in the default package,
+  like JRock itself - a name without a dot is taken as fully qualified.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:label="JRock"
+        android:allowBackup="false">
+
+        <activity
+            android:name="JRockActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

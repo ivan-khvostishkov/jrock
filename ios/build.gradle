@@ -1,0 +1,69 @@
+// An iOS binary out of the same single source file the desktop runs, ahead-of-time
+// compiled by MobiVM (the maintained fork of RoboVM).
+//
+// This does NOT work yet, and is not expected to: JRock.java is a Swing
+// application, and MobiVM ships no AWT and no Swing, so the AOT compiler stops
+// while linking - long before anything needs signing with an Apple identity. That
+// failure is the point of this module: it names, in a CI log anybody can read,
+// exactly what a native iOS JRock would have to replace (see ../README.md).
+//
+// Minimal on purpose. No storyboards, no asset catalogue, no icons: one plist, one
+// robovm.xml, and the root JRock.java as the main class.
+
+buildscript {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        // Applied the buildscript way rather than through the plugins {} block,
+        // because that is how MobiVM documents the plugin and the marker artefact
+        // the plugins {} block needs is not published for every release.
+        classpath 'com.mobidevelop.robovm:robovm-gradle-plugin:2.3.23'
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'robovm'
+
+// MobiVM 2.3.x compiles Java 11 bytecode. Beyond that the AOT compiler rejects the
+// class files, which would hide the Swing failure this module is here to show.
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+sourceSets {
+    main {
+        // The copied JRock.java (see below), beside this module's own sources.
+        java.srcDir layout.buildDirectory.dir('generated/jrock')
+    }
+}
+
+dependencies {
+    // robovm-rt is MobiVM's class library (its stand-in for the JDK's rt.jar);
+    // robovm-cocoatouch is the binding for UIKit and friends. Both are compileOnly
+    // in spirit, but the AOT compiler wants them on the runtime classpath too.
+    implementation 'com.mobidevelop.robovm:robovm-rt:2.3.23'
+    implementation 'com.mobidevelop.robovm:robovm-cocoatouch:2.3.23'
+}
+
+// No robovm { } block on purpose. Everything the compiler needs - the main class,
+// the target, the architecture, the plist - is in robovm.xml, so the same settings
+// apply when MobiVM is driven by hand rather than through Gradle. A signing
+// identity would go here, and is left out: there is no certificate in this
+// repository, and the AOT compiler fails on Swing long before signing.
+
+// JRock.java lives in the repository root, as one file with no build descriptor -
+// which is the whole point of it, and not something this module should change. It
+// is copied into the build directory rather than added as a source directory,
+// because a source directory two levels up would drag tests/ and the samples in
+// with it.
+def copyJRock = tasks.register('copyJRockSource', Copy) {
+    from rootProject.file('../JRock.java')
+    into layout.buildDirectory.dir('generated/jrock')
+}
+
+tasks.named('compileJava') {
+    dependsOn copyJRock
+}
