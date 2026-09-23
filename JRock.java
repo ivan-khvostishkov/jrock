@@ -8497,22 +8497,31 @@ public class JRock {
         // rather than as a MIME type inside the string.
         final String base64;
         final String audioFormat;
+        // Text that is JRock's own rather than the operator's - today only the clock,
+        // folded into the message when the request cannot carry a system one (see
+        // appendClockMessage). The masked copy prints it as it is, for the same reason
+        // the clock message was never masked: there is nothing of yours in it to hide,
+        // and hiding the line that says what time was sent defeats logging it.
+        final boolean verbatim;
         Part(boolean image, String text, String dataUrl, String maskHash,
-             String base64, String audioFormat) {
+             String base64, String audioFormat, boolean verbatim) {
             this.image = image; this.text = text; this.dataUrl = dataUrl; this.maskHash = maskHash;
-            this.base64 = base64; this.audioFormat = audioFormat;
+            this.base64 = base64; this.audioFormat = audioFormat; this.verbatim = verbatim;
         }
         static Part text(String t) {
-            return new Part(false, t, null, null, null, null);
+            return new Part(false, t, null, null, null, null, false);
         }
         static Part includedText(String t, String h) {
-            return new Part(false, t, null, h, null, null);
+            return new Part(false, t, null, h, null, null, false);
         }
         static Part image(String url, String h) {
-            return new Part(true, null, url, h, null, null);
+            return new Part(true, null, url, h, null, null, false);
         }
         static Part audio(String b64, String format, String h) {
-            return new Part(false, null, null, h, b64, format);
+            return new Part(false, null, null, h, b64, format, false);
+        }
+        static Part clock(String t) {
+            return new Part(false, t, null, null, null, null, true);
         }
     }
 
@@ -8582,14 +8591,38 @@ public class JRock {
         return ext.isEmpty() ? "wav" : ext;
     }
 
-    // Emits the OpenAI "content" value for one user turn into the real (sb) and
-    // masked (masked) builders: a JSON string when it's a single plain-text part,
-    // otherwise an array of text/image_url/input_audio parts. In the masked copy,
-    // included text/image/audio content is replaced by "<txt|img|audio masked <hash>>"
-    // and ordinary prompt text by "<input masked>".
+    // The parts of one message in the order they are sent: every recording first, then
+    // everything else, each group otherwise left as it was.
+    //
+    // Not cosmetic. Voxtral's own examples put the audio chunks before the text chunk in
+    // every one of them, and a prompt built the other way round was answered as if no
+    // recording had been given at all - "please provide the audio", with the audio sitting
+    // in the message behind the question. The text keeps its own order, because a prompt's
+    // segments and the files between them only mean anything in the order they were
+    // written; a recording has no such place in a sentence.
+    private static java.util.List<Part> audioFirst(java.util.List<Part> parts) {
+        boolean any = false;
+        for (Part p : parts) {
+            if (p.audioFormat != null) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) return parts;
+        java.util.List<Part> out = new ArrayList<>(parts.size());
+        for (Part p : parts) {
+            if (p.audioFormat != null) out.add(p);
+        }
+        for (Part p : parts) {
+            if (p.audioFormat == null) out.add(p);
+        }
+        return out;
+    }
+
     // Appends the REAL "content" value for one user turn: a JSON string when it's
     // a single plain-text part, otherwise an array of text/image_url/input_audio parts.
-    private static void appendRealContent(StringBuilder sb, java.util.List<Part> parts) {
+    private static void appendRealContent(StringBuilder sb, java.util.List<Part> unordered) {
+        java.util.List<Part> parts = audioFirst(unordered);
         if (isSinglePlainText(parts)) {
             sb.append("\"").append(jsonEscape(parts.get(0).text)).append("\"");
             return;
@@ -8619,7 +8652,8 @@ public class JRock {
     // Appends the MASKED "content" value for one user turn, mirroring the real shape but
     // replacing content: an included text/image/recording -> "<txt|img|audio masked
     // <hash>>", ordinary prompt text -> "<input masked>".
-    private static void appendMaskedContent(StringBuilder sb, java.util.List<Part> parts) {
+    private static void appendMaskedContent(StringBuilder sb, java.util.List<Part> unordered) {
+        java.util.List<Part> parts = audioFirst(unordered);
         if (isSinglePlainText(parts)) {
             sb.append("\"<input masked>\"");
             return;
@@ -8639,8 +8673,8 @@ public class JRock {
                         .append("\",\"format\":\"").append(jsonEscape(p.audioFormat))
                         .append("\"}}");
             } else {
-                String maskTxt = (p.maskHash != null)
-                        ? "<txt masked " + p.maskHash + ">"
+                String maskTxt = (p.maskHash != null) ? "<txt masked " + p.maskHash + ">"
+                        : p.verbatim ? jsonEscape(p.text)
                         : "<input masked>";
                 sb.append("{\"type\":\"text\",\"text\":\"").append(maskTxt).append("\"}");
             }
@@ -8649,7 +8683,9 @@ public class JRock {
     }
 
     private static boolean isSinglePlainText(java.util.List<Part> parts) {
-        return parts.size() == 1 && !parts.get(0).image && parts.get(0).maskHash == null;
+        Part only = (parts.size() == 1) ? parts.get(0) : null;
+        // A folded clock is never a message on its own: it is JRock's line, not a turn.
+        return only != null && !only.image && only.maskHash == null && !only.verbatim;
     }
 
     // Appends the clock's message, with its trailing comma, to a messages array that
@@ -8660,9 +8696,43 @@ public class JRock {
     // A "system" message, not a "user" one: the time is not something the operator
     // said, and an extra user turn in front of the real one would break the
     // user/assistant alternation that several models on mantle insist on.
+    //
+    // Except when the request carries audio, in which case there is no system message at
+    // all and the clock is folded into the user's content as a text part (Part.clock,
+    // carriesAudio). Voxtral refuses the two together - "Found system messages at indexes
+    // [0] and audio chunks in messages at indexes [1]. This is not allowed prior to the
+    // tokenizer version 13", which is mistral-common's MistralRequestValidatorV5 talking,
+    // and its model card is blunter still: "System prompts are not yet supported". Folded
+    // rather than dropped, because the clock is information the answer may depend on, and a
+    // line of text in front of the question is where it can still be read; the recording
+    // stays first in the message all the same (see audioFirst).
     private static void appendClockMessage(StringBuilder messages, String clockNow) {
         messages.append("{\"role\":\"system\",\"content\":\"")
                 .append(jsonEscape(clockNow)).append("\"},");
+    }
+
+    // True when this request will carry a recording: the new prompt's parts, or - in
+    // Extend mode - an @audio token in an earlier turn of yours. The validator that
+    // refuses a system message beside audio looks at the whole message list, so this has
+    // to as well.
+    //
+    // The earlier turns are read as text rather than expanded into parts, because
+    // expanding them reads every included file from disk and this question is asked before
+    // either copy of the request is built. The token is enough: the files were verified
+    // before the send began.
+    private static boolean carriesAudio(java.util.List<Part> parts,
+                                        java.util.List<String[]> history) {
+        for (Part p : parts) {
+            if (p.audioFormat != null) return true;
+        }
+        for (String[] turn : history) {
+            if (!ROLE_HUMAN.equals(turn[0])) continue;
+            java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(turn[1]);
+            while (m.find()) {
+                if (m.group(1).equals("audio")) return true;
+            }
+        }
+        return false;
     }
 
     // ---- HTTP transport ----------------------------------------------------
@@ -9097,11 +9167,25 @@ public class JRock {
             writeMessageFile(ROLE_CLOCK, LocalDateTime.now().format(STAMP_FMT), clockNow);
         }
 
+        // A request with a recording in it gets no system message: the clock goes into the
+        // user's content instead, in front of the prompt and behind the audio (see
+        // appendClockMessage for whose rule this is). Added to the parts list, so the real
+        // request and the masked copy carry it in the same place without being told twice.
+        // The blank line is part of the text and not decoration: text parts are
+        // concatenated as they are, so without it the clock would run straight into the
+        // first word of the prompt.
+        boolean clockInText = clockNow != null && carriesAudio(parts, history);
+        if (clockInText) parts.add(0, Part.clock(clockNow + "\n\n"));
+        String clockNote = !clockInText ? null
+                : "Clock: sent as a text part inside the message, not as a system message "
+                + "- this request carries audio, and a model that listens may refuse a "
+                + "system message beside it.";
+
         // Build the real messages array. Human turns - both prior ones (extend
         // mode) and the new turn - are expanded via buildParts so their @img/@txt
         // tokens become image/text content parts. Assistant turns are plain text.
         StringBuilder messages = new StringBuilder("[");
-        if (clockNow != null) appendClockMessage(messages, clockNow);
+        if (clockNow != null && !clockInText) appendClockMessage(messages, clockNow);
         for (String[] turn : history) {
             if (ROLE_HUMAN.equals(turn[0])) {
                 messages.append("{\"role\":\"user\",\"content\":");
@@ -9120,8 +9204,9 @@ public class JRock {
         String body = chatRequestBody(messages);
 
         // Masked copy of the request for display - built independently from the
-        // same history + prompt parts.
-        String maskedRequestBody = maskRequest(history, parts, clockNow);
+        // same history + prompt parts. A clock that was folded into the parts is not
+        // passed again here, or the dump would show it twice.
+        String maskedRequestBody = maskRequest(history, parts, clockInText ? null : clockNow);
 
         List<String[]> headers = new ArrayList<>();
         headers.add(new String[] { "Content-Type", "application/json" });
@@ -9136,7 +9221,7 @@ public class JRock {
                 "0",
                 "HTTP " + resp.status,
                 // Nothing to mask in the body: there is no reply, only an error.
-                rawDump(maskedRequestBody, resp.body)
+                rawDump(clockNote, maskedRequestBody, resp.body)
             };
         }
 
@@ -9162,7 +9247,7 @@ public class JRock {
         // (it's already shown above). The request was masked during assembly.
         String maskedResponse = maskResponse(resp.body, rawReply);
 
-        String details = rawDump(maskedRequestBody, maskedResponse)
+        String details = rawDump(clockNote, maskedRequestBody, maskedResponse)
                 + "\n\n--- stats ---"
                 + "\nInput text symbols:  " + inputSymbols
                 + "\nOutput text symbols: " + outputSymbols
@@ -9175,8 +9260,13 @@ public class JRock {
     // The raw request/response dump logged after a call, for either outcome. The
     // response body is the caller's choice: masked on success (the reply is already
     // shown above), verbatim on failure. A success then appends its stats block.
-    private static String rawDump(String maskedRequestBody, String responseBody) {
-        return "--- raw request ---\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
+    //
+    // The note, when there is one, is a line about how the request was built that reading
+    // the request would not tell you - today only the folded clock (see callModel). It goes
+    // above the dump, because it is about what follows.
+    private static String rawDump(String note, String maskedRequestBody, String responseBody) {
+        return (note == null ? "" : note + "\n\n")
+                + "--- raw request ---\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
                 + "\n\n--- raw response ---\n" + responseBody;
     }
 
