@@ -982,6 +982,14 @@ line that answers wins, the top of a reply being where the answer was asked for.
 the reply looks like a file name, the automation stops and shows you the reply, instead of
 renaming your documents to a sentence.
 
+"Name characters" means **letters, not ASCII**: `2026-09-22-MünchnerBank-…` stays that way. The
+prompt asks for Latin-1, which has umlauts and an eszet in it, and held to `A-Za-z0-9` the
+sanitiser turned every letter it did not know into a dash — `2026-09-22-M-nchnerBank-…`, where a
+dash is exactly the character that means *the next part of the name starts*. So the test is
+Unicode's own (`\p{L}`), and the reply is normalised to NFC first, so an *ü* is one character and
+not a *u* with a combining mark trailing it — the two look identical on screen and only one is
+what the file system and the person searching the folder next year will agree on.
+
 JRock's flags are passed straight through, and the document is not — a bare argument is a prompt
 file to JRock, so the two are told apart on the way in. That is what
 [**Install agent**](#windows-agents-one-automation-per-folder) installs: one right-click command
