@@ -150,16 +150,20 @@ as WebAssembly), so nothing runs on a server.
 - **Real Bedrock calls work.** The browser has no socket layer, so JRock detects the browser
   runtime and sends its requests through the page's own `fetch()` instead — see
   [HTTP transport](#http-transport).
-- **Entering your API key is safe here.** The page shows the jar's SHA-256 so you can confirm
-  it matches the reproducible build before typing anything. The region and key stay in the
-  page's JavaScript (`window.myBrowserHttp`): they are never passed to the in-browser JVM and
-  never sent anywhere but the Bedrock endpoint. You can change the key at any time — a
-  missing or rejected one reopens the credentials dialog by itself.
+- **The key goes where it goes on the desktop:** into JRock's own **Configure** dialog, which
+  writes it to `JRock/bedrock-key.txt` — in the browser, inside CheerpJ's own persistent storage
+  (`/files/`). So it is **still there after a reload**, it is changed in the one place anybody
+  would look for it, and there is no JavaScript credentials dialog interrupting a send to ask
+  for it again. The page shows the jar's SHA-256 so you can confirm it matches the reproducible
+  build before typing anything, and the key never goes anywhere but the Bedrock endpoint. The
+  region and model live beside it in `JRock/jrock-config.txt`, the same as everywhere else.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
-- **The page gets out of the way — and comes back.** A few seconds after launch the page
-  hides its own header and footer, giving the Swing display the whole tab. To check the
-  checksum again, or change the key, the top-bar context menu has **Show/hide the page
-  header & footer**: it calls one function in the page, which flips the chrome and reports
+- **The page gets out of the way — and comes back.** A few seconds after launch the page hides
+  its own header and footer, giving the Swing display the whole tab. That is what the **Hide
+  these bars after launch** checkbox beside *Run JRock* says it will do — ticked by default, and
+  there so the disappearance is something you were told about rather than something that
+  happened to you. To check the checksum again, the top-bar context menu has **Show/hide the
+  page header & footer**: it calls one function in the page, which flips the chrome and reports
   which way it went. The page owns that state, so JRock never has to guess.
 - **Copy and paste reach other apps.** CheerpJ gives the JVM a clipboard of its own that
   nothing else can see, so JRock goes through the browser's clipboard instead: text moves
@@ -292,15 +296,19 @@ reported in the log:
 | Runtime | Transport | Credentials |
 |---|---|---|
 | Any normal JVM | `java.net.http.HttpClient` | `JRock/bedrock-key.txt`, written by the Configure dialog |
-| CheerpJ (browser) | the page's `window.myBrowserHttp` | held by the page; never passed to the JVM |
+| CheerpJ (browser) | the page's `window.myBrowserHttp` | the same file, in the browser's persistent storage |
 
 In the browser there is no socket layer, so `HttpClient` cannot work at all and the hosting page
 provides the transport instead. Any host page can serve JRock by providing two functions on
 `window.myBrowserHttp`:
 
 - **`fetch(url, options)`** resolving to `{ status, body }` — the model calls, whose bodies are
-  JSON either way. It attaches the `Authorization` header itself, so the API key never reaches
-  the JVM, and it reports the region it holds a key for, which JRock adopts at startup.
+  JSON either way. The `options` include the headers JRock built, `Authorization` among them: the
+  key is JRock's in the browser too, so one dialog sets it and one file keeps it.
+  A page that would rather hold the key itself can attach that header instead and say
+  `"credentials": "page"` in its `browserHttpInfo()` reply, which tells JRock to send none and
+  never to report a missing one; the same reply can pin a `"region"`. `jrock-web/index.html`
+  uses neither.
 - **`fetchUrl(url, options)`** resolving to `{ status, contentType, url, bytes }` — an arbitrary
   address, for which a body of *text* would not do: Fetch URL decides between a page and a
   picture by the response's own `Content-Type`, and an image has to arrive as bytes
@@ -436,9 +444,11 @@ from inside the running application, and different for every way of launching it
   could only show it as something else and then write that back.
 
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
-startup, a change of working directory in Configure, a restore from a backup. In the browser the
-hosting page holds the key and names the region, and what the page says wins (see
-[HTTP transport](#http-transport)).
+startup, a change of working directory in Configure, a restore from a backup. In the browser both
+files are the same files, kept in CheerpJ's persistent `/files/` — the key survives a reload
+because it is on disk, not in a page's JavaScript. (A hosting page *may* hold the credentials and
+name the region instead, and then what the page says wins; see
+[HTTP transport](#http-transport).)
 
 The config format is a name on one line and its **value on the next**:
 

@@ -40,13 +40,21 @@
     header a.brand:hover { text-decoration: underline; }
     header .spacer { flex: 1; }
 
-    /* Keep the key button and Run button together on one line (no wrapping). */
-    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; flex: 0 0 auto; }
+    /* Keep the checkbox and the Run button together on one line (no wrapping). */
+    .controls { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; flex: 0 0 auto; }
+
+    /* The one choice this page offers, small and quiet beside the Run button. */
+    .controls label.check {
+      display: flex; align-items: center; gap: 5px; cursor: pointer;
+      font-size: 12px; color: var(--muted); white-space: nowrap;
+    }
+    .controls label.check input { margin: 0; accent-color: var(--brand); cursor: pointer; }
 
     /* Narrow screens: smaller title so the single-line header fits comfortably. */
     @media (max-width: 520px) {
       header { gap: 8px; padding: 10px 12px; }
       header h1 { font-size: 14px; }
+      .controls label.check { font-size: 11px; }
     }
     button {
       font-size: 13px; padding: 6px 12px; cursor: pointer;
@@ -54,11 +62,6 @@
       background: var(--brand); color: #fff;
     }
     button:disabled { opacity: 0.5; cursor: default; }
-    button.icon {
-      background: #fff; color: var(--text);
-      width: 34px; padding: 6px 0; font-size: 15px; line-height: 1;
-    }
-    button.icon.set { border-color: var(--brand); color: var(--brand); }
 
     #info {
       font-size: 12px; color: var(--muted);
@@ -99,28 +102,6 @@
       color: var(--text); white-space: pre-wrap; max-height: 96px; overflow-y: auto;
     }
     code { background: #eef1f2; padding: 1px 5px; border-radius: 4px; }
-
-    /* Minimalist modal for entering the Bedrock API key. */
-    .modal-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-      display: none; align-items: center; justify-content: center; z-index: 10;
-    }
-    .modal-backdrop.open { display: flex; }
-    .modal {
-      background: var(--panel); border-radius: 10px; padding: 18px;
-      width: min(460px, 92vw); box-shadow: 0 12px 40px rgba(0,0,0,0.25);
-    }
-    .modal h2 { font-size: 15px; margin: 0 0 6px; }
-    .modal p { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
-    .modal p a { color: var(--brand); }
-    .modal .field-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-    .modal input {
-      width: 100%; font-size: 13px; padding: 8px 10px; margin-bottom: 12px;
-      border: 1px solid var(--border); border-radius: 6px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
-    .modal .actions { display: flex; justify-content: flex-end; gap: 8px; }
-    .modal .actions button.secondary { background: #fff; color: var(--text); }
   </style>
 </head>
 
@@ -129,7 +110,10 @@
     <h1><a class="brand" href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock</a> in the browser</h1>
     <span class="spacer"></span>
     <div class="controls">
-      <button id="keyBtn" class="icon" title="Enter Bedrock credentials">&#128274;</button>
+      <label class="check" for="hideChrome"
+             title="A few seconds after JRock starts, this page's header and footer are hidden so the app gets the whole tab. Bring them back any time from JRock's own window menu: right-click the empty area of its top bar.">
+        <input id="hideChrome" type="checkbox" checked /> Hide these bars after launch
+      </label>
       <button id="runBtn" disabled>Run JRock</button>
     </div>
   </header>
@@ -143,52 +127,14 @@
     <div class="placeholder" id="placeholder">
       Compare the SHA-256 above with the build hashes published in the
       <a href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock
-      repository</a> (and optionally download the JAR to hash it yourself). Set your
-      Bedrock region and API key with the &#128274; button - they stay in this tab -
-      then press <b>Run JRock</b>.
+      repository</a> (and optionally download the JAR to hash it yourself), then press
+      <b>Run JRock</b>. Your Bedrock region and API key go into JRock's own
+      <b>Configure</b> dialog, exactly as on the desktop: they are kept in this browser's
+      storage, so they are still there after a reload.
     </div>
   </div>
 
-  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own HTTP <code>fetch()</code>. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
-
-  <!-- API key modal -->
-  <div class="modal-backdrop" id="keyModal">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
-      <h2 id="keyTitle">Bedrock credentials</h2>
-      <p>
-        Held by this page's HTTP client (<code>window.myBrowserHttp</code>), which
-        performs JRock's requests and adds the <code>Authorization</code> header
-        itself - the key is never handed to the in-browser JVM, and never sent
-        anywhere except directly to the Bedrock endpoint. You can change the key at
-        any time; the region is picked up by JRock when it starts, and after that
-        can be changed in JRock's own Configure dialog. A short-term key (tied to
-        its region) can be generated in the
-        <a href="https://console.aws.amazon.com/bedrock-mantle/api-keys" target="_blank" rel="noopener">AWS console</a>.
-      </p>
-      <label class="field-label" for="regionInput">AWS region</label>
-      <input id="regionInput" type="text" autocomplete="off" spellcheck="false"
-             list="regionList" placeholder="us-east-1" />
-      <datalist id="regionList">
-        <option value="us-east-1"></option>
-        <option value="us-east-2"></option>
-        <option value="us-west-2"></option>
-        <option value="eu-central-1"></option>
-        <option value="eu-west-1"></option>
-        <option value="eu-west-3"></option>
-        <option value="ap-northeast-1"></option>
-        <option value="ap-southeast-1"></option>
-        <option value="ap-southeast-2"></option>
-        <option value="ap-south-1"></option>
-      </datalist>
-      <label class="field-label" for="keyInput">Bedrock API key</label>
-      <input id="keyInput" type="password" autocomplete="off" spellcheck="false"
-             placeholder="Paste your Bedrock API key" />
-      <div class="actions">
-        <button class="secondary" id="keyClear" type="button">Clear</button>
-        <button id="keySave" type="button">Save</button>
-      </div>
-    </div>
-  </div>
+  <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own HTTP <code>fetch()</code>, with the API key JRock holds: type it into JRock's Configure dialog, and it is saved in /files/JRock/bedrock-key.txt inside this browser's own storage, where a reload finds it again. A short-term key can be generated in the <a href="https://console.aws.amazon.com/bedrock-mantle/api-keys" target="_blank" rel="noopener">AWS console</a>. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
 
   <script>
     (function () {
@@ -198,17 +144,13 @@
       var JAR_PATH = "/str/jrock.jar";   // CheerpJ transient JS->Java mount
 
       var headerEl = document.querySelector("header");
-      var keyBtn   = document.getElementById("keyBtn");
       var runBtn   = document.getElementById("runBtn");
+      var hideChromeBox = document.getElementById("hideChrome");
       var infoEl   = document.getElementById("info");
       var bottom   = document.getElementById("bottom");
       var shaEl    = document.getElementById("sha");
       var sizeEl   = document.getElementById("jarSize");
       var placeholder = document.getElementById("placeholder");
-
-      var keyModal    = document.getElementById("keyModal");
-      var keyInput    = document.getElementById("keyInput");
-      var regionInput = document.getElementById("regionInput");
 
       var jarBytes = null;          // Uint8Array of jrock.jar
       var started  = false;
@@ -220,35 +162,29 @@
       // its requests here instead (see the JNI bridge further down) - Bedrock through
       // `fetch`, and Fetch URL (Ctrl+U) through `fetchUrl` beside it.
       //
-      // This object owns the credentials. The region and API key live ONLY here, in
-      // this tab's JavaScript - they are never passed to the JVM (not as JVM
-      // properties, not as anything else), and JRock never sees the key: the fetch
-      // below attaches the Authorization header itself.
+      // This object holds NO credentials, deliberately. The Bedrock region and API key
+      // are JRock's own settings in the browser exactly as on the desktop: typed into
+      // its Configure dialog, kept in /files/JRock/bedrock-key.txt and
+      // /files/JRock/jrock-config.txt, which CheerpJ backs with this browser's
+      // persistent storage - so they outlive a reload, they are changed in the one place
+      // anybody would look for them, and no JavaScript dialog interrupts a send to ask
+      // for a key again. Requests arrive here with their Authorization header already on
+      // them, and this client sends what it was given.
       //
       // Replace either method to change how requests are made - a different HTTP
       // stack, extra headers, a proxy - as long as `fetch` resolves to
       // { status, body } and `fetchUrl` to { status, contentType, url, bytes }. That
-      // is all JRock needs.
+      // is all JRock needs. A page that would rather hold the key itself still can:
+      // attach the Authorization header here, and add "credentials": "page" to the info
+      // object below, which tells JRock to send none and never to report one missing.
       window.myBrowserHttp = {
-        region: "us-east-1",        // AWS region; JRock's default
-        apiKey: "",                 // set via the page's credentials dialog
-
         // Performs one request. `url` is the endpoint JRock built, `options` is a
-        // fetch()-style object (method, headers, body, signal). Resolves to
-        // { status, body }; throwing reports that the request never happened.
-        //
-        // Credentials are this object's business, not JRock's: the key is attached
-        // here, and a missing or rejected one reopens the page's dialog - the only
-        // place it can be fixed.
+        // fetch()-style object (method, headers, body, signal) - headers included.
+        // Resolves to { status, body }; throwing reports that the request never
+        // happened. A 401 or 403 is passed back as it stands: JRock logs it and the
+        // key is corrected where it was set, in the Configure dialog.
         fetch: async function (url, options) {
-          if (!this.apiKey) {
-            openKey();
-            throw new Error("No Bedrock API key set in this page. Enter one in the "
-              + "credentials dialog, then send again.");
-          }
-          options.headers["Authorization"] = "Bearer " + this.apiKey;
           var resp = await window.fetch(url, options);
-          if (resp.status === 401 || resp.status === 403) openKey();
           return { status: resp.status, body: await resp.text() };
         },
 
@@ -344,8 +280,8 @@
       // --- Page chrome: the header, the verification panel, the bottom bar ------
       //
       // All of it is hidden shortly after launch to give the Swing display the
-      // whole tab, which is what you want almost always - but not quite always:
-      // the checksum is up there, and so is the credentials button. So JRock's
+      // whole tab - if the checkbox beside Run asked for it, which it does by
+      // default. Not always what you want (the checksum is up there), so JRock's
       // window menu can ask for it back, through the single function below.
       //
       // The page owns the state, and one call flips it - the Java side never has
@@ -422,45 +358,6 @@
             "\n(Serve this page over HTTP with jrock.jar in the same directory.)");
         });
 
-      // --- Credentials modal (region = login, key = password) ---
-      // Reads and writes window.myBrowserHttp directly: that object is the single
-      // place the credentials live, and the running JVM picks up a new key on its
-      // next request (the modal stays usable after the page chrome is hidden).
-      function openKey() {
-        var http = window.myBrowserHttp;
-        regionInput.value = http.region; keyInput.value = http.apiKey;
-        keyModal.classList.add("open"); regionInput.focus();
-      }
-      function closeKey() { keyModal.classList.remove("open"); }
-      keyBtn.addEventListener("click", openKey);
-      document.getElementById("keySave").addEventListener("click", function () {
-        var http = window.myBrowserHttp;
-        http.region = regionInput.value.trim() || "us-east-1";
-        http.apiKey = keyInput.value.trim();
-        keyBtn.classList.toggle("set", !!http.apiKey);
-        keyBtn.title = http.apiKey
-          ? "Bedrock credentials set: " + http.region + " (click to change)"
-          : "Enter Bedrock credentials";
-        closeKey();
-      });
-      document.getElementById("keyClear").addEventListener("click", function () {
-        var http = window.myBrowserHttp;
-        http.apiKey = ""; keyInput.value = "";
-        http.region = "us-east-1"; regionInput.value = "";
-        keyBtn.classList.remove("set");
-        keyBtn.title = "Enter Bedrock credentials";
-        closeKey();
-      });
-      // Note: intentionally NO backdrop-click handler - the dialog closes only
-      // via its buttons (Save/Clear) or the Escape key, so a stray click or
-      // click-drag ending on the backdrop won't dismiss it.
-      function modalKeydown(e) {
-        if (e.key === "Enter") document.getElementById("keySave").click();
-        else if (e.key === "Escape") closeKey();
-      }
-      regionInput.addEventListener("keydown", modalKeydown);
-      keyInput.addEventListener("keydown", modalKeydown);
-
       // --- JNI bridge: JRock's native HTTP methods, implemented here ------------
       //
       // CheerpJ resolves a Java native method to the JS function registered under
@@ -473,11 +370,13 @@
       //   info -> a small JSON object;  send -> "<status>\n<body>", where status 0
       //   means the request never completed and the body is the reason to show.
 
+      // What JRock asks about this page's client, for one line in its startup log -
+      // and nothing else. No "region" and no "credentials": both of those fields are
+      // for a page that overrides JRock's own settings, and this one does not (see
+      // window.myBrowserHttp above).
       async function Java_JRock_browserHttpInfo(lib) {
-        var http = window.myBrowserHttp || {};
         return JSON.stringify({
-          transport: "window.myBrowserHttp (browser fetch)",
-          region: http.region || ""
+          transport: "window.myBrowserHttp (browser fetch)"
         });
       }
 
@@ -673,8 +572,8 @@
 
         try {
           log("Initialising CheerpJ (Java 11) with the browser HTTP bridge ...");
-          // No javaProperties: the region and API key stay in this page's
-          // JavaScript (window.myBrowserHttp) and are never passed to the JVM.
+          // No javaProperties: there is nothing for the page to pass in. JRock reads
+          // its own settings from /files/JRock/, which this browser keeps.
           await cheerpjInit({
             version: 11,
             status: "splash",
@@ -695,11 +594,15 @@
           cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
 
           log("Running JRock ... (first run downloads the Java runtime; please wait)");
-          // Once the app is up, hide the chrome after 5s to give the Swing display
-          // all the space. Going through setChromeHidden (rather than hiding the
-          // elements directly) is what makes JRock's toggle exact: the page knows
-          // the chrome is away, so the first toggle brings it back.
-          setTimeout(function () { setChromeHidden(true); }, 5000);
+          // Once the app is up, hide the chrome after 5s to give the Swing display all
+          // the space - unless the checkbox beside Run was unticked, which is the answer
+          // to "where did the page go?" being decided before it happens rather than
+          // afterwards. Going through setChromeHidden (rather than hiding the elements
+          // directly) is what makes JRock's toggle exact: the page knows the chrome is
+          // away, so the first toggle brings it back.
+          if (hideChromeBox.checked) {
+            setTimeout(function () { setChromeHidden(true); }, 5000);
+          }
           var code = await cheerpjRunJar(JAR_PATH);
           log("JRock exited with code " + code + ".");
         } catch (e) {
