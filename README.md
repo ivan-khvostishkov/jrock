@@ -403,16 +403,25 @@ conversation*, and never read back from disk: what goes with the request is alwa
 it appears verbatim (unmasked) in the raw request dump - the point of logging a clock being to
 see what time was actually sent.
 
-**One request shape does not get a system message: one with
-[audio](#what-an-audio-include-is-sent-as) in it.** There the clock is folded into the user's
-own content, as a text part in front of the prompt (and behind the recording), and the dump says
-so above the request. A model that listens may refuse the two together — Voxtral does, with
+**A model that listens may refuse a system message beside a recording.** Voxtral does, with
 *"Found system messages at indexes [0] and audio chunks in messages at indexes [1]. This is not
-allowed prior to the tokenizer version 13"*, which is
-[mistral-common's own validator](https://github.com/mistralai/mistral-common/blob/main/src/mistral_common/protocol/instruct/validator.py)
-talking; its model card is blunter still: *"System prompts are not yet supported"*. Folded rather
-than dropped, because what day it is can be exactly what the question about the recording turns
-on, and a line of text in front of the question is somewhere it can still be read.
+allowed prior to the tokenizer version 13"* — that is
+[mistral-common's own validator](https://github.com/mistralai/mistral-common/blob/main/src/mistral_common/protocol/instruct/validator.py),
+and the Voxtral model card is blunter still: *"System prompts are not yet supported"*. So a send
+that has both the Clock on and [audio](#what-an-audio-include-is-sent-as) in it **says so first,
+and then goes as it is**:
+
+```
+Clock is on and this request carries audio. A model that listens may refuse a system message beside a recording - Voxtral answers HTTP 400 with "Found system messages at indexes [0] and audio chunks in messages at indexes [1]". Untick Clock and send again if that is what comes back.
+```
+
+Nothing is rearranged and nothing is switched off for you: the clock is a checkbox, and unticking
+it is one click in the same window. Folding the clock into the user's turn instead was tried and
+taken out again — it is a text model's feature, it makes no difference to a transcription, and a
+request that quietly disagrees with the checkbox is worse than one that fails for a reason you
+were told in advance. An `@audio` token in an *earlier* turn counts too, since the validator
+reads the whole message list: in Extend mode the warning stays for as long as a recording is
+anywhere in the conversation.
 
 ## Persistence (crash recovery + full local history)
 
@@ -587,7 +596,7 @@ documents into either):
      places
    - **Text files as is** (txt, csv, html, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
-   - **Audio files** (wav, mp3, m4a) — the recording itself, sent as an
+   - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
    - **PDF as page images** — converts the PDF to one PNG per page
    - **RTF as Markdown text** — converts the RTF to one Markdown file
@@ -635,12 +644,11 @@ disk are base64-encoded and sent as an `input_audio` content part beside the tex
 ```
 
 **The recording goes first in the message**, ahead of your question, whatever order the prompt
-wrote them in — and ahead of a [folded clock](#clock), if that is in there too:
+wrote them in:
 
 ```json
 {"role":"user","content":[
   {"type":"input_audio","input_audio":{"data":"UklGRiQ...","format":"wav"}},
-  {"type":"text","text":"<clock><now>2026-09-23 11:39:03 +02:00 Europe/Berlin</now></clock>\n\n"},
   {"type":"text","text":"transcribe me the audio"}]}
 ```
 
@@ -652,53 +660,49 @@ sitting in the same message, behind the question, counted in `prompt_tokens` and
 keep their own order among themselves, because a prompt's segments and the files between them
 only mean anything in the order they were written; a recording has no such place in a sentence.
 
-The `format` is the file's own extension, lower-cased. That matters, because
-[the API's schema](https://github.com/openai/openai-openapi) lists exactly two values for that
-field — `wav` and `mp3`. `m4a` is documented for the *transcription* endpoint and not for this
-one, and Mistral's Voxtral takes no format field at all (it decodes with libsndfile, which has
-no AAC at all). The filter offers m4a anyway, because a phone records m4a and finding out costs
-one request; the log says so on include, and a refusal coming back is the endpoint's answer, not
-a fault in JRock:
+The `format` is the file's own extension, lower-cased, and **wav and mp3 are the only two there
+are**: [the API's schema](https://github.com/openai/openai-openapi) makes that field an enum of
+exactly those. `m4a` was in the filter for one version — it is what a phone's voice memo hands
+back, nothing documented it either way, and the endpoint was the only authority worth asking. It
+was asked, it refuses, and the filter no longer offers a file the request cannot carry. (`m4a`
+*is* documented for the separate *transcription* endpoint, which JRock does not call; and
+Voxtral's `input_audio` has no format field at all, decoding with libsndfile, which has no AAC.)
+
+A path handed straight to `automationInclude` can still be anything, so one that is neither wav
+nor mp3 is called out where it was picked rather than left to come back as an HTTP 400:
 
 ```
-Audio: MPEG-4 audio (m4a), 1,214,633 bytes
-Sent as input_audio with format "m4a". The API documents "wav" and "mp3" only, so if this one comes back rejected, that is the endpoint's answer and not a fault here.
+This would go out as input_audio with format "m4a", which the API does not take: the field is an enum of "wav" and "mp3", and an m4a comes back refused. Convert the file to one of those two first.
 ```
 
 What the log reports is read **straight out of the header**, by an `AudioHeader` class that is
 `ImageHeader`'s counterpart and exists for the same reasons: arithmetic on the first few
 kilobytes, no decoder, no native library, nothing that behaves differently in the browser build
 (the byte-order helpers are literally `ImageHeader`'s — a nested class can reach a sibling's
-private statics). Two of the three formats say enough to be worth reading:
+private statics). Both formats say enough to be worth reading:
 
 | Format | Read from | Example log line |
 |---|---|---|
 | **WAV** | the RIFF chunks, walked for `fmt ` and `data` — so the playing time is exact | `Audio: WAV, 44.1 kHz, stereo, 16-bit, 1,411 kbps, 0:32, 5,644,844 bytes` |
 | **MP3** | the first frame header after any ID3v2 tag; the playing time follows from the file size at that bitrate, which is why it says *at that bitrate* | `Audio: MP3 (MPEG 1 Layer III), 44.1 kHz, stereo, 128 kbps, 1:15 at that bitrate, 1,207,296 bytes` |
-| **M4A** | the `ftyp` box, and nothing else: it is **named**, and the byte count is the rest | `Audio: MPEG-4 audio (m4a), 1,214,633 bytes` |
 
-That last row is a budget, not an oversight. An M4A's numbers live in a movie header nested
-inside `moov`, which sits wherever the writer put it, behind a box walk and a version byte that
-moves two fields — thirty more lines of layout arithmetic for one gray line of log. The whole
-class is **a hundred lines** and stays there: when a format needs more than that, the answer is
-the byte count, which is honest and is what the file is charged by anyway. A header that says
-nothing readable gets the same treatment — *(nothing readable in the header)*, plus the bytes.
+Anything else — including an MPEG-4 file that reached the include some other way — reports
+*(nothing readable in the header)* and its byte count, which is the honest answer and is what
+the file is charged by anyway. That is the deal the class is kept to: **a hundred lines** of
+arithmetic and not one more, so when a format wants more than that (a VBR header for an exact
+MP3 length, an MP4 box walk for a duration) the answer is the byte count, not a decoder inside
+JRock. An `ftyp` box is recognised for one reason only — to stop the MP3 frame scan mistaking a
+box for a frame sync and inventing a line about a file it cannot read.
 
 Everything else is the machinery the other kinds already use: the same hash, the same
-deduplication, the same re-check of every file on send, the same **Reload all includes**. Two
-places differ. The [masked request dump](#conversation-log) prints `<audio masked <hash>>` where
-the base64 would be, for the same reason images are masked: a minute of audio is about a megabyte
-of it. And the [**Clock**](#clock) travels inside the message rather than as a `system` one,
-because a model that listens may refuse a system message beside audio — with a line above the
-dump saying it did:
+deduplication, the same re-check of every file on send, the same **Reload all includes**. One
+place differs: the [masked request dump](#conversation-log) prints `<audio masked <hash>>` where
+the base64 would be, for the same reason images are masked — a minute of audio is about a
+megabyte of it.
 
-```
-Clock: sent as a text part inside the message, not as a system message - this request carries audio, and a model that listens may refuse a system message beside it.
-```
-
-An `@audio` token in an *earlier* turn counts too, so Extend mode drops the system message for
-the whole conversation once a recording is anywhere in it — the validator that refuses the
-combination reads the entire message list, not just the last message.
+One thing to know before sending, though: the [**Clock**](#clock) is a `system` message, and a
+model that listens may refuse one beside a recording. A send with both warns and then goes as it
+is; unticking **Clock** is the fix, and it is yours to make.
 
 **Fetch URL** does not download audio; audio comes from Ctrl+I.
 

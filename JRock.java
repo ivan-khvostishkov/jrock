@@ -1743,6 +1743,19 @@ public class JRock {
                 return;
             }
 
+            // Clock on and a recording in the request: said before the call, not sent
+            // around. A model that listens may refuse a system message beside audio (see
+            // appendClockMessage for whose rule that is and what the error looks like), and
+            // the clock is a checkbox - so the answer is to untick it, which is yours to do.
+            // The request goes as it stands: another model may well take both.
+            if (clock && carriesAudio(prompt, history)) {
+                log.gray("Clock is on and this request carries audio. A model that listens "
+                        + "may refuse a system message beside a recording - Voxtral answers "
+                        + "HTTP 400 with \"Found system messages at indexes [0] and audio "
+                        + "chunks in messages at indexes [1]\". Untick Clock and send again "
+                        + "if that is what comes back.");
+            }
+
             log.gray(extend
                     ? "Calling " + pathOf(endpoint()) + " (extend: " + history.size() + " prior turns) ..."
                     : "Calling " + pathOf(endpoint()) + " ...");
@@ -2436,7 +2449,7 @@ public class JRock {
     //   "img"    an image file, as a picture
     //   "imgref" the same, with a Markdown "![](<hash>)" reference above the token
     //   "txt"    a text file, as it is
-    //   "audio"  a recording (wav, mp3, m4a), as an input_audio part
+    //   "audio"  a recording (wav, mp3), as an input_audio part
     //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
     //   "rtf"    an RTF, converted to Markdown text
     //   "docx"   a DOCX, converted to Markdown text
@@ -4404,15 +4417,14 @@ public class JRock {
     // The audio formats the include dialog offers, which are also the ones AudioHeader
     // can read a header out of.
     //
-    // wav and mp3 are what the chat API documents for an "input_audio" part - its format
-    // field is an enum of exactly those two ("Currently supports "wav" and "mp3""). m4a
-    // is in the list anyway, because it is what a phone's voice memo and most dictation
-    // apps hand back, and the endpoint is the only authority on whether it takes one:
-    // nothing in the API documents an m4a either way. So JRock sends it, says in the log
-    // that it is doing something undocumented, and lets the answer be the answer - see
-    // audioFormat and the note includeOne writes.
-    private static final String[] AUDIO_EXTENSIONS = { "wav", "mp3", "m4a" };
-    private static final String AUDIO_FILTER_SUFFIX = " (wav, mp3, m4a)";
+    // Exactly the two the chat API documents for an "input_audio" part, whose format field
+    // is an enum of those two and nothing else ("Currently supports "wav" and "mp3""). m4a
+    // was offered here for one version, because it is what a phone's voice memo hands back
+    // and the endpoint is the only authority on whether it takes one - it does not, and
+    // that is now a tested answer rather than a guess, so the filter no longer offers a
+    // file the request cannot carry.
+    private static final String[] AUDIO_EXTENSIONS = { "wav", "mp3" };
+    private static final String AUDIO_FILTER_SUFFIX = " (wav, mp3)";
 
     // The chooser's "File name" field: the first text field in it, every look and feel
     // putting that one first and the rest of the chooser having none. Found by looking
@@ -5032,15 +5044,16 @@ public class JRock {
             String about = AudioHeader.describe(file, fileBytes);
             log.gray("Audio: " + (about != null ? about : "(nothing readable in the header)")
                     + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
-            // Said once per include, where the file was picked, rather than at send time
-            // among the request lines: the documented format values for an input_audio
-            // part are wav and mp3, and an m4a is JRock asking the endpoint a question
-            // nobody's documentation answers.
+            // The dialog's filter cannot offer anything but wav and mp3, but
+            // automationInclude can be handed any path at all - so a file the request
+            // cannot carry is said here, where it was picked, rather than left to come back
+            // as an HTTP 400 from the send.
             String format = audioFormat(file);
             if (!format.equals("wav") && !format.equals("mp3")) {
-                log.gray("Sent as input_audio with format \"" + format + "\". The API "
-                        + "documents \"wav\" and \"mp3\" only, so if this one comes back "
-                        + "rejected, that is the endpoint's answer and not a fault here.");
+                log.gray("This would go out as input_audio with format \"" + format
+                        + "\", which the API does not take: the field is an enum of \"wav\" "
+                        + "and \"mp3\", and an m4a comes back refused. Convert the file to "
+                        + "one of those two first.");
             }
         } else {
             // Text: symbol count (Unicode code points) + byte count.
@@ -5677,7 +5690,8 @@ public class JRock {
     // for the log. The byte-order helpers ARE ImageHeader's: a nested class can reach a
     // sibling's private statics, so le16 and isAscii exist once and not twice.
     //
-    // Two formats are read, of the three the include filter offers:
+    // Both of the formats the include filter offers, which are the two the request can
+    // carry at all:
     //
     //   WAV  the RIFF chunks, walked for "fmt " (how it was sampled) and "data" (how much
     //        of it there is), so the length is exact.
@@ -5685,17 +5699,13 @@ public class JRock {
     //        sample rate. The length follows from the file size at that bitrate: exact for
     //        a constant-bitrate file, an estimate for a variable one, and nothing in the
     //        header says which, so it is always called one.
-    //   M4A  named, and nothing more. Its numbers live in a movie header nested inside
-    //        "moov", which sits wherever the writer put it - a box walk, a version byte
-    //        that moves two fields, a timescale. That is another thirty lines, and thirty
-    //        lines is what this class does not have; see the budget below.
     //
-    // A format that is none of those, or a header that does not say: null, and the caller
-    // reports the byte count alone - which is the honest answer and is what the file is
-    // charged by anyway. That is also the deal this class is kept to: a hundred lines of
-    // arithmetic and not one more, so the moment a format needs more than that (an M4A's
-    // duration, a VBR header for an exact MP3 length, a "stsd" walk for a sample rate) the
-    // answer is the byte count, not a decoder inside JRock.
+    // Anything else, or a header that does not say: null, and the caller reports the byte
+    // count alone - which is the honest answer and is what the file is charged by anyway.
+    // That is also the deal this class is kept to: a hundred lines of arithmetic and not
+    // one more, so the moment a format needs more than that (a VBR header for an exact MP3
+    // length, an MP4 box walk for an m4a's duration) the answer is the byte count, not a
+    // decoder inside JRock.
     private static final class AudioHeader {
         // Enough for a WAV's leading chunks, and for an ID3v2 tag's own length plus the
         // frame sync behind it. Nothing here reads past the front of the file.
@@ -5722,7 +5732,10 @@ public class JRock {
                 if (ImageHeader.isAscii(h, 0, "RIFF") && ImageHeader.isAscii(h, 8, "WAVE")) {
                     return wav(h, bytes);
                 }
-                if (ImageHeader.isAscii(h, 4, "ftyp")) return "MPEG-4 audio (m4a)";
+                // An MP4 (an m4a, say, handed to automationInclude) is stopped here
+                // rather than read: its boxes can spell something the frame scan below
+                // would take for a sync, and a made-up "MP3" line is worse than none.
+                if (ImageHeader.isAscii(h, 4, "ftyp")) return null;
                 return mp3(h, bytes);
             } catch (IOException ex) {
                 return null;
@@ -8497,31 +8510,22 @@ public class JRock {
         // rather than as a MIME type inside the string.
         final String base64;
         final String audioFormat;
-        // Text that is JRock's own rather than the operator's - today only the clock,
-        // folded into the message when the request cannot carry a system one (see
-        // appendClockMessage). The masked copy prints it as it is, for the same reason
-        // the clock message was never masked: there is nothing of yours in it to hide,
-        // and hiding the line that says what time was sent defeats logging it.
-        final boolean verbatim;
         Part(boolean image, String text, String dataUrl, String maskHash,
-             String base64, String audioFormat, boolean verbatim) {
+             String base64, String audioFormat) {
             this.image = image; this.text = text; this.dataUrl = dataUrl; this.maskHash = maskHash;
-            this.base64 = base64; this.audioFormat = audioFormat; this.verbatim = verbatim;
+            this.base64 = base64; this.audioFormat = audioFormat;
         }
         static Part text(String t) {
-            return new Part(false, t, null, null, null, null, false);
+            return new Part(false, t, null, null, null, null);
         }
         static Part includedText(String t, String h) {
-            return new Part(false, t, null, h, null, null, false);
+            return new Part(false, t, null, h, null, null);
         }
         static Part image(String url, String h) {
-            return new Part(true, null, url, h, null, null, false);
+            return new Part(true, null, url, h, null, null);
         }
         static Part audio(String b64, String format, String h) {
-            return new Part(false, null, null, h, b64, format, false);
-        }
-        static Part clock(String t) {
-            return new Part(false, t, null, null, null, null, true);
+            return new Part(false, null, null, h, b64, format);
         }
     }
 
@@ -8578,11 +8582,11 @@ public class JRock {
     // extension, lowercased.
     //
     // Not a MIME type and not a table of them - that field is a short format name, and the
-    // two the API documents ("wav", "mp3") are spelled exactly like the extensions. So an
-    // extension is the answer, and an m4a is sent as "m4a" rather than translated into
-    // something the endpoint was never told to expect either; includeOne says as much in
-    // the log when the format is not one of the documented two. No extension at all -> the
-    // default is "wav", that being the one format with a header you can be sure of.
+    // two the API takes ("wav", "mp3") are spelled exactly like the extensions. So an
+    // extension is the answer, and a file that is neither is sent under its own name rather
+    // than relabelled as one of the two it is not; includeOne says in the log that such a
+    // file will be refused. No extension at all -> "wav", that being the one format with a
+    // header you can be sure of.
     private static String audioFormat(Path p) {
         String n = p.getFileName().toString();
         int dot = n.lastIndexOf('.');
@@ -8673,8 +8677,8 @@ public class JRock {
                         .append("\",\"format\":\"").append(jsonEscape(p.audioFormat))
                         .append("\"}}");
             } else {
-                String maskTxt = (p.maskHash != null) ? "<txt masked " + p.maskHash + ">"
-                        : p.verbatim ? jsonEscape(p.text)
+                String maskTxt = (p.maskHash != null)
+                        ? "<txt masked " + p.maskHash + ">"
                         : "<input masked>";
                 sb.append("{\"type\":\"text\",\"text\":\"").append(maskTxt).append("\"}");
             }
@@ -8683,9 +8687,7 @@ public class JRock {
     }
 
     private static boolean isSinglePlainText(java.util.List<Part> parts) {
-        Part only = (parts.size() == 1) ? parts.get(0) : null;
-        // A folded clock is never a message on its own: it is JRock's line, not a turn.
-        return only != null && !only.image && only.maskHash == null && !only.verbatim;
+        return parts.size() == 1 && !parts.get(0).image && parts.get(0).maskHash == null;
     }
 
     // Appends the clock's message, with its trailing comma, to a messages array that
@@ -8697,40 +8699,41 @@ public class JRock {
     // said, and an extra user turn in front of the real one would break the
     // user/assistant alternation that several models on mantle insist on.
     //
-    // Except when the request carries audio, in which case there is no system message at
-    // all and the clock is folded into the user's content as a text part (Part.clock,
-    // carriesAudio). Voxtral refuses the two together - "Found system messages at indexes
-    // [0] and audio chunks in messages at indexes [1]. This is not allowed prior to the
-    // tokenizer version 13", which is mistral-common's MistralRequestValidatorV5 talking,
-    // and its model card is blunter still: "System prompts are not yet supported". Folded
-    // rather than dropped, because the clock is information the answer may depend on, and a
-    // line of text in front of the question is where it can still be read; the recording
-    // stays first in the message all the same (see audioFirst).
+    // A model that listens may refuse this message beside a recording. Voxtral does - "Found
+    // system messages at indexes [0] and audio chunks in messages at indexes [1]. This is
+    // not allowed prior to the tokenizer version 13", which is mistral-common's
+    // MistralRequestValidatorV5 talking, and its model card is blunter still: "System
+    // prompts are not yet supported".
+    //
+    // JRock does not work around that. The clock is not moved into the user's turn, not
+    // dropped behind your back and not switched off for you: the request goes as the
+    // checkbox says it will, and the send says so first (see carriesAudio) - the checkbox is
+    // the answer. Folding it into the message was tried and taken out again: it is a text
+    // model's feature, it makes no difference to a transcription, and a request that quietly
+    // disagrees with the checkbox is worse than one that fails for a reason you were told.
     private static void appendClockMessage(StringBuilder messages, String clockNow) {
         messages.append("{\"role\":\"system\",\"content\":\"")
                 .append(jsonEscape(clockNow)).append("\"},");
     }
 
-    // True when this request will carry a recording: the new prompt's parts, or - in
-    // Extend mode - an @audio token in an earlier turn of yours. The validator that
-    // refuses a system message beside audio looks at the whole message list, so this has
-    // to as well.
+    // True when this request would carry a recording: an @audio token in the new prompt or -
+    // in Extend mode - in an earlier turn of yours. The validator that refuses a system
+    // message beside audio reads the whole message list, so this has to as well.
     //
-    // The earlier turns are read as text rather than expanded into parts, because
-    // expanding them reads every included file from disk and this question is asked before
-    // either copy of the request is built. The token is enough: the files were verified
-    // before the send began.
-    private static boolean carriesAudio(java.util.List<Part> parts,
-                                        java.util.List<String[]> history) {
-        for (Part p : parts) {
-            if (p.audioFormat != null) return true;
-        }
+    // Tokens rather than expanded parts: this is asked in the UI, before the send thread
+    // reads a single file, and a token is enough to know what the request will carry.
+    private static boolean carriesAudio(String prompt, java.util.List<String[]> history) {
+        if (hasAudioToken(prompt)) return true;
         for (String[] turn : history) {
-            if (!ROLE_HUMAN.equals(turn[0])) continue;
-            java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(turn[1]);
-            while (m.find()) {
-                if (m.group(1).equals("audio")) return true;
-            }
+            if (ROLE_HUMAN.equals(turn[0]) && hasAudioToken(turn[1])) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasAudioToken(String text) {
+        java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(text);
+        while (m.find()) {
+            if (m.group(1).equals("audio")) return true;
         }
         return false;
     }
@@ -9167,25 +9170,11 @@ public class JRock {
             writeMessageFile(ROLE_CLOCK, LocalDateTime.now().format(STAMP_FMT), clockNow);
         }
 
-        // A request with a recording in it gets no system message: the clock goes into the
-        // user's content instead, in front of the prompt and behind the audio (see
-        // appendClockMessage for whose rule this is). Added to the parts list, so the real
-        // request and the masked copy carry it in the same place without being told twice.
-        // The blank line is part of the text and not decoration: text parts are
-        // concatenated as they are, so without it the clock would run straight into the
-        // first word of the prompt.
-        boolean clockInText = clockNow != null && carriesAudio(parts, history);
-        if (clockInText) parts.add(0, Part.clock(clockNow + "\n\n"));
-        String clockNote = !clockInText ? null
-                : "Clock: sent as a text part inside the message, not as a system message "
-                + "- this request carries audio, and a model that listens may refuse a "
-                + "system message beside it.";
-
         // Build the real messages array. Human turns - both prior ones (extend
         // mode) and the new turn - are expanded via buildParts so their @img/@txt
         // tokens become image/text content parts. Assistant turns are plain text.
         StringBuilder messages = new StringBuilder("[");
-        if (clockNow != null && !clockInText) appendClockMessage(messages, clockNow);
+        if (clockNow != null) appendClockMessage(messages, clockNow);
         for (String[] turn : history) {
             if (ROLE_HUMAN.equals(turn[0])) {
                 messages.append("{\"role\":\"user\",\"content\":");
@@ -9204,9 +9193,8 @@ public class JRock {
         String body = chatRequestBody(messages);
 
         // Masked copy of the request for display - built independently from the
-        // same history + prompt parts. A clock that was folded into the parts is not
-        // passed again here, or the dump would show it twice.
-        String maskedRequestBody = maskRequest(history, parts, clockInText ? null : clockNow);
+        // same history + prompt parts.
+        String maskedRequestBody = maskRequest(history, parts, clockNow);
 
         List<String[]> headers = new ArrayList<>();
         headers.add(new String[] { "Content-Type", "application/json" });
@@ -9221,7 +9209,7 @@ public class JRock {
                 "0",
                 "HTTP " + resp.status,
                 // Nothing to mask in the body: there is no reply, only an error.
-                rawDump(clockNote, maskedRequestBody, resp.body)
+                rawDump(maskedRequestBody, resp.body)
             };
         }
 
@@ -9247,7 +9235,7 @@ public class JRock {
         // (it's already shown above). The request was masked during assembly.
         String maskedResponse = maskResponse(resp.body, rawReply);
 
-        String details = rawDump(clockNote, maskedRequestBody, maskedResponse)
+        String details = rawDump(maskedRequestBody, maskedResponse)
                 + "\n\n--- stats ---"
                 + "\nInput text symbols:  " + inputSymbols
                 + "\nOutput text symbols: " + outputSymbols
@@ -9260,13 +9248,8 @@ public class JRock {
     // The raw request/response dump logged after a call, for either outcome. The
     // response body is the caller's choice: masked on success (the reply is already
     // shown above), verbatim on failure. A success then appends its stats block.
-    //
-    // The note, when there is one, is a line about how the request was built that reading
-    // the request would not tell you - today only the folded clock (see callModel). It goes
-    // above the dump, because it is about what follows.
-    private static String rawDump(String note, String maskedRequestBody, String responseBody) {
-        return (note == null ? "" : note + "\n\n")
-                + "--- raw request ---\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
+    private static String rawDump(String maskedRequestBody, String responseBody) {
+        return "--- raw request ---\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
                 + "\n\n--- raw response ---\n" + responseBody;
     }
 
