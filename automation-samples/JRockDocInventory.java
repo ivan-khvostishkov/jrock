@@ -330,15 +330,30 @@ public final class JRockDocInventory {
     }
 
     // ---- Files -------------------------------------------------------------
+    // The characters a name is made of, as the body of a regex class: letters, the marks
+    // that belong to them, and digits - and not merely A-Za-z0-9.
+    //
+    // The prompt asks for the title and the counterparty "in Latin1", and Latin-1 has
+    // umlauts and an eszet in it. Held to ASCII, this pass answered
+    //     2026-09-22-M-nchnerBank-...
+    // for a bank whose letterhead says Muenchner with an u-umlaut: every letter the
+    // sanitiser did not know became a dash, and a dash is the one character here that
+    // means "the next part of the name starts". \p{L} rather than a list of the accented
+    // letters of the languages met so far, because such a list only ever grows - a Greek
+    // or Cyrillic name is a legal file name too, and dashes in place of one help nobody.
+    // \p{M} for a reply whose letters arrive decomposed (see the NFC in baseName), \p{N}
+    // for digits that are not Arabic numerals.
+    private static final String NAME_CHARS = "\\p{L}\\p{M}\\p{N}";
+
     // A line that is nothing but a file name: name characters and spaces, no comma, no
     // apostrophe, no colon - the punctuation of prose is what tells the two apart.
-    private static final java.util.regex.Pattern NAME_LINE =
-            java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9 ._-]{2,}");
+    private static final java.util.regex.Pattern NAME_LINE = java.util.regex.Pattern
+            .compile("[" + NAME_CHARS + "][" + NAME_CHARS + " ._-]{2,}");
 
     // A file name sitting inside a line of text ("File name: 2020-07-27-FTS-3NDFL-..."):
     // a run of name characters long enough not to be an ordinary word.
-    private static final java.util.regex.Pattern NAME_IN_LINE =
-            java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{6,}[A-Za-z0-9]");
+    private static final java.util.regex.Pattern NAME_IN_LINE = java.util.regex.Pattern
+            .compile("[" + NAME_CHARS + "][" + NAME_CHARS + "._-]{6,}[" + NAME_CHARS + "]");
 
     // How many spaces a line may hold and still be read as a name rather than as prose.
     private static final int NAME_MAX_SPACES = 4;
@@ -361,8 +376,13 @@ public final class JRockDocInventory {
     //
     // Nothing that looks like a name -> "", and the caller stops and shows the reply
     // instead of inventing a name out of prose.
+    //
+    // The reply is put into NFC first, so an u-umlaut is one character and not a u with a
+    // combining mark after it: both spellings look the same on screen, only one of them is
+    // what a file system and the person searching the folder later will agree on.
     private static String baseName(String answer) {
-        String[] lines = answer.split("\n");
+        String[] lines = java.text.Normalizer
+                .normalize(answer, java.text.Normalizer.Form.NFC).split("\n");
         String found = "";
         for (String line : lines) {
             String plain = undecorated(line);
@@ -382,8 +402,14 @@ public final class JRockDocInventory {
             }
         }
         String name = found.replaceAll("(?i)\\.(pdf|txt)$", "");
-        name = name.replaceAll("[^A-Za-z0-9._-]+", "-").replaceAll("-{2,}", "-");
-        if (name.length() > 120) name = name.substring(0, 120);
+        name = name.replaceAll("[^" + NAME_CHARS + "._-]+", "-")
+                .replaceAll("-{2,}", "-");
+        if (name.length() > 120) {
+            // 120 chars, and a char is not always a whole character: a cut between the two
+            // halves of a surrogate pair would end the name in half a letter.
+            int cut = Character.isHighSurrogate(name.charAt(119)) ? 119 : 120;
+            name = name.substring(0, cut);
+        }
         return name.replaceAll("^-+", "").replaceAll("-+$", "");
     }
 
