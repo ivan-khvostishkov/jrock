@@ -1,18 +1,32 @@
 // A JRock automation: one scanned PDF in, a text twin of it and a file name out.
 //
-// Run it the way JRock itself runs - no build step, no Maven, one file:
+// Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
+// the class path:
 //
-//     java JRockDocInventory.java [document.pdf]
+//     java -cp jrock.jar JRockDocInventory.java [document.pdf]
 //
-// Without the argument it asks for the PDF in a file chooser. Everything else it needs
-// it finds beside itself, in this directory: jrock.jar and the two prompts.
+// Without the argument it asks for the PDF in a file chooser. The two prompts it needs
+// it finds beside itself, in this directory.
 //
 // COPY jrock.jar HERE FIRST. It is not in the repository - the repository carries no
 // jars - and nothing downloads it: take it from a "Reproducible build" artifact, or
 // build it with .github/build/BuildJar.java, and put it next to this file. That copy is
 // what enables automations, and copying it is deliberately a manual act: an automation
-// directory is a jar, some prompts and the scripts that chain them, all of them files
-// you put there yourself.
+// directory is a jar, some prompts and the scripts that chain them, all files you put
+// there yourself.
+//
+// -cp jrock.jar is not optional, and it is not only about run time. The source-file
+// launcher (JEP 330) compiles this file in memory with exactly that class path, so every
+// JRock call below is an ordinary typed static call the compiler has checked - and the
+// jar is where JRock is loaded from when it runs. Forget the flag and javac says
+// "cannot find symbol: class JRock" before anything starts, which is the whole
+// diagnosis. An older jar, without the automation API in it, fails the same way and
+// names the method it is missing.
+//
+// There is nothing to instantiate, either: JRock's automation API is static, and has to
+// be. The window, the log, the JRock/ directory and the Bedrock session are one per
+// process, so there is no object that could hold a second set of them. main() shows the
+// window; the automation* methods drive the one that is there.
 //
 // What this one does is the chain the README describes under "Prompt library and
 // chaining", with nobody pressing the keys:
@@ -26,17 +40,10 @@
 // fills with include tokens as the pages are converted, the log reports every step, and
 // both answers stay in the transcript. The prompt is read-only until the automation is
 // finished and editable again afterwards - the conversation is there to be carried on
-// by hand, which is the point of driving the window rather than a headless copy of it.
-//
-// How it talks to JRock: `java JRockDocInventory.java` compiles this file with nothing
-// on its classpath, so nothing here can name a JRock type. The jar is loaded at run
-// time and the API called by reflection - see api() and the one-line wrappers under it.
-// The API is the "Automation API (public)" section of JRock.java, and this file is meant
-// to be copied and rewritten for chains of your own.
+// by hand, which is the point of driving the real window rather than a headless copy of
+// it. Copy this file and rewrite it for chains of your own.
 
 import java.io.IOException;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,8 +51,7 @@ import java.nio.file.Paths;
 
 public final class JRockDocInventory {
 
-    // Everything this automation expects to find beside itself.
-    private static final String JAR = "jrock.jar";
+    // The two prompts, expected beside this file.
     private static final String PROMPT_ASCII = "jrock-prompt-doc-to-ascii.txt";
     private static final String PROMPT_NAME = "jrock-prompt-doc-inventory.txt";
 
@@ -57,15 +63,11 @@ public final class JRockDocInventory {
     // either way is cheaper than giving up on an answer that was on its way.
     private static final long REPLY_TIMEOUT_MS = 20 * 60_000;
 
-    // The JRock class, loaded out of jrock.jar. Null until load() has run, which is
-    // what end() and parent() check before they try to use it.
-    private static Class<?> jrock;
-
     // Why an automation stopped, said in one sentence and shown in one dialog.
     //
     // A RuntimeException so the steps below read as the sequence they are rather than as
-    // a ladder of if-blocks: every API call returns null for "fine" and a sentence for
-    // "not fine", and check() turns the second into one of these.
+    // a ladder of if-blocks: every automation API call returns null for "fine" and a
+    // sentence for "not fine", and check() turns the second into one of these.
     private static final class Stop extends RuntimeException {
         private static final long serialVersionUID = 1L;   // never leaves this JVM
         Stop(String why) { super(why); }
@@ -85,9 +87,10 @@ public final class JRockDocInventory {
         // Nothing to say: the chooser was cancelled, and nothing has been started.
         if (summary == null && stopped == null) return;
 
-        // The prompt becomes editable again and Send is released either way - an
-        // automation that failed must not leave the window locked.
-        end(stopped == null ? summary : "stopped - " + stopped);
+        // The prompt becomes editable again and Send is released whatever happened - an
+        // automation that failed must not leave the window locked. A no-op if it never
+        // got as far as taking it.
+        JRock.automationEnd(stopped == null ? summary : "stopped - " + stopped);
         if (stopped == null) {
             System.out.println("Finished: " + summary);
             tell("Finished.\n\n" + summary, "Automation finished",
@@ -105,13 +108,7 @@ public final class JRockDocInventory {
     private static String run(String[] args) throws IOException {
         Path here = ownDirectory();
         System.out.println("Automation directory: " + here);
-
-        Path jar = here.resolve(JAR);
-        if (!Files.isRegularFile(jar)) {
-            throw new Stop("there is no " + JAR + " in " + here + ".\n\nCopy one there "
-                    + "(from a \"Reproducible build\" artifact, or built with "
-                    + ".github/build/BuildJar.java) and run this again.");
-        }
+        System.out.println("Driving JRock from:   " + jrockCame());
         Path ascii = mustExist(here.resolve(PROMPT_ASCII));
         Path inventory = mustExist(here.resolve(PROMPT_NAME));
 
@@ -128,20 +125,21 @@ public final class JRockDocInventory {
         System.out.println("Document: " + pdf);
 
         // ---- Start JRock and wait for it to be usable ----------------------
-        load(jar);
         // The real entry point, which shows the window on the event dispatch thread and
-        // returns at once. Everything after this runs on THIS thread, which is exactly
-        // what the automation API asks for.
-        api("main", new Class<?>[] { String[].class }, (Object) new String[0]);
-        check(awaitReady(READY_TIMEOUT_MS));
-        check(begin("doc inventory of " + pdf.getFileName()));
+        // returns at once. Everything after this runs on THIS thread, which is what the
+        // automation API asks for - every one of its methods blocks.
+        JRock.main(new String[0]);
+        check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
+        check(JRock.automationBegin("doc inventory of " + pdf.getFileName()));
 
         // ---- Pass one: the document as plain text --------------------------
         System.out.println("Pass 1: " + PROMPT_ASCII);
-        check(loadPrompt(ascii));
-        dropPlaceholders();
-        check(include(pdf, "pdf"));
-        String text = reply(send());
+        check(JRock.automationLoadPrompt(ascii.toString()));
+        // The bare "@img" / "@txt" lines the sample prompts end with are placeholders a
+        // person reads and presses Ctrl+I on; a program has to be told.
+        JRock.automationDropPlaceholders();
+        check(JRock.automationInclude(pdf.toString(), "pdf"));
+        String text = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
 
         // Beside the PDF and named after it, which is what makes the pair findable
         // before they are renamed - and what the second pass is about to read back.
@@ -151,10 +149,10 @@ public final class JRockDocInventory {
 
         // ---- Pass two: a name for it --------------------------------------
         System.out.println("Pass 2: " + PROMPT_NAME);
-        check(loadPrompt(inventory));
-        dropPlaceholders();
-        check(include(twin, "txt"));
-        String answer = reply(send());
+        check(JRock.automationLoadPrompt(inventory.toString()));
+        JRock.automationDropPlaceholders();
+        check(JRock.automationInclude(twin.toString(), "txt"));
+        String answer = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
         String base = baseName(answer);
         if (base.isEmpty()) {
             throw new Stop("the second answer held no usable file name:\n\n"
@@ -177,15 +175,17 @@ public final class JRockDocInventory {
         return "renamed to " + pdfNow.getFileName() + " and " + twinNow.getFileName();
     }
 
-    // ---- Where this file is ------------------------------------------------
-    // The directory this source file sits in, which is where the jar and the prompts
-    // are looked for. An automation directory is self-contained by design, so "beside
-    // me" has to be answerable however the file was launched.
+    // ---- Where the files are -----------------------------------------------
+    // The directory this source file sits in, which is where the prompts are looked
+    // for. An automation directory is self-contained by design, so "beside me" has to be
+    // answerable however the file was launched - and it is not the working directory,
+    // which is the folder whose documents are being filed.
     //
     // jdk.launcher.sourcefile is set by the launcher in source-file mode (`java
-    // Foo.java`), which is how this is meant to be run. The code source covers the
-    // other way - a compiled class, or this file inside a jar - and the working
-    // directory is the last resort, which is right often enough to be worth trying.
+    // Foo.java`), which is how this is meant to be run, and it is absolute even when the
+    // command line was not. The code source covers the other way - a compiled class, or
+    // this file inside a jar - and the working directory is the last resort, which is
+    // right often enough to be worth trying.
     private static Path ownDirectory() {
         String source = System.getProperty("jdk.launcher.sourcefile");
         if (source != null && !source.isBlank()) {
@@ -206,103 +206,27 @@ public final class JRockDocInventory {
         return Paths.get("").toAbsolutePath().normalize();
     }
 
+    // Which jar is actually being driven, for one line on the console. A stale jrock.jar
+    // in one directory and a newer one in another is a real mix-up, and saying which one
+    // -cp found costs nothing.
+    private static String jrockCame() {
+        try {
+            java.security.CodeSource code = JRock.class.getProtectionDomain().getCodeSource();
+            if (code != null && code.getLocation() != null) return code.getLocation().toString();
+        } catch (RuntimeException ignore) {
+            // Nothing to say, which is what the fallback says.
+        }
+        return "the class path";
+    }
+
     // A file the automation cannot run without.
     private static Path mustExist(Path file) {
         if (!Files.isRegularFile(file)) throw new Stop("there is no " + file + ".");
         return file;
     }
 
-    // ---- Reaching JRock ----------------------------------------------------
-    // Loads jrock.jar and finds the JRock class in it.
-    //
-    // A class loader of its own, with this one's as its parent: JRock needs the JDK,
-    // which it gets from up the chain, and nothing here needs to be visible to JRock.
-    // The loader is never closed - JRock's window goes on living in it after this
-    // automation's own work is done, which is the whole idea.
-    private static void load(Path jar) {
-        try {
-            URLClassLoader loader = new URLClassLoader(
-                    new URL[] { jar.toUri().toURL() },
-                    JRockDocInventory.class.getClassLoader());
-            jrock = Class.forName("JRock", true, loader);
-            System.out.println("Loaded JRock from " + jar);
-        } catch (ClassNotFoundException ex) {
-            throw new Stop(jar + " does not contain a JRock class.");
-        } catch (java.net.MalformedURLException ex) {
-            throw new Stop("could not read " + jar + ": " + ex.getMessage());
-        }
-    }
-
-    // Calls one public static method of JRock and hands back whatever it returned.
-    //
-    // The single point of reflection in this file. Everything below it is a one-line
-    // wrapper, so a step in run() reads as the step it is and the API's shape - which
-    // types, which order - is written down once.
-    private static Object api(String name, Class<?>[] types, Object... args) {
-        if (jrock == null) throw new Stop("JRock has not been loaded yet.");
-        try {
-            return jrock.getMethod(name, types).invoke(null, args);
-        } catch (java.lang.reflect.InvocationTargetException ex) {
-            throw new Stop("JRock's " + name + " threw " + ex.getCause());
-        } catch (ReflectiveOperationException ex) {
-            throw new Stop("this " + JAR + " has no " + name + "(...) - it is older than "
-                    + "this automation. Copy a newer jar in.");
-        }
-    }
-
-    private static String awaitReady(long timeoutMillis) {
-        return (String) api("automationAwaitReady", new Class<?>[] { long.class },
-                timeoutMillis);
-    }
-
-    private static String begin(String what) {
-        return (String) api("automationBegin", new Class<?>[] { String.class }, what);
-    }
-
-    private static String loadPrompt(Path prompt) {
-        return (String) api("automationLoadPrompt", new Class<?>[] { String.class },
-                prompt.toString());
-    }
-
-    private static int dropPlaceholders() {
-        return (Integer) api("automationDropPlaceholders", new Class<?>[0]);
-    }
-
-    private static String include(Path file, String kind) {
-        return (String) api("automationInclude",
-                new Class<?>[] { String.class, String.class }, file.toString(), kind);
-    }
-
-    private static String[] send() {
-        return (String[]) api("automationSend", new Class<?>[] { long.class },
-                REPLY_TIMEOUT_MS);
-    }
-
-    private static String messageFile(String role, String stamp) {
-        return (String) api("automationMessageFile",
-                new Class<?>[] { String.class, String.class }, role, stamp);
-    }
-
-    // Best-effort, and called on the way out however that came about: an automation
-    // that failed must not leave the prompt locked, and a jar that was never loaded has
-    // no window to unlock.
-    private static void end(String note) {
-        if (jrock == null) return;
-        try {
-            api("automationEnd", new Class<?>[] { String.class }, note);
-        } catch (Stop ignore) {
-            // Beyond helping; the dialog about to be shown is the whole report.
-        }
-    }
-
-    // JRock's window, so this automation's dialogs belong to it rather than float on
-    // their own. Null before the jar is loaded, which JOptionPane reads as "centre it".
-    private static java.awt.Component parent() {
-        if (jrock == null) return null;
-        return (java.awt.Component) api("automationWindow", new Class<?>[0]);
-    }
-
-    // Turns an API method's answer into a stop, a null meaning there is nothing wrong.
+    // ---- The API's answers -------------------------------------------------
+    // Turns an automation API result into a stop, a null meaning there is nothing wrong.
     private static void check(String problem) {
         if (problem != null) throw new Stop(problem);
     }
@@ -314,10 +238,10 @@ public final class JRockDocInventory {
     // look like they mean and the reply under the other one is not to be trusted.
     private static String reply(String[] sent) {
         if (!"1".equals(sent[0])) throw new Stop(sent[3]);
-        if (messageFile("operator", sent[1]) == null) {
+        if (JRock.automationMessageFile("operator", sent[1]) == null) {
             throw new Stop("the request was not written to JRock/messages/.");
         }
-        String file = messageFile("assistant", sent[2]);
+        String file = JRock.automationMessageFile("assistant", sent[2]);
         if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
         try {
             return new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8);
@@ -327,7 +251,7 @@ public final class JRockDocInventory {
     }
 
     // ---- Files -------------------------------------------------------------
-    // The answer's file name, out of the second reply.
+    // The file name, out of the second reply.
     //
     // The prompt asks for nothing but the name and that is usually what comes back -
     // but "usually" is not a contract, so the last non-blank line is taken and then
@@ -375,7 +299,8 @@ public final class JRockDocInventory {
 
     // ---- Dialogs -----------------------------------------------------------
     // The PDF, chosen in a file chooser with one filter and no "All files": this
-    // automation converts a PDF and has nothing to say about anything else. Null when
+    // automation converts a PDF and has nothing to say about anything else. It opens in
+    // the working directory, which is the folder being filed, not this one. Null when
     // the chooser was cancelled.
     private static Path choosePdf() {
         Path[] chosen = { null };
@@ -393,10 +318,14 @@ public final class JRockDocInventory {
         return chosen[0];
     }
 
+    // Both dialogs below belong to JRock's own window, so they cannot be lost behind it.
+    // automationWindow() is null until that window exists, which JOptionPane reads as
+    // "centre it on the screen" - right for the one dialog that can come that early.
     private static boolean ask(String message) {
         boolean[] yes = { false };
-        onEdt(() -> yes[0] = javax.swing.JOptionPane.showConfirmDialog(parent(), message,
-                "Rename the files?", javax.swing.JOptionPane.YES_NO_OPTION,
+        onEdt(() -> yes[0] = javax.swing.JOptionPane.showConfirmDialog(
+                JRock.automationWindow(), message, "Rename the files?",
+                javax.swing.JOptionPane.YES_NO_OPTION,
                 javax.swing.JOptionPane.QUESTION_MESSAGE)
                     == javax.swing.JOptionPane.YES_OPTION);
         return yes[0];
@@ -404,7 +333,7 @@ public final class JRockDocInventory {
 
     private static void tell(String message, String title, int kind) {
         onEdt(() -> javax.swing.JOptionPane.showMessageDialog(
-                parent(), message, title, kind));
+                JRock.automationWindow(), message, title, kind));
     }
 
     // Runs body on the event dispatch thread and waits for it, every dialog above being

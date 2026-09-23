@@ -2108,10 +2108,16 @@ public class JRock {
     //
     // The shape is deliberately plain: static methods, String arguments, String or
     // String[] results, null for "nothing went wrong". An automation is a single .java
-    // file run with `java Automation.java`, which has no way to put jrock.jar on its
-    // own compile classpath, so it loads the jar at run time and reaches these methods
-    // by reflection - and reflection is only bearable against a surface built out of
-    // types every class loader already shares.
+    // file run with `java -cp jrock.jar Automation.java` - the source-file launcher
+    // compiles it in memory against that class path, so these are ordinary typed calls
+    // the compiler checks, and a jar too old to have one of them is a compile error
+    // naming the method rather than a surprise halfway through a document. Static
+    // because there is nothing to instantiate: the window, the log, the JRock/
+    // directory and the session are one per process.
+    //
+    // Plain also because the results are read by scripts. A reason travels with every
+    // failure, in the language the log is written in, so an automation can put it
+    // straight into its own dialog without a table of error codes in between.
     //
     // Every one of them must be called from a thread that is NOT the event dispatch
     // thread. They block, and two of them block for a long time: an include of a PDF

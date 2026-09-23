@@ -49,20 +49,22 @@ jobs:
         # resulting .class bytes are identical on any machine/OS.
         run: javac -encoding UTF-8 --release 11 -g:source,lines,vars -d out JRock.java
 
-      # The automation scripts in automation-samples/ are run as `java Script.java`
-      # against a jrock.jar the user copies in by hand, and they name no JRock type -
-      # they reach the public automation API by reflection. So they compile on their
-      # own, with nothing on the classpath, and that is worth checking here: a typo in
-      # one of them would otherwise only surface on somebody's desktop. The classes go
-      # to a directory of their own, outside both the jar and the source zip.
-      - name: Compile the automation samples
-        shell: bash
-        run: javac -encoding UTF-8 --release 11 -d out-automation automation-samples/*.java
-
       - name: Build reproducible JAR (+ checksums + source zip)
         # Run from the repo root (default) so BuildJar's relative paths (out/,
         # JRock.java, jrock.jar) resolve there; the tool source lives in .github/build.
         run: java .github/build/BuildJar.java
+
+      # The automation scripts in automation-samples/ are run as
+      # `java -cp jrock.jar Script.java` against a jar the user copies in by hand, so
+      # they are compiled here against the jar this job just built - which checks both
+      # that they compile and that the public automation API they call is still there.
+      # After the jar step for that reason, and the classes go to a directory of their
+      # own, outside both the jar and the source zip.
+      - name: Compile the automation samples against the JAR
+        shell: bash
+        run: |
+          javac -encoding UTF-8 --release 11 -cp jrock.jar \
+                -d out-automation automation-samples/*.java
 
       - name: Show checksums (job summary)
         shell: bash

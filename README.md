@@ -900,7 +900,7 @@ The eight steps above are a loop you run per document, and the third file in
 `automation-samples/` runs them for you. It is one Java file, started the way JRock is:
 
 ```
-java JRockDocInventory.java document.pdf     # or with no argument, and it asks for the PDF
+java -cp jrock.jar JRockDocInventory.java document.pdf   # no argument: it asks for the PDF
 ```
 
 It reads the same two prompts out of its own directory, converts the PDF to page images, sends,
@@ -915,6 +915,15 @@ automations, and it is deliberately a manual act — an automation directory is 
 prompts and the scripts that chain them, all files you put there yourself. The jar is in
 `.gitignore` and the build tool skips `.jar` files in that directory, so a local copy changes
 nothing about the repository or the reproducible source zip.
+
+`-cp jrock.jar` is not optional, and it does more than you'd think: the
+[source-file launcher](https://openjdk.org/jeps/330) compiles the script **in memory against
+that class path**, so the script's `JRock.automationSend(...)` calls are ordinary typed static
+calls the compiler has checked — and no reflection is involved anywhere. Forget the flag and you
+get `cannot find symbol: variable JRock` before anything runs (source-file mode compiles *only*
+that one file, so it won't quietly pick up a `JRock.java` sitting next door either); use a jar
+too old to have the automation API and the error names the missing method. Both are better
+diagnoses than any dialog would be.
 
 What it does *not* do is run headless. It starts the real window and drives it, so:
 
@@ -938,10 +947,14 @@ overwritten — an existing `document.txt` becomes `document-2.txt`, and the sam
 
 `JRock.java` exposes the handful of `public static` methods the script uses. They take and
 return nothing but `String`, `String[]`, `long` and `int`, and a `null` return means *fine* —
-anything else is a sentence saying what went wrong. That shape is not squeamishness, it is the
-launcher: `java JRockDocInventory.java` compiles the script with nothing on its classpath, so a
-script cannot name a JRock type. It loads the jar in a `URLClassLoader` and calls these by
-reflection, which is one small helper and no compile-time dependency in either direction.
+anything else is a sentence saying what went wrong, in the language the log is written in, so a
+script can put it straight into its own dialog without a table of error codes in between.
+
+Static because there is nothing to instantiate: the window, the log, the `JRock/` directory and
+the Bedrock session are one per process, so there is no object that could hold a second set of
+them. `JRock.main(new String[0])` shows the window and returns; the methods below drive the one
+that is there, and every one of them **blocks and must not be called on the event dispatch
+thread** — they say so rather than deadlocking if you do.
 
 | Method | What it does |
 |---|---|
