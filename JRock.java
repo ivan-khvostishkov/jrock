@@ -3341,6 +3341,16 @@ public class JRock {
     //
     // Send is held for the duration through sendGate, because the folder being zipped is
     // the folder a request writes its message files into.
+    //
+    // No lock is taken on the folder, and none would do the job. JRock's own writes are
+    // already serialized (WRITE_LOCK in atomicWriteQuietly) but they happen on the EDT,
+    // so a backup that held that lock for the length of a zip would stall the next
+    // keystroke instead of the next write. An OS file lock would say nothing to the
+    // Explorer copy, the editor or the sync client that can be in that folder too, and
+    // the browser build's filesystem has no such lock to take. So a backup promises what
+    // it can: every file that was there and readable while it ran, with whatever was
+    // caught mid-write skipped and counted rather than failing the backup - see
+    // writeBackup.
     private static void backupLog(JFrame frame, LogView log,
                                   java.util.function.Consumer<Boolean> sendGate,
                                   boolean ask) {
@@ -3386,7 +3396,7 @@ public class JRock {
         log.gray("Backing up " + jrockDir() + " to " + zip + " ...");
         sendGate.accept(false);
         new SwingWorker<String, Void>() {
-            private long files, bytes;
+            private long files, bytes, skipped;
 
             // Returns null when it went well, or the line to log when it did not.
             @Override
@@ -3395,6 +3405,7 @@ public class JRock {
                     long[] counts = writeBackup(zip);
                     files = counts[0];
                     bytes = counts[1];
+                    skipped = counts[2];
                     return null;
                 } catch (IOException ex) {
                     return "Could not write the backup " + zip + ": " + ex;
@@ -3412,6 +3423,13 @@ public class JRock {
                 if (failure == null) {
                     log.gray("Backed up " + files + " file(s), " + fmtNum(bytes)
                             + " bytes, to " + zip);
+                    if (skipped > 0) {
+                        log.gray(skipped + " file(s) were being written while the backup "
+                                + "ran and were left out of it. Nothing is missing from "
+                                + "the zip because of it: a file JRock replaces is in "
+                                + "there either as it was before the write or as it is "
+                                + "after it.");
+                    }
                     log.gray("");
                 } else {
                     backupNote(frame, log, ask, failure,
@@ -3436,21 +3454,36 @@ public class JRock {
     }
 
     // Writes the JRock folder into a zip, every entry named "JRock/..." with the folder
-    // itself as the root. Returns {files, bytes} for the log line.
+    // itself as the root. Returns {files, bytes, skipped} for the log line.
     //
     // Directories get entries of their own, so one that happens to be empty survives the
     // round trip: an empty includes/ is still part of the layout.
+    //
+    // A backup runs while JRock runs, so the folder changes under it. The prompt
+    // autosaves on every keystroke and every autosave writes a jrock<digits>.tmp beside
+    // the file and moves it into place (atomicWriteQuietly), which is a name that exists
+    // for a matter of milliseconds. A backup that listed one of those and then read it
+    // failed outright with "NoSuchFileException: .../JRock/jrock1234....tmp" - the whole
+    // zip lost to a file that was never worth having in it. Three things keep that from
+    // happening:
+    //
+    //   - JRock's own in-flight temp files are not backed up at all (see inFlightWrite).
+    //     The file one of them is about to become is in the zip anyway, either as it was
+    //     before the move or as it is after it;
+    //   - every other file is OPENED BEFORE its entry is created, and one that has gone
+    //     or cannot be read by then is counted and skipped instead of ending the backup.
+    //     Opening first is also what stops a half-written entry: the copy reads from the
+    //     stream it already holds, not from a name somebody else may be replacing;
+    //   - the walk is retried, because listing the folder is a read of it too.
     private static long[] writeBackup(Path zip) throws IOException {
         Path root = jrockDir().toAbsolutePath().normalize();
         Path parent = zip.getParent();
         if (parent != null) Files.createDirectories(parent);
 
-        java.util.List<Path> paths;
-        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
-            paths = walk.sorted().collect(java.util.stream.Collectors.toList());
-        }
+        java.util.List<Path> paths = walkForBackup(root);
 
-        long files = 0, bytes = 0;
+        long files = 0, bytes = 0, skipped = 0;
+        byte[] buffer = new byte[8192];
         try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
                 Files.newOutputStream(zip))) {
             for (Path path : paths) {
@@ -3461,19 +3494,88 @@ public class JRock {
                     out.closeEntry();
                     continue;
                 }
-                // Anything that is not a plain file is skipped rather than guessed at -
-                // including one that has just been moved away, which is what JRock's own
-                // atomic writes do with their temp files.
-                if (!Files.isRegularFile(path)) continue;
-                java.util.zip.ZipEntry entry = new java.util.zip.ZipEntry(name);
-                entry.setLastModifiedTime(Files.getLastModifiedTime(path));
-                out.putNextEntry(entry);
-                bytes += Files.copy(path, out);
-                out.closeEntry();
-                files++;
+                // Anything that is not a plain file, and anything JRock is in the middle
+                // of writing, is skipped rather than guessed at.
+                if (!Files.isRegularFile(path) || inFlightWrite(path)) continue;
+                java.io.InputStream in;
+                try {
+                    in = Files.newInputStream(path);
+                } catch (IOException gone) {
+                    // Moved away, deleted or briefly locked between the walk and now.
+                    // Counted, said in the log, and not the end of the backup.
+                    skipped++;
+                    continue;
+                }
+                try (java.io.InputStream stream = in) {
+                    java.util.zip.ZipEntry entry = new java.util.zip.ZipEntry(name);
+                    java.nio.file.attribute.FileTime when = modifiedOrNull(path);
+                    // An entry left without one gets the time the zip was written, which
+                    // is the closest thing to the truth there is for a file whose
+                    // timestamp could not be read.
+                    if (when != null) entry.setLastModifiedTime(when);
+                    out.putNextEntry(entry);
+                    int read;
+                    while ((read = stream.read(buffer)) > 0) {
+                        out.write(buffer, 0, read);
+                        bytes += read;
+                    }
+                    out.closeEntry();
+                    files++;
+                }
             }
         }
-        return new long[] { files, bytes };
+        return new long[] { files, bytes, skipped };
+    }
+
+    // The files and folders to pack, sorted - retried, because a walk stats what it
+    // lists, and a temp file that was there when the directory was read and gone when it
+    // was stat'ed ends the whole walk with an UncheckedIOException. Which is as transient
+    // as the name that caused it: the next walk does not see it at all.
+    private static final int BACKUP_WALK_ATTEMPTS = 3;
+    private static final long BACKUP_WALK_RETRY_MS = 60;
+
+    private static java.util.List<Path> walkForBackup(Path root) throws IOException {
+        IOException last = null;
+        for (int attempt = 1; attempt <= BACKUP_WALK_ATTEMPTS; attempt++) {
+            try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
+                return walk.sorted().collect(java.util.stream.Collectors.toList());
+            } catch (java.io.UncheckedIOException ex) {
+                last = ex.getCause();
+                if (attempt < BACKUP_WALK_ATTEMPTS) {
+                    try { Thread.sleep(BACKUP_WALK_RETRY_MS); }
+                    catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+        throw (last != null) ? last
+                : new IOException("could not list " + root);
+    }
+
+    // JRock caught in the act of replacing a file: atomicWriteQuietly writes
+    // jrock<digits>.tmp beside the prompt, the log, the config or the key file before
+    // moving it into place, and a scaled include copy is written as scaling-<digits>.<ext>
+    // before it gets its real name. Both patterns are Files.createTempFile's, digits and
+    // all, so nothing a person named is going to match one - and neither is worth backing
+    // up: what they become is already in the zip, and what they are is half a file.
+    private static final java.util.regex.Pattern IN_FLIGHT_WRITE =
+            java.util.regex.Pattern.compile(
+                    "(?i)^(jrock[0-9]+\\.tmp|scaling-[0-9]+\\.[a-z0-9]+)$");
+
+    private static boolean inFlightWrite(Path path) {
+        Path name = path.getFileName();
+        return name != null && IN_FLIGHT_WRITE.matcher(name.toString()).matches();
+    }
+
+    // A file's timestamp, or null when it no longer has one to read.
+    private static java.nio.file.attribute.FileTime modifiedOrNull(Path path) {
+        try {
+            return Files.getLastModifiedTime(path);
+        } catch (IOException ex) {
+            return null;
+        }
     }
 
     // A relative path as a zip entry spells it: forward slashes whatever the platform
