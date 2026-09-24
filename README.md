@@ -414,25 +414,10 @@ conversation*, and never read back from disk: what goes with the request is alwa
 it appears verbatim (unmasked) in the raw request dump - the point of logging a clock being to
 see what time was actually sent.
 
-**A model that listens may refuse a system message beside a recording.** Voxtral does, with
-*"Found system messages at indexes [0] and audio chunks in messages at indexes [1]. This is not
-allowed prior to the tokenizer version 13"* — that is
-[mistral-common's own validator](https://github.com/mistralai/mistral-common/blob/main/src/mistral_common/protocol/instruct/validator.py),
-and the Voxtral model card is blunter still: *"System prompts are not yet supported"*. So a send
-that has both the Clock on and [audio](#what-an-audio-include-is-sent-as) in it **says so first,
-and then goes as it is**:
-
-```
-Clock is on and this request carries audio. A model that listens may refuse a system message beside a recording - Voxtral answers HTTP 400 with "Found system messages at indexes [0] and audio chunks in messages at indexes [1]". Untick Clock and send again if that is what comes back.
-```
-
-Nothing is rearranged and nothing is switched off for you: the clock is a checkbox, and unticking
-it is one click in the same window. Folding the clock into the user's turn instead was tried and
-taken out again — it is a text model's feature, it makes no difference to a transcription, and a
-request that quietly disagrees with the checkbox is worse than one that fails for a reason you
-were told in advance. An `@audio` token in an *earlier* turn counts too, since the validator
-reads the whole message list: in Extend mode the warning stays for as long as a recording is
-anywhere in the conversation.
+The clock goes with every request the checkbox is ticked for, whatever else that request carries
+— text, images, a recording. Nothing is rearranged and nothing is switched off for you: if a
+model turns out not to want a `system` message beside what you are sending it, untick Clock and
+send again, which is one click in the same window.
 
 ## Persistence (crash recovery + full local history)
 
