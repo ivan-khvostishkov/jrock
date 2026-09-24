@@ -2904,6 +2904,113 @@ public class JRock {
         }
     }
 
+    // Empties the prompt, as selecting it all and deleting would. Returns null, or why not.
+    //
+    // A send leaves the prompt as it was sent, which by hand is what lets a question be
+    // asked again with one word changed; an automation that asks a new question every
+    // turn clears it first, or the new recording goes out after the old one.
+    public static String automationClearPrompt() {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        onEdt(() -> live.input.setText(""));   // triggers the autosave, as a delete does
+        return null;
+    }
+
+    // The recording automationStartRecording started, and the prompt as it was before
+    // it, for automationStopRecording to compare with.
+    private static volatile Recording automationRecording;
+    private static volatile String automationPromptBefore;
+
+    // How long a microphone gets to open before automationStartRecording gives up on it.
+    // A USB microphone waking up takes a second or so; this is for one that never does.
+    private static final long RECORD_OPEN_TIMEOUT_MS = 5_000;
+
+    // Starts recording from the microphone set in Configure > Record from, as pressing
+    // Ctrl+Space does, and returns once the microphone is open and listening - null - or
+    // with why nothing is being recorded.
+    //
+    // Unlike Ctrl+Space, an unset microphone is a refusal and not the "set up the
+    // microphone" dialog: an automation is not the one who can pick a microphone.
+    public static String automationStartRecording() {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        if (!recordAvailable()) return "recording is not available here.";
+        if (recording != null) return "a recording is already running.";
+        if (recordDevice.isEmpty()) {
+            return "no microphone is set. Press Ctrl+Space in JRock to list them, pick one "
+                    + "in Configure > Record from, and run this again.";
+        }
+        Ui live = ui;
+        Recording[] started = { null };
+        onEdt(() -> {
+            automationPromptBefore = live.input.getText();
+            startRecording(live.frame, live.input, live.log, false);
+            started[0] = recording;
+        });
+        Recording r = started[0];
+        automationRecording = r;
+        long deadline = System.currentTimeMillis() + RECORD_OPEN_TIMEOUT_MS;
+        while (r.line == null) {
+            if (!r.thread.isAlive()) {
+                automationRecording = null;
+                return "nothing is being recorded - the log says why.";
+            }
+            if (System.currentTimeMillis() > deadline) {
+                stopRecording(live.log);
+                automationRecording = null;
+                return "the microphone did not open within " + RECORD_OPEN_TIMEOUT_MS
+                        + " ms.";
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                stopRecording(live.log);
+                automationRecording = null;
+                return "interrupted while the microphone was opening.";
+            }
+        }
+        return null;
+    }
+
+    // Stops the recording automationStartRecording started, as letting go of Ctrl does,
+    // and waits until it has reached the prompt: null when it has, and otherwise why
+    // not - nothing was recorded or recognized, the microphone went away, the file could
+    // not be written.
+    //
+    // What reaches the prompt is what Configure says: an @audio token, or with
+    // Transcribe recordings on, the text Windows heard. Either way it is the recording
+    // thread that puts it there, as the last thing it does, so the thread ending is
+    // the one sign that covers both - a transcription taking seconds included - and
+    // the prompt having changed is what tells "done" from "done, with nothing to show".
+    // The recording goes on for RECORD_TAIL_MS after this is called, as after Ctrl.
+    public static String automationStopRecording(long timeoutMillis) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Recording r = automationRecording;
+        if (r == null) return "no recording was started.";
+        automationRecording = null;
+        Ui live = ui;
+        if (recording == r) stopRecording(live.log);
+        r.stop = true;   // one that ended on its own is past this already
+        try {
+            r.thread.join(Math.max(1, timeoutMillis));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return "interrupted while the recording was being saved.";
+        }
+        if (r.thread.isAlive()) {
+            return "the recording did not reach the prompt within " + timeoutMillis + " ms.";
+        }
+        String[] now = { null };
+        onEdt(() -> now[0] = live.input.getText());
+        if (now[0].equals(automationPromptBefore)) {
+            return "nothing from the recording reached the prompt - the log says why.";
+        }
+        return null;
+    }
+
     // Leaves automation mode: the prompt is editable again, Send is released, and
     // History goes back to what the user had it at. note finishes the
     // sentence "Automation finished: ", or is null for the sentence on its own.
