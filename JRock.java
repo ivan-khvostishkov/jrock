@@ -636,9 +636,10 @@ public class JRock {
     private static Path keyFile()          { return jrockDir().resolve("bedrock-key.txt"); }
     private static Path configFile()       { return jrockDir().resolve("jrock-config.txt"); }
 
-    // The API key to sign a request with, or null when there is none - which is
-    // normal in the browser, where the key stays in the page and the JVM never sees
-    // it (see HttpTransport.hostHoldsCredentials()).
+    // The API key to sign a request with, or null when there is none. Null means the
+    // same thing on every runtime, the browser included: JRock keeps its key in the
+    // working folder's JRock/bedrock-key.txt everywhere, so there is nowhere that a
+    // missing key is somebody else's key instead.
     private static String resolveApiKey() {
         return (apiKey != null && !apiKey.isBlank()) ? apiKey : null;
     }
@@ -712,10 +713,6 @@ public class JRock {
     // The same for the key, which is read here but never written: an empty file is
     // created so there is somewhere obvious to put one, and that is all.
     private static void adoptKeyOfWorkingDir() {
-        if (http().hostHoldsCredentials()) {
-            apiKeySource = null;   // the page holds it; JRock has no key to report
-            return;
-        }
         String stored = readFileQuietly(keyFile());
         if (stored == null) {
             atomicWriteQuietly(keyFile(), "");
@@ -1610,9 +1607,7 @@ public class JRock {
 
         log.gray("HTTP transport: " + http().describe()
                 + (isCheerpJ() ? " (CheerpJ browser runtime)" : ""));
-        if (http().hostHoldsCredentials()) {
-            log.gray("Bedrock API key: held by the hosting page, not by JRock");
-        } else if (apiKeySource != null) {
+        if (apiKeySource != null) {
             log.gray("Bedrock API key: " + apiKeySource);
         }
         log.gray("Settings: " + settingsSource);
@@ -1683,7 +1678,7 @@ public class JRock {
         HttpTransport http = http();
         String apiKey = resolveApiKey();
         boolean haveKey = apiKey != null && !apiKey.isBlank();
-        if (!haveKey && !http.hostHoldsCredentials()) {
+        if (!haveKey) {
             return "(skipped - no Bedrock API key set)";
         }
         try {
@@ -2597,9 +2592,7 @@ public class JRock {
                 return "interrupted while waiting for JRock to be ready.";
             }
         }
-        // In the browser the page holds the credential and the JVM never sees one, so
-        // that counts as having a key - it is the transport that would know otherwise.
-        if (resolveApiKey() == null && !http().hostHoldsCredentials()) {
+        if (resolveApiKey() == null) {
             return "no Bedrock API key is set. Put one in JRock/bedrock-key.txt, or "
                     + "type it into the Configure dialog, and run this again.";
         }
@@ -3111,12 +3104,6 @@ public class JRock {
         addCopyPasteMenu(cwdF, null);
         addCopyPasteMenu(promptsF, null);
         addCopyPasteMenu(regionF, null);
-        // True only when the hosting PAGE holds the Bedrock key and attaches it itself
-        // (see HttpTransport.hostHoldsCredentials): then JRock has no key to show or set,
-        // and the row is left out rather than offered as a field with no effect. The
-        // browser build as shipped does NOT do that - it keeps the key in JRock's own
-        // settings, so the row is there, unmasked, with a Paste button.
-        boolean hostKey = http().hostHoldsCredentials();
         // Editable combo: free text, plus a dropdown of the most recently fetched
         // available models (empty until the first successful /v1/models call).
         javax.swing.JComboBox<String> modelF =
@@ -3167,11 +3154,9 @@ public class JRock {
         int row = 0;
         addRow(fields, c, row++, "Working directory:", cwdRow);
         addRow(fields, c, row++, "Prompts & agents:", promptsRow);
-        if (!hostKey) {
-            // In the browser the row carries a Paste button of its own - see pasteRow.
-            addRow(fields, c, row++, "Bedrock API key:",
-                    isCheerpJ() ? pasteRow(keyF, "key") : keyF);
-        }
+        // In the browser the row carries a Paste button of its own - see pasteRow.
+        addRow(fields, c, row++, "Bedrock API key:",
+                isCheerpJ() ? pasteRow(keyF, "key") : keyF);
         addRow(fields, c, row++, "AWS region:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
         addRow(fields, c, row++, "Images DPI:", dpiRow);
@@ -3261,8 +3246,7 @@ public class JRock {
         }
 
         // API key: only set if the user typed something - an empty field means "keep
-        // whatever is already in effect". Skipped when the host holds the key: the
-        // field wasn't even shown.
+        // whatever is already in effect".
         //
         // Written to the working folder's key file, which is the one place a key is
         // ever written: the folder it was typed for is the folder that keeps it (see
@@ -3270,16 +3254,14 @@ public class JRock {
         //
         // Trimmed, because a key that was pasted arrives with whatever the page copied
         // around it, and no Bedrock key has a space or a newline in it.
-        if (!hostKey) {
-            char[] typed = (keyF instanceof javax.swing.JPasswordField)
-                    ? ((javax.swing.JPasswordField) keyF).getPassword()
-                    : keyF.getText().toCharArray();
-            String key = new String(typed).trim();
-            java.util.Arrays.fill(typed, '\0');   // wipe the transient char[]
-            if (!key.isEmpty()) {
-                apiKey = key;
-                saveKeyQuietly(apiKey);
-            }
+        char[] typed = (keyF instanceof javax.swing.JPasswordField)
+                ? ((javax.swing.JPasswordField) keyF).getPassword()
+                : keyF.getText().toCharArray();
+        String key = new String(typed).trim();
+        java.util.Arrays.fill(typed, '\0');   // wipe the transient char[]
+        if (!key.isEmpty()) {
+            apiKey = key;
+            saveKeyQuietly(apiKey);
         }
 
         // Region + model (free text).
@@ -3389,8 +3371,7 @@ public class JRock {
           + "Questions, bugs and wishes: " + CONTACT_EMAIL + "\n"
           + GITHUB_URL, plainFont, contentW);
 
-        javax.swing.JTextArea notes =
-                wrapped(configNotes(http().hostHoldsCredentials()), plainFont, contentW);
+        javax.swing.JTextArea notes = wrapped(configNotes(), plainFont, contentW);
         notes.setBorder(javax.swing.BorderFactory.createTitledBorder("Notes"));
 
         javax.swing.JPanel content = new javax.swing.JPanel();
@@ -3442,16 +3423,12 @@ public class JRock {
         return area;
     }
 
-    // What the Configure dialog's rows mean, and where what they set is kept. hostKey is
-    // http().hostHoldsCredentials(): in the browser there is no API key row to explain.
-    private static String configNotes(boolean hostKey) {
-        String keyNote = hostKey
-            ? "There is no API key field in Configure: the page hosting JRock holds the "
-            + "Bedrock API key itself and adds it to each request, so JRock is never "
-            + "handed one and has none to change. Change it on the page. (Only a page "
-            + "that asks for this gets it; the browser build as shipped keeps the key in "
-            + "JRock's own settings, exactly as the desktop does.)\n\n"
-            : "The API key field is intentionally blank and write-only: leave it empty "
+    // What the Configure dialog's rows mean, and where what they set is kept. One text
+    // for every runtime, because there is one behaviour: the browser build holds the key
+    // in JRock's own settings exactly as the desktop does.
+    private static String configNotes() {
+        String keyNote =
+              "The API key field is intentionally blank and write-only: leave it empty "
             + "to keep the current key; type or paste a value to replace it. What you "
             + "enter is written to JRock/bedrock-key.txt in the working directory, which "
             + "is where it is read from at startup. The stored key is never shown here, "
@@ -9263,13 +9240,6 @@ public class JRock {
         // bring back the response's own media type and an image's bytes intact.
         UrlReply fetch(String url, int timeoutSeconds) throws Exception;
 
-        // True when the HOST holds the Bedrock credentials and adds the
-        // Authorization header itself: JRock then has no key of its own and must not
-        // treat "no key set" as an error. A page opts in by reporting
-        // "credentials": "page"; the browser build as shipped does not, and keeps the
-        // key in JRock's own settings like every other runtime.
-        boolean hostHoldsCredentials();
-
         // Short description of the transport, for the startup log.
         String describe();
     }
@@ -9327,7 +9297,6 @@ public class JRock {
                     resp.body());
         }
 
-        @Override public boolean hostHoldsCredentials() { return false; }
         @Override public String describe() { return "java.net.http.HttpClient"; }
     }
 
@@ -9343,7 +9312,7 @@ public class JRock {
     // The wire format is deliberately trivial, so neither side needs a JSON parser
     // it doesn't already have:
     //   browserHttpInfo() -> a small flat JSON object describing the page's client
-    //                        ({"transport":...,"region":...,"credentials":...}).
+    //                        ({"transport":...,"region":...}).
     //   browserHttpSend() -> "<status>\n<body>". Status 0 means the request never
     //                        completed and the body is the reason, ready to show.
     // Request headers travel in the other direction as a flat JSON object, the
@@ -9351,10 +9320,13 @@ public class JRock {
     // it does on the desktop, in the working folder's JRock/bedrock-key.txt, which is
     // what makes it outlive a reload.
     //
-    // The two optional fields are for a page that wants it otherwise: "region" pins
-    // the region, and "credentials":"page" says the page holds the key and adds the
-    // Authorization header itself, so JRock sends none and never asks for one.
-    // JRock's own jrock-web page sets neither.
+    // The one optional field is for a page that wants a different region than JRock's
+    // own settings name: "region" pins it. JRock's own jrock-web page does not set it.
+    //
+    // There is deliberately nothing here about the key. A page held it instead until
+    // 2.1.0, saying so with "credentials":"page", and no page ever did: the key is
+    // JRock's on every runtime, so one dialog sets it, one file keeps it, and the
+    // browser behaves as the desktop does rather than nearly so.
     static native String browserHttpInfo();
     static native String browserHttpSend(String method, String url,
                                          String headersJson, String body,
@@ -9404,20 +9376,10 @@ public class JRock {
     private static final class BrowserHttpTransport implements HttpTransport {
         private final String label;
 
-        // Whether the PAGE holds the Bedrock key, which is the page's own statement:
-        // "credentials":"page" in the info JSON above. JRock's own jrock-web page does
-        // not - the key is typed into the Configure dialog and kept in
-        // JRock/bedrock-key.txt like everywhere else, which is what makes it survive a
-        // reload instead of being asked for again by a JavaScript dialog. A page that
-        // does hold one says so, and then JRock sends no Authorization header and
-        // never reports a missing key.
-        private final boolean hostKey;
-
         BrowserHttpTransport(String info) {
             String reported = jsonStringField(info, "transport");
             this.label = (reported == null || reported.isBlank())
                     ? "browser HTTP bridge" : reported;
-            this.hostKey = "page".equals(jsonStringField(info, "credentials"));
         }
 
         @Override
@@ -9514,7 +9476,6 @@ public class JRock {
             return new UrlReply(status, lines[1].trim(), lines[2].trim(), body);
         }
 
-        @Override public boolean hostHoldsCredentials() { return hostKey; }
         @Override public String describe() { return label; }
     }
 
@@ -9598,8 +9559,7 @@ public class JRock {
         HttpTransport http = http();
         String apiKey = resolveApiKey();
         boolean haveKey = apiKey != null && !apiKey.isBlank();
-        // No key needed when the host holds the credentials (the browser case).
-        if (!haveKey && !http.hostHoldsCredentials()) {
+        if (!haveKey) {
             return new String[] {
                 "0",
                 "No Bedrock API key set. Put one in JRock/bedrock-key.txt, or open "

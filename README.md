@@ -321,11 +321,15 @@ provides the transport instead. Any host page can serve JRock by providing two f
 
 - **`fetch(url, options)`** resolving to `{ status, body }` — the model calls, whose bodies are
   JSON either way. The `options` include the headers JRock built, `Authorization` among them: the
-  key is JRock's in the browser too, so one dialog sets it and one file keeps it.
-  A page that would rather hold the key itself can attach that header instead and say
-  `"credentials": "page"` in its `browserHttpInfo()` reply, which tells JRock to send none and
-  never to report a missing one; the same reply can pin a `"region"`. `jrock-web/index.html`
-  uses neither.
+  key is JRock's in the browser too, so one dialog sets it and one file keeps it. The
+  `browserHttpInfo()` reply can pin a `"region"`, and that is the only setting of JRock's a page
+  may override; `jrock-web/index.html` does not.
+  Until 2.1.0 a page could also say `"credentials": "page"` and hold the key itself, and JRock
+  then sent no `Authorization` header and never reported a missing key. It is gone, because the
+  page that ships here never used it: what it bought was a second way for the key to work, live
+  only in a configuration nobody ran, in exchange for every place that asks "is there a key?"
+  having to ask "and whose?" first. The key is JRock's on every platform, so the code says so
+  once.
 - **`fetchUrl(url, options)`** resolving to `{ status, contentType, url, bytes }` — an arbitrary
   address, for which a body of *text* would not do: Fetch URL decides between a page and a
   picture by the response's own `Content-Type`, and an image has to arrive as bytes
@@ -515,8 +519,8 @@ from inside the running application, and different for every way of launching it
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser both
 files are the same files, kept in CheerpJ's persistent `/files/` — the key survives a reload
-because it is on disk, not in a page's JavaScript. (A hosting page *may* hold the credentials and
-name the region instead, and then what the page says wins; see
+because it is on disk, not in a page's JavaScript. (A hosting page *may* name the region instead,
+and then what the page says wins; the key it may not, on any platform — see
 [HTTP transport](#http-transport).)
 
 The config format is a name on one line and its **value on the next**:
@@ -1319,9 +1323,9 @@ that you cannot.
   to replace it. What you enter is **trimmed** and written to `JRock/bedrock-key.txt` in the
   working directory, which is where it's read from at startup — trimmed because a pasted key
   arrives with whatever the page copied around it, and no Bedrock key has a space or a newline
-  in it. The key is never displayed. The row disappears only when the hosting page holds the
-  credentials itself (see [HTTP transport](#http-transport)): then there is no key of JRock's to
-  change.
+  in it. The key is never displayed. The row is there on every platform — it could be left out in
+  the browser until 2.1.0, when a page was allowed to hold the key instead (see
+  [HTTP transport](#http-transport)); nothing is allowed to now.
   In the browser the row is a **plain, unmasked field with its own Paste button**. The mask is
   what a phone's CheerpJ build will not raise a keyboard for — the region field beside it, same
   dialog, does come up — and a row you cannot fill in is worse than one whose text can be read
