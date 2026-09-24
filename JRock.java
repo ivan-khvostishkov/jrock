@@ -6109,6 +6109,10 @@ public class JRock {
     // document. By the Ghostscript that PDF includes already need, so there is no pdftk,
     // no Python and nothing else to install.
     //
+    // Which of the two picked files is the front pass is decided by their NAMES, not by
+    // the order the chooser hands them over in - see frontThenBack for why that order is
+    // not one.
+    //
     // First in the window menu because it is the one item there that is a tool rather
     // than a setting - and the one somebody comes to this menu looking for.
     //
@@ -6123,7 +6127,8 @@ public class JRock {
 
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(scanChooserDir.start());
-        chooser.setDialogTitle("Merge duplex scans: the front pass, then the back pass");
+        chooser.setDialogTitle(
+                "Merge duplex scans: both passes (the earlier name is the front)");
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 "PDF files (*.pdf)", "pdf"));
@@ -6137,17 +6142,18 @@ public class JRock {
         java.io.File[] picked = chooser.getSelectedFiles();
         int count = (picked == null) ? 0 : picked.length;
         if (count != 2) {
-            duplexWarn(frame, "Pick exactly two PDF files - the front pass and the back "
-                    + "pass. " + count + " were selected.");
+            duplexWarn(frame, "Pick exactly two PDF files - both passes of the same "
+                    + "batch. " + count + " were selected.");
             return;
         }
-        // The order is the chooser's own, which hands back what it selected in the order
-        // it lists it - so scan0166.pdf comes before scan0167.pdf, the way the scanner
-        // wrote them. Both are logged before anything runs, and the front one names the
-        // merged file, so a pair taken the wrong way round shows before the merge as
-        // well as in it.
-        final Path front = picked[0].toPath().toAbsolutePath().normalize();
-        final Path back  = picked[1].toPath().toAbsolutePath().normalize();
+        // Sorted by name, front first (see frontThenBack). Both are logged before
+        // anything runs, and the front one names the merged file, so a pair the names put
+        // the wrong way round shows before the merge as well as in it.
+        Path[] passes = frontThenBack(
+                picked[0].toPath().toAbsolutePath().normalize(),
+                picked[1].toPath().toAbsolutePath().normalize());
+        final Path front = passes[0];
+        final Path back  = passes[1];
         if (front.equals(back)) {
             duplexWarn(frame, "The front pass and the back pass are the same file.");
             return;
@@ -6172,7 +6178,7 @@ public class JRock {
             return;
         }
 
-        log.gray("Duplex merge, front pass: " + front);
+        log.gray("Duplex merge, front pass (the earlier name): " + front);
         log.gray("Duplex merge, back pass (in reverse): " + back);
         final String command = gs;
         new SwingWorker<Void, Void>() {
@@ -6192,6 +6198,67 @@ public class JRock {
                 log.gray("");   // closes the block, one per merge
             }
         }.execute();
+    }
+
+    // The two passes in the order their names put them: the earlier name is the front.
+    //
+    // NOT the order the file chooser handed them over in, which this used to trust and
+    // which is not an order at all. JFileChooser.getSelectedFiles() comes back in
+    // whatever order the selection was made or the File Name box was parsed in, and it
+    // differs by look-and-feel and by how the files were picked - so a box reading
+    // "doc.pdf" "doc-2.pdf" could hand back doc-2.pdf first and the merge would
+    // interleave the whole document inside out, every front against the wrong back. The
+    // names are the one thing about a scanner's output that IS in order: it writes the
+    // first pass before the second, so the earlier name holds the fronts.
+    //
+    // Compared without the extension first, because a plain compare of the whole names
+    // gets exactly the pair above backwards: "doc-2.pdf" sorts before "doc.pdf", '-'
+    // being 0x2D and '.' 0x2E. The extension is then the tie-break, and the whole path
+    // after it, so the answer is total and the same every time.
+    private static Path[] frontThenBack(Path a, Path b) {
+        int order = naturalCompare(stemOf(a), stemOf(b));
+        if (order == 0) {
+            order = naturalCompare(a.getFileName().toString(), b.getFileName().toString());
+        }
+        if (order == 0) order = a.toString().compareTo(b.toString());
+        return (order <= 0) ? new Path[] { a, b } : new Path[] { b, a };
+    }
+
+    // Compares two names the way a listing does: runs of digits as numbers, everything
+    // else character by character with case ignored (and then applied, so the order is
+    // total rather than "equal" for two names that differ).
+    //
+    // Numbers, because a scanner that does not pad its counter writes scan9.pdf and
+    // scan10.pdf, and a string compare puts the tenth sheet before the ninth - which as
+    // the choice of front pass means the merge is wrong once every ten sheets. Leading
+    // zeros are dropped and the digits compared by length first, so this holds for a
+    // counter longer than a long as well as for a padded one.
+    private static int naturalCompare(String a, String b) {
+        int i = 0;
+        int j = 0;
+        while (i < a.length() && j < b.length()) {
+            char ca = a.charAt(i);
+            char cb = b.charAt(j);
+            if (Character.isDigit(ca) && Character.isDigit(cb)) {
+                int startA = i;
+                int startB = j;
+                while (i < a.length() && Character.isDigit(a.charAt(i))) i++;
+                while (j < b.length() && Character.isDigit(b.charAt(j))) j++;
+                String da = a.substring(startA, i).replaceFirst("^0+(?=.)", "");
+                String db = b.substring(startB, j).replaceFirst("^0+(?=.)", "");
+                if (da.length() != db.length()) return da.length() - db.length();
+                int digits = da.compareTo(db);
+                if (digits != 0) return digits;
+                continue;
+            }
+            int one = Character.compare(Character.toLowerCase(ca), Character.toLowerCase(cb));
+            if (one != 0) return one;
+            i++;
+            j++;
+        }
+        // One name ran out: the shorter is the earlier ("scan" before "scan-2").
+        int rest = (a.length() - i) - (b.length() - j);
+        return (rest != 0) ? rest : a.compareTo(b);
     }
 
     // Counts the pages of both passes, then interleaves them into out with Ghostscript.

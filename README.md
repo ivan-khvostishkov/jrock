@@ -550,11 +550,28 @@ of them readable on its own, and interleaving them by hand is a job nobody does 
 `pdftk A=front B=back shuffle A1 BN A2 B(N-1) ...` one-liner, done with the **Ghostscript** a PDF
 include already needs — no pdftk, no Python, nothing else to install:
 
-1. A **multi-select file chooser**, filtered to PDFs. Pick exactly **two**: the **front pass
-   first**, the **back pass second** — `scan0166.pdf` then `scan0167.pdf`, the order the scanner
-   wrote them in and the order the chooser hands them back in. On a touch device, both names in
-   the File Name box in quotes selects two files without a Shift key
-   ([context menus](#context-menus-right-click--long-tap)).
+1. A **multi-select file chooser**, filtered to PDFs. Pick exactly **two** — both passes of the
+   same batch, in any order. **Their names decide which is the front pass: the earlier name is
+   the fronts**, so `scan0166.pdf` is the front of `scan0166.pdf` + `scan0167.pdf`, whichever was
+   clicked first. On a touch device, both names in the File Name box in quotes selects two files
+   without a Shift key ([context menus](#context-menus-right-click--long-tap)).
+
+   The chooser's own order is not used, because it is not an order: `getSelectedFiles()` comes
+   back in the order the selection happened or the File Name box was parsed, which varies by
+   look-and-feel and by how the files were picked — `"doc.pdf" "doc-2.pdf"` typed in that box
+   could arrive back to front, and the merge would then pair every front with the wrong back.
+   Names are compared **without the extension** (a plain compare puts `doc-2.pdf` *before*
+   `doc.pdf`, `-` being 0x2D and `.` 0x2E) and with **digit runs as numbers**, so `scan9.pdf`
+   comes before `scan10.pdf` on a scanner that does not pad its counter. The log says which file
+   it took as which before anything runs:
+
+   ```
+   Duplex merge, front pass (the earlier name): C:\scans\scan0166.pdf
+   Duplex merge, back pass (in reverse): C:\scans\scan0167.pdf
+   ```
+
+   So a pair named `front.pdf` and `back.pdf` merges with **`back.pdf` as the front pass**:
+   the names are read, not understood. Rename them if that is not what you meant.
 2. A **save dialog** for the merged file, offering `<front-name>.Merged.pdf` in the folder you
    were just in — the front pass names it, its page 1 being the merged document's page 1.
 3. Both passes are counted, and the merge runs: **front 1, back N, front 2, back N−1, …** — which
