@@ -29,7 +29,7 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
 
     /** The other offer for the same file: send the bytes on disk, markup and all. */
     private static final String AS_IS_FILTER =
-            "Text files as is (*.txt, *.csv, *.html, *.java, *.rtf)";
+            "Text files as is (*.txt, *.csv, *.json, *.html, *.java, *.rtf)";
 
     /** Reading one small document in-process; only a slow CI runner needs the rest. */
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;

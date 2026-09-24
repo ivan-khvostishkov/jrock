@@ -23,12 +23,12 @@ import com.sun.net.httpserver.HttpServer;
 
 /**
  * Drives <em>Fetch URL...</em> in the prompt's context menu against a web server of
- * this test's own: a page, a picture, and something that is neither.
+ * this test's own: a page, JSON, plain text, a picture, and something that is none of these.
  * <p>
  * A real server on 127.0.0.1 rather than a stubbed transport, because what the feature
  * turns on is the response - its status, its {@code Content-Type}, its charset and its
  * bytes - and a stub that produced those would be a stub of the one thing under test.
- * It listens on a port the OS picks, serves three fixed paths, and is taken down after
+ * It listens on a port the OS picks, serves five fixed paths, and is taken down after
  * each test; nothing leaves the machine.
  * <p>
  * Offline in the sense the rest of the suite is: no API key is set, so JRock skips its
@@ -49,7 +49,13 @@ class JRockFetchUrlTest extends JRockGuiFixture {
     private static final String PAGE =
             "<html><body><h1>Für Elise</h1><p>Eine Kleinigkeit.</p></body></html>";
 
-    /** Deliberately not square, so the dimensions in the log can only be this image's. */
+    /** JSON, which is UTF-8 by RFC 8259 and served without a charset to say so. */
+    private static final String JSON = "{\"title\":\"Für Elise\",\"key\":\"a minor\"}";
+
+    /** Plain text in a charset that is neither the default nor Latin-1: Cyrillic. */
+    private static final String PLAIN = "Привет, мир.\nЭто просто текст.\n";
+
+    /** Deliberately not square,so the dimensions in the log can only be this image's. */
     private static final int IMAGE_WIDTH = 120;
     private static final int IMAGE_HEIGHT = 80;
 
@@ -68,12 +74,20 @@ class JRockFetchUrlTest extends JRockGuiFixture {
                         PAGE.getBytes(StandardCharsets.ISO_8859_1)));
         server.createContext("/pics/cat.png", exchange ->
                 respond(exchange, "image/png", png()));
-        // A media type JRock cannot include: not HTML, not one of the four image types
-        // it can send. The whole response is served anyway, so what refuses it is the
-        // type and not a failed request.
+        // Text that is not a page: sent as text all the same, each under the extension
+        // its media type calls for.
         server.createContext("/data/notes.json", exchange ->
                 respond(exchange, "application/json",
-                        "{\"note\":\"not includable\"}".getBytes(StandardCharsets.UTF_8)));
+                        JSON.getBytes(StandardCharsets.UTF_8)));
+        server.createContext("/notes/readme", exchange ->
+                respond(exchange, "text/plain; charset=windows-1251",
+                        PLAIN.getBytes(java.nio.charset.Charset.forName("windows-1251"))));
+        // A media type JRock cannot include: not text, not one of the four image types
+        // it can send. The whole response is served anyway, so what refuses it is the
+        // type and not a failed request.
+        server.createContext("/docs/report.pdf", exchange ->
+                respond(exchange, "application/pdf",
+                        "%PDF-1.4 not includable".getBytes(StandardCharsets.US_ASCII)));
         server.start();
         base = "http://" + server.getAddress().getHostString() + ":"
                 + server.getAddress().getPort();
@@ -148,24 +162,71 @@ class JRockFetchUrlTest extends JRockGuiFixture {
     }
 
     @Test
+    @DisplayName("a JSON URL is saved as .json and inserted as @txt")
+    void insertsJsonAsText() throws Exception {
+        awaitReadyCount(1);
+
+        String url = base + "/data/notes.json";
+        fetchUrl(url);
+        awaitLogLine("new @txt token(s) for " + url, FETCH_TIMEOUT_SECONDS);
+
+        // Already named ".json", which the media type agrees with: not added twice.
+        Path saved = urlsDirectory().resolve("notes.json");
+        assertThat(saved).describedAs("the saved JSON").exists();
+        assertThat(new String(Files.readAllBytes(saved), StandardCharsets.UTF_8))
+                .describedAs("the saved JSON, read back as UTF-8")
+                .isEqualTo(JSON);
+
+        String hash = hashOf(promptArea().text(), "txt");
+        assertThat(promptArea().text()).describedAs("the prompt")
+                .startsWith("[](" + url + ")\n@txt " + hash + "\n");
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .contains("Decoded as UTF-8, saved as UTF-8.")
+                .contains("bytes of application/json to " + saved);
+    }
+
+    @Test
+    @DisplayName("a plain-text URL is saved as .txt, re-encoded as UTF-8, and inserted as @txt")
+    void insertsPlainTextAsText() throws Exception {
+        awaitReadyCount(1);
+
+        String url = base + "/notes/readme";
+        fetchUrl(url);
+        awaitLogLine("new @txt token(s) for " + url, FETCH_TIMEOUT_SECONDS);
+
+        Path saved = urlsDirectory().resolve("readme.txt");
+        assertThat(saved).describedAs("the saved text").exists();
+        assertThat(new String(Files.readAllBytes(saved), StandardCharsets.UTF_8))
+                .describedAs("the saved text, read back as UTF-8")
+                .isEqualTo(PLAIN);
+
+        String hash = hashOf(promptArea().text(), "txt");
+        assertThat(promptArea().text()).describedAs("the prompt")
+                .startsWith("[](" + url + ")\n@txt " + hash + "\n");
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .contains("Decoded as windows-1251, saved as UTF-8.")
+                .contains("bytes of text/plain to " + saved);
+    }
+
+    @Test
     @DisplayName("any other media type is refused, and nothing is saved or inserted")
     void refusesAnythingElse() throws Exception {
         awaitReadyCount(1);
 
         String promptBefore = promptArea().text();
-        String url = base + "/data/notes.json";
+        String url = base + "/docs/report.pdf";
         fetchUrl(url);
 
         // The refusal names the type the server answered with, in the log and in a
         // dialog of its own - which is dismissed here, the application being left as
         // this test found it.
-        awaitLogLine("application/json", FETCH_TIMEOUT_SECONDS);
+        awaitLogLine("application/pdf", FETCH_TIMEOUT_SECONDS);
         JOptionPaneFixture refusal =
                 JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
         refusal.requireTitle("Unsupported media type");
         assertThat(refusal.target().getMessage().toString())
                 .describedAs("the refusal dialog's message")
-                .contains("application/json")
+                .contains("application/pdf")
                 .contains("nothing was saved");
         press(refusal.okButton());
 

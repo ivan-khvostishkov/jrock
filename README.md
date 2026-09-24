@@ -665,7 +665,7 @@ documents into either):
      text and writes it back into its answer where the picture belongs, which is what
      [**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) then
      places
-   - **Text files as is** (txt, csv, html, java, rtf) — sent exactly as they are on disk,
+   - **Text files as is** (txt, csv, json, html, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
    - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
@@ -787,8 +787,8 @@ is; unticking **Clock** is the fix, and it is yours to make.
 
 The same include, for something that isn't on this machine. **Ctrl+U**, or **right-click the
 prompt → Fetch URL...**, asks for an address, downloads it into `JRock/urls/`, and includes the saved
-file exactly as if you had picked it with Ctrl+I — a **web page as text**, an **image as a
-picture**. Two lines go into the prompt, the address above the token:
+file exactly as if you had picked it with Ctrl+I — a **web page, plain text or JSON as
+text**, an **image as a picture**. Two lines go into the prompt, the address above the token:
 
 ```
 [](https://example.org/a/article)
@@ -814,6 +814,8 @@ is a web page, and saving it as a PNG would only produce an `@img` token no mode
 | It answers with | Saved as | Inserted as |
 |---|---|---|
 | `text/html`, `application/xhtml+xml` | `.html` | `@txt` — sent as text, markup and all |
+| `text/plain` | `.txt` | `@txt` |
+| `application/json` | `.json` | `@txt` |
 | `image/png` | `.png` | `@img` — sent as a picture |
 | `image/jpeg` | `.jpg` | `@img` |
 | `image/gif` | `.gif` | `@img` |
@@ -829,7 +831,7 @@ Details:
   name is cut. The same URL fetched twice is **one file** (same bytes, same name, nothing
   rewritten); a different page that wants a taken name becomes `article-2.html`, exactly as an
   [include copy](#includes-that-outlive-the-session) does.
-- **A page is saved as UTF-8**, decoded first with the charset the response declares — an
+- **A page — or plain text, or JSON — is saved as UTF-8**, decoded first with the charset the response declares — an
   included text file is *read back* as UTF-8, so a page served as `windows-1251` would
   otherwise reach the model as mojibake. An image is saved byte for byte: those bytes are what
   gets sent.
@@ -1251,7 +1253,7 @@ from, read back off that first line.
 
 **The document can be any kind JRock can include**, and the include kind comes from the
 extension: `.pdf` as page images, `.docx` and `.rtf` converted to Markdown text, `.txt` `.md`
-`.csv` `.html` `.log` `.java` as they are, and `.png` `.jpg` `.jpeg` `.gif` `.webp` as pictures.
+`.csv` `.json` `.html` `.log` `.java` as they are, and `.png` `.jpg` `.jpeg` `.gif` `.webp` as pictures.
 Which is what makes this one worth [installing as an
 agent](#windows-agents-one-automation-per-folder): that right-click entry hands over whatever
 file you clicked, of any type, so a scan, a Word document and a photograph of a page all
@@ -1629,11 +1631,18 @@ the way to `main(String[])`, and every Java program started from Explorer shares
 
 Nothing tries to guess what those `?` stood for: the characters were thrown away rather than
 encoded, and a name pieced together from whatever the folder contains would be a guess wearing
-the shape of a path. An unreadable path is reported as unreadable. Two ways round it, both
-yours: right-click **the folder** and pick the file in the chooser (a chooser never goes through
-a command line — include a file that way and it works whatever its name looks like), or turn on
-**Use Unicode UTF-8 for worldwide language support** in Windows' Region settings, Administrative
-tab, which makes the code page UTF-8 and lets those arguments through untouched.
+the shape of a path. An unreadable path is reported as unreadable, and the message names both
+ways round it, both yours:
+
+- **The lasting fix: turn on Unicode UTF-8.** Region settings → **Administrative** tab →
+  **Change system locale…** → tick **Beta: Use Unicode UTF-8 for worldwide language support**,
+  then restart Windows. The system code page becomes UTF-8, the arguments come through
+  untouched, and right-clicking a file with a Cyrillic name works like any other — tried, and
+  it helped. It is a machine-wide setting, so an old non-Unicode program may show its own text
+  differently afterwards.
+- **Without changing anything:** right-click **the folder** and pick the file in the chooser (a
+  chooser never goes through a command line — include a file that way and it works whatever its
+  name looks like).
 
 ## Per-folder window title & icon
 
@@ -1762,11 +1771,13 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   files* leaves the token alone.
 - **`JRockFetchUrlTest`** starts a **web server of its own** on loopback — a real one, since
   what the feature turns on is the response — and drives **Fetch URL...** from the prompt's
-  context menu against three of its paths. A page served as `ISO-8859-1` has to land in
-  `JRock/urls/article.html` **re-encoded as UTF-8**, with `[](<url>)` above an `@txt` token; a
-  PNG has to land as `cat.png` **byte for byte**, with an `@img` token and its 120 × 80 read out
-  of the saved file's header; and `application/json` has to be **refused by name**, in the log
-  and in a dialog, leaving no `JRock/urls/` at all and the prompt untouched.
+  context menu against five of its paths. A page served as `ISO-8859-1` has to land in
+  `JRock/urls/article.html` **re-encoded as UTF-8**, with `[](<url>)` above an `@txt` token;
+  `application/json` has to land as `notes.json` and `text/plain` in `windows-1251` as
+  `readme.txt`, both UTF-8 and both `@txt`; a PNG has to land as `cat.png` **byte for byte**,
+  with an `@img` token and its 120 × 80 read out of the saved file's header; and
+  `application/pdf` has to be **refused by name**, in the log and in a dialog, leaving no
+  `JRock/urls/` at all and the prompt untouched.
 - **`JRockIncludeCopyTest`** includes a file through **Include with copy...** and checks
   where the include then points: the copy line comes *before* the include it was made for, the
   copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what

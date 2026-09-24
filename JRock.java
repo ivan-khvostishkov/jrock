@@ -890,7 +890,11 @@ public class JRock {
     // user's: start the agent on the FOLDER and pick the file in the chooser, or turn on
     // "Use Unicode UTF-8 for worldwide language support" (Windows Region settings,
     // Administrative tab), which makes the code page UTF-8 and lets those arguments
-    // through untouched.
+    // through untouched. Tried, and it does: which is why every note about such a path
+    // names it, in the words the dialog uses.
+    private static final String UTF8_HINT = " - if it shows '?' where letters were, turn on"
+            + " Region settings > Administrative > Change system locale... > \"Beta: Use"
+            + " Unicode UTF-8 for worldwide language support\" and restart Windows";
 
     // Applies --working-dir, which roots JRock's own files - JRock/, its settings, its
     // key, its log - in a named folder instead of the one the process happens to have
@@ -921,7 +925,7 @@ public class JRock {
             candidate = Paths.get(value).toAbsolutePath().normalize();
         } catch (java.nio.file.InvalidPathException bad) {
             workingDirNote = "(" + WORKING_DIR_FLAG + " " + value
-                    + " is not a path this system can read - ignored)";
+                    + " is not a path this system can read - ignored" + UTF8_HINT + ")";
             return;
         }
         if (!Files.isDirectory(candidate)) {
@@ -950,7 +954,7 @@ public class JRock {
             candidate = Paths.get(value).toAbsolutePath().normalize();
         } catch (java.nio.file.InvalidPathException bad) {
             promptsDirNote = value + " (not a path this system can read - "
-                    + "using the working directory)";
+                    + "using the working directory" + UTF8_HINT + ")";
             return;
         }
         if (!Files.isDirectory(candidate)) {
@@ -1779,7 +1783,8 @@ public class JRock {
             } else {
                 initialPrompt = PROMPT;
                 promptSource = "default (could not read "
-                        + (argPath == null ? sourceArg : argPath.toString()) + ")";
+                        + (argPath == null ? sourceArg + UTF8_HINT : argPath.toString())
+                        + ")";
             }
         } else {
             String fromPersist = readFileQuietly(promptFile());
@@ -4801,8 +4806,8 @@ public class JRock {
     }
 
     // What "text file" means in the Load prompt and Include dialogs: .txt plus the
-    // plain-text formats people actually reach for. A .csv, .html or .java file is
-    // text like any other, and having to rename it to .txt to load or include it was
+    // plain-text formats people actually reach for. A .csv, .json, .html or .java file
+    // is text like any other, and having to rename it to .txt to load or include it was
     // pure friction. (Any file still has to pass the looksBinary check on load.)
     //
     // .rtf is in the list because an RTF file is text too - its markup is ASCII, which
@@ -4810,9 +4815,10 @@ public class JRock {
     // stands, and answer in it. "as is" is what separates this from the include
     // dialog's other offer for the same file: "RTF as Markdown text", which converts it
     // and sends the Markdown instead.
-    private static final String[] TEXT_EXTENSIONS = { "txt", "csv", "html", "java", "rtf" };
+    private static final String[] TEXT_EXTENSIONS =
+            { "txt", "csv", "json", "html", "java", "rtf" };
     private static final String TEXT_FILTER_LABEL =
-            "Text files as is (*.txt, *.csv, *.html, *.java, *.rtf)";
+            "Text files as is (*.txt, *.csv, *.json, *.html, *.java, *.rtf)";
 
     // The image formats ImageHeader can read a size out of, which is also the set the
     // DOCX export can place: named once, because two filters in the include dialog
@@ -5524,8 +5530,9 @@ public class JRock {
     // What decides which kind it is - and the extension the file is saved under - is
     // the response's own Content-Type, not the URL: a link ending in ".png" that
     // answers with HTML is a web page, and saving it as a PNG would produce an @img
-    // token no model can read. A media type that is neither HTML nor one of the image
-    // types JRock sends is refused, named, and nothing is written or inserted.
+    // token no model can read. A media type that is neither text (HTML, plain, JSON) nor
+    // one of the image types JRock sends is refused, named, and nothing is written or
+    // inserted.
 
     // Accepted media type -> the extension the download is saved under.
     //
@@ -5534,13 +5541,16 @@ public class JRock {
     // saved as ".html", which the include dialog already offers as text - so from the
     // request's point of view the model is simply reading a text file, markup and all.
     // XHTML is in the list because it is a web page by any other name; it, too, is
-    // saved and sent as HTML.
+    // saved and sent as HTML. Plain text and JSON are text the same way, saved as the
+    // ".txt" and ".json" the include dialog offers too, and decoded like a page.
     private static final java.util.Map<String, String> URL_EXTENSIONS = urlExtensions();
 
     private static java.util.Map<String, String> urlExtensions() {
         java.util.Map<String, String> types = new java.util.LinkedHashMap<>();
         types.put("text/html", "html");
         types.put("application/xhtml+xml", "html");
+        types.put("text/plain", "txt");
+        types.put("application/json", "json");
         types.put("image/png", "png");
         types.put("image/jpeg", "jpg");
         types.put("image/gif", "gif");
@@ -5585,8 +5595,9 @@ public class JRock {
         javax.swing.JLabel what = new javax.swing.JLabel(
                 "<html><body style='width:" + wrapAt + "px'>"
                 + "A web page comes in as text (@txt), a picture as a picture (@img) - "
-                + "whichever the address itself answers with. HTML, PNG, JPEG, GIF and "
-                + "WEBP are accepted, and the file is saved under JRock/urls/." + cors
+                + "whichever the address itself answers with. HTML, plain text, JSON, "
+                + "PNG, JPEG, GIF and WEBP are accepted, and the file is saved under "
+                + "JRock/urls/." + cors
                 + "</body></html>");
 
         javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
@@ -5699,8 +5710,9 @@ public class JRock {
         if (ext == null) {
             urlRefused(frame, log, "Unsupported media type",
                     "The URL answered with " + (mime.isEmpty() ? "no media type" : mime)
-                    + ", which JRock cannot include. Only HTML pages and PNG, JPEG, GIF "
-                    + "or WEBP images can be inserted - nothing was saved.");
+                    + ", which JRock cannot include. Only HTML pages, plain text, JSON "
+                    + "and PNG, JPEG, GIF or WEBP images can be inserted - nothing was "
+                    + "saved.");
             return;
         }
         boolean isImage = mime.startsWith("image/");

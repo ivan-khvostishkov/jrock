@@ -97,7 +97,7 @@ public final class JRockTranslateToEnglish {
     // include itself reads any text file, and a translation is exactly what a Markdown
     // note or a log of foreign-language messages might want.
     private static final String[] TEXT_EXTENSIONS =
-            { "txt", "md", "csv", "html", "htm", "log", "java" };
+            { "txt", "md", "csv", "json", "html", "htm", "log", "java" };
     private static final String[] IMAGE_EXTENSIONS =
             { "png", "jpg", "jpeg", "gif", "webp" };
 
@@ -274,9 +274,11 @@ public final class JRockTranslateToEnglish {
         } catch (java.nio.file.InvalidPathException bad) {
             throw new Stop("Windows could not put this file name on the command line - a "
                     + "character in it has no place in the system code page, so it "
-                    + "arrived as '?':\n\n    " + value + "\n\nRight-click the FOLDER "
-                    + "instead and pick the file in the chooser, which never goes "
-                    + "through a command line.");
+                    + "arrived as '?':\n\n    " + value + "\n\nTo fix it for good: Region "
+                    + "settings > Administrative > Change system locale... > tick \"Beta: "
+                    + "Use Unicode UTF-8 for worldwide language support\" and restart "
+                    + "Windows.\n\nOr right-click the FOLDER instead and pick the file in "
+                    + "the chooser, which never goes through a command line.");
         }
     }
 
