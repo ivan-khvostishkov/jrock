@@ -1519,8 +1519,8 @@ menu)...**: the same idea for the `.java`
 entry with two commands** for the automation you pick:
 
 - **inside or on a folder** — the agent runs with **no file**, so it asks which one to work on.
-  Its chooser opens in **the folder you clicked**, handed over as `--start-dir "%V"` (`%V` and
-  not `%1`, because `%1` is empty for a right-click on the background of an open folder).
+  Its chooser opens in **the folder Explorer ran it from**, which is the folder you clicked — no
+  flag carries that, the process working directory already is it.
 - **on a file of any type, in any folder** — the agent gets **that file's full path** as its
   single argument, and works on it.
 
@@ -1531,11 +1531,11 @@ of what an agent needs. An agent belongs to the folder it was installed from —
 model, its images DPI, its Bedrock key, all in that folder's
 [`JRock/jrock-config.txt`](#settings-files) — and may be run on a document anywhere on the disk.
 
-`--start-dir` is the other half of that split, and it is the **agent's** flag, not JRock's: the
-settings folder is the one folder the document is certainly not in, so a chooser that opened
-there was a chooser that opened in the wrong place. An agent reads the flag and keeps it — it is
-not passed on, since JRock reads an unknown bare word as a prompt file to load (JRock accepts it
-and ignores it anyway, so an older agent that forwards everything still works).
+Which is why the samples open their chooser in the folder they were **started** in and not in
+the working directory: the settings folder is the one folder the document is certainly not in.
+They read it once at startup, before JRock's `--working-dir` handling moves `user.dir`, and no
+flag is involved — an earlier attempt to hand the folder over as `--start-dir "%V"` did not
+work, and the command line was the wrong place to look for something the process already knew.
 
 Which is why an entry is per **(agent, folder)** pair, not per agent. Install the same
 automation from two folders and you get two entries, with two sets of settings:

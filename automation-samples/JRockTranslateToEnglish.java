@@ -4,12 +4,11 @@
 // the class path:
 //
 //     java -cp jrock.jar JRockTranslateToEnglish.java [--working-dir <dir>]
-//                                                     [--prompts-dir <dir>]
-//                                                     [--start-dir <dir>] [document]
+//                                                     [--prompts-dir <dir>] [document]
 //
-// Without the document it asks for one in a file chooser, opened in --start-dir if there
-// is one and the working directory otherwise. The prompt it needs it finds beside itself,
-// in this directory.
+// Without the document it asks for one in a file chooser, opened in the folder this was
+// started in - which, from the right-click menu, is the folder that was clicked. The
+// prompt it needs it finds beside itself, in this directory.
 //
 // COPY jrock.jar HERE FIRST, take the flags as JRock's own, and expect a typed static
 // call rather than reflection: all of that is JRockDocInventory.java's opening comment,
@@ -70,12 +69,18 @@ public final class JRockTranslateToEnglish {
     private static final String WORKING_DIR_FLAG = "--working-dir";
     private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
 
-    // This automation's own flag, and the one flag it does not pass on: the folder that
-    // was right-clicked, which the file chooser opens in. JRock's "Install agent" puts it
-    // in the folder verbs' command (see buildAgentLaunch there); JRock itself has no use
-    // for it - its files are rooted by --working-dir - and reading it here is what makes
-    // the chooser open where the user just was.
-    private static final String START_DIR_FLAG = "--start-dir";
+    // The folder this process was started in, which is where the file chooser opens.
+    //
+    // Not the working directory, and that is the whole point: --working-dir names the
+    // folder whose model, DPI and key this run uses, one folder set up once and usually
+    // nowhere near the document, so a chooser opening there opens in the one folder the
+    // answer is certainly not in. Explorer runs a right-click command IN the folder it
+    // was clicked in, so this is that folder - no flag needed, and nothing to pass on.
+    //
+    // Read once, here, and held: JRock's own --working-dir handling sets the user.dir
+    // property, and Paths.get("").toAbsolutePath() reads that property every time it is
+    // called, so asking later would answer with the settings folder instead.
+    private static final Path STARTED_IN = Paths.get("").toAbsolutePath().normalize();
 
     // Starting a JVM's worth of Swing and fetching the model list, on a cold machine.
     private static final long READY_TIMEOUT_MS = 120_000;
@@ -205,20 +210,14 @@ public final class JRockTranslateToEnglish {
     // chooser opens in it.
     private static final class Args {
         private final java.util.List<String> forJRock = new java.util.ArrayList<>();
-        private Path workingDir = Paths.get("").toAbsolutePath().normalize();
-        private Path startDir = null;
+        private Path workingDir = STARTED_IN;
         private Path document = null;
 
-        // Where the file chooser opens: the folder that was right-clicked when there was
-        // one, and the settings folder otherwise.
-        //
-        // Rarely the same place, and that is the point. --working-dir names the folder
-        // whose model, DPI and key this run uses - one folder, set up once, usually
-        // nowhere near the document - while --start-dir is where the user just was. A
-        // chooser opened in the settings folder is a chooser opened in the one folder the
-        // document is certainly not in.
+        // Where the file chooser opens: the folder this process was started in (see
+        // STARTED_IN), falling back to the working directory if that folder has since
+        // gone - a chooser must open somewhere.
         private Path chooserStart() {
-            return (startDir != null && Files.isDirectory(startDir)) ? startDir : workingDir;
+            return Files.isDirectory(STARTED_IN) ? STARTED_IN : workingDir;
         }
     }
 
@@ -232,28 +231,21 @@ public final class JRockTranslateToEnglish {
             String arg = args[i];
             if (arg == null || arg.isBlank()) continue;
             String flag = flagOf(arg);
-            // --start-dir is this automation's own, so it is read and NOT passed on:
-            // JRock would take an unknown flag for the prompt file to load.
-            boolean mine = flag.equals(START_DIR_FLAG);
-            if (mine || flag.equals(WORKING_DIR_FLAG) || flag.equals(PROMPTS_DIR_FLAG)) {
+            if (flag.equals(WORKING_DIR_FLAG) || flag.equals(PROMPTS_DIR_FLAG)) {
                 String value = valueOf(arg);
                 if (value == null) {
                     if (i + 1 >= args.length) {
                         throw new Stop(flag + " needs a directory after it.");
                     }
                     value = args[++i];
-                    if (!mine) {
-                        parsed.forJRock.add(flag);
-                        parsed.forJRock.add(value);
-                    }
-                } else if (!mine) {
+                    parsed.forJRock.add(flag);
+                    parsed.forJRock.add(value);
+                } else {
                     parsed.forJRock.add(arg);   // one word, passed on as one word
                 }
                 if (flag.equals(WORKING_DIR_FLAG)) {
                     Path dir = dirOrNull(value);
                     if (dir != null) parsed.workingDir = dir;
-                } else if (mine) {
-                    parsed.startDir = dirOrNull(value);
                 }
             } else if (arg.startsWith("-")) {
                 parsed.forJRock.add(arg);
@@ -480,8 +472,9 @@ public final class JRockTranslateToEnglish {
     // The document, chosen in a file chooser with one filter and no "All files": one
     // filter because the kind is decided by the extension anyway, and no "All files"
     // because a file with no readable extension would only reach includeKind's stop. It
-    // opens where Args.chooserStart says - the folder that was right-clicked, or the
-    // settings folder when nothing was. Null when the chooser was cancelled.
+    // opens where Args.chooserStart says - the folder this process was started in, which
+    // from the right-click menu is the folder that was clicked. Null when the chooser was
+    // cancelled.
     private static Path chooseDocument(Path startIn) {
         Path[] chosen = { null };
         onEdt(() -> {

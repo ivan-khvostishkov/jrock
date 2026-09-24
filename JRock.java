@@ -819,26 +819,12 @@ public class JRock {
         http();
         // Command line:
         //   [--working-dir <dir>] [--prompts-dir <dir>] [<initial-prompt-file>]
-        // (--start-dir <dir> is an agent's flag and is accepted here only to be
-        // ignored - see START_DIR_FLAG.)
         String sourceArg = parseArgs(args);
         SwingUtilities.invokeLater(() -> createAndShowGui(sourceArg));
     }
 
     private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
     private static final String WORKING_DIR_FLAG = "--working-dir";
-
-    // An agent's flag, not JRock's: the folder the right-click was made in, which an
-    // agent opens its own file chooser in - the folder you clicked, rather than the
-    // settings folder --working-dir names (see buildAgentLaunch, and the samples that
-    // read it). JRock has nothing to do with it: its own files are rooted by
-    // --working-dir and nothing else.
-    //
-    // Known here all the same, so it can be ignored properly. An agent passes on every
-    // flag it does not recognize - deliberately, so a launcher that grew one does not
-    // have to wait for every agent to be edited - so this flag can arrive here, and a
-    // flag taken for a bare argument would be read as a prompt file to load.
-    private static final String START_DIR_FLAG = "--start-dir";
 
     // Reads the command line, applying the directory flags as a side effect and
     // returning the initial-prompt file argument (null when none was given). Flags may
@@ -870,10 +856,6 @@ public class JRock {
             // Already applied in the pass above, value and all.
             if (arg.equals(WORKING_DIR_FLAG)) { i++; continue; }
             if (arg.startsWith(WORKING_DIR_FLAG + "=")) continue;
-
-            // Somebody else's flag, value and all (see START_DIR_FLAG).
-            if (arg.equals(START_DIR_FLAG)) { i++; continue; }
-            if (arg.startsWith(START_DIR_FLAG + "=")) continue;
 
             if (arg.startsWith(PROMPTS_DIR_FLAG + "=")) {
                 setPromptsDir(arg.substring(PROMPTS_DIR_FLAG.length() + 1).trim());
@@ -4330,8 +4312,8 @@ public class JRock {
                         + "  \"" + label + "\"\n"
                         + "for " + agent.getFileName() + ", in two places:\n\n"
                         + "  \u2022 inside or on a folder - the agent runs with no "
-                        + "file, so it asks\n    which one to work on, and asks in the "
-                        + "folder you clicked.\n"
+                        + "file, so it asks\n    which one to work on, starting in the "
+                        + "folder Explorer ran it from.\n"
                         + "  \u2022 on a file of any type, in any folder - the agent "
                         + "works on THAT\n    file, still using the settings of "
                         + workingDir + ".\n\n"
@@ -4440,16 +4422,14 @@ public class JRock {
     // then the flags that pin the folder whose settings it is to use, and last what was
     // clicked. No cmd, no console.
     //
-    // The two verbs hand over different things, because Explorer clicked on different
-    // things. The file verb passes the file (%1), which is the document to work on. The
-    // folder verb passes the folder (%V) under --start-dir, which is not: an agent with
-    // no document opens a file chooser, and the folder you right-clicked is the one
-    // thing known about where that document might be. Without it the chooser opened in
-    // the settings folder named by --working-dir, which is the one folder the answer is
-    // certainly not in.
-    //
-    // %V and not %1 for the folder: %1 is empty for a right-click on the background of
-    // an open folder, which is one of the two places the folder verb is installed.
+    // The file verb passes what was clicked (%1); the folder verb passes nothing, and
+    // an agent started with no document asks for one in a file chooser. Where that
+    // chooser opens is the agent's business and needs no flag: Explorer starts a
+    // right-click command IN the folder it was clicked in, so the process working
+    // directory already is that folder - which is what the samples open in. (An earlier
+    // attempt passed the folder as --start-dir "%V" and did not work; %V was not the
+    // folder the chooser wanted, and the command line was the wrong place to look for
+    // something the process already knows.)
     private static String buildAgentLaunch(String javaw, Path jar, Path agent,
                                            String fileArg) {
         StringBuilder cmd = new StringBuilder();
@@ -4457,11 +4437,7 @@ public class JRock {
         cmd.append('"').append(agent).append('"');
         cmd.append(' ').append(WORKING_DIR_FLAG).append(' ').append(quotedDir(workingDir));
         cmd.append(ctxPromptsDirArg());
-        if (fileArg != null) {
-            cmd.append(' ').append(fileArg);
-        } else {
-            cmd.append(' ').append(START_DIR_FLAG).append(" \"%V\"");
-        }
+        if (fileArg != null) cmd.append(' ').append(fileArg);
         return cmd.toString();
     }
 
