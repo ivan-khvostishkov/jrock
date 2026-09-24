@@ -514,7 +514,11 @@ from inside the running application, and different for every way of launching it
   [agent](#windows-agents-one-automation-per-folder) run on one model, and another folder's run
   on a different one — or at a different DPI. An `images-dpi$` that isn't one of the values the
   Configure dropdown offers is reported in the startup log and ignored, since that dropdown
-  could only show it as something else and then write that back.
+  could only show it as something else and then write that back. It also holds
+  `narrate-device$` and `record-device$`, the one speaker [Narrate](#narrate-windows) plays on
+  and the one microphone [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from.
+  Each is written only once one is set, and there is no default for either. On Windows,
+  `record-transcribe$` (`true`/`false`) says whether a recording is transcribed.
 
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser both
@@ -1338,6 +1342,12 @@ that you cannot.
   `JRock/jrock-config.txt` too — as is the **Images DPI** below, which is what makes one
   folder's [agent](#windows-agents-one-automation-per-folder) a different agent from the same
   automation installed from another folder.
+- **Autobackup log** — on a line of its own, right under the Model (it shared the DPI row until 2.1.0, which
+  made two unrelated settings read as one), and **on by default**: after five
+  minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
+  `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
+  long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
+  only when it is **off**, so nobody counts on a backup that isn't being taken.
 - **Images DPI** — how fine a picture JRock keeps, per inch of page: 72 / 96 (screen), **150**
   (documents, the default), 203 (fax/receipt), 300 (print). The image is what the model actually
   sees, so this is a real trade-off — too low and small print is unreadable, too high and you pay
@@ -1348,12 +1358,12 @@ that you cannot.
   against A4 less 2 cm margins. Only reported at startup when it isn't the default; every PDF
   conversion logs its full Ghostscript command line regardless, and every downscale says what it
   did.
-- **Autobackup log** — on a line of its own (it shared the DPI row until 2.1.0, which made
-  two unrelated settings read as one), and **on by default**: after five
-  minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
-  `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
-  long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
-  only when it is **off**, so nobody counts on a backup that isn't being taken.
+- **Narrate on** and **Record from** (Windows / desktop) — the one speaker
+  [Narrate](#narrate-windows) plays on and the one microphone
+  [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a
+  dropdown, empty until the feature lists the devices, and never fall back to the default.
+- **Transcribe recordings into the prompt** (Windows) — under Record from: a recording is typed
+  into the prompt by Windows speech recognition instead of being included as `@audio`.
 
 Every row above has a **right-click — or, on a touch screen, a long-press — menu** with Copy,
 Paste and Select all (the model's is on the combo's editor, which is what a tap lands on). On a
@@ -1404,6 +1414,92 @@ Opens the native print dialog for the log. On Windows you can pick "Microsoft Pr
 to save the transcript to a PDF, or print to a physical printer. If text is selected in the
 log pane, only the selection is printed (with its colors), so a single answer can be printed
 without the surrounding transcript.
+
+## Narrate (Windows)
+
+Select text in the log, right-click, **Narrate selected text**: Windows reads it aloud with its
+own voices. While it reads, the same item says **Stop narrating** and stops it mid-word. The log
+says what is happening: how many characters, which voice, and when it finishes.
+
+- **The speaker is yours to set, and nobody else's.** Windows moves its default output to
+  whatever was plugged in last, so JRock does not use that default. A first run has no device set.
+  Press Narrate and nothing is read: a message asks you to set up the output device, and the
+  devices are listed into **Configure → Narrate on:**. That field is free text over a dropdown,
+  like the model. Pick one, press OK, and it is kept as `narrate-device$` in
+  `JRock/jrock-config.txt`. To list the devices again, empty the field and press Narrate.
+- **A device that is not there is a failure, and no fallback.** If the speaker is disconnected
+  (a Bluetooth speaker switched off, headphones unplugged), Narrate says so in the log and reads
+  nothing. It does not switch to another device. The same happens if the device disappears during
+  a reading: it is checked every two seconds.
+- **SAPI renders, Java plays.** `System.Speech` can only play on the Windows default, so it
+  renders 22.05 kHz 16-bit mono PCM into a pipe instead, and JRock plays that with Java Sound on
+  the chosen device.
+- **Each narration is saved** as `JRock/wav/narration.wav`, overwritten every time, for when
+  something sounds wrong. A stopped narration is saved as far as it played.
+
+- **SAPI, through PowerShell, not JNI.** The voice is SAPI 5, reached through `System.Speech`,
+  the .NET wrapper that comes with PowerShell on every Windows. JNI would mean a native DLL built
+  for each architecture and shipped beside the jar, where one short script makes the same call.
+  The PowerShell process lasts exactly as long as the reading, so stopping it is ending the process.
+- **The text goes over as a UTF-8 file**, not as an argument, so a command line and its code
+  page (see [**Names Windows cannot put on a command
+  line**](#windows-agents-one-automation-per-folder)) cannot turn Cyrillic into `?`.
+- **The Markdown is read, not the markup.** Headings, `**bold**`, `` `code` ``, list and quote
+  markers, table pipes and rules are dropped, links keep their text, and `@txt`/`@img`/`@audio`
+  tokens and picture references are left out entirely.
+- **The voice follows the text's script.** Most letters in Cyrillic asks for an installed voice
+  whose language is `ru`, and the same goes for Greek, Chinese, Japanese, Korean, Arabic, Hebrew
+  and Thai. Latin letters get Windows' default voice. When no installed voice speaks that
+  language, the log says so and the default voice reads it. A voice comes with the language's
+  speech pack (**Settings → Time & language → Language**, or **Speech → Add voices**), but SAPI
+  sees only the classic *Desktop* voices, such as Microsoft Irina Desktop (`ru-RU`). A newer
+  voice that Settings lists may not be one of them.
+
+### Recording from the microphone (Ctrl+Space)
+
+The other direction. **Hold Ctrl+Space** in the JRock window and the log says the recording has
+started. **Let go of Ctrl** (Space may come up first) and the log says the recording is done. The
+recording is saved as `JRock/wav/recording-<date>-<time>.wav` and included as `@audio` at the
+prompt cursor, as if you had picked that file with Ctrl+I. It works on any desktop, not just
+Windows, but not in the browser.
+
+- **The microphone is set like the speaker.** A first run has none set. Ctrl+Space then records
+  nothing, asks you to set up the microphone, and lists the microphones into **Configure → Record
+  from:**. The choice is kept as `record-device$`. Empty the field and press Ctrl+Space to list
+  the microphones again. A disconnected microphone makes the recording fail with a line in the
+  log, and there is never a fallback to the Windows default ("Primary Sound Capture Driver" is
+  not offered).
+- **The log says when the microphone comes and goes**: "Microphone connected: …" and
+  "Microphone disconnected: …". Java Sound has no hot-plug event, so JRock looks every two
+  seconds. The Windows driver refreshes its own device list every five, so a change shows up
+  within about seven seconds. The startup report says whether the microphone is connected.
+- **16 kHz, 16-bit mono** when the microphone offers it, which is plenty for speech. Otherwise
+  44.1 or 48 kHz. Leaving the window while recording ends the recording, because a Ctrl
+  released in another window is never seen.
+- **Recording continues for 0.3 s after you let go of Ctrl.** The key usually comes up while the
+  last word is still being said, and without the extra time that word is cut off. A recognizer
+  then hears half a word as a different one.
+- **A new file for every recording**, named for the moment it was made. An include is checked
+  against its file at every send, including every earlier turn that History sends again. If one
+  file were overwritten, every earlier `@audio` token would name a file that has changed since,
+  and the conversation could not go on.
+- **Transcribe recordings into the prompt** (Windows; the checkbox under **Record from:**, kept
+  as `record-transcribe$`). With it ticked, the recording is not included. Windows speech
+  recognition (SAPI dictation, the same `System.Speech` Narrate speaks with) turns it into
+  text, and the text is typed at the prompt cursor. The audio is then one file,
+  `JRock/wav/transcribe.wav`, overwritten every time, since no token ever names it. The
+  recognizer is always the **en-GB** one, whatever Windows' default is, and the log names it.
+  System.Speech sees only the classic *Desktop* recognizers (English and a few others), so
+  Russian speech, for one, is not recognized. **Use a proper microphone.** A Bluetooth
+  headset's hands-free mic sends 8 kHz telephone audio with nothing above 4 kHz, and the
+  recognizer turns that into gibberish. "Today is a good day, do you agree with me" came out
+  as "A DMZ a W Greenwood". A good microphone is necessary, but it is not enough. The sample
+  rate is not the limit: Windows' own voice is recognized word for word at anything from 8 to
+  48 kHz. The limit is dictation that has not been trained on your voice, and it can still
+  mishear an accent. When it does, leave the box unticked and let the model hear the recording.
+  Voxtral transcribes it if the `@audio` token comes first and the text after it asks for
+  exactly that, e.g. *"Transcribe this audio verbatim in its original language. Output only the
+  transcript."*
 
 ## Markdown export (RTF and DOCX)
 
@@ -1507,7 +1603,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   selected text...*). A partial export doesn't count as saving the log, so Clear log still
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
-  greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)).
+  greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)). On
+  **Windows**, *Narrate selected text* reads the selection aloud, and is *Stop narrating* while
+  it does (see [**Narrate**](#narrate-windows)).
 - **Prompt area** — Include text, image, audio, PDF, RTF or DOCX file... (multi-select), *Include
   with copy...* (the same dialog, keeping a copy of each file under `JRock/includes/` — see
   [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
@@ -1673,6 +1771,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+I | Include text/image/audio files, a PDF, an RTF or a DOCX (multi-select) |
 | Ctrl+Shift+I | The same, keeping a copy of each file under `JRock/includes/` |
 | Ctrl+U | Fetch a URL and include what it answers with |
+| Ctrl+Space (held) | Record from the microphone; let go of Ctrl to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle History (send the prior dialog too) |
 | Ctrl+M | Move & resize the window |
@@ -1820,6 +1919,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockReplyTextTest`** feeds chat-completion JSON to the reply parser and checks non-ASCII
   text comes back intact — as characters, as `\uXXXX` escapes (a server may use either, and an
   emoji arrives as a *pair* of them), and mixed. No window.
+- **`JRockNarrationTextTest`** checks what [**Narrate selected text**](#narrate-windows) would
+  hand the voice: headings, emphasis, list and quote markers, table pipes and include tokens
+  gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
+  English words in it, none for the reverse, `ja` rather than `zh` once there is kana. No
+  window, and no speech.
 - **`JRockImageSizeTest`** checks the image-header reader: PNG, GIF and JPEG against what the
   JDK's own encoder wrote, a JPEG whose size sits behind a 60 KB metadata segment, all three
   WEBP encodings from hand-built headers, and junk or truncated files, which must report
