@@ -388,11 +388,18 @@ Built-in cards include:
   timestamped (e.g. `[OPERATOR'S ASSISTANT] · Monday, 14 September 2026, 10:01:34`) so the
   time order of stateless turns is visible.
 - **Enter** — the checkbox beside the Send button, **off when JRock starts and never
-  remembered**: when it is on, plain Enter sends as well as Ctrl+Enter, and Shift+Enter is a
-  new line. It earns its place twice over. Ticked, it is the fast way to talk; unticked, it
-  answers in the one place you are already looking the question every new window raises —
-  *what does Enter do here* — and the answer is "a new line, nothing else". It starts off, and
-  stays off next time, so that answer never depends on a window that has already closed.
+  remembered**: when it is on, plain Enter sends as well as Ctrl+Enter. It earns its place
+  twice over. Ticked, it is the fast way to talk; unticked, it answers in the one place you are
+  already looking the question every new window raises — *what does Enter do here* — and the
+  answer is "a new line, nothing else". It starts off, and stays off next time, so that answer
+  never depends on a window that has already closed.
+  **Shift+Enter is a new line whichever way the checkbox is set**, so one key always types one
+  and never sends — which is what makes the checkbox safe to tick. It had to be bound
+  explicitly: a Swing text area has no binding for Shift+Enter at all and Windows sends no
+  typed character for it either, so until 2.1.0 it did nothing whatsoever. The newline is
+  inserted directly rather than delegated to the editor kit's action, which is a look-up that
+  can come back empty — and a key that silently does nothing is the one thing this checkbox
+  exists to rule out.
 - **Stats** per response: input/output text symbols, and input/output tokens (from the API's
   `usage`), followed by two lines of **rough cost** — a rule of thumb and this exchange priced
   by it:
@@ -787,6 +794,15 @@ picture**. Two lines go into the prompt, the address above the token:
 
 The link says where the text or the picture came from, in a form the model reads as a
 reference belonging to the content below it; the token is what is actually sent.
+
+**The dialog is sized against the screen.** A text field asks for room for its columns and an
+HTML label asks for room for its longest line, and both of those were written for a desktop
+window — so on a phone the dialog came out wider than the screen, which puts its **OK** button
+past the edge. The explanation now wraps to a width taken from the screen and the field asks for
+fewer columns in the browser, where the layout stretches it anyway. In the browser the URL row
+also carries a **Paste** button of its own, exactly like the [Bedrock API
+key](#configure-dialog-top-left-button) row: an address is pasted rather than typed, and a button
+is one tap that no browser gesture can take away.
 
 What decides which of the two it is — and the extension the file is saved under — is the
 **response's own `Content-Type`**, not the URL. A link ending in `.png` that answers with HTML
@@ -1327,7 +1343,8 @@ that you cannot.
   against A4 less 2 cm margins. Only reported at startup when it isn't the default; every PDF
   conversion logs its full Ghostscript command line regardless, and every downscale says what it
   did.
-- **Autobackup log** — on the same line as the DPI dropdown, and **on by default**: after five
+- **Autobackup log** — on a line of its own (it shared the DPI row until 2.1.0, which made
+  two unrelated settings read as one), and **on by default**: after five
   minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
   long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
@@ -1339,13 +1356,36 @@ phone there is no Ctrl+V, and *Select all* is in there because a field that alre
 region, a model or a path is a field whose contents are in the way of the one being pasted over
 it. The API key row is the exception, with Paste alone.
 
+The long press is timed **from the press and checked again on release**, not left to the timer
+alone. A `javax.swing.Timer` fires on the event queue, and a modal dialog runs that queue in a
+nested loop of its own — in the browser runtime the timer behind it may simply never come up,
+which is why the menu did nothing in exactly the two dialogs that needed it, this one and
+[Fetch URL](#fetching-a-url). Mouse events do arrive there (the field takes the tap and the
+keyboard appears), so the clock is read from them instead of trusted to fire. On the desktop
+nothing changes: a right-click is still a right-click.
+
 Applying re-runs the session init (working directory reported first, then models loaded,
 ending with `Ready.`). Changing the working directory reloads **both the log and the prompt**
 from the new folder, so nothing carries over from the old one. A folder with no prompt of its
 own keeps the one on screen and stores it there.
 
-The dialog also shows an **About** line with the version and a **JRock** link to the project
-on GitHub, a short description, keyboard shortcuts, and authorship.
+The dialog is titled **Configure JRock** and opens with two lines of its own: the version, with
+a **JRock** link to the project on GitHub and a **Help** button at the far end of the same line;
+then, below it, who wrote it — Ivan Khvostishkov, with assistance of Kiro, Claude and JetBrains
+IntelliJ IDEA.
+
+### Help (the button on the first line)
+
+What JRock is, where to write about it — **jrock@nosocial.net** — the whole **Shortcuts** list
+and the **Notes** on what every setting does and which file keeps it. All of it in one scrolling
+window that opens *on top of* Configure, so anything already typed into the form is still there
+when it closes.
+
+It was in the Configure dialog itself until 2.1.0, above and below the rows it describes: three
+screens of prose in front of someone who opened the dialog to change the model, and no easier to
+find for being in the way. The window is sized against the screen, like the Fetch URL dialog
+below, so on a phone it is a short window that scrolls rather than a tall one with its button
+off the bottom.
 
 ## Window move & resize (Ctrl+M)
 
@@ -1614,6 +1654,7 @@ of your own and it is named in the title just as on the desktop.
 | Shortcut | Action |
 |---|---|
 | Ctrl+Enter | Send (and plain Enter, with the **Enter** checkbox on) |
+| Shift+Enter | A new line in the prompt, always — whatever the **Enter** checkbox says |
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
