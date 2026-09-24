@@ -8595,38 +8595,18 @@ public class JRock {
         return ext.isEmpty() ? "wav" : ext;
     }
 
-    // The parts of one message in the order they are sent: every recording first, then
-    // everything else, each group otherwise left as it was.
-    //
-    // Not cosmetic. Voxtral's own examples put the audio chunks before the text chunk in
-    // every one of them, and a prompt built the other way round was answered as if no
-    // recording had been given at all - "please provide the audio", with the audio sitting
-    // in the message behind the question. The text keeps its own order, because a prompt's
-    // segments and the files between them only mean anything in the order they were
-    // written; a recording has no such place in a sentence.
-    private static java.util.List<Part> audioFirst(java.util.List<Part> parts) {
-        boolean any = false;
-        for (Part p : parts) {
-            if (p.audioFormat != null) {
-                any = true;
-                break;
-            }
-        }
-        if (!any) return parts;
-        java.util.List<Part> out = new ArrayList<>(parts.size());
-        for (Part p : parts) {
-            if (p.audioFormat != null) out.add(p);
-        }
-        for (Part p : parts) {
-            if (p.audioFormat == null) out.add(p);
-        }
-        return out;
-    }
-
     // Appends the REAL "content" value for one user turn: a JSON string when it's
     // a single plain-text part, otherwise an array of text/image_url/input_audio parts.
-    private static void appendRealContent(StringBuilder sb, java.util.List<Part> unordered) {
-        java.util.List<Part> parts = audioFirst(unordered);
+    //
+    // The order is the prompt's own, part for part, whatever the parts are. JRock does not
+    // sort them - not images before text, not a recording before the question it belongs to.
+    // Where the tokens sit in the prompt is the one place that order is decided, because it
+    // is the only place you can see it; a model that wants the recording first is a model
+    // you put the @audio token first for. (Voxtral is one: it reads a recording as the
+    // instruction rather than as something the instruction is about, so a question typed in
+    // front of it is answered as a question about nothing. Move the token, or leave the text
+    // out - that is a prompt, and prompts are yours.)
+    private static void appendRealContent(StringBuilder sb, java.util.List<Part> parts) {
         if (isSinglePlainText(parts)) {
             sb.append("\"").append(jsonEscape(parts.get(0).text)).append("\"");
             return;
@@ -8656,8 +8636,7 @@ public class JRock {
     // Appends the MASKED "content" value for one user turn, mirroring the real shape but
     // replacing content: an included text/image/recording -> "<txt|img|audio masked
     // <hash>>", ordinary prompt text -> "<input masked>".
-    private static void appendMaskedContent(StringBuilder sb, java.util.List<Part> unordered) {
-        java.util.List<Part> parts = audioFirst(unordered);
+    private static void appendMaskedContent(StringBuilder sb, java.util.List<Part> parts) {
         if (isSinglePlainText(parts)) {
             sb.append("\"<input masked>\"");
             return;
