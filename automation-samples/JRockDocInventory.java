@@ -337,39 +337,34 @@ public final class JRockDocInventory {
         return parsed;
     }
 
-    // A path as it was meant, not as the command line managed to spell it.
+    // The document argument as a path, or a stop saying why that text is not one.
     //
-    // Windows hands a process its arguments as ANSI text, so a path holding a character
-    // the system code page has no room for arrives with a literal '?' in place of it -
-    // and that is not a path at all: Paths.get throws "Illegal char <?>". Which is why a
-    // right-click on a file with a Cyrillic name in it used to stop this automation
-    // before it started, while the very same file picked in the chooser worked perfectly:
-    // a chooser is not a command line. JRock.automationResolvePath reads the folder to
-    // find the name that fits; a path with nothing wrong with it comes back untouched.
-    private static Path spelled(String value) {
-        return Paths.get(JRock.automationResolvePath(value)).toAbsolutePath().normalize();
-    }
-
-    // The document argument, or a stop saying why that text is not a path. Worth its own
-    // sentence: the file is what the run is about, and "Illegal char <?>" out of a
-    // stack trace says nothing about what to do next.
+    // Worth its own sentence rather than an InvalidPathException out of a stack trace,
+    // because the reason is nothing to do with this automation: on Windows the arguments
+    // reaching main are decoded with the system ANSI code page, so a path holding a
+    // character that code page has no room for - a Cyrillic name on a Western install -
+    // arrives with a literal '?' in place of it, and '?' is illegal in a path. Nobody
+    // can put those characters back; the chooser is the way round it, and the message
+    // says so.
     private static Path documentPath(String value) {
         try {
-            return spelled(value);
+            return Paths.get(value).toAbsolutePath().normalize();
         } catch (java.nio.file.InvalidPathException bad) {
-            throw new Stop("Windows could not put this path on the command line, and the "
-                    + "folder it names does not say which file was meant:\n\n    " + value
-                    + "\n\nStart the automation without a file and pick it in the "
-                    + "chooser - a chooser is not a command line.");
+            throw new Stop("Windows could not put this file name on the command line - a "
+                    + "character in it has no place in the system code page, so it "
+                    + "arrived as '?':\n\n    " + value + "\n\nRight-click the FOLDER "
+                    + "instead and pick the file in the chooser, which never goes "
+                    + "through a command line.");
         }
     }
 
-    // A directory argument, or null when that text is no path at all. Null rather than a
-    // stop: a flag whose folder cannot be read is a worse chooser, not a reason to give
-    // up on the document (and JRock reports its own flags for itself).
+    // A directory argument, or null when that text is no path at all (same reason as
+    // above). Null rather than a stop: a flag whose folder cannot be read is a worse
+    // chooser, not a reason to give up on the document (and JRock reports its own flags
+    // for itself).
     private static Path dirOrNull(String value) {
         try {
-            return spelled(value);
+            return Paths.get(value).toAbsolutePath().normalize();
         } catch (java.nio.file.InvalidPathException bad) {
             System.out.println("Ignored, not a readable path: " + value);
             return null;

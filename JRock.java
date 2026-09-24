@@ -884,7 +884,7 @@ public class JRock {
                     promptsDirNote = "(none given after " + PROMPTS_DIR_FLAG + ")";
                 }
             } else if (sourceArg == null) {
-                sourceArg = resolveArgPath(arg);
+                sourceArg = arg;
             }
         }
         return sourceArg;
@@ -895,144 +895,29 @@ public class JRock {
     }
 
     // ---- A path the command line could not spell ---------------------------
-    // Windows hands a new process its command line as ANSI text, and the JVM reads it
-    // with sun.jnu.encoding - Cp1252 on a Western install. A character that code page
-    // has no room for is replaced with a literal '?' before Java is started at all:
-    // right-click C:\Documents\<a Cyrillic name>.rtf and the agent is launched with
-    // C:\?????????\????????.rtf, which Paths.get refuses outright with
-    // "InvalidPathException: Illegal char <?>". The same file picked in JRock's own file
-    // chooser works perfectly - a chooser never goes through a command line - which is
-    // what makes this look like an include problem when it is nothing of the kind.
-    // Decoding those '?' back is impossible: the characters were thrown away, not
-    // encoded. (An environment variable would have survived: Windows keeps that block
-    // in Unicode. A registry verb has no way to set one without a cmd window, though,
-    // and this way needs no launcher at all.)
+    // Not JRock's doing, and not something JRock can undo - but worth one note, because
+    // it looks like an include problem and is nothing of the kind. On Windows the
+    // arguments that reach main(String[]) are decoded with sun.jnu.encoding, the system
+    // ANSI code page - Cp1252 on a Western install - and a character that code page has
+    // no room for is already a literal '?' before Java starts. Right-click a file with a
+    // Cyrillic name and the agent is launched with C:\?????????\????????.rtf, which
+    // Paths.get refuses outright: "InvalidPathException: Illegal char <?>".
     //
-    // What is left is the disk. '?' cannot appear in a Windows path, so every one of
-    // them is a character that was lost, one '?' for one char - which makes the mangled
-    // text a pattern with exactly as many single-character wildcards as there are
-    // characters to find, and the folder it names holds the answer. So: match the
-    // pattern against what is actually there, one component at a time from the root
-    // down.
+    // Which is why "Open with Acrobat" on that very file works. Windows passes a command
+    // line in Unicode and keeps it that way; a native program asks for it with
+    // GetCommandLineW and gets the real name. The narrowing to ANSI is the Java
+    // launcher's, so every Java program started from Explorer shares it. It is also why
+    // the same file opens perfectly from JRock's own file chooser - a chooser never goes
+    // through a command line.
     //
-    // A component that matches nothing, or two entries at once, is handed back exactly
-    // as it came and the caller fails as it did before: this repairs what the disk can
-    // prove and does not guess at the rest. A path with no '?' in it - which is every
-    // path on every other platform, and almost every path on this one - is returned
-    // unchanged after one indexOf.
-    private static final char LOST_CHAR = '?';
-
-    private static String resolveArgPath(String text) {
-        if (text == null || text.indexOf(LOST_CHAR) < 0) return text;
-        String[] parts = text.split("[\\\\/]+", -1);
-        Path at;
-        int from;
-        if (text.startsWith("\\\\") || text.startsWith("//")) {
-            // A UNC root - the server and the share of \\server\share - is two names
-            // with nothing above them to list, so there is nothing to match against.
-            return text;
-        } else if (parts.length > 0 && parts[0].endsWith(":")) {
-            at = Paths.get(parts[0] + java.io.File.separator);
-            from = 1;
-        } else if (parts.length > 0 && parts[0].isEmpty()) {
-            at = Paths.get(java.io.File.separator);   // rooted, no drive
-            from = 1;
-        } else {
-            at = Paths.get("").toAbsolutePath();      // relative to here
-            from = 0;
-        }
-        for (int i = from; i < parts.length; i++) {
-            String part = parts[i];
-            if (part.isEmpty()) continue;             // a doubled or trailing separator
-            if (part.indexOf(LOST_CHAR) < 0) {
-                at = at.resolve(part);
-                continue;
-            }
-            Path only = theOneNamed(at, part);
-            if (only == null) return text;
-            at = only;
-        }
-        return at.toString();
-    }
-
-    // The one entry of dir whose name fits pattern, where each '?' stands for the one
-    // character that was lost in its place - or null when nothing fits, when two things
-    // do, or when the folder cannot be listed. Case-insensitive, as Windows names are.
-    private static Path theOneNamed(Path dir, String pattern) {
-        Path found = null;
-        try (java.util.stream.Stream<Path> list = Files.list(dir)) {
-            for (java.util.Iterator<Path> it = list.iterator(); it.hasNext(); ) {
-                Path entry = it.next();
-                Path name = entry.getFileName();
-                if (name == null || !fitsLost(pattern, name.toString())) continue;
-                if (found != null) return null;      // two candidates: prove neither
-                found = entry;
-            }
-        } catch (IOException | RuntimeException ex) {
-            return null;
-        }
-        return found;
-    }
-
-    // Whether name could be what pattern was before the command line lost characters
-    // out of it: the same length, the same characters where the pattern still has one,
-    // and a character the command line COULD NOT HAVE CARRIED everywhere it has a '?'.
-    //
-    // That last test is what makes this worth doing. A '?' is there because the system
-    // code page had no room for the character in its place, so a candidate that has an
-    // ordinary letter there is not the file: it would have come through as that letter.
-    // Without it, every sibling of the same length fits - "plain.txt" is as good a match
-    // for nine lost characters as the nine-letter name that was really clicked - and a
-    // folder with two such names could never be resolved at all. With it, a name Cp1252
-    // can spell is ruled out by the fact that it was not spelled.
-    private static boolean fitsLost(String pattern, String name) {
-        if (pattern.length() != name.length()) return false;
-        for (int i = 0; i < pattern.length(); i++) {
-            char want = pattern.charAt(i);
-            char has = name.charAt(i);
-            if (want == LOST_CHAR) {
-                if (!wasLost(has)) return false;
-                continue;
-            }
-            if (Character.toLowerCase(want) != Character.toLowerCase(has)) return false;
-        }
-        return true;
-    }
-
-    // True when this character is one the command line could not have carried - which is
-    // to say one that arrives as '?'. sun.jnu.encoding is the charset the JVM decodes
-    // arguments with, so it is the one that decides; native.encoding is the same answer
-    // under the name Java 17 gave it, and is read as a fallback.
-    //
-    // A JVM that will not name its charset makes every character possible again, which
-    // is the behaviour this had before the check existed: fewer names resolved, none
-    // resolved wrongly.
-    private static final java.nio.charset.CharsetEncoder LOST_ENCODER = lostEncoder();
-
-    private static java.nio.charset.CharsetEncoder lostEncoder() {
-        for (String property : new String[] { "sun.jnu.encoding", "native.encoding" }) {
-            String name = System.getProperty(property);
-            if (name == null || name.isEmpty()) continue;
-            try {
-                if (java.nio.charset.Charset.isSupported(name)) {
-                    return java.nio.charset.Charset.forName(name).newEncoder();
-                }
-            } catch (RuntimeException ex) {
-                // An unusable charset name is no answer; try the other property.
-            }
-        }
-        return null;
-    }
-
-    // Synchronized because a CharsetEncoder holds state and this is asked from whichever
-    // thread an automation runs on as well as from the startup.
-    private static boolean wasLost(char c) {
-        java.nio.charset.CharsetEncoder encoder = LOST_ENCODER;
-        if (encoder == null) return true;
-        synchronized (encoder) {
-            return !encoder.canEncode(c);
-        }
-    }
+    // Nothing here tries to work out what a '?' stood for: those characters were thrown
+    // away rather than encoded, and a name pieced together from whatever a folder happens
+    // to contain would be a guess wearing the shape of a path. An unreadable path is
+    // reported as unreadable, and that is the end of it. Two ways round it, both the
+    // user's: start the agent on the FOLDER and pick the file in the chooser, or turn on
+    // "Use Unicode UTF-8 for worldwide language support" (Windows Region settings,
+    // Administrative tab), which makes the code page UTF-8 and lets those arguments
+    // through untouched.
 
     // Applies --working-dir, which roots JRock's own files - JRock/, its settings, its
     // key, its log - in a named folder instead of the one the process happens to have
@@ -1054,12 +939,13 @@ public class JRock {
             workingDirNote = "(empty " + WORKING_DIR_FLAG + " ignored)";
             return;
         }
-        // Recovered first, because this path was written into a registry entry and is
-        // read back through an ANSI command line (see resolveArgPath); and never thrown,
-        // because a flag that cannot be read at all must still leave a window standing.
+        // Caught rather than thrown: this path was written into a registry entry months
+        // ago and comes back through an ANSI command line, so it may not be a path at all
+        // any more (see the note above), and a flag that cannot be read must still leave
+        // a window standing.
         Path candidate;
         try {
-            candidate = Paths.get(resolveArgPath(value)).toAbsolutePath().normalize();
+            candidate = Paths.get(value).toAbsolutePath().normalize();
         } catch (java.nio.file.InvalidPathException bad) {
             workingDirNote = "(" + WORKING_DIR_FLAG + " " + value
                     + " is not a path this system can read - ignored)";
@@ -1088,7 +974,7 @@ public class JRock {
         }
         Path candidate;
         try {
-            candidate = Paths.get(resolveArgPath(value)).toAbsolutePath().normalize();
+            candidate = Paths.get(value).toAbsolutePath().normalize();
         } catch (java.nio.file.InvalidPathException bad) {
             promptsDirNote = value + " (not a path this system can read - "
                     + "using the working directory)";
@@ -1148,9 +1034,9 @@ public class JRock {
         try {
             given = Paths.get(arg);
         } catch (java.nio.file.InvalidPathException bad) {
-            // A name the command line could not spell and the disk could not identify
-            // either (see resolveArgPath). Reported as "could not read" like any other
-            // unreadable prompt file, rather than thrown out of the startup.
+            // A name the command line could not spell (see the note above). Reported as
+            // "could not read" like any other unreadable prompt file, rather than thrown
+            // out of the startup.
             return null;
         }
         if (given.isAbsolute() || promptsDir == null) return given;
@@ -2617,24 +2503,6 @@ public class JRock {
     public static JFrame automationWindow() {
         Ui live = ui;
         return live == null ? null : live.frame;
-    }
-
-    // The path an argument meant, when the command line could not spell it.
-    //
-    // An agent installed by "Install agent" is started by Explorer with the clicked file
-    // as its argument, and on Windows an argument is ANSI text: a path holding a
-    // character the system code page has no room for arrives with a '?' in place of it,
-    // and Paths.get refuses it ("Illegal char <?>") - which is why a Cyrillic file name
-    // fails from the right-click menu and works from the file chooser. This reads the
-    // folder to find the name that fits, and gives it back spelled properly; see
-    // resolveArgPath for the whole story, and for what it does when the disk cannot
-    // prove which file was meant.
-    //
-    // Pass every path argument through it: a path with nothing wrong with it comes back
-    // unchanged. Callable before JRock.main, because it reads the disk and not the
-    // window.
-    public static String automationResolvePath(String path) {
-        return resolveArgPath(path);
     }
 
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
@@ -9687,7 +9555,8 @@ public class JRock {
                 + "\nInput text symbols:  " + inputSymbols
                 + "\nOutput text symbols: " + outputSymbols
                 + "\nInput tokens:   " + tokenStr(inputTokens)
-                + "\nOutput tokens:  " + tokenStr(outputTokens);
+                + "\nOutput tokens:  " + tokenStr(outputTokens)
+                + priceLines(inputTokens, outputTokens);
 
         return new String[] { "1", reply, details };
     }
@@ -9708,6 +9577,69 @@ public class JRock {
 
     private static String tokenStr(long v) {
         return v < 0 ? "(not reported)" : Long.toString(v);
+    }
+
+    // What a request like this one costs, in the roughest terms that are still useful:
+    // dollars per million tokens, low and high, across the frontier text models as a
+    // group. Output is the expensive half by a factor of about five, which is the one
+    // thing about pricing worth carrying in your head.
+    //
+    // A band and not a number, on purpose. JRock talks to whatever endpoint it is pointed
+    // at - Bedrock, an OpenAI-compatible gateway, something local and free - and looking
+    // up the real rate behind that URL is not this window's job. The band answers the
+    // question actually being asked after a long reply, which is not "what do I owe" but
+    // "was that cents or dollars".
+    private static final double PRICE_IN_LOW = 2.0;
+    private static final double PRICE_IN_HIGH = 5.0;
+    private static final double PRICE_OUT_LOW = 10.0;
+    private static final double PRICE_OUT_HIGH = 25.0;
+
+    // The two price lines of the stats block: the rule of thumb, then this exchange
+    // costed by it. Both say they are a guide - a figure in dollars invites being read as
+    // a bill, and this one never is.
+    //
+    // No counts from the API means nothing to multiply. The guide line still goes out:
+    // the rates are worth seeing either way, and a silent stats block would look like the
+    // estimate had been dropped.
+    private static String priceLines(long inputTokens, long outputTokens) {
+        String guide = "\nRough price guide: $" + rate(PRICE_IN_LOW) + "-"
+                + rate(PRICE_IN_HIGH) + " per 1M input tokens, $" + rate(PRICE_OUT_LOW)
+                + "-" + rate(PRICE_OUT_HIGH) + " per 1M output (frontier average)";
+        if (inputTokens < 0 || outputTokens < 0) {
+            return guide + "\nRough cost here:   (no token counts came back to price)";
+        }
+        double inLow = inputTokens * PRICE_IN_LOW / 1000000.0;
+        double inHigh = inputTokens * PRICE_IN_HIGH / 1000000.0;
+        double outLow = outputTokens * PRICE_OUT_LOW / 1000000.0;
+        double outHigh = outputTokens * PRICE_OUT_HIGH / 1000000.0;
+        // One shape for all six figures, chosen from the largest: "$0.0057-0.014" reads
+        // as a typo, and a range whose two ends are written to different precisions is
+        // harder to compare than one that is simply too precise at the low end.
+        String shape = shapeFor(inHigh + outHigh);
+        return guide + "\nRough cost here:   in $" + usd(inLow, shape) + "-"
+                + usd(inHigh, shape) + " + out $" + usd(outLow, shape) + "-"
+                + usd(outHigh, shape) + " = $" + usd(inLow + outLow, shape) + "-"
+                + usd(inHigh + outHigh, shape) + ", not this model's real price";
+    }
+
+    // A rate per million, without the ".0" that makes a round number look measured.
+    private static String rate(double perMillion) {
+        return (perMillion == Math.floor(perMillion))
+                ? Long.toString((long) perMillion)
+                : String.format(java.util.Locale.ROOT, "%.1f", perMillion);
+    }
+
+    // How many digits an amount of this size deserves: cents at a dollar, hundredths of
+    // a cent below one. A request small enough to print as $0.0000 has answered the
+    // question it was asked.
+    private static String shapeFor(double dollars) {
+        return (dollars >= 1.0) ? "%.2f" : (dollars >= 0.01) ? "%.3f" : "%.4f";
+    }
+
+    // Locale.ROOT because a decimal comma in a price reads as a thousands separator to
+    // half the world.
+    private static String usd(double dollars, String shape) {
+        return String.format(java.util.Locale.ROOT, shape, dollars);
     }
 
     // ---- Masking for display -----------------------------------------------
