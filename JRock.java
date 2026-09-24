@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.0.0";
+    private static final String VERSION = "2.1.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -2037,19 +2037,28 @@ public class JRock {
             }
         });
 
-        // Plain Enter: Send when the "Enter" checkbox is on, a new line when it is off -
-        // and Shift+Enter is a new line either way, so there is always a way to type one.
+        // Plain Enter: Send when the "Enter" checkbox is on, a new line when it is off.
+        // Shift+Enter is a new line in BOTH states, so there is always one key that types
+        // one and never sends - which is what makes the checkbox safe to tick.
         //
-        // The text area's own newline action is looked up and kept rather than reproduced,
-        // so the untouched case behaves exactly as it did before this binding existed,
-        // undo history and all.
-        javax.swing.Action newLine = input.getActionMap().get(
-                javax.swing.text.DefaultEditorKit.insertBreakAction);
+        // Shift+Enter has to be bound, not left alone: a plain JTextArea has no binding
+        // for it at all (its InputMap answers null), and Windows sends no KEY_TYPED for
+        // it either, so before this it did nothing whatsoever. Verified with a Robot, both
+        // ways round, rather than assumed.
+        //
+        // The newline is inserted here rather than delegated to the editor kit's
+        // insert-break action: that action is looked up through the L&F's ActionMap, and a
+        // lookup that comes back null is a key that silently does nothing. replaceSelection
+        // is the same edit - it honours the selection, the caret and undo - and it cannot
+        // be missing.
+        javax.swing.Action newLine = new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { input.replaceSelection("\n"); }
+        };
         input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "jrock-enter");
         input.getActionMap().put("jrock-enter", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
                 if (!enterSends.isSelected()) {
-                    if (newLine != null) newLine.actionPerformed(e);
+                    newLine.actionPerformed(e);
                 } else if (send.isEnabled()) {
                     send.doClick();
                 }
@@ -2057,11 +2066,7 @@ public class JRock {
         });
         input.getInputMap().put(KeyStroke.getKeyStroke(
                 KeyEvent.VK_ENTER, InputEvent.SHIFT_DOWN_MASK), "jrock-newline");
-        input.getActionMap().put("jrock-newline", new AbstractAction() {
-            @Override public void actionPerformed(ActionEvent e) {
-                if (newLine != null) newLine.actionPerformed(e);
-            }
-        });
+        input.getActionMap().put("jrock-newline", newLine);
 
         JScrollPane outputScroll = new JScrollPane(output);
         // Same framed look as the input area.
@@ -3004,8 +3009,10 @@ public class JRock {
         java.awt.event.MouseAdapter h = new java.awt.event.MouseAdapter() {
             private javax.swing.Timer timer;
             private java.awt.Point origin;
+            private long pressedAt;
+            private boolean shown;
 
-            private void showAt(int x, int y) { menu.show(comp, x, y); }
+            private void showAt(int x, int y) { shown = true; menu.show(comp, x, y); }
 
             private void cancel() {
                 if (timer != null) { timer.stop(); timer = null; }
@@ -3013,19 +3020,31 @@ public class JRock {
             }
 
             @Override public void mousePressed(java.awt.event.MouseEvent e) {
+                shown = false;
                 if (e.isPopupTrigger()) { showAt(e.getX(), e.getY()); return; }   // desktop right-click
                 // Otherwise arm a long-press timer for touch/left-press.
                 cancel();
                 origin = e.getPoint();
+                pressedAt = System.currentTimeMillis();
                 final int x = e.getX(), y = e.getY();
                 timer = new javax.swing.Timer(LONG_PRESS_MS, ev -> { cancel(); showAt(x, y); });
                 timer.setRepeats(false);
                 timer.start();
             }
 
+            // A long press is measured on release as well as by the timer, so the menu
+            // still opens where a Swing Timer never fires: a modal dialog runs the event
+            // queue in a nested loop, and in the browser runtime the timers queued behind
+            // it stay queued - which is exactly why Paste could not be reached in the
+            // Fetch URL and Configure dialogs, the two places it is needed most. Mouse
+            // events are delivered there (the field takes the tap and the keyboard comes
+            // up), so the clock is read from the press instead of trusted to fire.
             @Override public void mouseReleased(java.awt.event.MouseEvent e) {
                 if (e.isPopupTrigger()) { cancel(); showAt(e.getX(), e.getY()); return; }
+                boolean held = !shown && origin != null
+                        && System.currentTimeMillis() - pressedAt >= LONG_PRESS_MS;
                 cancel();   // released before the threshold: normal click, no menu
+                if (held) showAt(e.getX(), e.getY());
             }
 
             @Override public void mouseDragged(java.awt.event.MouseEvent e) {
@@ -3092,9 +3111,11 @@ public class JRock {
         addCopyPasteMenu(cwdF, null);
         addCopyPasteMenu(promptsF, null);
         addCopyPasteMenu(regionF, null);
-        // In the browser the API key belongs to the hosting page, so JRock has no
-        // key to show or set: the row is left out entirely rather than offered as a
-        // field that would have no effect.
+        // True only when the hosting PAGE holds the Bedrock key and attaches it itself
+        // (see HttpTransport.hostHoldsCredentials): then JRock has no key to show or set,
+        // and the row is left out rather than offered as a field with no effect. The
+        // browser build as shipped does NOT do that - it keeps the key in JRock's own
+        // settings, so the row is there, unmasked, with a Paste button.
         boolean hostKey = http().hostHoldsCredentials();
         // Editable combo: free text, plus a dropdown of the most recently fetched
         // available models (empty until the first successful /v1/models call).
@@ -3122,9 +3143,10 @@ public class JRock {
                 + "screen, 150 documents, 203 fax/receipt, 300 print). PDF pages are "
                 + "rasterised at it, and \"Include with copy...\" downscales an image "
                 + "to it. Higher is sharper but costs more tokens.");
-        // Autobackup, on the same line: a checkbox says what it is in its own label, so
-        // it costs no row of its own, and the space next to a three-digit dropdown is
-        // otherwise empty.
+        // Autobackup, on a line of its own. It used to share the DPI row, which made two
+        // unrelated settings look like one thing: how fine a picture to keep has nothing
+        // to do with zipping the folder up. The checkbox says what it is in its own label,
+        // so the left column of its row stays empty rather than repeating it.
         javax.swing.JCheckBox autoBackupF =
                 new javax.swing.JCheckBox("Autobackup log", autoBackupLog);
         autoBackupF.setFont(autoBackupF.getFont().deriveFont(java.awt.Font.PLAIN));
@@ -3136,7 +3158,6 @@ public class JRock {
         // three-digit dropdown across the whole dialog.
         javax.swing.JPanel dpiRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         dpiRow.add(dpiF, BorderLayout.WEST);
-        dpiRow.add(autoBackupF, BorderLayout.CENTER);
 
         javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
@@ -3149,99 +3170,16 @@ public class JRock {
         if (!hostKey) {
             // In the browser the row carries a Paste button of its own - see pasteRow.
             addRow(fields, c, row++, "Bedrock API key:",
-                    isCheerpJ() ? pasteRow(keyF) : keyF);
+                    isCheerpJ() ? pasteRow(keyF, "key") : keyF);
         }
         addRow(fields, c, row++, "AWS region:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
         addRow(fields, c, row++, "Images DPI:", dpiRow);
+        addRow(fields, c, row++, "", autoBackupF);
 
-        // A plain (non-bold) font derived from the default label font, reused for
-        // the notes, shortcuts and titled-border titles so nothing renders bold.
-        java.awt.Font base = javax.swing.UIManager.getFont("Label.font");
-        java.awt.Font plainFont = (base != null)
-                ? base.deriveFont(java.awt.Font.PLAIN)
-                : new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12);
+        java.awt.Font plainFont = plainLabelFont();
 
-        String keyNote = hostKey
-            ? "There is no API key field here: in the browser the Bedrock API key "
-            + "belongs to the hosting page, which holds it in JavaScript and adds it "
-            + "to each request itself - so it is never handed to the JVM. Change it "
-            + "on the page.\n\n"
-            : "The API key field is intentionally blank and write-only: leave it empty "
-            + "to keep the current key; type or paste a value to replace it. What you "
-            + "enter is written to JRock/bedrock-key.txt in the working directory, which "
-            + "is where it is read from at startup. The stored key is never shown here, "
-            + "and what you enter is trimmed - a pasted key brings the page's spaces "
-            + "and newlines with it.\n\n"
-            + "Every row above has a right-click - or, on a touch screen, a long-press - "
-            + "menu with Copy, Paste and Select all; the API key row has Paste alone. "
-            + (isCheerpJ()
-               ? "In the browser that row is also the one field left unmasked, and it has "
-               + "a Paste button of its own: CheerpJ brings up no on-screen keyboard for "
-               + "a masked field, so on a phone there would otherwise be no way to fill "
-               + "it in at all.\n\n"
-               : "\n\n")
-            + "The region, the model and the images DPI are kept in "
-            + "JRock/jrock-config.txt beside it, so they survive a restart. Both files "
-            + "belong to the working directory and are plain text you can edit "
-            + "yourself - which is what lets one folder's agent run on a different "
-            + "model, or at a different DPI, than another's.\n\n";
-
-        javax.swing.JTextArea note = new javax.swing.JTextArea(
-            keyNote
-          + "Clearing the log only clears jrock-log.txt (and the window); the "
-          + "per-message files in JRock/messages/ are never deleted, so your inputs "
-          + "and outputs are preserved.\n\n"
-          + "The prompts & agents directory is where Load prompt (Ctrl+O) and Save "
-          + "prompt copy (Ctrl+S) always open - they don't drift to wherever you last "
-          + "browsed - and where Install agent looks for the .java automations that "
-          + "drive JRock. Set it to the working directory to have both simply follow "
-          + "that. It overrides " + PROMPTS_DIR_FLAG + " for this session, and "
-          + "installing the Explorer entries writes whichever directory is in effect "
-          + "then.\n\n"
-          + "Note: a true OS process chdir isn't possible from Java, so changing the "
-          + "working directory reroutes JRock's own files (a JRock/ subfolder holding "
-          + "the prompt, log and messages/) to the new directory rather than changing "
-          + "the OS-level CWD of the process.");
-        note.setEditable(false);
-        note.setOpaque(false);
-        note.setLineWrap(true);
-        note.setWrapStyleWord(true);
-        note.setFont(plainFont);
-
-        // Shortcuts as a 2-column grid so keys and descriptions align cleanly
-        // (no space-padding). The "Shortcuts" border title keeps the default bold.
-        String[][] keys = {
-            {"Ctrl+Enter", "Send message (call a Bedrock model)"},
-            {"Ctrl+I", "Include a text, image, audio, PDF, RTF or DOCX file"},
-            {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
-            {"Ctrl+U", "Fetch a URL and include what it answers with"},
-            {"Ctrl+D", "Toggle Dialog only"},
-            {"Ctrl+E", "Toggle History (send the prior dialog too)"},
-            {"Ctrl+S", "Save prompt as (a copy)"},
-            {"Ctrl+O", "Load prompt from a file"},
-            {"Ctrl+L", "Save log as (a copy, or just the selected text)"},
-            {"Ctrl+P", "Print log (or the selected text) / save as PDF"},
-        };
-        javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
-        shortcuts.setBorder(javax.swing.BorderFactory.createTitledBorder("Shortcuts"));
-        java.awt.GridBagConstraints sc = new java.awt.GridBagConstraints();
-        sc.anchor = java.awt.GridBagConstraints.WEST;
-        sc.fill = java.awt.GridBagConstraints.HORIZONTAL;
-        sc.insets = new java.awt.Insets(1, 4, 1, 4);
-        for (int r = 0; r < keys.length; r++) {
-            javax.swing.JLabel keyLbl = new javax.swing.JLabel(keys[r][0]);
-            keyLbl.setFont(plainFont);
-            javax.swing.JLabel descLbl = new javax.swing.JLabel(keys[r][1]);
-            descLbl.setFont(plainFont);
-            // Golden-ratio-ish column weights: key column narrow (~38%), desc wide.
-            sc.gridx = 0; sc.gridy = r; sc.weightx = 0.38;
-            shortcuts.add(keyLbl, sc);
-            sc.gridx = 1; sc.weightx = 0.62;
-            shortcuts.add(descLbl, sc);
-        }
-
-        // About line (bold, default L&F) + a short plain description.
+        // First line: which JRock this is, and a Help button at the other end of it.
         // "JRock" is a hyperlink to the project on GitHub. Swing labels render
         // HTML for the link look but don't open URLs themselves, so a click
         // handler (below) opens the default browser.
@@ -3253,39 +3191,37 @@ public class JRock {
         about.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override public void mouseClicked(java.awt.event.MouseEvent e) { openUrl(GITHUB_URL); }
         });
-        javax.swing.JTextArea desc = new javax.swing.JTextArea(
-            "The Amazon Bedrock desktop GUI client in Java that just works: every prompt and session "
-          + "is saved to disk so nothing is ever lost, and your credentials stay put "
-          + "with no repeated sign-ins - so it keeps out of your way and lets you "
-          + "focus on the models.\n\n"
-          + "By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.");
-        desc.setEditable(false);
-        desc.setOpaque(false);
-        desc.setLineWrap(true);
-        desc.setWrapStyleWord(true);
-        desc.setFont(plainFont);
+
+        // What JRock is, the shortcut list and the notes on these settings are all behind
+        // this button now - see showHelpDialog. This dialog is a form: someone opening it
+        // to change the model was being handed three screens of prose to scroll past
+        // first, and the prose was no easier to find for being in the way.
+        JButton help = new JButton("Help");
+        help.setToolTipText("What JRock is, who wrote it, every shortcut, and what "
+                + "these settings do");
+        help.addActionListener(e -> showHelpDialog(help));
+
+        javax.swing.JPanel titleLine = new javax.swing.JPanel(new BorderLayout(8, 0));
+        titleLine.add(about, BorderLayout.WEST);
+        titleLine.add(help, BorderLayout.EAST);
+
+        // Second line: who made it, including the tools that helped make it.
+        javax.swing.JLabel credits = new javax.swing.JLabel(
+                "By Ivan Khvostishkov, with assistance of Kiro, Claude and "
+                + "JetBrains IntelliJ IDEA.");
+        credits.setFont(plainFont);
 
         javax.swing.JPanel aboutBox = new javax.swing.JPanel(new BorderLayout(0, 4));
-        aboutBox.add(about, BorderLayout.NORTH);
-        aboutBox.add(desc, BorderLayout.CENTER);
+        aboutBox.add(titleLine, BorderLayout.NORTH);
+        aboutBox.add(credits, BorderLayout.CENTER);
         aboutBox.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 2, 8, 2));
 
-        javax.swing.JPanel north = new javax.swing.JPanel(new BorderLayout(8, 8));
-        north.add(aboutBox, BorderLayout.NORTH);
-        north.add(fields, BorderLayout.CENTER);
-        north.add(shortcuts, BorderLayout.SOUTH);
-
         javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
-        panel.add(north, BorderLayout.NORTH);
-        javax.swing.JScrollPane noteScroll = new javax.swing.JScrollPane(note);
-        noteScroll.setBorder(javax.swing.BorderFactory.createTitledBorder("Notes"));
-        noteScroll.setPreferredSize(new java.awt.Dimension(460, 150));
-        noteScroll.setHorizontalScrollBarPolicy(
-                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        panel.add(noteScroll, BorderLayout.CENTER);
+        panel.add(aboutBox, BorderLayout.NORTH);
+        panel.add(fields, BorderLayout.CENTER);
 
         int result = javax.swing.JOptionPane.showConfirmDialog(
-                frame, panel, "Configure",
+                frame, panel, "Configure JRock",
                 javax.swing.JOptionPane.OK_CANCEL_OPTION,
                 javax.swing.JOptionPane.PLAIN_MESSAGE);
         if (result != javax.swing.JOptionPane.OK_OPTION) return false;
@@ -3395,16 +3331,19 @@ public class JRock {
     }
 
     // A field with a "Paste" button beside it, the way dirRow gives one a "Browse..."
-    // button. For the browser only, and for the API key row in particular.
+    // button. For the browser only: the API key row, and the URL the Fetch URL dialog
+    // asks for. what names the thing in the tooltip ("key", "address").
     //
-    // The long-press menu (addPasteMenu) is already on that field, and on a phone a long
-    // press is a gesture competing with the browser's own - the iOS text callout, the
-    // drag-and-drop pick-up - so it is not something to depend on for the one row that
-    // has no other way in. A directory row has Browse..., a region and a model can be
-    // typed once the keyboard is up; a key can only be pasted. A button is one tap.
-    private static javax.swing.JPanel pasteRow(javax.swing.text.JTextComponent field) {
+    // The long-press menu (addPasteMenu) is already on those fields, and on a phone a
+    // long press is a gesture competing with the browser's own - the iOS text callout,
+    // the drag-and-drop pick-up - so it is not something to depend on for a row that has
+    // no other way in. A directory row has Browse..., a region and a model can be typed
+    // once the keyboard is up; a key can only be pasted, and an address practically
+    // always is. A button is one tap, and it is visible, which a gesture is not.
+    private static javax.swing.JPanel pasteRow(javax.swing.text.JTextComponent field,
+                                               String what) {
         JButton paste = new JButton("Paste");
-        paste.setToolTipText("Paste the key from the browser's clipboard");
+        paste.setToolTipText("Paste the " + what + " from the browser's clipboard");
         paste.addActionListener(ev -> {
             clipboardPaste(field, null);        // no log to write to in a modal dialog
             field.requestFocusInWindow();
@@ -3422,6 +3361,174 @@ public class JRock {
         p.add(new javax.swing.JLabel(label), c);
         c.gridx = 1; c.weightx = 1;
         p.add(field, c);
+    }
+
+    // ---- Help dialog (the Help button in Configure) -------------------------
+    // What JRock is, who to write to, every shortcut, and what the settings do. All of
+    // it used to be in the Configure dialog, above and below the rows it is about; it
+    // opens on top of that dialog instead, so the form is a form and nothing typed into
+    // it is lost while this is being read.
+    private static final String CONTACT_EMAIL = "jrock@nosocial.net";
+
+    private static void showHelpDialog(java.awt.Component parent) {
+        java.awt.Font plainFont = plainLabelFont();
+
+        // Sized against the screen rather than against a desktop window, for the reason
+        // spelled out in showFetchUrlDialog: a dialog wider or taller than the screen is
+        // one whose button is off the edge of it. Everything here scrolls, so a phone
+        // gets a short window it can scroll and a desktop gets the whole thing at once.
+        java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+        int contentW = Math.max(240, Math.min(520, screen.width - 140));
+        int contentH = Math.max(240, Math.min(540, screen.height - 220));
+
+        javax.swing.JTextArea about = wrapped(
+            "The Amazon Bedrock desktop GUI client in Java that just works: every prompt "
+          + "and session is saved to disk so nothing is ever lost, and your credentials "
+          + "stay put with no repeated sign-ins - so it keeps out of your way and lets "
+          + "you focus on the models.\n\n"
+          + "Questions, bugs and wishes: " + CONTACT_EMAIL + "\n"
+          + GITHUB_URL, plainFont, contentW);
+
+        javax.swing.JTextArea notes =
+                wrapped(configNotes(http().hostHoldsCredentials()), plainFont, contentW);
+        notes.setBorder(javax.swing.BorderFactory.createTitledBorder("Notes"));
+
+        javax.swing.JPanel content = new javax.swing.JPanel();
+        content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
+        content.add(about);
+        content.add(javax.swing.Box.createVerticalStrut(10));
+        content.add(shortcutsPanel(plainFont, (int) (contentW * 0.62) - 16));
+        content.add(javax.swing.Box.createVerticalStrut(10));
+        content.add(notes);
+
+        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(content);
+        scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder());
+        scroll.setHorizontalScrollBarPolicy(
+                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setPreferredSize(new java.awt.Dimension(contentW + 28, contentH));
+
+        // parent is the Help button, so this comes up centred on the Configure dialog
+        // and modal above it - not behind it, which a dialog owned by the frame would be.
+        javax.swing.JOptionPane.showMessageDialog(parent, scroll, "JRock Help",
+                javax.swing.JOptionPane.PLAIN_MESSAGE);
+    }
+
+    // A plain (non-bold) font derived from the default label font, for the prose, the
+    // shortcut rows and the titled-border titles, so none of it renders bold.
+    private static java.awt.Font plainLabelFont() {
+        java.awt.Font base = javax.swing.UIManager.getFont("Label.font");
+        return (base != null)
+                ? base.deriveFont(java.awt.Font.PLAIN)
+                : new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12);
+    }
+
+    // A read-only text area that wraps at about the given width in pixels.
+    //
+    // The columns are worked back from the width because that is what a wrapping text
+    // area answers getPreferredSize with - a column being the width of an 'm' in its
+    // font, which is JTextArea's own definition (getColumnWidth). Left to itself it asks
+    // for one line as wide as its longest paragraph, and the dialog holding it comes out
+    // wider than the screen.
+    private static javax.swing.JTextArea wrapped(String text, java.awt.Font font, int width) {
+        javax.swing.JTextArea area = new javax.swing.JTextArea(text);
+        area.setEditable(false);
+        area.setOpaque(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setFont(font);
+        int em = Math.max(1, area.getFontMetrics(font).charWidth('m'));
+        area.setColumns(Math.max(20, width / em));
+        return area;
+    }
+
+    // What the Configure dialog's rows mean, and where what they set is kept. hostKey is
+    // http().hostHoldsCredentials(): in the browser there is no API key row to explain.
+    private static String configNotes(boolean hostKey) {
+        String keyNote = hostKey
+            ? "There is no API key field in Configure: the page hosting JRock holds the "
+            + "Bedrock API key itself and adds it to each request, so JRock is never "
+            + "handed one and has none to change. Change it on the page. (Only a page "
+            + "that asks for this gets it; the browser build as shipped keeps the key in "
+            + "JRock's own settings, exactly as the desktop does.)\n\n"
+            : "The API key field is intentionally blank and write-only: leave it empty "
+            + "to keep the current key; type or paste a value to replace it. What you "
+            + "enter is written to JRock/bedrock-key.txt in the working directory, which "
+            + "is where it is read from at startup. The stored key is never shown here, "
+            + "and what you enter is trimmed - a pasted key brings the page's spaces "
+            + "and newlines with it.\n\n"
+            + "Every row in Configure has a right-click - or, on a touch screen, a "
+            + "long-press - menu with Copy, Paste and Select all; the API key row has "
+            + "Paste alone. "
+            + (isCheerpJ()
+               ? "In the browser that row is also the one field left unmasked, and it has "
+               + "a Paste button of its own: CheerpJ brings up no on-screen keyboard for "
+               + "a masked field, so on a phone there would otherwise be no way to fill "
+               + "it in at all.\n\n"
+               : "\n\n")
+            + "The region, the model and the images DPI are kept in "
+            + "JRock/jrock-config.txt beside it, so they survive a restart. Both files "
+            + "belong to the working directory and are plain text you can edit "
+            + "yourself - which is what lets one folder's agent run on a different "
+            + "model, or at a different DPI, than another's.\n\n";
+
+        return keyNote
+            + "Clearing the log only clears jrock-log.txt (and the window); the "
+            + "per-message files in JRock/messages/ are never deleted, so your inputs "
+            + "and outputs are preserved.\n\n"
+            + "The prompts & agents directory is where Load prompt (Ctrl+O) and Save "
+            + "prompt copy (Ctrl+S) always open - they don't drift to wherever you last "
+            + "browsed - and where Install agent looks for the .java automations that "
+            + "drive JRock. Set it to the working directory to have both simply follow "
+            + "that. It overrides " + PROMPTS_DIR_FLAG + " for this session, and "
+            + "installing the Explorer entries writes whichever directory is in effect "
+            + "then.\n\n"
+            + "Note: a true OS process chdir isn't possible from Java, so changing the "
+            + "working directory reroutes JRock's own files (a JRock/ subfolder holding "
+            + "the prompt, log and messages/) to the new directory rather than changing "
+            + "the OS-level CWD of the process.";
+    }
+
+    // The shortcut list, for the Help dialog. descWidth is how much room the second
+    // column has in pixels: the descriptions are wrapped to it, because on a phone the
+    // widest of them ("Include a text, image, audio, PDF, RTF or DOCX file") is wider
+    // than the whole screen, and a grid in a window that does not scroll sideways would
+    // simply have its right-hand end cut off.
+    private static javax.swing.JPanel shortcutsPanel(java.awt.Font plainFont, int descWidth) {
+        // A 2-column grid so keys and descriptions align cleanly (no
+        // space-padding). The "Shortcuts" border title keeps the default bold.
+        String[][] keys = {
+            {"Ctrl+Enter", "Send message (call a Bedrock model)"},
+            {"Ctrl+I", "Include a text, image, audio, PDF, RTF or DOCX file"},
+            {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
+            {"Ctrl+U", "Fetch a URL and include what it answers with"},
+            {"Ctrl+D", "Toggle Dialog only"},
+            {"Ctrl+E", "Toggle History (send the prior dialog too)"},
+            {"Ctrl+S", "Save prompt as (a copy)"},
+            {"Ctrl+O", "Load prompt from a file"},
+            {"Ctrl+L", "Save log as (a copy, or just the selected text)"},
+            {"Ctrl+P", "Print log (or the selected text) / save as PDF"},
+        };
+        javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        shortcuts.setBorder(javax.swing.BorderFactory.createTitledBorder("Shortcuts"));
+        java.awt.GridBagConstraints sc = new java.awt.GridBagConstraints();
+        sc.anchor = java.awt.GridBagConstraints.WEST;
+        sc.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        sc.insets = new java.awt.Insets(1, 4, 1, 4);
+        for (int r = 0; r < keys.length; r++) {
+            javax.swing.JLabel keyLbl = new javax.swing.JLabel(keys[r][0]);
+            keyLbl.setFont(plainFont);
+            javax.swing.JLabel descLbl = new javax.swing.JLabel(
+                    "<html><body style='width:" + descWidth + "px'>" + keys[r][1]
+                    + "</body></html>");
+            descLbl.setFont(plainFont);
+            // Golden-ratio-ish column weights: key column narrow (~38%), desc wide.
+            sc.gridx = 0; sc.gridy = r; sc.weightx = 0.38;
+            shortcuts.add(keyLbl, sc);
+            sc.gridx = 1; sc.weightx = 0.62;
+            shortcuts.add(descLbl, sc);
+        }
+        return shortcuts;
     }
 
     // ---- Save / load prompt (Ctrl+S / Ctrl+O) ------------------------------
@@ -5477,31 +5584,45 @@ public class JRock {
     // Asks for a URL and, if one is given, fetches and includes it.
     private static void showFetchUrlDialog(JFrame frame, JTextArea input, LogView log,
                                            boolean extend) {
-        javax.swing.JTextField urlF = new javax.swing.JTextField(48);
+        // Why the width of this dialog is worked out rather than left to the content: a
+        // JTextField asks for room for its columns and an HTML label with <br> in it asks
+        // for room for its longest line, so a dialog written for a desktop window comes
+        // out wider than a phone screen - and a JOptionPane that does not fit is one
+        // whose OK button is off the edge of it, which is what happened here. The field
+        // asks for fewer columns in the browser (it is stretched by the layout anyway),
+        // and the text is given a width to wrap inside, taken from the screen.
+        javax.swing.JTextField urlF = new javax.swing.JTextField(isCheerpJ() ? 14 : 48);
         urlF.setName("url");
 
         // A URL is pasted far more often than it is typed, and on a phone there is no
-        // Ctrl+V to paste it with (see addPasteMenu).
+        // Ctrl+V to paste it with (see addPasteMenu, and pasteRow below for the button
+        // that does not depend on a gesture at all).
         addPasteMenu(urlF, log);
 
         // In the browser the fetching is the page's doing, and a page may only read an
         // address that allows it - so the one failure worth warning about beforehand is
         // said here rather than only in the reason that comes back.
         String cors = isCheerpJ()
-                ? "<br>In the browser the page fetches it, so the address has to allow "
+                ? " In the browser the page fetches it, so the address has to allow "
                   + "cross-origin reads (CORS); plenty of sites do not."
                 : "";
+        // 120px of it goes to the option pane's own borders, the icon gap and the frame -
+        // measured, not guessed: on a 360px screen a 280px wrap still gave a 398px dialog,
+        // while 240px gives 346x232, which fits with room to spare.
+        int wrapAt = Math.max(220, Math.min(440,
+                java.awt.Toolkit.getDefaultToolkit().getScreenSize().width - 120));
         javax.swing.JLabel what = new javax.swing.JLabel(
-                "<html>A web page is included as text (@txt), an image as a picture (@img).<br>"
-                + "Accepted: HTML, PNG, JPEG, GIF and WEBP - whatever the address itself "
-                + "answers with.<br>The file is saved under JRock/urls/ and included from "
-                + "there." + cors + "</html>");
+                "<html><body style='width:" + wrapAt + "px'>"
+                + "A web page comes in as text (@txt), a picture as a picture (@img) - "
+                + "whichever the address itself answers with. HTML, PNG, JPEG, GIF and "
+                + "WEBP are accepted, and the file is saved under JRock/urls/." + cors
+                + "</body></html>");
 
         javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
         panel.add(what, BorderLayout.NORTH);
         javax.swing.JPanel row = new javax.swing.JPanel(new BorderLayout(6, 0));
         row.add(new javax.swing.JLabel("URL:"), BorderLayout.WEST);
-        row.add(urlF, BorderLayout.CENTER);
+        row.add(isCheerpJ() ? pasteRow(urlF, "address") : urlF, BorderLayout.CENTER);
         panel.add(row, BorderLayout.SOUTH);
 
         int result = javax.swing.JOptionPane.showConfirmDialog(
@@ -9143,9 +9264,10 @@ public class JRock {
         UrlReply fetch(String url, int timeoutSeconds) throws Exception;
 
         // True when the HOST holds the Bedrock credentials and adds the
-        // Authorization header itself. That is the browser case: the API key is
-        // typed into the page and stays in JavaScript, so JRock has no key of its
-        // own and must not treat "no key set" as an error.
+        // Authorization header itself: JRock then has no key of its own and must not
+        // treat "no key set" as an error. A page opts in by reporting
+        // "credentials": "page"; the browser build as shipped does not, and keeps the
+        // key in JRock's own settings like every other runtime.
         boolean hostHoldsCredentials();
 
         // Short description of the transport, for the startup log.
