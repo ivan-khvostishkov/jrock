@@ -177,9 +177,10 @@
       // Replace either method to change how requests are made - a different HTTP
       // stack, extra headers, a proxy - as long as `fetch` resolves to
       // { status, body } and `fetchUrl` to { status, contentType, url, bytes }. That
-      // is all JRock needs. What not to replace is where the key lives: it is JRock's
-      // on every runtime, desktop and browser alike, so one dialog sets it and one file
-      // keeps it. A page holding it instead was possible until 2.1.0 and is not now.
+      // is all JRock needs. What a page cannot do is configure JRock: the key and the
+      // region are JRock's own on every runtime, desktop and browser alike, kept in the
+      // files named above. Holding the key here, or naming the region, were both
+      // possible until 2.2.0 and are not now.
       window.myBrowserHttp = {
         // Performs one request. `url` is the endpoint JRock built, `options` is a
         // fetch()-style object (method, headers, body, signal) - headers included.
@@ -373,10 +374,9 @@
       //   info -> a small JSON object;  send -> "<status>\n<body>", where status 0
       //   means the request never completed and the body is the reason to show.
 
-      // What JRock asks about this page's client, for one line in its startup log -
-      // and nothing else. No "region": that optional field is for a page that wants a
-      // different region than JRock's own settings name, and this one does not (see
-      // window.myBrowserHttp above).
+      // What JRock asks about this page's client: what to call it, for one line in its
+      // startup log, and nothing else at all. There is nothing to configure from here
+      // (see window.myBrowserHttp above).
       async function Java_JRock_browserHttpInfo(lib) {
         return JSON.stringify({
           transport: "window.myBrowserHttp (browser fetch)"

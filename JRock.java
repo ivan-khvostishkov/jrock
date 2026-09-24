@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.1.0";
+    private static final String VERSION = "2.2.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -128,10 +128,6 @@ public class JRock {
     // Where REGION came from, phrased for the startup log; null for the built-in
     // default and once the user sets it in the Configure dialog.
     private static String regionSource = null;
-    // What regionSource says when the hosting page supplied the region. A constant
-    // because it is also a decision: a region the page chose outranks a file (see
-    // adoptSettingsOfWorkingDir).
-    private static final String PAGE_REGION_SOURCE = "from the hosting page";
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
@@ -696,9 +692,7 @@ public class JRock {
         } else {
             java.util.Map<String, String> settings = parseConfig(stored);
             String region = settings.get(CONFIG_REGION);
-            // The hosting page's region outranks the file: in the browser the page
-            // holds the key, and a key belongs to one region (see http()).
-            if (region != null && !PAGE_REGION_SOURCE.equals(regionSource)) {
+            if (region != null) {
                 REGION = region;
                 regionSource = "from JRock/jrock-config.txt";
             }
@@ -9311,8 +9305,8 @@ public class JRock {
     //
     // The wire format is deliberately trivial, so neither side needs a JSON parser
     // it doesn't already have:
-    //   browserHttpInfo() -> a small flat JSON object describing the page's client
-    //                        ({"transport":...,"region":...}).
+    //   browserHttpInfo() -> a small flat JSON object naming the page's client
+    //                        ({"transport":...}), for the startup log.
     //   browserHttpSend() -> "<status>\n<body>". Status 0 means the request never
     //                        completed and the body is the reason, ready to show.
     // Request headers travel in the other direction as a flat JSON object, the
@@ -9320,13 +9314,16 @@ public class JRock {
     // it does on the desktop, in the working folder's JRock/bedrock-key.txt, which is
     // what makes it outlive a reload.
     //
-    // The one optional field is for a page that wants a different region than JRock's
-    // own settings name: "region" pins it. JRock's own jrock-web page does not set it.
+    // The page configures nothing. It says what its client is called, so the startup
+    // log can name it, and that is the whole of what it is asked.
     //
-    // There is deliberately nothing here about the key. A page held it instead until
-    // 2.1.0, saying so with "credentials":"page", and no page ever did: the key is
-    // JRock's on every runtime, so one dialog sets it, one file keeps it, and the
-    // browser behaves as the desktop does rather than nearly so.
+    // Two optional fields used to override JRock's own settings - "region" pinned the
+    // region, and "credentials":"page" said the page held the Bedrock key and attached
+    // it itself. Both are gone as of 2.2.0, and the page that ships here never set
+    // either. Every setting lives in the working folder's files on every runtime, so
+    // there is one place each one is read from and one answer to what it is - rather
+    // than a file, a page that may disagree with it, and an order of precedence
+    // between them to remember.
     static native String browserHttpInfo();
     static native String browserHttpSend(String method, String url,
                                          String headersJson, String body,
@@ -9500,11 +9497,6 @@ public class JRock {
             return transport;
         }
         transport = new BrowserHttpTransport(info);
-        String hostRegion = jsonStringField(info, "region");
-        if (hostRegion != null && !hostRegion.isBlank()) {
-            REGION = hostRegion.trim();
-            regionSource = PAGE_REGION_SOURCE;
-        }
         return transport;
     }
 
@@ -9533,9 +9525,10 @@ public class JRock {
         return vm.contains("cheerpj") || vm.contains("leaningtech");
     }
 
-    // Best-effort read of a string field ("region":"us-east-1") from a small flat
-    // JSON object. Escapes are not decoded - the bridge only reports plain
-    // identifier-like values. Returns null when the field isn't there.
+    // Best-effort read of a string field ("transport":"...") from a small flat JSON
+    // object - the bridge's info reply, which is the only JSON either side parses.
+    // Escapes are not decoded, the reported values being plain text. Returns null
+    // when the field isn't there.
     private static String jsonStringField(String json, String key) {
         if (json == null) return null;
         int k = json.indexOf("\"" + key + "\"");
