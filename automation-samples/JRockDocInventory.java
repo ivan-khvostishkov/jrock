@@ -1,13 +1,13 @@
-// A JRock automation: one scanned PDF in, a text twin of it and a file name out.
+// A JRock automation: one scanned PDF or RTF in, a text twin of it and a file name out.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
 //     java -cp jrock.jar JRockDocInventory.java [--working-dir <dir>]
-//                                               [--prompts-dir <dir>] [document.pdf]
+//                                               [--prompts-dir <dir>] [document.pdf|.rtf]
 //
-// Without the document it asks for the PDF in a file chooser, opened in the working
-// directory. The two prompts it needs it finds beside itself, in this directory.
+// Without the document it asks for a PDF or an RTF in a file chooser, opened in the
+// working directory. The two prompts it needs it finds beside itself, in this directory.
 //
 // The flags are JRock's and are passed straight through (see parseArgs): --working-dir
 // names the folder whose settings it is to use - that folder's model, its images DPI,
@@ -39,10 +39,18 @@
 // What this one does is the chain the README describes under "Prompt library and
 // chaining", with nobody pressing the keys:
 //
-//   1. jrock-prompt-doc-to-ascii.txt  + the PDF as page images  -> the document as
-//      plain text, saved as <pdf name>.txt beside the PDF.
+//   1. jrock-prompt-doc-to-ascii.txt  + the document           -> the document as plain
+//      text, saved as <document name>.txt beside it. A PDF goes in as one page image
+//      per page; an RTF goes in as Markdown, which is text.
 //   2. jrock-prompt-doc-inventory.txt + that text file          -> one file name.
-//   3. Both files renamed to it, if you say so.
+//   3. Every file of that document renamed to it, if you say so.
+//
+// A PDF and an RTF of the same name are one document filed twice - which is what
+// Acrobat's "Export to RTF" leaves behind - so both are offered and both are renamed:
+// pick either and the other is found beside it (see companionOf), and the rename at the
+// end moves two files or three. Handed a PDF with an RTF next to it, this automation
+// offers to read the RTF instead, because a page of Markdown costs a fraction of the
+// same page photographed and says more exactly what is on it.
 //
 // The JRock window is the real one, and it is in front of you the whole way: the prompt
 // fills with include tokens as the pages are converted, the log reports every step, and
@@ -64,6 +72,13 @@ public final class JRockDocInventory {
     // The two prompts, expected beside this file.
     private static final String PROMPT_ASCII = "jrock-prompt-doc-to-ascii.txt";
     private static final String PROMPT_NAME = "jrock-prompt-doc-inventory.txt";
+
+    // The two kinds of file this automation files, and the only two: a scanned document
+    // and the text of one. Constants because every step asks the extension the same
+    // questions - which include kind the file goes in under, which file is its twin, and
+    // whether a path handed over by the right-click menu is one this agent reads at all.
+    private static final String EXT_PDF = "pdf";
+    private static final String EXT_RTF = "rtf";
 
     // JRock's own flags, spelled out here because this automation both reads them and
     // passes them on (see parseArgs).
@@ -88,11 +103,24 @@ public final class JRockDocInventory {
         Stop(String why) { super(why); }
     }
 
+    // What a finished run has to say, in the two shapes it has to be said in.
+    //
+    // note is one line, for the log and the console, which are lines already. message is
+    // the same thing for a dialog, with every file name on a line of its own: a name here
+    // is a date, a counterparty, a subject and a document number joined by dashes, sixty
+    // characters is ordinary, and three of those wrapped into a paragraph is a dialog as
+    // wide as the desktop with nothing the eye can compare down a column.
+    private static final class Result {
+        final String note;
+        final String message;
+        Result(String note, String message) { this.note = note; this.message = message; }
+    }
+
     public static void main(String[] args) {
-        String summary = null;
+        Result done = null;
         String stopped = null;
         try {
-            summary = run(args);
+            done = run(args);
         } catch (Stop stop) {
             stopped = stop.getMessage();
         } catch (Exception ex) {
@@ -100,15 +128,15 @@ public final class JRockDocInventory {
         }
 
         // Nothing to say: the chooser was cancelled, and nothing has been started.
-        if (summary == null && stopped == null) return;
+        if (done == null && stopped == null) return;
 
         // The prompt becomes editable again and Send is released whatever happened - an
         // automation that failed must not leave the window locked. A no-op if it never
         // got as far as taking it.
-        JRock.automationEnd(stopped == null ? summary : "stopped - " + stopped);
+        JRock.automationEnd(stopped == null ? done.note : "stopped - " + stopped);
         if (stopped == null) {
-            System.out.println("Finished: " + summary);
-            tell("Finished.\n\n" + summary, "Automation finished",
+            System.out.println("Finished: " + done.note);
+            tell("Finished.\n\n" + done.message, "Automation finished",
                     javax.swing.JOptionPane.INFORMATION_MESSAGE);
         } else {
             System.out.println("Stopped: " + stopped);
@@ -120,7 +148,7 @@ public final class JRockDocInventory {
 
     // The whole chain, start to finish. Returns what to report, or null when there was
     // nothing to do; throws Stop with the reason for anything else.
-    private static String run(String[] args) throws IOException {
+    private static Result run(String[] args) throws IOException {
         Args told = parseArgs(args);
         Path here = ownDirectory();
         System.out.println("Automation directory: " + here);
@@ -131,13 +159,37 @@ public final class JRockDocInventory {
 
         // The document. Asked for before JRock is started, so a cancelled chooser
         // leaves nothing behind at all.
-        Path pdf = (told.document != null) ? told.document : choosePdf(told.workingDir);
-        if (pdf == null) {
+        Path chosen = (told.document != null)
+                ? told.document : chooseDocument(told.workingDir);
+        if (chosen == null) {
             System.out.println("No document chosen - nothing to do.");
             return null;
         }
-        if (!Files.isRegularFile(pdf)) throw new Stop("not a file: " + pdf);
-        System.out.println("Document: " + pdf);
+        if (!Files.isRegularFile(chosen)) throw new Stop("not a file:\n\n    " + chosen);
+
+        // Checked here and not left to the include: the chooser only offers the two
+        // extensions, but the right-click menu hands over whatever was clicked, and a
+        // .jpg or a .docx arriving that way would otherwise be converted, sent and paid
+        // for before anything noticed it is not a document this agent files.
+        String ext = extension(chosen);
+        if (!ext.equals(EXT_PDF) && !ext.equals(EXT_RTF)) {
+            throw new Stop("this files a PDF or an RTF, and that is neither:\n\n    "
+                    + chosen.getFileName() + "\n\nA scan goes in as page images, an RTF "
+                    + "as Markdown text; nothing else is read here.");
+        }
+
+        // The same document in the other format, when it is there - and the offer to
+        // read the cheaper copy of it (see companionOf and askRtfInstead). Whichever is
+        // worked on, both are renamed at the end: they are one document.
+        Path document = chosen;
+        Path companion = companionOf(chosen);
+        if (ext.equals(EXT_PDF) && companion != null && askRtfInstead(chosen, companion)) {
+            document = companion;
+            companion = chosen;
+        }
+        String kind = extension(document).equals(EXT_RTF) ? "rtf" : "pdf";
+        System.out.println("Document: " + document + " (as " + kind + ")");
+        if (companion != null) System.out.println("Companion: " + companion);
 
         // ---- Start JRock and wait for it to be usable ----------------------
         // The real entry point, which shows the window on the event dispatch thread and
@@ -145,7 +197,7 @@ public final class JRockDocInventory {
         // automation API asks for - every one of its methods blocks.
         JRock.main(told.forJRock.toArray(new String[0]));
         check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
-        check(JRock.automationBegin("doc inventory of " + pdf.getFileName()));
+        check(JRock.automationBegin("doc inventory of " + document.getFileName()));
 
         // ---- Pass one: the document as plain text --------------------------
         System.out.println("Pass 1: " + PROMPT_ASCII);
@@ -153,12 +205,12 @@ public final class JRockDocInventory {
         // The bare "@img" / "@txt" lines the sample prompts end with are placeholders a
         // person reads and presses Ctrl+I on; a program has to be told.
         JRock.automationDropPlaceholders();
-        check(JRock.automationInclude(pdf.toString(), "pdf"));
+        check(JRock.automationInclude(document.toString(), kind));
         String text = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
 
-        // Beside the PDF and named after it, which is what makes the pair findable
+        // Beside the document and named after it, which is what makes the set findable
         // before they are renamed - and what the second pass is about to read back.
-        Path twin = free(pdf.getParent(), stem(pdf), ".txt");
+        Path twin = free(document.getParent(), stem(document), ".txt");
         Files.write(twin, text.getBytes(StandardCharsets.UTF_8));
         System.out.println("Wrote " + twin);
 
@@ -178,16 +230,28 @@ public final class JRockDocInventory {
         // ---- The rename, which is the user's call --------------------------
         // Asked rather than assumed: this is the one step that changes files the user
         // owns, and the name is a model's suggestion, not a fact about the document.
-        if (!ask("Rename both files to\n\n    " + base + "\n\nfrom\n\n    "
-                + pdf.getFileName() + "\n    " + twin.getFileName() + "\n\nin "
-                + pdf.getParent() + " ?")) {
-            return "kept " + pdf.getFileName() + " and " + twin.getFileName()
-                    + "; the suggested name was " + base;
+        //
+        // Every file of the document goes at once, or none does - two of them, or three
+        // when the PDF and the RTF are both on the disk. A scan renamed without its
+        // export beside it leaves one document under two names, which is the mess this
+        // automation exists to clear up rather than to make.
+        java.util.List<Path> files = new java.util.ArrayList<>();
+        files.add(document);
+        if (companion != null) files.add(companion);
+        files.add(twin);
+        String howMany = (files.size() == 2) ? "both files" : "all three files";
+        if (!ask("Rename " + howMany + " to\n\n    " + base + "\n\nfrom\n\n"
+                + listed(files) + "\nin " + document.getParent() + " ?",
+                "Rename the files?")) {
+            return new Result("kept " + named(files) + "; the suggested name was " + base,
+                    "Nothing was renamed:\n\n" + listed(files)
+                            + "\nThe suggested name was\n\n    " + base);
         }
-        Path pdfNow = renameTo(pdf, base);
-        Path twinNow = renameTo(twin, base);
-        System.out.println("Renamed to " + pdfNow + " and " + twinNow);
-        return "renamed to " + pdfNow.getFileName() + " and " + twinNow.getFileName();
+        java.util.List<Path> renamed = new java.util.ArrayList<>();
+        for (Path file : files) renamed.add(renameTo(file, base));
+        System.out.println("Renamed to " + named(renamed));
+        return new Result("renamed to " + named(renamed),
+                "Renamed to\n\n" + listed(renamed) + "\nin " + document.getParent() + ".");
     }
 
     // ---- The command line --------------------------------------------------
@@ -300,7 +364,9 @@ public final class JRockDocInventory {
 
     // A file the automation cannot run without.
     private static Path mustExist(Path file) {
-        if (!Files.isRegularFile(file)) throw new Stop("there is no " + file + ".");
+        if (!Files.isRegularFile(file)) {
+            throw new Stop("there is no such file:\n\n    " + file);
+        }
         return file;
     }
 
@@ -325,7 +391,8 @@ public final class JRockDocInventory {
         try {
             return new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8);
         } catch (IOException ex) {
-            throw new Stop("could not read " + file + ": " + ex.getMessage());
+            throw new Stop("could not read the reply:\n\n    " + file
+                    + "\n\n" + ex.getMessage());
         }
     }
 
@@ -401,7 +468,7 @@ public final class JRockDocInventory {
                 }
             }
         }
-        String name = found.replaceAll("(?i)\\.(pdf|txt)$", "");
+        String name = found.replaceAll("(?i)\\.(pdf|rtf|txt)$", "");
         name = name.replaceAll("[^" + NAME_CHARS + "._-]+", "-")
                 .replaceAll("-{2,}", "-");
         if (name.length() > 120) {
@@ -444,6 +511,43 @@ public final class JRockDocInventory {
         return n;
     }
 
+    // A file's extension, lower-cased and without the dot ("" when it has none).
+    private static String extension(Path file) {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+    }
+
+    // The same document in the other of the two formats, beside it and under the same
+    // name: the .rtf of a .pdf, or the .pdf of a .rtf. Null when there is none.
+    //
+    // Worth looking for, because that pair is what Acrobat's "Export to RTF" leaves
+    // behind: one document on the disk twice, one of the copies carrying text somebody
+    // has already paid to extract. Both copies are the same document, so both get the
+    // name the inventory settles on - and the text one is the cheaper one to read.
+    private static Path companionOf(Path file) {
+        String other = extension(file).equals(EXT_PDF) ? EXT_RTF : EXT_PDF;
+        Path beside = file.getParent().resolve(stem(file) + "." + other);
+        return Files.isRegularFile(beside) ? beside : null;
+    }
+
+    // File names for a dialog: one per line, indented, nothing else on the line. See
+    // Result for why a name here never shares a line with anything.
+    private static String listed(java.util.List<Path> files) {
+        StringBuilder text = new StringBuilder();
+        for (Path file : files) {
+            text.append("    ").append(file.getFileName()).append('\n');
+        }
+        return text.toString();
+    }
+
+    // The same names for one line of log or console, where a line is what is wanted.
+    private static String named(java.util.List<Path> files) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (Path file : files) names.add(file.getFileName().toString());
+        return String.join(", ", names);
+    }
+
     // A file's name without its extension.
     private static String stem(Path file) {
         String name = file.getFileName().toString();
@@ -471,20 +575,20 @@ public final class JRockDocInventory {
     }
 
     // ---- Dialogs -----------------------------------------------------------
-    // The PDF, chosen in a file chooser with one filter and no "All files": this
-    // automation converts a PDF and has nothing to say about anything else. It opens in
-    // the working directory - the folder being filed, not this one, and not the folder
-    // Explorer happened to start the process in either (that is what --working-dir
-    // overrides). Null when the chooser was cancelled.
-    private static Path choosePdf(Path startIn) {
+    // The document, chosen in a file chooser with one filter and no "All files": this
+    // automation files a scan or the text export of one, and has nothing to say about
+    // anything else. It opens in the working directory - the folder being filed, not this
+    // one, and not the folder Explorer happened to start the process in either (that is
+    // what --working-dir overrides). Null when the chooser was cancelled.
+    private static Path chooseDocument(Path startIn) {
         Path[] chosen = { null };
         onEdt(() -> {
             javax.swing.JFileChooser chooser =
                     new javax.swing.JFileChooser(startIn.toFile());
-            chooser.setDialogTitle("Choose the PDF to inventory");
+            chooser.setDialogTitle("Choose the PDF or RTF to inventory");
             chooser.setAcceptAllFileFilterUsed(false);
             chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                    "PDF files (*.pdf)", "pdf"));
+                    "PDF and RTF files (*.pdf, *.rtf)", EXT_PDF, EXT_RTF));
             if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
                 chosen[0] = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
             }
@@ -492,13 +596,30 @@ public final class JRockDocInventory {
         return chosen[0];
     }
 
-    // Both dialogs below belong to JRock's own window, so they cannot be lost behind it.
-    // automationWindow() is null until that window exists, which JOptionPane reads as
-    // "centre it on the screen" - right for the one dialog that can come that early.
-    private static boolean ask(String message) {
+    // The offer a PDF with an RTF beside it gets: read the text instead of the pictures.
+    //
+    // Offered rather than taken, because which copy is the good one is not something this
+    // automation knows - a badly converted RTF is worse than the scan it came from. But
+    // the question is worth asking out loud: twenty scanned pages are twenty images to
+    // rasterise, upload and be charged for, and the RTF of the same document is a few
+    // kilobytes of Markdown saying what is on them - cheaper, and read rather than
+    // deciphered. Both files are renamed at the end whichever way this goes.
+    private static boolean askRtfInstead(Path pdf, Path rtf) {
+        return ask("There is an RTF beside this PDF, under the same name:\n\n"
+                + "    " + pdf.getFileName() + "\n    " + rtf.getFileName()
+                + "\n\nWork on the RTF instead? Its text goes to the model as Markdown, "
+                + "which is cheaper and more exact than the PDF's pages as images.\n\n"
+                + "Both files are renamed either way.", "Use the RTF instead?");
+    }
+
+    // Every dialog below belongs to JRock's own window, so none of them can be lost
+    // behind it. automationWindow() is null until that window exists, which JOptionPane
+    // reads as "centre it on the screen" - right for the dialogs that come that early,
+    // the RTF offer among them.
+    private static boolean ask(String message, String title) {
         boolean[] yes = { false };
         onEdt(() -> yes[0] = javax.swing.JOptionPane.showConfirmDialog(
-                JRock.automationWindow(), message, "Rename the files?",
+                JRock.automationWindow(), message, title,
                 javax.swing.JOptionPane.YES_NO_OPTION,
                 javax.swing.JOptionPane.QUESTION_MESSAGE)
                     == javax.swing.JOptionPane.YES_OPTION);
