@@ -383,10 +383,16 @@ Built-in cards include:
   system/status output in gray.
 - **Dialog only** mode (Ctrl+D) hides the gray system lines, leaving a clean, copy-pastable
   transcript.
-- **Extend conversation** mode (Ctrl+E): each send includes the full prior dialog so the
-  model sees a continuous conversation (stateless multi-turn). In this mode role headers are
+- **History** mode (Ctrl+E): each send includes the full prior dialog so the model sees a
+  continuous conversation (stateless multi-turn). In this mode role headers are
   timestamped (e.g. `[OPERATOR'S ASSISTANT] · Monday, 14 September 2026, 10:01:34`) so the
   time order of stateless turns is visible.
+- **Enter** — the checkbox beside the Send button, **off when JRock starts and never
+  remembered**: when it is on, plain Enter sends as well as Ctrl+Enter, and Shift+Enter is a
+  new line. It earns its place twice over. Ticked, it is the fast way to talk; unticked, it
+  answers in the one place you are already looking the question every new window raises —
+  *what does Enter do here* — and the answer is "a new line, nothing else". It starts off, and
+  stays off next time, so that answer never depends on a window that has already closed.
 - **Stats** per response: input/output text symbols, and input/output tokens (from the API's
   `usage`), followed by two lines of **rough cost** — a rule of thumb and this exchange priced
   by it:
@@ -418,16 +424,16 @@ Built-in cards include:
   to the text it stands for, rather than a folder to be searched by the timestamp of a send. A
   send that failed wrote no reply file, and its response header stays bare.
 
-![Two timestamped turns with Extend conversation and Dialog only both on](images/extend-dialog-only.png)
+![Two timestamped turns with History and Dialog only both on](images/extend-dialog-only.png)
 
-*Extend conversation (Ctrl+E) with Dialog only (Ctrl+D): the second question says "that risk" and
+*History (Ctrl+E) with Dialog only (Ctrl+D): the second question says "that risk" and
 is answered correctly, because the whole prior dialog was resent. Every gray line is hidden, so
 what's left is a clean, copy-pastable transcript — and the header timestamps keep the order of
 these stateless turns visible.*
 
 ## Clock
 
-**Clock** — the checkbox left of *Extend conversation*, **on by default** — sends the current
+**Clock** — the checkbox left of *History*, **on by default** — sends the current
 local time with each message, as one extra `system` message ahead of the dialog:
 
 ```
@@ -1198,7 +1204,7 @@ What it does *not* do is run headless. It starts the real window and drives it, 
 - **the prompt is read-only while the automation runs** — a keystroke landing in a prompt that
   is about to be sent is the one failure mode here that would be silent, so the field is locked,
   Send is held, and both are released at the end;
-- **Extend conversation is forced off** for the duration (and restored afterwards), so pass two
+- **History is forced off** for the duration (and restored afterwards), so pass two
   asks about a text file and not about pass one's page images all over again;
 - both turns stay in the transcript, and when the dialog closes the prompt is editable and the
   conversation is there to be continued by hand — asking the model *about* the document it just
@@ -1607,7 +1613,7 @@ of your own and it is named in the title just as on the desktop.
 
 | Shortcut | Action |
 |---|---|
-| Ctrl+Enter | Send |
+| Ctrl+Enter | Send (and plain Enter, with the **Enter** checkbox on) |
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
@@ -1615,7 +1621,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+Shift+I | The same, keeping a copy of each file under `JRock/includes/` |
 | Ctrl+U | Fetch a URL and include what it answers with |
 | Ctrl+D | Toggle Dialog only |
-| Ctrl+E | Toggle Extend conversation |
+| Ctrl+E | Toggle History (send the prior dialog too) |
 | Ctrl+M | Move & resize the window |
 | Ctrl+P | Print log (or the selected text) / save as PDF |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |

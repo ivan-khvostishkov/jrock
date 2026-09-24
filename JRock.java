@@ -1829,10 +1829,18 @@ public class JRock {
         // list, Ready). Reused verbatim after reconfiguration.
         initSession(log, promptSource);
 
-        // "Extend conversation" mode: when on, each send includes the full prior
-        // dialog so the model sees a continuous conversation, not a single message.
-        javax.swing.JCheckBox extendMode = new javax.swing.JCheckBox("Extend conversation");
-        extendMode.setToolTipText("Send the whole prior dialog with each message (continuous chat)");
+        // "History" mode: when on, each send includes the full prior dialog so the model
+        // sees a continuous conversation, not a single message.
+        //
+        // Called History and not "Extend conversation" because the bottom bar has to fit
+        // on a phone, and because a checkbox wants a noun: it sits beside Clock, and the
+        // pair reads as the two things that can travel with a message - the time, and
+        // what was said before. A verb like Continue or Append reads as a button that
+        // does something now, which is the one thing a checkbox never does.
+        javax.swing.JCheckBox extendMode = new javax.swing.JCheckBox("History");
+        extendMode.setToolTipText(
+                "Send the whole prior dialog with each message, so the model follows the "
+                + "conversation (Ctrl+E)");
 
         // "Clock" mode: tell the model what time it is here, with each message. On by
         // default - a model that has to guess the date guesses wrong, and one extra
@@ -1842,6 +1850,21 @@ public class JRock {
                 "Send the local time and time zone with each message, as <clock><now>...</now></clock>");
 
         JButton send = new JButton("Send (Ctrl-Enter)");
+
+        // "Enter" mode: when on, plain Enter sends too. Off at startup and never
+        // remembered - deliberately, both times.
+        //
+        // Off, because Enter is the key a text area owes a new line to, and a window that
+        // sends on Enter without being asked sends half-written prompts. Never
+        // remembered, because the answer to "what does Enter do here" must not depend on
+        // what happened in a window that is already closed: the checkbox IS the answer,
+        // and it starts in the state that cannot surprise anyone. That makes it useful to
+        // the careful user as much as to the fast one - unticked, it says in the one place
+        // they are looking that Enter is safe.
+        javax.swing.JCheckBox enterSends = new javax.swing.JCheckBox("Enter");
+        enterSends.setToolTipText(
+                "Enter sends the prompt as well as Ctrl+Enter; Shift+Enter is always a "
+                + "new line. Off when JRock starts, and not remembered");
 
         // Two things disable Send - a request in flight and a backup in progress - and
         // they can overlap: a backup started while an answer was on its way must not
@@ -2014,6 +2037,32 @@ public class JRock {
             }
         });
 
+        // Plain Enter: Send when the "Enter" checkbox is on, a new line when it is off -
+        // and Shift+Enter is a new line either way, so there is always a way to type one.
+        //
+        // The text area's own newline action is looked up and kept rather than reproduced,
+        // so the untouched case behaves exactly as it did before this binding existed,
+        // undo history and all.
+        javax.swing.Action newLine = input.getActionMap().get(
+                javax.swing.text.DefaultEditorKit.insertBreakAction);
+        input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "jrock-enter");
+        input.getActionMap().put("jrock-enter", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (!enterSends.isSelected()) {
+                    if (newLine != null) newLine.actionPerformed(e);
+                } else if (send.isEnabled()) {
+                    send.doClick();
+                }
+            }
+        });
+        input.getInputMap().put(KeyStroke.getKeyStroke(
+                KeyEvent.VK_ENTER, InputEvent.SHIFT_DOWN_MASK), "jrock-newline");
+        input.getActionMap().put("jrock-newline", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (newLine != null) newLine.actionPerformed(e);
+            }
+        });
+
         JScrollPane outputScroll = new JScrollPane(output);
         // Same framed look as the input area.
         outputScroll.setBorder(javax.swing.BorderFactory.createCompoundBorder(
@@ -2027,12 +2076,18 @@ public class JRock {
         split.setContinuousLayout(true);
         split.setOneTouchExpandable(true);
 
-        // Bottom bar: Send on the left, the two send-time checkboxes on the right, same
-        // row. Zero gaps in this layout keep "Extend conversation" flush with the bar's
-        // own right margin, so the space before it is a strut rather than a hgap.
+        // Bottom bar: Send and what Enter does on the left, the two send-time checkboxes
+        // on the right, same row. Zero gaps in this layout keep History flush with the
+        // bar's own right margin, so the space before it is a strut rather than a hgap.
+        //
+        // Enter belongs beside the button and not with the other two: it says what a key
+        // does in this window, while Clock and History say what goes out with the next
+        // message. Beside the button it also sits where the eye already is.
         javax.swing.JPanel sendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         sendSide.add(send);
+        sendSide.add(javax.swing.Box.createHorizontalStrut(10));
+        sendSide.add(enterSends);
         javax.swing.JPanel extendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
         extendSide.add(clockMode);
@@ -2101,7 +2156,8 @@ public class JRock {
             @Override public void actionPerformed(ActionEvent e) { dialogOnly.doClick(); }
         });
 
-        // Ctrl+E toggles "Extend conversation" (E = extend; avoids Ctrl+A/C).
+        // Ctrl+E toggles History (E for extend, which is what this was called and what
+        // the field is still named; Ctrl+H is a text area's backspace).
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_E, InputEvent.CTRL_DOWN_MASK), "jrock-toggle-extend");
         frame.getRootPane().getActionMap().put("jrock-toggle-extend", new AbstractAction() {
@@ -2445,7 +2501,7 @@ public class JRock {
     // line typed into it would be sent as part of the next request.
     private static volatile boolean automating = false;
 
-    // What "Extend conversation" was set to before the automation turned it off, so
+    // What History was set to before the automation turned it off, so
     // automationEnd can put it back exactly as the user left it.
     //
     // Off for the duration, because a chain sends independent prompts: pass two of the
@@ -2488,7 +2544,7 @@ public class JRock {
     }
 
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
-    // and "Extend conversation" is turned off. Returns null, or why it refused.
+    // and History is turned off. Returns null, or why it refused.
     //
     // what finishes the sentence "Automation started: ", so the transcript says which
     // automation this was - the log being the only record of it afterwards.
@@ -2507,7 +2563,7 @@ public class JRock {
         });
         live.log.gray("Automation started: " + what);
         live.log.gray("The prompt is read-only and Send is held until it finishes; "
-                + "\"Extend conversation\" is off for the duration.");
+                + "\"History\" is off for the duration.");
         live.log.gray("");
         return null;
     }
@@ -2763,7 +2819,7 @@ public class JRock {
     }
 
     // Leaves automation mode: the prompt is editable again, Send is released, and
-    // "Extend conversation" goes back to what the user had it at. note finishes the
+    // History goes back to what the user had it at. note finishes the
     // sentence "Automation finished: ", or is null for the sentence on its own.
     //
     // The window stays open with the whole run in its log, and the conversation can be
@@ -3161,7 +3217,7 @@ public class JRock {
             {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
             {"Ctrl+U", "Fetch a URL and include what it answers with"},
             {"Ctrl+D", "Toggle Dialog only"},
-            {"Ctrl+E", "Toggle Extend conversation"},
+            {"Ctrl+E", "Toggle History (send the prior dialog too)"},
             {"Ctrl+S", "Save prompt as (a copy)"},
             {"Ctrl+O", "Load prompt from a file"},
             {"Ctrl+L", "Save log as (a copy, or just the selected text)"},
