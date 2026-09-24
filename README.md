@@ -643,22 +643,28 @@ disk are base64-encoded and sent as an `input_audio` content part beside the tex
 {"type":"input_audio","input_audio":{"data":"UklGRiQ...","format":"wav"}}
 ```
 
-**The recording goes first in the message**, ahead of your question, whatever order the prompt
-wrote them in:
+**The parts go in the order your prompt wrote them**, part for part, recording included:
 
 ```json
 {"role":"user","content":[
-  {"type":"input_audio","input_audio":{"data":"UklGRiQ...","format":"wav"}},
-  {"type":"text","text":"transcribe me the audio"}]}
+  {"type":"text","text":"transcribe me the audio"},
+  {"type":"input_audio","input_audio":{"data":"UklGRiQ...","format":"wav"}}]}
 ```
 
-That order is not cosmetic. Voxtral's
-[own examples](https://huggingface.co/mistralai/Voxtral-Mini-3B-2507) put the audio chunks before
-the text chunk in every single one, and with the question first a 3B Voxtral answered *"I'd be
-happy to help! Please provide the audio you'd like me to transcribe"* — with the recording
-sitting in the same message, behind the question, counted in `prompt_tokens` and all. Text parts
-keep their own order among themselves, because a prompt's segments and the files between them
-only mean anything in the order they were written; a recording has no such place in a sentence.
+Nothing is sorted for you — not images before text, not a recording before the question it
+belongs to. A prompt's segments and the files between them only mean anything in the order they
+were written, and where the token sits is the one place that order is visible, so it is the one
+place it is decided.
+
+That is worth knowing, because a model can care. Voxtral treats a recording as the prompt rather
+than as something the prompt is about: say *"hello operator"* into it and it says hello back, and
+a question typed in *front* of the audio gets answered as a question about nothing — *"I'd be
+happy to help! Please provide the audio you'd like me to transcribe"*, with the recording sitting
+right there in the same message, counted in `prompt_tokens` and all. Its
+[own examples](https://huggingface.co/mistralai/Voxtral-Mini-3B-2507) put the audio chunk first in
+every one. The fix is a prompt, not a feature: put the `@audio` token first, or send the
+recording with no text at all. Another model may want the opposite, which is exactly why JRock
+does not choose.
 
 The `format` is the file's own extension, lower-cased, and **wav and mp3 are the only two there
 are**: [the API's schema](https://github.com/openai/openai-openapi) makes that field an enum of
