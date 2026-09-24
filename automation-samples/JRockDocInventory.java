@@ -4,10 +4,12 @@
 // the class path:
 //
 //     java -cp jrock.jar JRockDocInventory.java [--working-dir <dir>]
-//                                               [--prompts-dir <dir>] [document.pdf|.rtf]
+//                                               [--prompts-dir <dir>] [--start-dir <dir>]
+//                                               [document.pdf|.rtf]
 //
-// Without the document it asks for a PDF or an RTF in a file chooser, opened in the
-// working directory. The two prompts it needs it finds beside itself, in this directory.
+// Without the document it asks for a PDF or an RTF in a file chooser, opened in
+// --start-dir if there is one and the working directory otherwise. The two prompts it
+// needs it finds beside itself, in this directory.
 //
 // The flags are JRock's and are passed straight through (see parseArgs): --working-dir
 // names the folder whose settings it is to use - that folder's model, its images DPI,
@@ -85,6 +87,13 @@ public final class JRockDocInventory {
     private static final String WORKING_DIR_FLAG = "--working-dir";
     private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
 
+    // This automation's own flag, and the one flag it does not pass on: the folder that
+    // was right-clicked, which the file chooser opens in. JRock's "Install agent" puts it
+    // in the folder verbs' command (see buildAgentLaunch there); JRock itself has no use
+    // for it - its files are rooted by --working-dir - and reading it here is what makes
+    // the chooser open where the user just was.
+    private static final String START_DIR_FLAG = "--start-dir";
+
     // Starting a JVM's worth of Swing and fetching the model list, on a cold machine.
     private static final long READY_TIMEOUT_MS = 120_000;
 
@@ -153,6 +162,7 @@ public final class JRockDocInventory {
         Path here = ownDirectory();
         System.out.println("Automation directory: " + here);
         System.out.println("Working directory:    " + told.workingDir);
+        System.out.println("Chooser opens in:     " + told.chooserStart());
         System.out.println("Driving JRock from:   " + jrockCame());
         Path ascii = mustExist(here.resolve(PROMPT_ASCII));
         Path inventory = mustExist(here.resolve(PROMPT_NAME));
@@ -160,7 +170,7 @@ public final class JRockDocInventory {
         // The document. Asked for before JRock is started, so a cancelled chooser
         // leaves nothing behind at all.
         Path chosen = (told.document != null)
-                ? told.document : chooseDocument(told.workingDir);
+                ? told.document : chooseDocument(told.chooserStart());
         if (chosen == null) {
             System.out.println("No document chosen - nothing to do.");
             return null;
@@ -266,7 +276,20 @@ public final class JRockDocInventory {
     private static final class Args {
         private final java.util.List<String> forJRock = new java.util.ArrayList<>();
         private Path workingDir = Paths.get("").toAbsolutePath().normalize();
+        private Path startDir = null;
         private Path document = null;
+
+        // Where the file chooser opens: the folder that was right-clicked when there was
+        // one, and the settings folder otherwise.
+        //
+        // Rarely the same place, and that is the point. --working-dir names the folder
+        // whose model, DPI and key this run uses - one folder, set up once, usually
+        // nowhere near the document - while --start-dir is where the user just was. A
+        // chooser opened in the settings folder is a chooser opened in the one folder the
+        // document is certainly not in.
+        private Path chooserStart() {
+            return (startDir != null && Files.isDirectory(startDir)) ? startDir : workingDir;
+        }
     }
 
     // Both spellings of a flag - "--working-dir <dir>" and "--working-dir=<dir>" - as
@@ -279,31 +302,78 @@ public final class JRockDocInventory {
             String arg = args[i];
             if (arg == null || arg.isBlank()) continue;
             String flag = flagOf(arg);
-            if (flag.equals(WORKING_DIR_FLAG) || flag.equals(PROMPTS_DIR_FLAG)) {
+            // --start-dir is this automation's own, so it is read and NOT passed on:
+            // JRock would take an unknown flag for the prompt file to load.
+            boolean mine = flag.equals(START_DIR_FLAG);
+            if (mine || flag.equals(WORKING_DIR_FLAG) || flag.equals(PROMPTS_DIR_FLAG)) {
                 String value = valueOf(arg);
                 if (value == null) {
                     if (i + 1 >= args.length) {
                         throw new Stop(flag + " needs a directory after it.");
                     }
                     value = args[++i];
-                    parsed.forJRock.add(flag);
-                    parsed.forJRock.add(value);
-                } else {
+                    if (!mine) {
+                        parsed.forJRock.add(flag);
+                        parsed.forJRock.add(value);
+                    }
+                } else if (!mine) {
                     parsed.forJRock.add(arg);   // one word, passed on as one word
                 }
                 if (flag.equals(WORKING_DIR_FLAG)) {
-                    parsed.workingDir = Paths.get(value).toAbsolutePath().normalize();
+                    Path dir = dirOrNull(value);
+                    if (dir != null) parsed.workingDir = dir;
+                } else if (mine) {
+                    parsed.startDir = dirOrNull(value);
                 }
             } else if (arg.startsWith("-")) {
                 parsed.forJRock.add(arg);
             } else if (parsed.document == null) {
-                parsed.document = Paths.get(arg).toAbsolutePath().normalize();
+                parsed.document = documentPath(arg);
             } else {
                 throw new Stop("one document at a time, and two were given:\n\n"
-                        + parsed.document + "\n" + Paths.get(arg).toAbsolutePath());
+                        + parsed.document + "\n" + arg);
             }
         }
         return parsed;
+    }
+
+    // A path as it was meant, not as the command line managed to spell it.
+    //
+    // Windows hands a process its arguments as ANSI text, so a path holding a character
+    // the system code page has no room for arrives with a literal '?' in place of it -
+    // and that is not a path at all: Paths.get throws "Illegal char <?>". Which is why a
+    // right-click on a file with a Cyrillic name in it used to stop this automation
+    // before it started, while the very same file picked in the chooser worked perfectly:
+    // a chooser is not a command line. JRock.automationResolvePath reads the folder to
+    // find the name that fits; a path with nothing wrong with it comes back untouched.
+    private static Path spelled(String value) {
+        return Paths.get(JRock.automationResolvePath(value)).toAbsolutePath().normalize();
+    }
+
+    // The document argument, or a stop saying why that text is not a path. Worth its own
+    // sentence: the file is what the run is about, and "Illegal char <?>" out of a
+    // stack trace says nothing about what to do next.
+    private static Path documentPath(String value) {
+        try {
+            return spelled(value);
+        } catch (java.nio.file.InvalidPathException bad) {
+            throw new Stop("Windows could not put this path on the command line, and the "
+                    + "folder it names does not say which file was meant:\n\n    " + value
+                    + "\n\nStart the automation without a file and pick it in the "
+                    + "chooser - a chooser is not a command line.");
+        }
+    }
+
+    // A directory argument, or null when that text is no path at all. Null rather than a
+    // stop: a flag whose folder cannot be read is a worse chooser, not a reason to give
+    // up on the document (and JRock reports its own flags for itself).
+    private static Path dirOrNull(String value) {
+        try {
+            return spelled(value);
+        } catch (java.nio.file.InvalidPathException bad) {
+            System.out.println("Ignored, not a readable path: " + value);
+            return null;
+        }
     }
 
     // "--flag=value" in two halves: the flag, and the value or null when the argument
@@ -577,9 +647,9 @@ public final class JRockDocInventory {
     // ---- Dialogs -----------------------------------------------------------
     // The document, chosen in a file chooser with one filter and no "All files": this
     // automation files a scan or the text export of one, and has nothing to say about
-    // anything else. It opens in the working directory - the folder being filed, not this
-    // one, and not the folder Explorer happened to start the process in either (that is
-    // what --working-dir overrides). Null when the chooser was cancelled.
+    // anything else. It opens where Args.chooserStart says - the folder that was
+    // right-clicked, or the settings folder when nothing was. Null when the chooser was
+    // cancelled.
     private static Path chooseDocument(Path startIn) {
         Path[] chosen = { null };
         onEdt(() -> {
