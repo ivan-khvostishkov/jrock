@@ -1799,19 +1799,6 @@ public class JRock {
                 return;
             }
 
-            // Clock on and a recording in the request: said before the call, not sent
-            // around. A model that listens may refuse a system message beside audio (see
-            // appendClockMessage for whose rule that is and what the error looks like), and
-            // the clock is a checkbox - so the answer is to untick it, which is yours to do.
-            // The request goes as it stands: another model may well take both.
-            if (clock && carriesAudio(prompt, history)) {
-                log.gray("Clock is on and this request carries audio. A model that listens "
-                        + "may refuse a system message beside a recording - Voxtral answers "
-                        + "HTTP 400 with \"Found system messages at indexes [0] and audio "
-                        + "chunks in messages at indexes [1]\". Untick Clock and send again "
-                        + "if that is what comes back.");
-            }
-
             log.gray(extend
                     ? "Calling " + pathOf(endpoint()) + " (extend: " + history.size() + " prior turns) ..."
                     : "Calling " + pathOf(endpoint()) + " ...");
@@ -8801,43 +8788,16 @@ public class JRock {
     // said, and an extra user turn in front of the real one would break the
     // user/assistant alternation that several models on mantle insist on.
     //
-    // A model that listens may refuse this message beside a recording. Voxtral does - "Found
-    // system messages at indexes [0] and audio chunks in messages at indexes [1]. This is
-    // not allowed prior to the tokenizer version 13", which is mistral-common's
-    // MistralRequestValidatorV5 talking, and its model card is blunter still: "System
-    // prompts are not yet supported".
-    //
-    // JRock does not work around that. The clock is not moved into the user's turn, not
-    // dropped behind your back and not switched off for you: the request goes as the
-    // checkbox says it will, and the send says so first (see carriesAudio) - the checkbox is
-    // the answer. Folding it into the message was tried and taken out again: it is a text
-    // model's feature, it makes no difference to a transcription, and a request that quietly
-    // disagrees with the checkbox is worse than one that fails for a reason you were told.
+    // The clock goes out exactly as the checkbox says, for every model and every kind of
+    // include. It is not moved into the user's turn, not dropped behind your back and not
+    // switched off for you when a request also carries a recording: folding it into the
+    // message was tried and taken out again - it is a text model's feature, it makes no
+    // difference to a transcription, and a request that quietly disagrees with the checkbox
+    // is worse than one that does what it was told to do. If some model does refuse the
+    // pair, untick Clock: that is one click in the same window.
     private static void appendClockMessage(StringBuilder messages, String clockNow) {
         messages.append("{\"role\":\"system\",\"content\":\"")
                 .append(jsonEscape(clockNow)).append("\"},");
-    }
-
-    // True when this request would carry a recording: an @audio token in the new prompt or -
-    // in Extend mode - in an earlier turn of yours. The validator that refuses a system
-    // message beside audio reads the whole message list, so this has to as well.
-    //
-    // Tokens rather than expanded parts: this is asked in the UI, before the send thread
-    // reads a single file, and a token is enough to know what the request will carry.
-    private static boolean carriesAudio(String prompt, java.util.List<String[]> history) {
-        if (hasAudioToken(prompt)) return true;
-        for (String[] turn : history) {
-            if (ROLE_HUMAN.equals(turn[0]) && hasAudioToken(turn[1])) return true;
-        }
-        return false;
-    }
-
-    private static boolean hasAudioToken(String text) {
-        java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(text);
-        while (m.find()) {
-            if (m.group(1).equals("audio")) return true;
-        }
-        return false;
     }
 
     // ---- HTTP transport ----------------------------------------------------
