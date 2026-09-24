@@ -1254,6 +1254,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
+| `automationResolvePath(String path)` | The path an argument meant, when an ANSI command line replaced characters it could not carry with `?` — see [Agents](#windows-agents-one-automation-per-folder). Anything already spelled properly comes back untouched, so every path argument can go through it. Callable before `JRock.main`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, and a log line saying so. |
 
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the
@@ -1507,8 +1508,9 @@ menu)...**: the same idea for the `.java`
 [prompts & agents directory](#the-prompts-directory) for `.java` files only, and writes **one
 entry with two commands** for the automation you pick:
 
-- **inside or on a folder** — the agent runs with **no argument**, so it asks which file to work
-  on. Its own file chooser opens in the working directory it was installed for.
+- **inside or on a folder** — the agent runs with **no file**, so it asks which one to work on.
+  Its chooser opens in **the folder you clicked**, handed over as `--start-dir "%V"` (`%V` and
+  not `%1`, because `%1` is empty for a right-click on the background of an open folder).
 - **on a file of any type, in any folder** — the agent gets **that file's full path** as its
   single argument, and works on it.
 
@@ -1518,6 +1520,30 @@ Explorer starts a right-click command in the folder that was **clicked**, which 
 of what an agent needs. An agent belongs to the folder it was installed from — that folder's
 model, its images DPI, its Bedrock key, all in that folder's
 [`JRock/jrock-config.txt`](#settings-files) — and may be run on a document anywhere on the disk.
+
+`--start-dir` is the other half of that split, and it is the **agent's** flag, not JRock's: the
+settings folder is the one folder the document is certainly not in, so a chooser that opened
+there was a chooser that opened in the wrong place. An agent reads the flag and keeps it — it is
+not passed on, since JRock reads an unknown bare word as a prompt file to load (JRock accepts it
+and ignores it anyway, so an older agent that forwards everything still works).
+
+**Names Windows cannot put on a command line.** Windows hands a new process its arguments as
+ANSI text, so a path holding a character the system code page has no room for — Cyrillic,
+Greek, CJK, on a Cp1252 install — arrives with a literal `?` in place of each one, before Java
+starts at all. `C:\Документы\Документ.rtf` becomes `C:\?????????\????????.rtf`, which is not a path
+(`InvalidPathException: Illegal char <?>`) — while the same file picked in a file chooser has
+always worked, because a chooser never goes through a command line. Those characters cannot be
+decoded back; they were thrown away, not encoded. So JRock asks the **disk** instead: `?` is
+illegal in a Windows path, so each one marks one lost character, which makes the mangled text a
+pattern with one single-character wildcard per character to find, and the folder is matched
+against it one component at a time. A candidate is only accepted if the character in each `?`
+position is one the code page **could not** have carried — otherwise it would have come through
+as itself — so `plain.txt` is not a match for nine lost characters even though it is nine
+characters long. A component that matches nothing, or two entries at once, is left exactly as it
+came and the caller fails as it did before: this repairs what the disk can prove and guesses at
+nothing. It applies to the clicked file, to `--working-dir` and `--prompts-dir` baked into a
+registry entry, to the `.txt` verb's prompt file, and to any path an automation passes through
+[`automationResolvePath`](#the-automation-api).
 
 Which is why an entry is per **(agent, folder)** pair, not per agent. Install the same
 automation from two folders and you get two entries, with two sets of settings:

@@ -819,12 +819,26 @@ public class JRock {
         http();
         // Command line:
         //   [--working-dir <dir>] [--prompts-dir <dir>] [<initial-prompt-file>]
+        // (--start-dir <dir> is an agent's flag and is accepted here only to be
+        // ignored - see START_DIR_FLAG.)
         String sourceArg = parseArgs(args);
         SwingUtilities.invokeLater(() -> createAndShowGui(sourceArg));
     }
 
     private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
     private static final String WORKING_DIR_FLAG = "--working-dir";
+
+    // An agent's flag, not JRock's: the folder the right-click was made in, which an
+    // agent opens its own file chooser in - the folder you clicked, rather than the
+    // settings folder --working-dir names (see buildAgentLaunch, and the samples that
+    // read it). JRock has nothing to do with it: its own files are rooted by
+    // --working-dir and nothing else.
+    //
+    // Known here all the same, so it can be ignored properly. An agent passes on every
+    // flag it does not recognize - deliberately, so a launcher that grew one does not
+    // have to wait for every agent to be edited - so this flag can arrive here, and a
+    // flag taken for a bare argument would be read as a prompt file to load.
+    private static final String START_DIR_FLAG = "--start-dir";
 
     // Reads the command line, applying the directory flags as a side effect and
     // returning the initial-prompt file argument (null when none was given). Flags may
@@ -857,6 +871,10 @@ public class JRock {
             if (arg.equals(WORKING_DIR_FLAG)) { i++; continue; }
             if (arg.startsWith(WORKING_DIR_FLAG + "=")) continue;
 
+            // Somebody else's flag, value and all (see START_DIR_FLAG).
+            if (arg.equals(START_DIR_FLAG)) { i++; continue; }
+            if (arg.startsWith(START_DIR_FLAG + "=")) continue;
+
             if (arg.startsWith(PROMPTS_DIR_FLAG + "=")) {
                 setPromptsDir(arg.substring(PROMPTS_DIR_FLAG.length() + 1).trim());
             } else if (arg.equals(PROMPTS_DIR_FLAG)) {
@@ -866,7 +884,7 @@ public class JRock {
                     promptsDirNote = "(none given after " + PROMPTS_DIR_FLAG + ")";
                 }
             } else if (sourceArg == null) {
-                sourceArg = arg;
+                sourceArg = resolveArgPath(arg);
             }
         }
         return sourceArg;
@@ -874,6 +892,146 @@ public class JRock {
 
     private static String argAt(String[] args, int i) {
         return (args[i] == null) ? "" : args[i].trim();
+    }
+
+    // ---- A path the command line could not spell ---------------------------
+    // Windows hands a new process its command line as ANSI text, and the JVM reads it
+    // with sun.jnu.encoding - Cp1252 on a Western install. A character that code page
+    // has no room for is replaced with a literal '?' before Java is started at all:
+    // right-click C:\Documents\<a Cyrillic name>.rtf and the agent is launched with
+    // C:\?????????\????????.rtf, which Paths.get refuses outright with
+    // "InvalidPathException: Illegal char <?>". The same file picked in JRock's own file
+    // chooser works perfectly - a chooser never goes through a command line - which is
+    // what makes this look like an include problem when it is nothing of the kind.
+    // Decoding those '?' back is impossible: the characters were thrown away, not
+    // encoded. (An environment variable would have survived: Windows keeps that block
+    // in Unicode. A registry verb has no way to set one without a cmd window, though,
+    // and this way needs no launcher at all.)
+    //
+    // What is left is the disk. '?' cannot appear in a Windows path, so every one of
+    // them is a character that was lost, one '?' for one char - which makes the mangled
+    // text a pattern with exactly as many single-character wildcards as there are
+    // characters to find, and the folder it names holds the answer. So: match the
+    // pattern against what is actually there, one component at a time from the root
+    // down.
+    //
+    // A component that matches nothing, or two entries at once, is handed back exactly
+    // as it came and the caller fails as it did before: this repairs what the disk can
+    // prove and does not guess at the rest. A path with no '?' in it - which is every
+    // path on every other platform, and almost every path on this one - is returned
+    // unchanged after one indexOf.
+    private static final char LOST_CHAR = '?';
+
+    private static String resolveArgPath(String text) {
+        if (text == null || text.indexOf(LOST_CHAR) < 0) return text;
+        String[] parts = text.split("[\\\\/]+", -1);
+        Path at;
+        int from;
+        if (text.startsWith("\\\\") || text.startsWith("//")) {
+            // A UNC root - the server and the share of \\server\share - is two names
+            // with nothing above them to list, so there is nothing to match against.
+            return text;
+        } else if (parts.length > 0 && parts[0].endsWith(":")) {
+            at = Paths.get(parts[0] + java.io.File.separator);
+            from = 1;
+        } else if (parts.length > 0 && parts[0].isEmpty()) {
+            at = Paths.get(java.io.File.separator);   // rooted, no drive
+            from = 1;
+        } else {
+            at = Paths.get("").toAbsolutePath();      // relative to here
+            from = 0;
+        }
+        for (int i = from; i < parts.length; i++) {
+            String part = parts[i];
+            if (part.isEmpty()) continue;             // a doubled or trailing separator
+            if (part.indexOf(LOST_CHAR) < 0) {
+                at = at.resolve(part);
+                continue;
+            }
+            Path only = theOneNamed(at, part);
+            if (only == null) return text;
+            at = only;
+        }
+        return at.toString();
+    }
+
+    // The one entry of dir whose name fits pattern, where each '?' stands for the one
+    // character that was lost in its place - or null when nothing fits, when two things
+    // do, or when the folder cannot be listed. Case-insensitive, as Windows names are.
+    private static Path theOneNamed(Path dir, String pattern) {
+        Path found = null;
+        try (java.util.stream.Stream<Path> list = Files.list(dir)) {
+            for (java.util.Iterator<Path> it = list.iterator(); it.hasNext(); ) {
+                Path entry = it.next();
+                Path name = entry.getFileName();
+                if (name == null || !fitsLost(pattern, name.toString())) continue;
+                if (found != null) return null;      // two candidates: prove neither
+                found = entry;
+            }
+        } catch (IOException | RuntimeException ex) {
+            return null;
+        }
+        return found;
+    }
+
+    // Whether name could be what pattern was before the command line lost characters
+    // out of it: the same length, the same characters where the pattern still has one,
+    // and a character the command line COULD NOT HAVE CARRIED everywhere it has a '?'.
+    //
+    // That last test is what makes this worth doing. A '?' is there because the system
+    // code page had no room for the character in its place, so a candidate that has an
+    // ordinary letter there is not the file: it would have come through as that letter.
+    // Without it, every sibling of the same length fits - "plain.txt" is as good a match
+    // for nine lost characters as the nine-letter name that was really clicked - and a
+    // folder with two such names could never be resolved at all. With it, a name Cp1252
+    // can spell is ruled out by the fact that it was not spelled.
+    private static boolean fitsLost(String pattern, String name) {
+        if (pattern.length() != name.length()) return false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char want = pattern.charAt(i);
+            char has = name.charAt(i);
+            if (want == LOST_CHAR) {
+                if (!wasLost(has)) return false;
+                continue;
+            }
+            if (Character.toLowerCase(want) != Character.toLowerCase(has)) return false;
+        }
+        return true;
+    }
+
+    // True when this character is one the command line could not have carried - which is
+    // to say one that arrives as '?'. sun.jnu.encoding is the charset the JVM decodes
+    // arguments with, so it is the one that decides; native.encoding is the same answer
+    // under the name Java 17 gave it, and is read as a fallback.
+    //
+    // A JVM that will not name its charset makes every character possible again, which
+    // is the behaviour this had before the check existed: fewer names resolved, none
+    // resolved wrongly.
+    private static final java.nio.charset.CharsetEncoder LOST_ENCODER = lostEncoder();
+
+    private static java.nio.charset.CharsetEncoder lostEncoder() {
+        for (String property : new String[] { "sun.jnu.encoding", "native.encoding" }) {
+            String name = System.getProperty(property);
+            if (name == null || name.isEmpty()) continue;
+            try {
+                if (java.nio.charset.Charset.isSupported(name)) {
+                    return java.nio.charset.Charset.forName(name).newEncoder();
+                }
+            } catch (RuntimeException ex) {
+                // An unusable charset name is no answer; try the other property.
+            }
+        }
+        return null;
+    }
+
+    // Synchronized because a CharsetEncoder holds state and this is asked from whichever
+    // thread an automation runs on as well as from the startup.
+    private static boolean wasLost(char c) {
+        java.nio.charset.CharsetEncoder encoder = LOST_ENCODER;
+        if (encoder == null) return true;
+        synchronized (encoder) {
+            return !encoder.canEncode(c);
+        }
     }
 
     // Applies --working-dir, which roots JRock's own files - JRock/, its settings, its
@@ -896,7 +1054,17 @@ public class JRock {
             workingDirNote = "(empty " + WORKING_DIR_FLAG + " ignored)";
             return;
         }
-        Path candidate = Paths.get(value).toAbsolutePath().normalize();
+        // Recovered first, because this path was written into a registry entry and is
+        // read back through an ANSI command line (see resolveArgPath); and never thrown,
+        // because a flag that cannot be read at all must still leave a window standing.
+        Path candidate;
+        try {
+            candidate = Paths.get(resolveArgPath(value)).toAbsolutePath().normalize();
+        } catch (java.nio.file.InvalidPathException bad) {
+            workingDirNote = "(" + WORKING_DIR_FLAG + " " + value
+                    + " is not a path this system can read - ignored)";
+            return;
+        }
         if (!Files.isDirectory(candidate)) {
             workingDirNote = "(" + WORKING_DIR_FLAG + " " + candidate
                     + " is not a directory - ignored)";
@@ -918,7 +1086,14 @@ public class JRock {
             promptsDirNote = "(empty " + PROMPTS_DIR_FLAG + " ignored)";
             return;
         }
-        Path candidate = Paths.get(value).toAbsolutePath().normalize();
+        Path candidate;
+        try {
+            candidate = Paths.get(resolveArgPath(value)).toAbsolutePath().normalize();
+        } catch (java.nio.file.InvalidPathException bad) {
+            promptsDirNote = value + " (not a path this system can read - "
+                    + "using the working directory)";
+            return;
+        }
         if (!Files.isDirectory(candidate)) {
             promptsDirNote = candidate + " (not a directory - using the working directory)";
         } else if (candidate.equals(workingDir)) {
@@ -969,7 +1144,15 @@ public class JRock {
     // flag can name the directory and the argument just name a file inside it.
     // Without the flag this is the process working directory, as it always was.
     private static Path resolvePromptArg(String arg) {
-        Path given = Paths.get(arg);
+        Path given;
+        try {
+            given = Paths.get(arg);
+        } catch (java.nio.file.InvalidPathException bad) {
+            // A name the command line could not spell and the disk could not identify
+            // either (see resolveArgPath). Reported as "could not read" like any other
+            // unreadable prompt file, rather than thrown out of the startup.
+            return null;
+        }
         if (given.isAbsolute() || promptsDir == null) return given;
         return promptsDir.resolve(given);
     }
@@ -1732,13 +1915,14 @@ public class JRock {
             // name, and the full path is what makes the line useful when it didn't
             // load.
             Path argPath = resolvePromptArg(sourceArg);
-            String fromArg = readFileQuietly(argPath);
+            String fromArg = (argPath == null) ? null : readFileQuietly(argPath);
             if (fromArg != null) {
                 initialPrompt = fromArg;
                 promptSource = "command-line file (read-only): " + argPath;
             } else {
                 initialPrompt = PROMPT;
-                promptSource = "default (could not read " + argPath + ")";
+                promptSource = "default (could not read "
+                        + (argPath == null ? sourceArg : argPath.toString()) + ")";
             }
         } else {
             String fromPersist = readFileQuietly(promptFile());
@@ -2433,6 +2617,24 @@ public class JRock {
     public static JFrame automationWindow() {
         Ui live = ui;
         return live == null ? null : live.frame;
+    }
+
+    // The path an argument meant, when the command line could not spell it.
+    //
+    // An agent installed by "Install agent" is started by Explorer with the clicked file
+    // as its argument, and on Windows an argument is ANSI text: a path holding a
+    // character the system code page has no room for arrives with a '?' in place of it,
+    // and Paths.get refuses it ("Illegal char <?>") - which is why a Cyrillic file name
+    // fails from the right-click menu and works from the file chooser. This reads the
+    // folder to find the name that fits, and gives it back spelled properly; see
+    // resolveArgPath for the whole story, and for what it does when the disk cannot
+    // prove which file was meant.
+    //
+    // Pass every path argument through it: a path with nothing wrong with it comes back
+    // unchanged. Callable before JRock.main, because it reads the disk and not the
+    // window.
+    public static String automationResolvePath(String path) {
+        return resolveArgPath(path);
     }
 
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
@@ -4248,8 +4450,8 @@ public class JRock {
                         + "  \"" + label + "\"\n"
                         + "for " + agent.getFileName() + ", in two places:\n\n"
                         + "  \u2022 inside or on a folder - the agent runs with no "
-                        + "argument, so it\n    asks which file to work on, starting in "
-                        + workingDir + ".\n"
+                        + "file, so it asks\n    which one to work on, and asks in the "
+                        + "folder you clicked.\n"
                         + "  \u2022 on a file of any type, in any folder - the agent "
                         + "works on THAT\n    file, still using the settings of "
                         + workingDir + ".\n\n"
@@ -4355,8 +4557,19 @@ public class JRock {
 
     // The command Explorer runs: this jar on the class path, the agent as the source
     // file to run (single-file source mode compiles it in memory against that jar),
-    // then the flags that pin the folder whose settings it is to use, and last the
-    // clicked file for the file verb. No cmd, no console.
+    // then the flags that pin the folder whose settings it is to use, and last what was
+    // clicked. No cmd, no console.
+    //
+    // The two verbs hand over different things, because Explorer clicked on different
+    // things. The file verb passes the file (%1), which is the document to work on. The
+    // folder verb passes the folder (%V) under --start-dir, which is not: an agent with
+    // no document opens a file chooser, and the folder you right-clicked is the one
+    // thing known about where that document might be. Without it the chooser opened in
+    // the settings folder named by --working-dir, which is the one folder the answer is
+    // certainly not in.
+    //
+    // %V and not %1 for the folder: %1 is empty for a right-click on the background of
+    // an open folder, which is one of the two places the folder verb is installed.
     private static String buildAgentLaunch(String javaw, Path jar, Path agent,
                                            String fileArg) {
         StringBuilder cmd = new StringBuilder();
@@ -4364,7 +4577,11 @@ public class JRock {
         cmd.append('"').append(agent).append('"');
         cmd.append(' ').append(WORKING_DIR_FLAG).append(' ').append(quotedDir(workingDir));
         cmd.append(ctxPromptsDirArg());
-        if (fileArg != null) cmd.append(' ').append(fileArg);
+        if (fileArg != null) {
+            cmd.append(' ').append(fileArg);
+        } else {
+            cmd.append(' ').append(START_DIR_FLAG).append(" \"%V\"");
+        }
         return cmd.toString();
     }
 
