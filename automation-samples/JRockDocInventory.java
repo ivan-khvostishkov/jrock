@@ -344,9 +344,11 @@ public final class JRockDocInventory {
         } catch (java.nio.file.InvalidPathException bad) {
             throw new Stop("Windows could not put this file name on the command line - a "
                     + "character in it has no place in the system code page, so it "
-                    + "arrived as '?':\n\n    " + value + "\n\nRight-click the FOLDER "
-                    + "instead and pick the file in the chooser, which never goes "
-                    + "through a command line.");
+                    + "arrived as '?':\n\n    " + value + "\n\nTo fix it for good: Region "
+                    + "settings > Administrative > Change system locale... > tick \"Beta: "
+                    + "Use Unicode UTF-8 for worldwide language support\" and restart "
+                    + "Windows.\n\nOr right-click the FOLDER instead and pick the file in "
+                    + "the chooser, which never goes through a command line.");
         }
     }
 

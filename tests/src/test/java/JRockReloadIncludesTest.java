@@ -34,7 +34,7 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
     private static final String IMAGE_FILTER = "Image files (png, jpg, jpeg, gif, webp)";
     private static final String TEXT_FILTER =
-            "Text files as is (*.txt, *.csv, *.html, *.java, *.rtf)";
+            "Text files as is (*.txt, *.csv, *.json, *.html, *.java, *.rtf)";
     private static final String RELOAD_ITEM = "Reload all includes";
 
     /** Reading a log and a handful of paths; a slow CI runner needs the rest. */
