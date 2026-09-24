@@ -509,10 +509,66 @@ public class JRock {
         // Uses the mantle default /v1/chat/completions (inherited).
     }
 
+    // Shared traits of Google Gemma models on Bedrock. Their cards are blunt about the
+    // entry point: "Gemma 4 models are available only on the bedrock-mantle endpoint",
+    // and "on bedrock-mantle, this model is served at /openai/v1/responses, not the
+    // default /v1/responses" - an OpenAI-compatible base of /openai/v1, so Chat
+    // Completions lives at /openai/v1/chat/completions. Text-out only.
+    //
+    // Worth knowing before choosing one: the cards say Chat Completions returns no
+    // reasoning tokens even though the model reasons, because the OpenAI Chat Completions
+    // specification has nowhere to put them - that is a limit of the API JRock speaks,
+    // not of the model. The reasoning still happens and is still charged for.
+    //
+    // CONCRETE (not abstract), the way OpenAiModelCard is: it doubles as a generic "any
+    // Google model" card for partial matches (an id starting with "google."). Every
+    // Google model Bedrock documents today is a Gemma 4 on that same base, so an
+    // unrecognised google.* id is better sent there than to the mantle default /v1.
+    private static class GoogleModelCard extends BedrockModelCard {
+        String vendorPrefix()         { return "google."; }
+        String modelId()              { return "google."; }
+        String displayName()          { return "Google Gemma (generic)"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html"; }
+        String[] inputModalities()    { return new String[] { "Image", "Text", "Video" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] {}; }  // runtime not supported
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
+    }
+
+    // Google Gemma 4 26B-A4B: the mixture-of-experts one, 256K context, 25.2B parameters
+    // with 3.8B active per token. Card: mantle only, Image/Text/Video in, Text out - and
+    // NO audio, which is a red cross on its modality table where its small sibling has a
+    // tick (see Gemma4E2bCard). Request payload, images and video included, caps at
+    // 3.5 MB, which is a real limit for a document sent as page images.
+    private static final class Gemma426bA4bCard extends GoogleModelCard {
+        String modelId()     { return "google.gemma-4-26b-a4b"; }
+        String displayName() { return "Gemma 4 26B-A4B"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-google-gemma-4-26b-a4b.html"; }
+    }
+
+    // Google Gemma 4 E2B: the compact one, 128K context, 5.1B parameters - and the only
+    // card in this registry whose input modalities include Audio, which makes it the one
+    // to try an @audio include against. Same 3.5 MB payload cap as its bigger sibling,
+    // which for a recording is about the ceiling a minute or two of wav runs into.
+    //
+    // Its card recommends reasoning_effort "high", because the model reasons at length
+    // anyway and the effort setting is what keeps that reasoning in its own channel
+    // instead of in the answer. JRock sends no reasoning_effort of its own, so an answer
+    // here may well arrive with its thinking in front of it.
+    private static final class Gemma4E2bCard extends GoogleModelCard {
+        String modelId()     { return "google.gemma-4-e2b"; }
+        String displayName() { return "Gemma 4 E2B"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-google-gemma-4-e2b.html"; }
+        String[] inputModalities() { return new String[] { "Audio", "Image", "Text", "Video" }; }
+    }
+
     // Registry of known model cards, and a lookup by model id.
     private static final BedrockModelCard[] MODEL_CARDS = {
         new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(), new Qwen332bCard(),
         new Gpt54Card(), new Gpt6AstraCard(),
+        new Gemma426bA4bCard(), new Gemma4E2bCard(),
         new ClaudeOpus5Card(), new ClaudeFable51Card(),
     };
 
@@ -520,7 +576,7 @@ public class JRock {
     // found but the id starts with a known vendor prefix (e.g. any "anthropic.*"
     // model routes to the Anthropic/Messages behavior).
     private static final BedrockModelCard[] VENDOR_CARDS = {
-        new AnthropicModelCard(), new OpenAiModelCard(),
+        new AnthropicModelCard(), new OpenAiModelCard(), new GoogleModelCard(),
     };
 
     // Exact-match lookup by model id (pure; used to build endpoint URLs).

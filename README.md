@@ -337,7 +337,7 @@ correct mantle path (`/v1/...` vs `/openai/v1/...`). The **Model** field in Conf
 free-text with a dropdown pre-populated from the most recently fetched available models.
 
 Model matching: exact model-id match wins; otherwise a **vendor-prefix** partial match
-(e.g. any `anthropic.*` or `openai.*`); otherwise a default config is used. This is logged
+(e.g. any `anthropic.*`, `openai.*` or `google.*`); otherwise a default config is used. This is logged
 at startup and after reconfiguration.
 
 Built-in cards include:
@@ -350,12 +350,23 @@ Built-in cards include:
 | Qwen3 32B | `qwen.qwen3-32b` | yes (`/v1`) |
 | GPT-5.4 | `openai.gpt-5.4` | yes (`/openai/v1`) |
 | GPT-6 Astra | `openai.gpt-6-astra` | yes (`/openai/v1`) |
+| Gemma 4 26B-A4B | `google.gemma-4-26b-a4b` | yes (`/openai/v1`) |
+| Gemma 4 E2B | `google.gemma-4-e2b` | yes (`/openai/v1`) |
 | Claude Opus 5 | `anthropic.claude-opus-5` | no (Messages API only) |
 | Claude Fable 5.1 | `anthropic.claude-fable-5-1` | no (Messages API only) |
 
 > Anthropic Claude models are served on mantle via the Anthropic **Messages API**
 > (`/anthropic/v1/messages`), not Chat Completions. JRock doesn't implement Messages yet,
 > so selecting a Claude model reports this and doesn't send a (broken) request.
+
+> **Gemma 4 E2B** is the one built-in card whose input modalities include **Audio**, which
+> makes it the model to point an [`@audio` include](#what-an-audio-include-is-sent-as) at —
+> its 26B-A4B sibling reads text, images and video and has a red cross in that row. Both are
+> `bedrock-mantle`-only, both use the `/openai/v1` base rather than the default `/v1`, and both
+> cap one request body at **3.5 MB** with attachments counted in, which a minute or two of wav
+> reaches on its own. Their cards also note that Chat Completions returns no reasoning tokens
+> even though these models reason — the reasoning happens, and is charged for, with nowhere in
+> the API's response to put it.
 
 ## Conversation log
 
