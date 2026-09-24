@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.2.0";
+    private static final String VERSION = "2.3.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -627,6 +627,9 @@ public class JRock {
     private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
     private static Path urlsDir()          { return jrockDir().resolve("urls"); }
+    // The last narration and the last recording, one file each, overwritten every time
+    // (see the Narrate and Record sections).
+    private static Path wavDir()           { return jrockDir().resolve("wav"); }
     // The two settings files (see "Settings files"): the credential on its own, and
     // everything else beside it.
     private static Path keyFile()          { return jrockDir().resolve("bedrock-key.txt"); }
@@ -662,6 +665,14 @@ public class JRock {
     // read at 203 dpi and another holds drawings that need 300, and an agent installed
     // from each (see installAgent) is then two agents with two resolutions.
     private static final String CONFIG_IMAGES_DPI = "images-dpi";
+    // The one output device Narrate plays on, by its exact name - or absent, which is
+    // "not set" (see the Narrate section for why there is no default to fall back on).
+    private static final String CONFIG_NARRATE_DEVICE = "narrate-device";
+    // The same for the one microphone Ctrl+Space records from.
+    private static final String CONFIG_RECORD_DEVICE = "record-device";
+    // Whether a recording is transcribed into the prompt rather than included: true or
+    // false, and absent is false.
+    private static final String CONFIG_RECORD_TRANSCRIBE = "record-transcribe";
 
     // Written above the settings, and the only documentation the format needs. The
     // format itself exists for one reason: a value is a whole line of its own, so it
@@ -699,6 +710,13 @@ public class JRock {
             String model = settings.get(CONFIG_MODEL);
             if (model != null) MODEL_ID = model;
             adoptImagesDpi(settings.get(CONFIG_IMAGES_DPI));
+            // Absent is a value here, not "keep what we had": a folder whose file names
+            // no device has none, and Narrate says so rather than using the last one's.
+            String device = settings.get(CONFIG_NARRATE_DEVICE);
+            narrateDevice = (device == null) ? "" : device.trim();
+            String mic = settings.get(CONFIG_RECORD_DEVICE);
+            recordDevice = (mic == null) ? "" : mic.trim();
+            recordTranscribe = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_TRANSCRIBE));
             settingsSource = "JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
@@ -742,6 +760,11 @@ public class JRock {
         appendSetting(text, CONFIG_REGION, REGION);
         appendSetting(text, CONFIG_MODEL, MODEL_ID);
         appendSetting(text, CONFIG_IMAGES_DPI, String.valueOf(imagesDpi));
+        appendSetting(text, CONFIG_NARRATE_DEVICE, narrateDevice);   // blank: left out
+        appendSetting(text, CONFIG_RECORD_DEVICE, recordDevice);     // likewise
+        if (transcribeAvailable()) {
+            appendSetting(text, CONFIG_RECORD_TRANSCRIBE, String.valueOf(recordTranscribe));
+        }
         atomicWriteQuietly(configFile(), text.toString());
     }
 
@@ -1635,6 +1658,19 @@ public class JRock {
         if (!autoBackupLog) {
             log.gray("Autobackup log: off");
         }
+        if (narrateAvailable()) {
+            log.gray("Narrate on: " + (narrateDevice.isEmpty()
+                    ? "no output device set yet (Narrate lists them, Configure picks one)"
+                    : narrateDevice));
+        }
+        if (recordAvailable()) {
+            log.gray("Record from: " + (recordDevice.isEmpty()
+                    ? "no microphone set yet (Ctrl+Space lists them, Configure picks one)"
+                    : recordDevice + (inputMixer(recordDevice) != null
+                                      ? ", connected" : ", NOT connected"))
+                    + (recordTranscribe && transcribeAvailable()
+                       ? " - transcribed into the prompt" : ""));
+        }
         if (promptSourceNote != null) {
             log.gray("Prompt source: " + promptSourceNote);
         }
@@ -2207,6 +2243,48 @@ public class JRock {
             }
         });
 
+        // Ctrl+Space, held, records from the microphone: pressed starts it, and letting
+        // go of Ctrl - not of Space - ends it and includes it (see the Record section).
+        // A KeyEventDispatcher rather than a key binding, because a binding sees the press
+        // but not the release of a modifier, and because the auto-repeat of a held key
+        // has to be swallowed rather than start a recording per repeat.
+        if (recordAvailable()) {
+            java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                    .addKeyEventDispatcher(e -> {
+                // Space let go of, wherever: only then may the next press record again,
+                // so the auto-repeat of one held press is never a second recording (or a
+                // second "set up the microphone" dialog).
+                if (e.getID() == KeyEvent.KEY_RELEASED && e.getKeyCode() == KeyEvent.VK_SPACE) {
+                    recordSpaceHeld = false;
+                }
+                if (javax.swing.SwingUtilities.getWindowAncestor(e.getComponent()) != frame
+                        && e.getComponent() != frame) return false;
+                if (e.getKeyCode() == KeyEvent.VK_SPACE || e.getKeyChar() == ' ') {
+                    if (!e.isControlDown() || e.isAltDown() || e.isShiftDown()) return false;
+                    if (e.getID() == KeyEvent.KEY_PRESSED && !recordSpaceHeld
+                            && recording == null) {
+                        recordSpaceHeld = true;
+                        startRecording(frame, input, log, extendMode.isSelected());
+                    }
+                    return true;   // the press, its repeats, the typed space, the release
+                }
+                if (e.getID() == KeyEvent.KEY_RELEASED && e.getKeyCode() == KeyEvent.VK_CONTROL
+                        && recording != null) {
+                    stopRecording(log);
+                }
+                return false;
+            });
+            // Ctrl let go of in another window is a release this one never sees: leaving
+            // the window ends the recording the same way.
+            frame.addWindowFocusListener(new java.awt.event.WindowAdapter() {
+                @Override public void windowLostFocus(java.awt.event.WindowEvent e) {
+                    recordSpaceHeld = false;
+                    if (recording != null) stopRecording(log);
+                }
+            });
+            watchMicrophone(log);
+        }
+
         // Configure button: opens the settings dialog, then re-runs the session
         // report (CWD first, models loaded, ... Ready) exactly like startup.
         // initSession reloads the log from the (possibly new) working directory,
@@ -2247,6 +2325,12 @@ public class JRock {
         javax.swing.JMenuItem exportDocxItem =
                 addMenuItem(logMenu, "Export selected Markdown with images as DOCX...",
                         () -> exportSelectedMarkdown(frame, log, true));
+        // Windows only, because the voice is Windows' own (see narrateSelection). One
+        // item for both directions: while a narration is playing it stops it, which is
+        // the only thing anybody wants from the menu at that moment.
+        javax.swing.JMenuItem narrateItem = narrateAvailable()
+                ? addMenuItem(logMenu, NARRATE_LABEL, () -> narrateSelection(frame, log))
+                : null;
         // The log pane is read-only, so Copy is the only clipboard verb it needs.
         logMenu.addSeparator();
         javax.swing.JMenuItem copyLogItem = addEditItem(logMenu, "Copy", output,
@@ -2258,6 +2342,11 @@ public class JRock {
                 printLogItem.setText(selected ? "Print selected text..."  : "Print...");
                 exportRtfItem.setEnabled(selected);
                 exportDocxItem.setEnabled(selected);
+                if (narrateItem != null) {
+                    boolean speaking = narration != null;
+                    narrateItem.setText(speaking ? "Stop narrating" : NARRATE_LABEL);
+                    narrateItem.setEnabled(speaking || selected);
+                }
                 copyLogItem.setEnabled(selected);
             }
             @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) { }
@@ -3119,6 +3208,60 @@ public class JRock {
             addCopyPasteMenu((javax.swing.text.JTextComponent) modelEditor, null);
         }
 
+        // Narrate's output device: free text like the model, over a list that is empty
+        // until Narrate has been pressed with no device set - which is the one moment
+        // the devices are enumerated (see narrateSelection). Empty by default, and
+        // emptying it is how a device is unset and the list made again.
+        javax.swing.JComboBox<String> deviceF = null;
+        if (narrateAvailable()) {
+            deviceF = new javax.swing.JComboBox<>(outputDevices.toArray(new String[0]));
+            deviceF.setName("narrateDevice");
+            deviceF.setEditable(true);
+            deviceF.setSelectedItem(narrateDevice);
+            deviceF.setFont(deviceF.getFont().deriveFont(java.awt.Font.PLAIN));
+            deviceF.getEditor().getEditorComponent()
+                    .setFont(deviceF.getFont().deriveFont(java.awt.Font.PLAIN));
+            deviceF.setToolTipText("The speaker Narrate plays on, and only that one: "
+                    + "JRock never switches to another. Empty it and press Narrate to "
+                    + "list the devices again.");
+            java.awt.Component deviceEditor = deviceF.getEditor().getEditorComponent();
+            if (deviceEditor instanceof javax.swing.text.JTextComponent) {
+                addCopyPasteMenu((javax.swing.text.JTextComponent) deviceEditor, null);
+            }
+        }
+
+        // The microphone Ctrl+Space records from, the same way: listed only by Ctrl+Space
+        // pressed with none set (see startRecording), empty by default.
+        javax.swing.JComboBox<String> micF = null;
+        if (recordAvailable()) {
+            micF = new javax.swing.JComboBox<>(inputDevices.toArray(new String[0]));
+            micF.setName("recordDevice");
+            micF.setEditable(true);
+            micF.setSelectedItem(recordDevice);
+            micF.setFont(micF.getFont().deriveFont(java.awt.Font.PLAIN));
+            micF.getEditor().getEditorComponent()
+                    .setFont(micF.getFont().deriveFont(java.awt.Font.PLAIN));
+            micF.setToolTipText("The microphone Ctrl+Space records from, and only that "
+                    + "one: JRock never switches to another. Empty it and press Ctrl+Space "
+                    + "to list the microphones again.");
+            java.awt.Component micEditor = micF.getEditor().getEditorComponent();
+            if (micEditor instanceof javax.swing.text.JTextComponent) {
+                addCopyPasteMenu((javax.swing.text.JTextComponent) micEditor, null);
+            }
+        }
+        // Under the microphone, because it is what becomes of what it records: Windows'
+        // speech recognition turns it into text in the prompt instead of an @audio.
+        javax.swing.JCheckBox transcribeF = null;
+        if (micF != null && transcribeAvailable()) {
+            transcribeF = new javax.swing.JCheckBox(
+                    "Transcribe recordings into the prompt", recordTranscribe);
+            transcribeF.setName("recordTranscribe");
+            transcribeF.setFont(transcribeF.getFont().deriveFont(java.awt.Font.PLAIN));
+            transcribeF.setToolTipText("Ctrl+Space recordings are turned into text by "
+                    + "Windows speech recognition and typed into the prompt, instead of "
+                    + "being included as @audio");
+        }
+
         // Image resolution: a fixed list, so not editable - unlike the model, an
         // arbitrary number here has no meaning worth supporting.
         javax.swing.JComboBox<Integer> dpiF = new javax.swing.JComboBox<>();
@@ -3158,8 +3301,11 @@ public class JRock {
                 isCheerpJ() ? pasteRow(keyF, "key") : keyF);
         addRow(fields, c, row++, "AWS region:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
-        addRow(fields, c, row++, "Images DPI:", dpiRow);
         addRow(fields, c, row++, "", autoBackupF);
+        addRow(fields, c, row++, "Images DPI:", dpiRow);
+        if (deviceF != null) addRow(fields, c, row++, "Narrate on:", deviceF);
+        if (micF != null) addRow(fields, c, row++, "Record from:", micF);
+        if (transcribeF != null) addRow(fields, c, row++, "", transcribeF);
 
         java.awt.Font plainFont = plainLabelFont();
 
@@ -3273,6 +3419,18 @@ public class JRock {
         // Image resolution: picked from the list, so always valid.
         Object dpi = dpiF.getSelectedItem();
         if (dpi instanceof Integer) { imagesDpi = (Integer) dpi; }
+
+        // Narrate's device: taken as it stands, empty included - unlike the model, an
+        // empty field here means something, "no device", and is how one is unset.
+        if (deviceF != null) {
+            Object device = deviceF.getEditor().getItem();
+            narrateDevice = (device == null) ? "" : device.toString().trim();
+        }
+        if (micF != null) {
+            Object mic = micF.getEditor().getItem();
+            recordDevice = (mic == null) ? "" : mic.toString().trim();
+        }
+        if (transcribeF != null) recordTranscribe = transcribeF.isSelected();
 
         // Autobackup: the idle timer reads this when it next fires, so a change here
         // applies to the spell of inactivity that starts the moment this dialog closes.
@@ -3446,7 +3604,29 @@ public class JRock {
             + "JRock/jrock-config.txt beside it, so they survive a restart. Both files "
             + "belong to the working directory and are plain text you can edit "
             + "yourself - which is what lets one folder's agent run on a different "
-            + "model, or at a different DPI, than another's.\n\n";
+            + "model, or at a different DPI, than another's.\n\n"
+            + (narrateAvailable()
+               ? "Narrate on is the one output device Narrate plays on, kept in the same "
+               + "file. It starts empty: press Narrate and the devices are listed here to "
+               + "pick from. A device that is disconnected makes Narrate fail and say so - "
+               + "JRock never falls back to the Windows default. Empty the field and press "
+               + "Narrate again to list the devices anew. Each narration is also saved as "
+               + "JRock/wav/narration.wav, overwritten every time.\n\n"
+               : "")
+            + (recordAvailable()
+               ? "Record from is the one microphone Ctrl+Space records from, kept there "
+               + "too and set the same way: it starts empty, Ctrl+Space lists the "
+               + "microphones here, and a disconnected one fails rather than falling back. "
+               + "Hold Ctrl+Space to record, let go of Ctrl to stop; the recording is "
+               + "saved as JRock/wav/recording-<date>-<time>.wav, a new file each time, and "
+               + "included as @audio, as Ctrl+I would. The log says when the microphone "
+               + "is connected and disconnected.\n\n"
+               + (transcribeAvailable()
+                  ? "With Transcribe recordings ticked, Windows speech recognition turns the "
+                  + "recording into text typed into the prompt instead, and the audio is one "
+                  + "file, JRock/wav/transcribe.wav, overwritten every time.\n\n"
+                  : "")
+               : "");
 
         return keyNote
             + "Clearing the log only clears jrock-log.txt (and the window); the "
@@ -3478,6 +3658,8 @@ public class JRock {
             {"Ctrl+I", "Include a text, image, audio, PDF, RTF or DOCX file"},
             {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
             {"Ctrl+U", "Fetch a URL and include what it answers with"},
+            {"Ctrl+Space", "Hold to record from the microphone; let go of Ctrl to include "
+                    + "it (or type it, with Transcribe on)"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle History (send the prior dialog too)"},
             {"Ctrl+S", "Save prompt as (a copy)"},
@@ -4738,6 +4920,826 @@ public class JRock {
         pb.redirectError(ProcessBuilder.Redirect.DISCARD);
         int code = pb.start().waitFor();
         if (code != 0) throw new IOException("reg import failed (exit " + code + ")");
+    }
+
+    // ---- Narrate (log menu, Windows) ----------------------------------------
+    // Reads the log's selection aloud with the voices Windows already has: SAPI 5,
+    // reached through System.Speech, the .NET wrapper every Windows since 7 ships with
+    // PowerShell. No JNI: JRock is one Java file and a jar, and a speech call through
+    // JNI needs a DLL built for it, per architecture, shipped beside the jar - native
+    // code to answer for, where one short PowerShell script does the same call.
+    //
+    // The text goes over as a UTF-8 file named in an environment variable, not as an
+    // argument: an argument is quoted by one program, parsed by another and narrowed to
+    // the ANSI code page on the way (see the command line note above), and a Cyrillic
+    // answer would be read out as "question mark question mark". A file read as UTF-8
+    // by the script cannot be changed by any of that.
+    //
+    // The voice follows the text's script. Windows speaks with its default voice, an
+    // English one on most installs, and an English voice reading Russian spells it out
+    // letter by letter or skips it. So a text mostly in Cyrillic (or Greek, CJK, ...)
+    // asks for an installed voice of that language, and says so in the log when there
+    // is none. Only the classic "Desktop" voices are SAPI 5 voices; a newer (OneCore)
+    // one that Settings lists may be invisible to System.Speech.
+    //
+    // The speaker is the user's to name, and nobody else's. Windows moves its default
+    // device to whatever was plugged in last - a headset, a Bluetooth speaker across the
+    // room, a monitor's audio - and System.Speech can only play on that default. So SAPI
+    // does not play at all here: it renders raw PCM into its stdout, and JRock plays that
+    // with Java Sound on the one device named in Configure (narrate-device$ in the
+    // config). There is no fallback. A device that is not there is a narration that
+    // fails and says so; "Primary Sound Driver", which is Java's name for "whatever
+    // Windows' default is", is not even offered.
+    //
+    // The list of devices is made at one moment only: Narrate pressed with no device
+    // set. Then it fills the Configure dropdown and the log, and nothing plays. Emptying
+    // the field in Configure is how a device is unset and the list made again - a new
+    // speaker is never picked up by itself.
+
+    private static final String NARRATE_LABEL = "Narrate selected text";
+
+    // Windows only, and not in the browser: the voices are Windows' own.
+    private static boolean narrateAvailable() {
+        return isWindows() && !isCheerpJ();
+    }
+
+    // The configured device (empty = not set), and the devices last listed for the
+    // Configure dropdown - empty until Narrate has listed them.
+    private static String narrateDevice = "";
+    private static java.util.List<String> outputDevices = new ArrayList<>();
+
+    // The one name among Java Sound's mixers that is not a device but a pointer to the
+    // Windows default - exactly what this feature exists not to use.
+    private static final String DEFAULT_DEVICE_ALIAS = "Primary Sound Driver";
+
+    // What SAPI renders and the line plays: 22.05 kHz, 16-bit signed little-endian mono.
+    private static final javax.sound.sampled.AudioFormat NARRATE_FORMAT =
+            new javax.sound.sampled.AudioFormat(22050f, 16, 1, true, false);
+
+    // How often, in bytes of audio played, the device is looked for again: every two
+    // seconds, so a speaker switched off mid-sentence stops the narration within two.
+    private static final int NARRATE_CHECK_BYTES = 22050 * 2 * 2;
+
+    // The narration now playing, or null. One at a time: a second one on top of the
+    // first would be two voices talking over each other. Set on the EDT the moment one
+    // is asked for, before its process or its line exist, so a second click cannot
+    // start a second one in the gap.
+    private static final class Narration {
+        volatile Process process;
+        volatile javax.sound.sampled.SourceDataLine line;
+    }
+    private static volatile Narration narration;
+
+    // The SAPI side, run as powershell -Command. Everything it says goes to stderr, one
+    // line each - the voice it picked ("voice|<name>|<culture>"), or that none speaks the
+    // language asked for ("novoice|<lang>") - because stdout is the audio. The whole
+    // script is in "$null = & { }" so no stray pipeline output lands in the PCM.
+    //
+    // A sentence at a time, into a MemoryStream and out: SAPI refuses a stream it cannot
+    // seek ("Stream does not support seeking"), which a pipe is not. So each sentence is
+    // rendered whole and written out while the next one renders, and the voice starts
+    // after the first sentence rather than after the whole selection.
+    private static final String NARRATE_SCRIPT = String.join("\n",
+            "$ErrorActionPreference = 'Stop'",
+            "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+            "$null = & {",
+            "  Add-Type -AssemblyName System.Speech",
+            "  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
+            "  $t = [IO.File]::ReadAllText($env:JROCK_NARRATE_FILE, [Text.Encoding]::UTF8)",
+            "  $lang = $env:JROCK_NARRATE_LANG",
+            "  if ($lang) {",
+            "    $v = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and"
+                    + " $_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq $lang }"
+                    + " | Select-Object -First 1",
+            "    if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }"
+                    + " else { [Console]::Error.WriteLine('novoice|' + $lang) }",
+            "  }",
+            "  [Console]::Error.WriteLine('voice|' + $s.Voice.Name + '|' + $s.Voice.Culture.Name)",
+            "  $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050,"
+                    + " [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen,"
+                    + " [System.Speech.AudioFormat.AudioChannel]::Mono)",
+            "  $out = [Console]::OpenStandardOutput()",
+            "  $ms = New-Object System.IO.MemoryStream",
+            "  $s.SetOutputToAudioStream($ms, $fmt)",
+            "  foreach ($part in [regex]::Split($t, '(?<=[.!?\u2026\u3002\uFF01\uFF1F])\\s+|\\r?\\n')) {",
+            "    if (-not $part.Trim()) { continue }",
+            "    $ms.SetLength(0)",
+            "    $s.Speak($part)",
+            "    $out.Write($ms.GetBuffer(), 0, [int]$ms.Length)",
+            "    $out.Flush()",
+            "  }",
+            "}");
+
+    // The output devices, by the names Java Sound gives them - which are the names
+    // Windows' Sound settings show, "Speakers (Realtek High Definition Audio)". Only
+    // mixers that can play (a SourceDataLine), which leaves out the microphones and
+    // the "Port" mixers, and never the default alias.
+    static java.util.List<String> outputDeviceNames() {
+        java.util.List<String> names = new ArrayList<>();
+        javax.sound.sampled.Line.Info playback =
+                new javax.sound.sampled.Line.Info(javax.sound.sampled.SourceDataLine.class);
+        for (javax.sound.sampled.Mixer.Info info : javax.sound.sampled.AudioSystem.getMixerInfo()) {
+            if (info.getName().equals(DEFAULT_DEVICE_ALIAS)) continue;
+            try {
+                if (javax.sound.sampled.AudioSystem.getMixer(info).isLineSupported(playback)
+                        && !names.contains(info.getName())) {
+                    names.add(info.getName());
+                }
+            } catch (RuntimeException ignored) {
+                // A device going away while it is being asked about: not in the list.
+            }
+        }
+        return names;
+    }
+
+    // The mixer of that exact name, or null when it is not there - no near matches,
+    // no default: a device that is not there is not there.
+    private static javax.sound.sampled.Mixer outputMixer(String name) {
+        for (javax.sound.sampled.Mixer.Info info : javax.sound.sampled.AudioSystem.getMixerInfo()) {
+            if (info.getName().equals(name) && !name.equals(DEFAULT_DEVICE_ALIAS)) {
+                javax.sound.sampled.Mixer mixer = javax.sound.sampled.AudioSystem.getMixer(info);
+                if (mixer.isLineSupported(new javax.sound.sampled.Line.Info(
+                        javax.sound.sampled.SourceDataLine.class))) return mixer;
+            }
+        }
+        return null;
+    }
+
+    // Reports a narration that cannot go on, in the log and in a dialog - it was asked
+    // for by hand, and the answer is that nothing is being said.
+    private static void narrateRefused(JFrame frame, LogView log, String title, String message) {
+        log.gray(message);
+        onEdt(() -> javax.swing.JOptionPane.showMessageDialog(frame, message, title,
+                javax.swing.JOptionPane.WARNING_MESSAGE));
+    }
+
+    // The menu item: narrates the selection, or stops the narration already playing.
+    private static void narrateSelection(JFrame frame, LogView log) {
+        Narration playing = narration;
+        if (playing != null) {
+            narration = null;    // first, so the playing thread knows this was a stop
+            stopNarration(playing);
+            log.gray("Narration stopped.");
+            return;
+        }
+        String selected = log.selectedText();
+        if (selected == null) return;
+        String text = narrationText(selected);
+        if (text.isBlank()) {
+            log.gray("Nothing to narrate: the selection is only markup.");
+            return;
+        }
+        String lang = narrationLanguage(text);
+        String device = narrateDevice;
+        Narration mine = new Narration();
+        narration = mine;
+
+        // Off the EDT: listing the devices asks the driver, and the playing lasts as
+        // long as the reading does.
+        Thread t = new Thread(() -> {
+            Path file = null;
+            // What was played, kept for JRock/wav/narration.wav - played, so a narration
+            // stopped halfway is saved as far as it was heard.
+            java.io.ByteArrayOutputStream heard = new java.io.ByteArrayOutputStream();
+            try {
+                if (device.isEmpty()) {
+                    java.util.List<String> found = outputDeviceNames();
+                    outputDevices = found;
+                    StringBuilder list = new StringBuilder();
+                    for (String name : found) list.append("\n    ").append(name);
+                    narrateRefused(frame, log, "Set up the output device",
+                            "No output device is set for Narrate - nothing was narrated. "
+                            + (found.isEmpty()
+                               ? "No output devices were found."
+                               : found.size() + " found, now in Configure > Narrate on: "
+                                 + "pick the one to hear it on, then OK." + list));
+                    return;
+                }
+                javax.sound.sampled.Mixer mixer = outputMixer(device);
+                // Not connected: a line in the log, no dialog - a speaker that is off is
+                // an everyday thing, and the log is where Narrate already reports.
+                if (mixer == null) {
+                    log.gray(deviceGoneMessage(device, "nothing was narrated"));
+                    return;
+                }
+
+                javax.sound.sampled.SourceDataLine line = (javax.sound.sampled.SourceDataLine)
+                        mixer.getLine(new javax.sound.sampled.DataLine.Info(
+                                javax.sound.sampled.SourceDataLine.class, NARRATE_FORMAT));
+                line.open(NARRATE_FORMAT, NARRATE_CHECK_BYTES / 4);   // half a second
+                mine.line = line;
+
+                file = Files.createTempFile("jrock-narrate-", ".txt");
+                Files.write(file, text.getBytes(StandardCharsets.UTF_8));
+                ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile",
+                        "-NonInteractive", "-Command", NARRATE_SCRIPT);
+                pb.environment().put("JROCK_NARRATE_FILE", file.toString());
+                pb.environment().put("JROCK_NARRATE_LANG", lang == null ? "" : lang);
+                Process p = pb.start();
+                p.getOutputStream().close();   // the script reads the file, not stdin
+                mine.process = p;
+                if (narration != mine) { stopNarration(mine); return; }  // stopped already
+                log.gray("Narrating " + fmtNum(text.length()) + " characters on " + device
+                        + (lang == null ? "" : " (language: " + lang + ")") + "...");
+                Thread messages = narratorMessages(p, log);
+
+                line.start();
+                byte[] buf = new byte[4096];
+                long played = 0;
+                long nextCheck = NARRATE_CHECK_BYTES;
+                boolean gone = false;
+                java.io.InputStream pcm = p.getInputStream();
+                // Whole 16-bit samples only: an odd byte out of a read is held back and
+                // goes out in front of the next one, rather than shifting every sample
+                // after it by half.
+                int held = 0;
+                for (int n; narration == mine && (n = pcm.read(buf, held, buf.length - held)) > 0; ) {
+                    int have = held + n;
+                    int whole = have - (have % 2);
+                    line.write(buf, 0, whole);
+                    heard.write(buf, 0, whole);
+                    held = have - whole;
+                    if (held > 0) buf[0] = buf[whole];
+                    played += whole;
+                    if (played >= nextCheck) {
+                        nextCheck += NARRATE_CHECK_BYTES;
+                        if (outputMixer(device) == null) { gone = true; break; }
+                    }
+                }
+                if (narration == mine && !gone) line.drain();
+                messages.join(2000);
+                if (narration != mine) return;   // a stop, already reported
+                if (gone) {
+                    log.gray(deviceGoneMessage(device, "the narration was stopped"));
+                    return;
+                }
+                int code = p.waitFor();
+                log.gray(code == 0 ? "Narration finished."
+                        : "Narration failed (PowerShell exit " + code + ").");
+            } catch (javax.sound.sampled.LineUnavailableException | IllegalArgumentException ex) {
+                if (narration == mine) {
+                    log.gray("Could not play on " + device + ": " + ex.getMessage()
+                            + " - nothing was narrated. JRock does not switch to another "
+                            + "device.");
+                }
+            } catch (IOException ex) {
+                if (narration == mine) {
+                    log.gray("Narration failed: " + ex.getMessage());
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            } finally {
+                stopNarration(mine);
+                if (narration == mine) narration = null;
+                if (file != null) {
+                    try { Files.deleteIfExists(file); } catch (IOException ignored) { }
+                }
+                if (heard.size() > 0) {
+                    Path wav = wavDir().resolve("narration.wav");
+                    try {
+                        writeWav(wav, heard.toByteArray(), NARRATE_FORMAT);
+                        log.gray("Narration audio saved to " + wav);
+                    } catch (IOException ex) {
+                        log.gray("Could not save the narration audio to " + wav + ": "
+                                + ex.getMessage());
+                    }
+                }
+            }
+        }, "jrock-narrate");
+        t.setDaemon(true);   // a narration does not keep a closed window's JVM alive
+        t.start();
+    }
+
+    // What to say about a configured device that is not there, before or during.
+    private static String deviceGoneMessage(String device, String outcome) {
+        return "The output device \"" + device + "\" is not connected - " + outcome
+                + ". JRock plays only on the device set in Configure > Narrate on, and "
+                + "does not switch to another one. Connect it again, or empty that field "
+                + "and press Narrate to list the devices anew.";
+    }
+
+    // Ends a narration where it stands: the process killed (the voice stops mid-word)
+    // and the line stopped, flushed and closed, which also returns a write blocked on it.
+    private static void stopNarration(Narration n) {
+        Process p = n.process;
+        if (p != null) p.destroy();
+        javax.sound.sampled.SourceDataLine line = n.line;
+        if (line != null) {
+            line.stop();
+            line.flush();
+            line.close();
+        }
+    }
+
+    // Reads the script's stderr into the log: the voice lines it writes on purpose, and
+    // whatever PowerShell writes when something fails.
+    private static Thread narratorMessages(Process p, LogView log) {
+        Thread t = new Thread(() -> {
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("voice|")) {
+                        String[] v = line.split("\\|", 3);
+                        log.gray("Voice: " + v[1] + (v.length > 2 ? " (" + v[2] + ")" : ""));
+                    } else if (line.startsWith("novoice|")) {
+                        log.gray("No installed voice speaks \"" + line.substring(8)
+                                + "\" - using the default one. The language's speech "
+                                + "pack (Settings > Time & language) brings one; SAPI "
+                                + "sees only the \"Desktop\" voices.");
+                    } else if (!line.isEmpty()) {
+                        log.gray("narrator: " + line);
+                    }
+                }
+            } catch (IOException ignored) {
+                // The process was killed: a stop, reported by whoever stopped it.
+            }
+        }, "jrock-narrate-messages");
+        t.setDaemon(true);
+        t.start();
+        return t;
+    }
+
+    // The selection as it should be heard: the model answers in Markdown, and a voice
+    // reads "#" as "number" and "**" as "star star". Markers go, the words stay; a
+    // link keeps its text, an include token and a picture reference go altogether,
+    // being twelve hex digits nobody wants read out.
+    static String narrationText(String markdown) {
+        StringBuilder out = new StringBuilder(markdown.length());
+        for (String line : markdown.split("\r?\n", -1)) {
+            String s = line;
+            if (s.matches("\\s*@(txt|img|audio)\\s+[0-9a-f]{12}\\s*")) continue;
+            if (s.matches("\\s*(```|~~~).*") || s.matches("\\s*([-*_]\\s*){3,}")) continue;
+            if (s.matches("\\s*\\|[\\s|:-]*-[\\s|:-]*")) continue;          // | --- | rows
+            s = s.replaceAll("!\\[[^\\]]*\\]\\([^)]*\\)", "");          // pictures
+            s = s.replaceAll("\\[([^\\]]*)\\]\\([^)]*\\)", "$1");       // links: the text
+            s = s.replaceFirst("^\\s*#{1,6}\\s+", "");                  // headings
+            s = s.replaceFirst("^\\s*(>\\s*)+", "");                    // quotes
+            s = s.replaceFirst("^\\s*([-*+]|\\d+[.)])\\s+", "");        // list markers
+            s = s.replaceAll("\\*\\*|__|[*`]", "");                     // emphasis, code
+            s = s.replaceAll("^\\s*\\||\\|\\s*$", "")                   // table cells
+                 .replaceAll("\\s*\\|\\s*", ", ").trim();
+            out.append(s).append('\n');
+        }
+        return out.toString().trim();
+    }
+
+    // The two-letter language to ask for a voice in, from the script most of the text's
+    // letters are written in - or null for Latin letters (or none), where the default
+    // voice is the right one to start from.
+    static String narrationLanguage(String text) {
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        int latin = 0;
+        for (int i = 0; i < text.length(); ) {
+            int c = text.codePointAt(i);
+            i += Character.charCount(c);
+            if (!Character.isLetter(c)) continue;
+            Character.UnicodeScript script = Character.UnicodeScript.of(c);
+            String lang;
+            switch (script) {
+                case CYRILLIC: lang = "ru"; break;
+                case GREEK:    lang = "el"; break;
+                case HAN:      lang = "zh"; break;
+                case HIRAGANA: case KATAKANA: lang = "ja"; break;
+                case HANGUL:   lang = "ko"; break;
+                case ARABIC:   lang = "ar"; break;
+                case HEBREW:   lang = "he"; break;
+                case THAI:     lang = "th"; break;
+                default:       latin++; continue;
+            }
+            counts.merge(lang, 1, Integer::sum);
+        }
+        // Kana decides Japanese even among more kanji: a Chinese text has no kana.
+        if (counts.containsKey("ja")) {
+            counts.merge("ja", counts.getOrDefault("zh", 0), Integer::sum);
+            counts.remove("zh");
+        }
+        String best = null;
+        int most = latin;
+        for (java.util.Map.Entry<String, Integer> e : counts.entrySet()) {
+            if (e.getValue() > most) { best = e.getKey(); most = e.getValue(); }
+        }
+        return best;
+    }
+
+    // ---- Record (Ctrl+Space held) --------------------------------------------
+    // Narrate's other half: speech in rather than out. Ctrl+Space pressed starts a
+    // recording from the one microphone named in Configure (record-device$), letting go
+    // of Ctrl ends it, and the recording is saved as JRock/wav/recording-<time>.wav and
+    // included as @audio exactly as Ctrl+I would include that file.
+    //
+    // The microphone is set the way the speaker is, for the same reason: Windows moves
+    // its default input to whatever headset was plugged in last. So there is no
+    // default here either. With none set, Ctrl+Space lists the microphones into the
+    // Configure dropdown and records nothing; one that is not connected is a line in
+    // the log and no recording; "Primary Sound Capture Driver", Java's name for the
+    // Windows default, is never offered.
+    //
+    // A new file every time, named for the moment it was made - unlike narration.wav,
+    // which is overwritten. A recording is an include, and an include is checked at
+    // every send against the file it names (verifyIncludes), History's earlier turns
+    // included: one file overwritten would change under every earlier token of it and
+    // stop the conversation from going on.
+    //
+    // With Transcribe recordings on (Windows), the recording is not included but heard:
+    // SAPI's recognizer turns it into text typed at the prompt's caret, and the audio
+    // is then one file, transcribe.wav, overwritten - no token will ever name it.
+    //
+    // Java Sound has no event for a device plugged in or pulled out, so the configured
+    // microphone is looked for every two seconds (see watchMicrophone), and the log says
+    // when it comes and goes.
+
+    // Anywhere but the browser: Java Sound captures on every desktop.
+    private static boolean recordAvailable() {
+        return !isCheerpJ();
+    }
+
+    private static String recordDevice = "";
+    private static java.util.List<String> inputDevices = new ArrayList<>();
+
+    // The names that are not a microphone but "whatever the system default is": on
+    // Windows (DirectSound), on macOS, and ALSA's on Linux.
+    private static final java.util.Set<String> DEFAULT_INPUT_ALIASES = new java.util.HashSet<>(
+            java.util.Arrays.asList("Primary Sound Capture Driver", "Default Audio Device",
+                    "default [default]"));
+
+    // The formats asked for, best first: 16 kHz mono is what speech needs and a third
+    // of the bytes of 48 kHz; the others are for a driver that will not convert.
+    private static final javax.sound.sampled.AudioFormat[] RECORD_FORMATS = {
+        new javax.sound.sampled.AudioFormat(16000f, 16, 1, true, false),
+        new javax.sound.sampled.AudioFormat(44100f, 16, 1, true, false),
+        new javax.sound.sampled.AudioFormat(48000f, 16, 1, true, false),
+        new javax.sound.sampled.AudioFormat(44100f, 16, 2, true, false),
+        new javax.sound.sampled.AudioFormat(48000f, 16, 2, true, false),
+    };
+
+    // The recording in progress, or null. Set on the EDT at the key press, before the
+    // line exists; stop is set at the release, and the recording thread does the rest.
+    private static final class Recording {
+        volatile boolean stop;
+        volatile javax.sound.sampled.TargetDataLine line;
+        volatile Thread thread;
+    }
+    private static volatile Recording recording;
+    // How long a recording goes on after Ctrl is let go of (see startRecording).
+    private static final int RECORD_TAIL_MS = 300;
+    // Space down since the press that started the last recording (EDT only).
+    private static boolean recordSpaceHeld;
+
+    // The microphones: mixers that can capture (a TargetDataLine), without the aliases.
+    static java.util.List<String> inputDeviceNames() {
+        java.util.List<String> names = new ArrayList<>();
+        javax.sound.sampled.Line.Info capture =
+                new javax.sound.sampled.Line.Info(javax.sound.sampled.TargetDataLine.class);
+        for (javax.sound.sampled.Mixer.Info info : javax.sound.sampled.AudioSystem.getMixerInfo()) {
+            if (DEFAULT_INPUT_ALIASES.contains(info.getName())) continue;
+            try {
+                if (javax.sound.sampled.AudioSystem.getMixer(info).isLineSupported(capture)
+                        && !names.contains(info.getName())) {
+                    names.add(info.getName());
+                }
+            } catch (RuntimeException ignored) {
+                // Going away while being asked about: not in the list.
+            }
+        }
+        return names;
+    }
+
+    // The microphone of that exact name, or null when it is not there.
+    private static javax.sound.sampled.Mixer inputMixer(String name) {
+        if (DEFAULT_INPUT_ALIASES.contains(name)) return null;
+        for (javax.sound.sampled.Mixer.Info info : javax.sound.sampled.AudioSystem.getMixerInfo()) {
+            if (info.getName().equals(name)) {
+                javax.sound.sampled.Mixer mixer = javax.sound.sampled.AudioSystem.getMixer(info);
+                if (mixer.isLineSupported(new javax.sound.sampled.Line.Info(
+                        javax.sound.sampled.TargetDataLine.class))) return mixer;
+            }
+        }
+        return null;
+    }
+
+    // Says in the log when the configured microphone comes and goes. Java Sound has no
+    // hot-plug event, so this looks every two seconds; the Windows driver refreshes its
+    // own device list every five, so a change shows up within about seven. The state at
+    // the moment a microphone is set is the session report's to say ("Record from: ...,
+    // connected"), so only a change after that is a line here.
+    private static void watchMicrophone(LogView log) {
+        Thread t = new Thread(() -> {
+            String watched = null;
+            Boolean present = null;
+            while (true) {
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException ex) {
+                    return;
+                }
+                String device = recordDevice;
+                if (!device.equals(watched)) { watched = device; present = null; }
+                if (device.isEmpty()) continue;
+                boolean now;
+                try {
+                    now = inputMixer(device) != null;
+                } catch (RuntimeException ex) {
+                    continue;   // asked mid-change: the next look will tell
+                }
+                if (present != null && now != present) {
+                    log.gray((now ? "Microphone connected: " : "Microphone disconnected: ")
+                            + device);
+                }
+                present = now;
+            }
+        }, "jrock-mic-watch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static String micGoneMessage(String device, String outcome) {
+        return "The microphone \"" + device + "\" is not connected - " + outcome
+                + ". JRock records only from the one set in Configure > Record from, and "
+                + "does not switch to another. Connect it again, or empty that field and "
+                + "press Ctrl+Space to list the microphones anew.";
+    }
+
+    // Ctrl+Space pressed. On the EDT; the microphone is looked for and read on a thread
+    // of its own, so a slow driver does not hold up the window.
+    private static void startRecording(JFrame frame, JTextArea input, LogView log,
+                                       boolean extend) {
+        String device = recordDevice;
+        Recording mine = new Recording();
+        recording = mine;
+        Thread t = new Thread(() -> {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            javax.sound.sampled.AudioFormat format = null;
+            try {
+                if (device.isEmpty()) {
+                    recording = null;   // nothing to let go of: the dialog takes the focus
+                    java.util.List<String> found = inputDeviceNames();
+                    inputDevices = found;
+                    StringBuilder list = new StringBuilder();
+                    for (String name : found) list.append("\n    ").append(name);
+                    narrateRefused(frame, log, "Set up the microphone",
+                            "No microphone is set for recording - nothing was recorded. "
+                            + (found.isEmpty()
+                               ? "No microphones were found."
+                               : found.size() + " found, now in Configure > Record from: "
+                                 + "pick the one to record from, then OK." + list));
+                    return;
+                }
+                javax.sound.sampled.Mixer mixer = inputMixer(device);
+                if (mixer == null) {
+                    log.gray(micGoneMessage(device, "nothing was recorded"));
+                    return;
+                }
+                javax.sound.sampled.TargetDataLine line = null;
+                for (javax.sound.sampled.AudioFormat f : RECORD_FORMATS) {
+                    javax.sound.sampled.DataLine.Info info = new javax.sound.sampled.DataLine.Info(
+                            javax.sound.sampled.TargetDataLine.class, f);
+                    if (!mixer.isLineSupported(info)) continue;
+                    line = (javax.sound.sampled.TargetDataLine) mixer.getLine(info);
+                    format = f;
+                    break;
+                }
+                if (line == null) {
+                    log.gray("The microphone \"" + device + "\" offers none of the 16-bit "
+                            + "formats JRock records in - nothing was recorded.");
+                    return;
+                }
+                int second = (int) format.getSampleRate() * format.getFrameSize();
+                line.open(format, second / 2);
+                mine.line = line;
+                line.start();
+                log.gray("Recording from " + device + " (" + (int) format.getSampleRate()
+                        + " Hz" + (format.getChannels() == 2 ? ", stereo" : "") + ")... "
+                        + "let go of Ctrl to stop.");
+                // A tenth of a second a read, so letting go of Ctrl is answered within one;
+                // whole frames, and the device looked for again every two seconds.
+                byte[] buf = new byte[Math.max(format.getFrameSize(),
+                        second / 10 / format.getFrameSize() * format.getFrameSize())];
+                long nextCheck = 2L * second;
+                boolean gone = false;
+                while (!mine.stop) {
+                    int n = line.read(buf, 0, buf.length);
+                    if (n <= 0 && mine.stop) break;
+                    bytes.write(buf, 0, Math.max(n, 0));
+                    if (bytes.size() >= nextCheck) {
+                        nextCheck += 2L * second;
+                        if (inputMixer(device) == null) { gone = true; break; }
+                    }
+                }
+                // Ctrl comes up as the last word is still being said, so the recording
+                // goes on for RECORD_TAIL_MS more: without it the word is cut off, and a
+                // recognizer hears half a word as another one.
+                if (!gone) {
+                    int tail = (int) ((long) second * RECORD_TAIL_MS / 1000)
+                            / format.getFrameSize() * format.getFrameSize();
+                    byte[] rest = new byte[tail];
+                    for (int got = 0, n; got < tail
+                            && (n = line.read(rest, got, tail - got)) > 0; ) {
+                        got += n;
+                        bytes.write(rest, got - n, n);
+                    }
+                }
+                line.stop();
+                if (!gone) {
+                    // What was already captured when Ctrl came up is part of it.
+                    int left = line.available() / format.getFrameSize() * format.getFrameSize();
+                    if (left > 0) {
+                        byte[] rest = new byte[left];
+                        int n = line.read(rest, 0, left);
+                        if (n > 0) bytes.write(rest, 0, n);
+                    }
+                }
+                line.close();
+                double seconds = bytes.size() / (double) second;
+                if (gone) {
+                    log.gray(micGoneMessage(device, "the recording was stopped and not "
+                            + "included"));
+                    return;
+                }
+                if (bytes.size() == 0) {
+                    log.gray("Recording done - nothing was recorded, so nothing was included.");
+                    return;
+                }
+                log.gray("Recording done: " + String.format(java.util.Locale.ROOT, "%.1f", seconds)
+                        + " s.");
+                // Transcribed: the text is what stays, and the audio is only the way to
+                // it - so one file, overwritten, like narration.wav.
+                if (recordTranscribe && transcribeAvailable()) {
+                    Path wav = wavDir().resolve("transcribe.wav");
+                    writeWav(wav, bytes.toByteArray(), format);
+                    log.gray("Recording saved to " + wav + " - transcribing...");
+                    String said = transcribe(wav, log);
+                    if (said == null) return;   // the reason is in the log
+                    if (said.isBlank()) {
+                        log.gray("Nothing was recognized in the recording, so nothing was "
+                                + "typed into the prompt.");
+                        return;
+                    }
+                    onEdt(() -> {
+                        input.replaceSelection(said);
+                        input.requestFocusInWindow();
+                    });
+                    log.gray("Transcribed " + fmtNum(said.length())
+                            + " characters into the prompt.");
+                    return;
+                }
+                String stamp =java.time.LocalDateTime.now().format(
+                        java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+                Path wav = wavDir().resolve("recording-" + stamp + ".wav");
+                if (Files.exists(wav)) {   // two in one second
+                    wav = wavDir().resolve("recording-" + stamp + "-"
+                            + (System.currentTimeMillis() % 1000) + ".wav");
+                }
+                writeWav(wav, bytes.toByteArray(), format);
+                Path included = wav;
+                log.gray("Recording saved to " + wav);
+                onEdt(() -> includeOne(input, log, extend, included, "audio", false));
+            } catch (javax.sound.sampled.LineUnavailableException | IllegalArgumentException ex) {
+                log.gray("Could not record from " + device + ": " + ex.getMessage()
+                        + " - nothing was recorded. JRock does not switch to another "
+                        + "microphone.");
+            } catch (IOException ex) {
+                log.gray("Recording failed: " + ex.getMessage());
+            } finally {
+                javax.sound.sampled.TargetDataLine line = mine.line;
+                if (line != null && line.isOpen()) line.close();
+                if (recording == mine) recording = null;
+            }
+        }, "jrock-record");
+        mine.thread = t;
+        t.setDaemon(true);
+        t.start();
+    }
+
+    // Ctrl let go of (or the window left). The recording thread notices within a read;
+    // a line that stopped answering - a microphone pulled out mid-read - is closed
+    // after a moment, which returns the read it was blocked in.
+    private static void stopRecording(LogView log) {
+        Recording r = recording;
+        if (r == null) return;
+        recording = null;
+        r.stop = true;
+        Thread watchdog = new Thread(() -> {
+            try {
+                Thread recorder = r.thread;
+                if (recorder != null) recorder.join(1500);
+                javax.sound.sampled.TargetDataLine line = r.line;
+                if (recorder != null && recorder.isAlive() && line != null) line.close();
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+        }, "jrock-record-stop");
+        watchdog.setDaemon(true);
+        watchdog.start();
+    }
+
+    // Transcribe: Windows only, the recognizer being SAPI's, the same System.Speech that
+    // Narrate speaks with, the other way round.
+    private static boolean transcribeAvailable() {
+        return isWindows() && !isCheerpJ();
+    }
+    private static boolean recordTranscribe = false;
+
+    // The recognizer side, run like NARRATE_SCRIPT: stdout is the text, stderr says
+    // which recognizer heard it ("recognizer|<name>|<culture>"). Dictation, a phrase at
+    // a time until the file ends, a pause in the speech being just the end of one phrase.
+    // The recognizer is named, en-GB, rather than left to Windows' default, so which
+    // one hears a recording does not change with the Speech settings. (en-US was tried
+    // and was no better: the gibberish both produced was a Bluetooth hands-free mic's
+    // 8 kHz audio, nothing above 4 kHz, which no Desktop recognizer is made for.) Only
+    // the classic Desktop recognizers exist for System.Speech, as with the voices; one
+    // that is not installed is a failure in the log.
+    private static final String TRANSCRIBE_CULTURE = "en-GB";
+    private static final String TRANSCRIBE_SCRIPT = String.join("\n",
+            "$ErrorActionPreference = 'Stop'",
+            "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+            "$null = & {",
+            "  Add-Type -AssemblyName System.Speech",
+            "  $r = New-Object System.Speech.Recognition.SpeechRecognitionEngine("
+                    + "[Globalization.CultureInfo]::GetCultureInfo($env:JROCK_TRANSCRIBE_CULTURE))",
+            "  [Console]::Error.WriteLine('recognizer|' + $r.RecognizerInfo.Description"
+                    + " + '|' + $r.RecognizerInfo.Culture.Name)",
+            "  $r.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))",
+            "  $r.SetInputToWaveFile($env:JROCK_TRANSCRIBE_FILE)",
+            "  $first = $true",
+            "  while ($true) {",
+            // The end of the file is a null result when it ends in silence, but an
+            // InvalidOperationException ("No audio input is supplied") when it ends
+            // mid-word - which a recording cut by letting go of Ctrl usually does.
+            "    try { $res = $r.Recognize() } catch {",
+            "      if ($_.Exception.InnerException -is [InvalidOperationException]) { break }",
+            "      throw",
+            "    }",
+            "    if ($res -eq $null) { break }",
+            "    if (-not $first) { [Console]::Out.Write(' ') }",
+            "    [Console]::Out.Write($res.Text)",
+            "    $first = $false",
+            "  }",
+            "  [Console]::Out.Flush()",
+            "}");
+
+    // The text Windows recognizes in the recording: "" when it heard nothing, null
+    // when it could not be asked (said in the log).
+    private static String transcribe(Path wav, LogView log) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile",
+                    "-NonInteractive", "-Command", TRANSCRIBE_SCRIPT);
+            pb.environment().put("JROCK_TRANSCRIBE_FILE", wav.toString());
+            pb.environment().put("JROCK_TRANSCRIBE_CULTURE", TRANSCRIBE_CULTURE);
+            Process p = pb.start();
+            p.getOutputStream().close();
+            java.io.ByteArrayOutputStream err = new java.io.ByteArrayOutputStream();
+            Thread errReader = new Thread(() -> {
+                try (java.io.InputStream in = p.getErrorStream()) {
+                    in.transferTo(err);
+                } catch (IOException ignored) { }
+            }, "jrock-transcribe-messages");
+            errReader.setDaemon(true);
+            errReader.start();
+            String text;
+            try (java.io.InputStream in = p.getInputStream()) {
+                text = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+            }
+            int code = p.waitFor();
+            errReader.join(2000);
+            for (String line : new String(err.toByteArray(), StandardCharsets.UTF_8)
+                    .split("\r?\n")) {
+                line = line.trim();
+                if (line.startsWith("recognizer|")) {
+                    String[] v = line.split("\\|", 3);
+                    log.gray("Recognizer: " + v[1] + (v.length > 2 ? " (" + v[2] + ")" : ""));
+                } else if (!line.isEmpty()) {
+                    log.gray("transcriber: " + line);
+                }
+            }
+            if (code != 0) {
+                log.gray("Transcribing failed (PowerShell exit " + code + ") - nothing was "
+                        + "typed into the prompt. The recording is kept in " + wav + ".");
+                return null;
+            }
+            return text;
+        } catch (IOException ex) {
+            log.gray("Transcribing failed: " + ex.getMessage());
+            return null;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    // Raw 16-bit PCM as a WAV file, replacing the one there: written beside it and moved
+    // over it, so a player holding the old one open sees either it or the new one whole.
+    private static void writeWav(Path file, byte[] pcm, javax.sound.sampled.AudioFormat format)
+            throws IOException {
+        Files.createDirectories(file.getParent());
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+        try (javax.sound.sampled.AudioInputStream in = new javax.sound.sampled.AudioInputStream(
+                new java.io.ByteArrayInputStream(pcm), format, pcm.length / format.getFrameSize())) {
+            javax.sound.sampled.AudioSystem.write(in,
+                    javax.sound.sampled.AudioFileFormat.Type.WAVE, tmp.toFile());
+        }
+        Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
     // Opens the native print dialog for the log pane. JTextComponent.print()
