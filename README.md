@@ -289,6 +289,14 @@ the **Sponsor** button at the top of this repository ;)
   (where Amazon Nova, Meta Llama and other families are also available), but as of
   Sep 2026 several frontier models run on `bedrock-mantle` only. JRock prefers mantle for
   the simplicity of a single API surface.
+  - What that costs us, concretely: `bedrock-runtime` has **`CountTokens`**
+    (`POST /model/{modelId}/count-tokens` → `{"inputTokens": n}`), which prices a prompt
+    *before* it is sent and is documented to match what the same input would be charged.
+    Mantle has no such operation, and the Chat Completions schema has none either — token
+    counts arrive only in a reply's `usage`, i.e. after paying for it. But not every model
+    is on runtime (several of the cards below list no runtime APIs at all), so the count
+    would be available for some models and not others — which is the same split that made
+    mantle the choice in the first place.
 - Uses **Chat Completions**, not the Responses API. Responses is *stateful* (the backend
   retains conversation state). JRock deliberately avoids that: it stores **nothing** on the
   backend. All history stays local, unlike a browser client where session data can hide
