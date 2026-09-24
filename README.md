@@ -386,6 +386,18 @@ Built-in cards include:
   and included files stay referenced only by hash. The response `id` is elided after its
   first few characters (`"id":"chatcmpl-abcd<...>"`) — in full it is long enough on its own
   to put a horizontal scrollbar under the dump.
+- Both headers **name the file that half of the exchange was written to** under
+  [`JRock/messages/`](#persistence-crash-recovery--full-local-history), with the arrow the
+  direction it went:
+
+  ```
+  --- raw request < 20260924-004543-348-operator.txt ---
+  --- raw response > 20260924-004550-613-assistant.txt ---
+  ```
+
+  The dump is masked and those files are not, so this is one glance from the line in the log
+  to the text it stands for, rather than a folder to be searched by the timestamp of a send. A
+  send that failed wrote no reply file, and its response header stays bare.
 
 ![Two timestamped turns with Extend conversation and Dialog only both on](images/extend-dialog-only.png)
 

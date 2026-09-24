@@ -1175,9 +1175,75 @@ public class JRock {
                 logCopySaved = false;
                 // Write the message body to its own append-only file in logs/.
                 writeMessageFile(role, stamp, text);
+                rememberMessageFile(role, stamp);
                 renderDialog(e);        // dialog is always visible
                 persistMainLog();
             });
+        }
+
+        // The raw request/response block: a gray entry like any other, with its two
+        // headers naming the message files this exchange wrote.
+        void grayDump(String text) {
+            SwingUtilities.invokeLater(() -> {
+                Entry e = new Entry(false, null, null, namedHeaders(text), "");
+                entries.add(e);
+                logCopySaved = false;
+                if (isVisible(e)) renderGray(e.text);
+                persistMainLog();
+            });
+        }
+
+        // ---- Which file each half of the last exchange went into ------------
+        // The dump in the log is masked - the prompt, the reply and every attachment
+        // are hashes in it - and the files under JRock/messages/ are not. So the two
+        // headers name them: "--- raw request < 20260924-004543-348-operator.txt ---"
+        // is one glance from the log line to the file that holds that request's text
+        // in full, instead of a folder to be searched by the timestamp of a send.
+        //
+        // Remembered here rather than passed in, because the names do not exist when
+        // the dump is built: callModel runs on a worker thread, and the reply's file is
+        // not written until the reply is logged - which is queued ahead of this entry
+        // and therefore done by the time it is added.
+        //
+        // A request clears the reply of the exchange before it. A send that fails logs
+        // its dump with no reply file written at all, and naming the previous one would
+        // be worse than naming none.
+        private String requestFile, responseFile;
+
+        private void rememberMessageFile(String role, String stamp) {
+            String name = messageFile(role, stamp).getFileName().toString();
+            if (role.equals(ROLE_HUMAN)) {
+                requestFile = name;
+                responseFile = null;
+            } else if (role.equals(ROLE_ASSISTANT)) {
+                responseFile = name;
+            }
+        }
+
+        private String namedHeaders(String text) {
+            String named = namedHeader(text, RAW_REQUEST_HEADER, '<', requestFile);
+            return namedHeader(named, RAW_RESPONSE_HEADER, '>', responseFile);
+        }
+
+        // One header, named: "< file" for the request, "> file" for the response - the
+        // arrow being the direction that file went, out of JRock and into it.
+        //
+        // The first occurrence that starts a line, which is where rawDump puts it, and
+        // otherwise nothing: a half with no file and a dump that does not look the way
+        // it should are both left exactly as they came.
+        private String namedHeader(String text, String header, char arrow, String file) {
+            if (file == null) return text;
+            int at;
+            if (text.startsWith(header)) {
+                at = 0;
+            } else {
+                int found = text.indexOf("\n" + header);
+                if (found < 0) return text;
+                at = found + 1;
+            }
+            String stem = header.substring(0, header.length() - " ---".length());
+            return text.substring(0, at) + stem + " " + arrow + " " + file + " ---"
+                    + text.substring(at + header.length());
         }
 
         void setDialogOnly(boolean on) {
@@ -1851,7 +1917,7 @@ public class JRock {
                             log.gray("");
                         }
                         if (result[2] != null) {
-                            log.gray(result[2]);
+                            log.grayDump(result[2]);
                             log.gray("");        // closes the raw request/response/stats block
                         }
                     } catch (Exception ex) {
@@ -9409,12 +9475,18 @@ public class JRock {
         return new String[] { "1", reply, details };
     }
 
+    // The two headers of the dump. Constants because the log names the message file
+    // each half went into in them once both files exist, which is after this is built -
+    // see LogView.grayDump and namedHeader.
+    private static final String RAW_REQUEST_HEADER = "--- raw request ---";
+    private static final String RAW_RESPONSE_HEADER = "--- raw response ---";
+
     // The raw request/response dump logged after a call, for either outcome. The
     // response body is the caller's choice: masked on success (the reply is already
     // shown above), verbatim on failure. A success then appends its stats block.
     private static String rawDump(String maskedRequestBody, String responseBody) {
-        return "--- raw request ---\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
-                + "\n\n--- raw response ---\n" + responseBody;
+        return RAW_REQUEST_HEADER + "\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
+                + "\n\n" + RAW_RESPONSE_HEADER + "\n" + responseBody;
     }
 
     private static String tokenStr(long v) {
