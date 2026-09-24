@@ -523,6 +523,17 @@ after the cursor last moved in the prompt, it takes a backup with the dated defa
 dialog at all. Once per idle spell, not every five minutes - a window left open overnight has one
 backup, and the next keystroke arms it again.
 
+A backup is taken of a folder JRock is still writing to, and it is written to survive that. The
+prompt is autosaved by writing a `jrock<digits>.tmp` beside it and moving it into place, so those
+names appear and vanish in milliseconds; they are **not** packed — what one of them is about to
+become is in the zip either as it was before the write or as it is after it. Any other file that
+turns out to be gone or unreadable when its turn comes is skipped and counted, and the log says
+so (`... file(s) were being written while the backup ran`) rather than the whole backup failing on
+it. No lock is taken on the folder: JRock's own writes happen on the UI thread, so a lock held for
+the length of a zip would stall typing rather than the write, an OS file lock means nothing to the
+editor or sync client that may be in that folder too, and the browser build's filesystem has no
+such lock to take.
+
 ## Merging duplex scans (Ghostscript)
 
 **Right-click the empty area of the top bar → Merge two-sided (duplex) PDF scans...** — the first
