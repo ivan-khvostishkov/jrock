@@ -380,7 +380,18 @@ Built-in cards include:
   timestamped (e.g. `[OPERATOR'S ASSISTANT] · Monday, 14 September 2026, 10:01:34`) so the
   time order of stateless turns is visible.
 - **Stats** per response: input/output text symbols, and input/output tokens (from the API's
-  `usage`).
+  `usage`), followed by two lines of **rough cost** — a rule of thumb and this exchange priced
+  by it:
+
+  ```
+  Rough price guide: $2-5 per 1M input tokens, $10-25 per 1M output (frontier average)
+  Rough cost here:   in $0.002-0.006 + out $0.006-0.014 = $0.008-0.020, not this model's real price
+  ```
+
+  A band across the frontier models as a group, not the rate of whatever endpoint this build
+  points at, and not a bill. It answers the question a long reply actually raises — cents or
+  dollars — and it says out loud that it is a guide. Without `usage` counts the second line
+  says so instead.
 - The **raw request and raw response** are shown for debugging, but prompt/reply/attachment
   content is **masked** (shown by hash/placeholder) so the transcript isn't a noisy duplicate
   and included files stay referenced only by hash. The response `id` is elided after its
@@ -1254,7 +1265,6 @@ thread** — they say so rather than deadlocking if you do.
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
-| `automationResolvePath(String path)` | The path an argument meant, when an ANSI command line replaced characters it could not carry with `?` — see [Agents](#windows-agents-one-automation-per-folder). Anything already spelled properly comes back untouched, so every path argument can go through it. Callable before `JRock.main`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, and a log line saying so. |
 
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the
@@ -1527,24 +1537,6 @@ there was a chooser that opened in the wrong place. An agent reads the flag and 
 not passed on, since JRock reads an unknown bare word as a prompt file to load (JRock accepts it
 and ignores it anyway, so an older agent that forwards everything still works).
 
-**Names Windows cannot put on a command line.** Windows hands a new process its arguments as
-ANSI text, so a path holding a character the system code page has no room for — Cyrillic,
-Greek, CJK, on a Cp1252 install — arrives with a literal `?` in place of each one, before Java
-starts at all. `C:\Документы\Документ.rtf` becomes `C:\?????????\????????.rtf`, which is not a path
-(`InvalidPathException: Illegal char <?>`) — while the same file picked in a file chooser has
-always worked, because a chooser never goes through a command line. Those characters cannot be
-decoded back; they were thrown away, not encoded. So JRock asks the **disk** instead: `?` is
-illegal in a Windows path, so each one marks one lost character, which makes the mangled text a
-pattern with one single-character wildcard per character to find, and the folder is matched
-against it one component at a time. A candidate is only accepted if the character in each `?`
-position is one the code page **could not** have carried — otherwise it would have come through
-as itself — so `plain.txt` is not a match for nine lost characters even though it is nine
-characters long. A component that matches nothing, or two entries at once, is left exactly as it
-came and the caller fails as it did before: this repairs what the disk can prove and guesses at
-nothing. It applies to the clicked file, to `--working-dir` and `--prompts-dir` baked into a
-registry entry, to the `.txt` verb's prompt file, and to any path an automation passes through
-[`automationResolvePath`](#the-automation-api).
-
 Which is why an entry is per **(agent, folder)** pair, not per agent. Install the same
 automation from two folders and you get two entries, with two sets of settings:
 
@@ -1569,6 +1561,22 @@ and a class path is a jar, never a `.java` file. The jar is looked for **beside 
 first, which is where an automation directory keeps it anyway
 ([copy it in yourself](#automating-the-chain-jrockdocinventoryjava)), and then the jar this JRock
 is running from. With neither, install says so instead of writing an entry that could not work.
+
+**Names Windows cannot put on a command line.** A path holding a character the system ANSI
+code page has no room for — Cyrillic, Greek, CJK on a Cp1252 install — reaches a Java program
+with a literal `?` in place of each one: `C:\Документы\Документ.rtf` arrives as
+`C:\?????????\????????.rtf`, which is not a path at all (`InvalidPathException: Illegal char
+<?>`). Windows itself is not the problem — it passes a command line in Unicode, which is why
+**Open with Acrobat** on that same file works — the narrowing happens in the Java launcher, on
+the way to `main(String[])`, and every Java program started from Explorer shares it.
+
+Nothing tries to guess what those `?` stood for: the characters were thrown away rather than
+encoded, and a name pieced together from whatever the folder contains would be a guess wearing
+the shape of a path. An unreadable path is reported as unreadable. Two ways round it, both
+yours: right-click **the folder** and pick the file in the chooser (a chooser never goes through
+a command line — include a file that way and it works whatever its name looks like), or turn on
+**Use Unicode UTF-8 for worldwide language support** in Windows' Region settings, Administrative
+tab, which makes the code page UTF-8 and lets those arguments through untouched.
 
 ## Per-folder window title & icon
 
