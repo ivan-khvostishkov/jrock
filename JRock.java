@@ -2032,6 +2032,18 @@ public class JRock {
             }
         });
 
+        // Ctrl+Shift+Enter: count the tokens of what is typed WITHOUT sending it.
+        // Scratch, undocumented, and not in the menus - see probeTokenCount for what it
+        // knocks on and why none of it is promised to answer.
+        input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,
+                InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK), "jrock-count");
+        input.getActionMap().put("jrock-count", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (!send.isEnabled()) return;
+                probeTokenCount(stripMessage(input.getText()), log, sendGate);
+            }
+        });
+
         JScrollPane outputScroll = new JScrollPane(output);
         // Same framed look as the input area.
         outputScroll.setBorder(javax.swing.BorderFactory.createCompoundBorder(
@@ -9640,6 +9652,131 @@ public class JRock {
     // half the world.
     private static String usd(double dollars, String shape) {
         return String.format(java.util.Locale.ROOT, shape, dollars);
+    }
+
+    // ---- Counting tokens without sending (Ctrl+Shift+Enter, scratch) --------
+    // What the documentation says, so the next reader does not have to look it up again:
+    //
+    //   - The OpenAI Chat Completions schema JRock speaks has NO token-counting
+    //     operation. Token counts exist only in a reply's "usage" object, which means a
+    //     request was made and paid for. Clients count locally instead (tiktoken), and
+    //     the count is the tokenizer's guess rather than the server's.
+    //   - Anthropic's Messages API does have one: POST /v1/messages/count_tokens.
+    //     JRock does not speak Messages yet (mantleMessagesPath is metadata), but on a
+    //     mantle host the path is worth knocking on.
+    //   - Bedrock has one, on the OTHER endpoint: CountTokens on bedrock-runtime,
+    //     POST /model/{modelId}/count-tokens, body {"input":{"converse"|"invokeModel"}},
+    //     answering {"inputTokens": n} - documented to match what the same input would
+    //     be charged. Not part of mantle's documented surface.
+    //
+    // So: nothing documented on the endpoint JRock uses. This knocks on the plausible
+    // paths anyway - /tokens first, as asked - and prints each status and body as it
+    // comes. A 404 is an answer, and finding out which of these mantle actually serves
+    // is the whole point of the key.
+    //
+    // Deliberately crude: the typed prompt only, no history, no clock, one short
+    // timeout, and no attempt to read a count out of whatever comes back. Nothing here
+    // sends the prompt to a model.
+    private static void probeTokenCount(String prompt, LogView log,
+                                        java.util.function.Consumer<Boolean> sendGate) {
+        if (prompt.isEmpty()) {
+            log.gray("Nothing to count - type a prompt first...");
+            log.gray("");
+            return;
+        }
+        sendGate.accept(false);
+        log.gray("Counting tokens without sending (Ctrl-Shift-Enter, undocumented) ...");
+        new SwingWorker<String, Void>() {
+            @Override protected String doInBackground() {
+                try {
+                    return tokenCountProbe(prompt);
+                } catch (Throwable ex) {
+                    return "ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                }
+            }
+
+            @Override protected void done() {
+                try {
+                    log.gray(get());
+                } catch (Exception ex) {
+                    log.gray("ERROR: " + ex.getMessage());
+                }
+                log.gray("");
+                sendGate.accept(true);
+            }
+        }.execute();
+    }
+
+    private static final int PROBE_TIMEOUT_SECONDS = 20;
+
+    // One line per candidate: the path, the status, and as much of the body as reads on
+    // one line. Runs off the EDT.
+    private static String tokenCountProbe(String prompt) throws Exception {
+        HttpTransport http = http();
+        String apiKey = resolveApiKey();
+        boolean haveKey = apiKey != null && !apiKey.isBlank();
+        if (!haveKey && !http.hostHoldsCredentials()) {
+            return "No Bedrock API key set - nothing to ask with.";
+        }
+
+        // The same content parts a send would build, so a count that does come back is
+        // a count of the real request and not of some plainer copy of it.
+        StringBuilder messages = new StringBuilder("[{\"role\":\"user\",\"content\":");
+        appendRealContent(messages, buildParts(prompt));
+        messages.append("}]");
+        String chatBody = chatRequestBody(messages);
+
+        // Bedrock's CountTokens shape, text only: its Converse messages are not the
+        // Chat Completions ones, and an image part would need converting too.
+        String converseBody = "{\"input\":{\"converse\":{\"messages\":[{\"role\":\"user\","
+                + "\"content\":[{\"text\":\"" + jsonEscape(prompt) + "\"}]}]}}}";
+
+        // The base the configured model's Chat Completions path hangs off - /v1 or
+        // /openai/v1 - so the siblings knocked on are the ones this model would have.
+        String chat = endpoint();
+        String base = "/v1";
+        if (chat != null) {
+            String path = pathOf(chat);
+            int cut = path.lastIndexOf("/chat/completions");
+            if (cut > 0) base = path.substring(0, cut);
+        }
+        String host = mantleHost();
+        String[][] candidates = {
+            { host + base + "/tokens", chatBody },
+            { host + base + "/tokenize", chatBody },
+            { host + base + "/tokens/count", chatBody },
+            { host + base + "/chat/completions/tokens", chatBody },
+            { host + base + "/messages/count_tokens", chatBody },
+            { host + "/model/" + MODEL_ID + "/count-tokens", converseBody },
+            { "https://bedrock-runtime." + REGION + ".amazonaws.com/model/" + MODEL_ID
+                    + "/count-tokens", converseBody },
+        };
+
+        List<String[]> headers = new ArrayList<>();
+        headers.add(new String[] { "Content-Type", "application/json" });
+        if (haveKey) headers.add(new String[] { "Authorization", "Bearer " + apiKey.trim() });
+
+        StringBuilder out = new StringBuilder("--- token count probe ---");
+        out.append("\nModel: ").append(MODEL_ID);
+        for (String[] candidate : candidates) {
+            out.append("\nPOST ").append(candidate[0]).append("\n  ");
+            try {
+                HttpReply reply = http.send("POST", candidate[0], headers, candidate[1],
+                        PROBE_TIMEOUT_SECONDS);
+                out.append("HTTP ").append(reply.status).append("  ")
+                        .append(oneLine(reply.body));
+            } catch (Throwable ex) {
+                out.append(ex.getClass().getSimpleName()).append(": ").append(ex.getMessage());
+            }
+        }
+        return out.toString();
+    }
+
+    // A response body on one line, short enough to read in the log.
+    private static String oneLine(String body) {
+        if (body == null) return "(no body)";
+        String flat = body.replaceAll("\\s+", " ").trim();
+        return (flat.length() <= 300) ? flat : flat.substring(0, 300) + "<...>";
     }
 
     // ---- Masking for display -----------------------------------------------
