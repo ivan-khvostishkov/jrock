@@ -1281,6 +1281,34 @@ The two files are also worth reading side by side. The plumbing — the flags, `
 automation *is* a prompt, an include and a send; what differs is the chain around them. Copy
 whichever is closer to yours.
 
+### A third agent: push-to-talk (`JRockPushToTalk.java`)
+
+A loop rather than a pass, and no prompt file at all:
+
+```
+java -cp jrock.jar JRockPushToTalk.java
+java -cp jrock.jar JRockPushToTalk.java --working-dir D:\Voice   # that folder's model and mic
+```
+
+It starts JRock, clears the prompt, and opens a small window of its own beside JRock's with one
+round button. **Hold the button, or hold Ctrl** while that window has the focus, and JRock
+records from its **Record from** microphone. Let go and the recording goes into the prompt the
+way Configure says: an `@audio` token, or with **Transcribe recordings into the prompt** ticked,
+the text Windows heard. The agent waits until it is there (the recording thread has finished,
+transcription included), presses Send, waits for the reply, and prints the exchange in its own
+window. Then the button is ready again.
+
+- **Each turn stands alone.** The prompt is cleared before every recording and History is off
+  during an automation, so the model hears one question at a time. The whole conversation is
+  still in JRock's transcript.
+- **The recording is the whole prompt**, with no text around it. That is what Voxtral wants (see
+  [what an audio include is sent as](#what-an-audio-include-is-sent-as)): it takes a recording as the question and answers it.
+- **The microphone is JRock's to choose.** If none is set, the agent's window says so. Press
+  Ctrl+Space in JRock's own window once to list the microphones into Configure, pick one, and
+  hold the button again.
+- **Closing the agent's window** ends the automation and gives JRock back to you, the
+  conversation included.
+
 ### The automation API
 
 `JRock.java` exposes the handful of `public static` methods the script uses. They take and
@@ -1301,6 +1329,9 @@ thread** — they say so rather than deadlocking if you do.
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
 | `automationDropPlaceholders()` | Removes the bare `@img` / `@txt` / `@audio` placeholder lines, and returns how many. The include tokens go at the end of the prompt. |
 | `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
+| `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
+| `automationStartRecording()` | Ctrl+Space pressed: records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
+| `automationStopRecording(long millis)` | Ctrl let go of, and waits until the recording is in the prompt — an `@audio` token, or the transcribed text with **Transcribe** on. Fails when nothing reached the prompt. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
