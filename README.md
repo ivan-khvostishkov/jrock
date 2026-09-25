@@ -1330,8 +1330,10 @@ the voice, so the microphone doesn't record the last answer as the next question
   the prompt, the agent sends it, shows and reads out the answer, and listens again — turn after
   turn. Turning the lever off, clicking the button or pressing **Ctrl on its own** ends it and
   mutes the microphone again; what was being said is not sent. The microphone is muted while a
-  question is on its way, and JRock does not listen while it reads the answer aloud, so it
-  doesn't hear its own voice on speakers either. You speak once it has finished.
+  question is on its way, and listens again while the answer is read aloud: **start talking
+  and the reading stops**, and what you say is the next question. On speakers JRock would hear
+  its own voice and stop itself, so use headphones or a microphone with a mute button, muted
+  whenever you are not speaking.
 - **Each turn stands alone.** The prompt is cleared before every recording and History is off
   during an automation, so the model hears one question at a time. The whole conversation is
   still in JRock's transcript.
@@ -1596,8 +1598,10 @@ it is included or transcribed like any other.
 - **An automation mutes it** for as long as it runs: nobody types into the prompt then, so
   nobody speaks into it either. The tick stays; listening comes back when the automation ends,
   or earlier if the agent asks for it — the push-to-talk agent's **Hands-free** does.
-- **Nor does it listen while JRock reads aloud**, or for 0.7 s after, whether the narration
-  came from the menu or an agent: on speakers it would hear its own voice as speech.
+- **Speech stops a narration.** Talk over JRock reading aloud, from the menu or an agent, and
+  the reading stops and what you say is recorded. On speakers JRock would hear its own voice
+  and stop itself, so use headphones or keep a microphone with a mute button muted while you
+  listen; unmuting and talking then interrupts it.
 
 ## Markdown export (RTF and DOCX)
 
