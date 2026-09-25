@@ -684,6 +684,10 @@ public class JRock {
     private static volatile int historyLimit = 0;
     private static final String HISTORY_UNLIMITED = "Unlimited";
     private static volatile boolean clockOn = true;
+    // Whether the History checkbox is ticked: true or false, and absent is false - the
+    // checkbox's default before it was kept.
+    private static final String CONFIG_HISTORY = "history";
+    private static volatile boolean historyOn = false;
 
     // Written above the settings, and the only documentation the format needs. The
     // format itself exists for one reason: a value is a whole line of its own, so it
@@ -731,6 +735,7 @@ public class JRock {
             micAlwaysOn = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_ALWAYS_ON));
             clockOn = !"false".equalsIgnoreCase(settings.get(CONFIG_CLOCK));
             historyLimit = parseHistoryLimit(settings.get(CONFIG_HISTORY_LIMIT), 0);
+            historyOn = "true".equalsIgnoreCase(settings.get(CONFIG_HISTORY));
             settingsSource = "JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
@@ -783,6 +788,7 @@ public class JRock {
             appendSetting(text, CONFIG_RECORD_ALWAYS_ON, String.valueOf(micAlwaysOn));
         }
         appendSetting(text, CONFIG_CLOCK, String.valueOf(clockOn));
+        appendSetting(text, CONFIG_HISTORY, String.valueOf(historyOn));
         if (historyLimit > 0) {   // unlimited: left out, which reads back as unlimited
             appendSetting(text, CONFIG_HISTORY_LIMIT, String.valueOf(historyLimit));
         }
@@ -1655,10 +1661,13 @@ public class JRock {
         // loadFromDisk for the same reason the report lines are: it replaces the entry
         // list, so anything logged before it would be wiped.
         adoptSettingsOfWorkingDir();
-        // The one setting with a control of its own on the main window, which shows the
-        // folder's value as soon as there is a window (at startup, it is made with it).
+        // The settings with a control of their own on the main window, which show the
+        // folder's value as soon as there is a window (at startup, it is made with them).
         Ui shown = ui;
-        if (shown != null) shown.clock.setSelected(clockOn);
+        if (shown != null) {
+            shown.clock.setSelected(clockOn);
+            shown.extend.setSelected(historyOn);
+        }
 
         // The session report begins here; the working directory is its first line.
         // A restored log already ends with its own trailing blank line.
@@ -1924,10 +1933,15 @@ public class JRock {
         // pair reads as the two things that can travel with a message - the time, and
         // what was said before. A verb like Continue or Append reads as a button that
         // does something now, which is the one thing a checkbox never does.
-        javax.swing.JCheckBox extendMode = new javax.swing.JCheckBox("History");
+        // Kept per folder, as history$ in the config.
+        javax.swing.JCheckBox extendMode = new javax.swing.JCheckBox("History", historyOn);
         extendMode.setToolTipText(
                 "Send the whole prior dialog with each message, so the model follows the "
                 + "conversation (Ctrl+E)");
+        extendMode.addActionListener(e -> {
+            historyOn = extendMode.isSelected();
+            saveConfigQuietly();
+        });
 
         // "Clock" mode: tell the model what time it is here, with each message. On by
         // default - a model that has to guess the date guesses wrong, and one extra
@@ -2729,15 +2743,6 @@ public class JRock {
     // line typed into it would be sent as part of the next request.
     private static volatile boolean automating = false;
 
-    // What History was set to before the automation turned it off, so
-    // automationEnd can put it back exactly as the user left it.
-    //
-    // Off for the duration, because a chain sends independent prompts: pass two of the
-    // sample chain asks for a file name, and with extend on it would resend every page
-    // image pass one attached - paying for the whole document twice to answer a
-    // question about a page of text.
-    private static boolean automationExtendWas = false;
-
     // One send, waited for. The latch is made by automationSend before it presses the
     // button and counted down by sendFinished wherever the send path stops; the failure
     // is null when the reply arrived.
@@ -2772,12 +2777,14 @@ public class JRock {
     }
 
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
-    // History is turned off, and Mic always on is muted - nobody types into the prompt
+    // and Mic always on is muted - nobody types into the prompt
     // now, so nobody speaks into it either (see automationListen). Returns null, or why
     // it refused.
     //
     // what finishes the sentence "Automation started: ", so the transcript says which
     // automation this was - the log being the only record of it afterwards.
+    // History is left as it is: whether the model hears the conversation so far, and how
+    // much of it, is the History checkbox and the History limit in Configure.
     public static String automationBegin(String what) {
         String problem = offEdt();
         if (problem != null) return problem;
@@ -2787,14 +2794,11 @@ public class JRock {
         automating = true;
         setMicMuted(true);
         onEdt(() -> {
-            automationExtendWas = live.extend.isSelected();
-            live.extend.setSelected(false);
             live.input.setEditable(false);
             live.sendGate.accept(false);
         });
         live.log.gray("Automation started: " + what);
-        live.log.gray("The prompt is read-only and Send is held until it finishes; "
-                + "\"History\" is off for the duration"
+        live.log.gray("The prompt is read-only and Send is held until it finishes"
                 + (micAlwaysOn ? ", and Mic always on is muted." : "."));
         live.log.gray("");
         return null;
@@ -3284,7 +3288,6 @@ public class JRock {
         if (live == null || !automating) return;
         onEdt(() -> {
             live.input.setEditable(true);
-            live.extend.setSelected(automationExtendWas);
             live.sendGate.accept(true);
         });
         automating = false;
@@ -3732,9 +3735,16 @@ public class JRock {
         titleLine.add(help, BorderLayout.EAST);
 
         // Second line: who made it, including the tools that helped make it.
-        javax.swing.JLabel credits = new javax.swing.JLabel(
-                "By Ivan Khvostishkov, with assistance of Kiro, Claude and "
-                + "JetBrains IntelliJ IDEA.");
+        // One line where it fits, wrapped where it does not: on a phone a label would
+        // simply be cut off at the dialog's edge.
+        String creditsText = "By Ivan Khvostishkov, with assistance of Kiro, Claude and "
+                + "JetBrains IntelliJ IDEA.";
+        int creditsW = new javax.swing.JLabel().getFontMetrics(plainFont).stringWidth(creditsText);
+        int creditsRoom = java.awt.Toolkit.getDefaultToolkit().getScreenSize().width - 80;
+        javax.swing.JLabel credits = new javax.swing.JLabel(creditsW <= creditsRoom
+                ? creditsText
+                : "<html><body style='width:" + Math.max(160, creditsRoom) + "px'>"
+                  + creditsText + "</body></html>");
         credits.setFont(plainFont);
 
         javax.swing.JPanel aboutBox = new javax.swing.JPanel(new BorderLayout(0, 4));
@@ -3921,22 +3931,40 @@ public class JRock {
         int contentW = Math.max(240, Math.min(520, screen.width - 140));
         int contentH = Math.max(240, Math.min(540, screen.height - 220));
 
+        // Which JRock this is, repeated from Configure so the window says it itself.
+        javax.swing.JLabel title = new javax.swing.JLabel("JRock version " + VERSION + " (c) 2026");
+        title.setFont(plainFont.deriveFont(java.awt.Font.BOLD, plainFont.getSize2D() + 2f));
+        title.setAlignmentX(0f);
+
         javax.swing.JTextArea about = wrapped(
             "The Amazon Bedrock desktop GUI client in Java that just works: every prompt "
           + "and session is saved to disk so nothing is ever lost, and your credentials "
           + "stay put with no repeated sign-ins - so it keeps out of your way and lets "
-          + "you focus on the models.\n\n"
-          + "Questions, bugs and wishes: " + CONTACT_EMAIL + "\n"
-          + GITHUB_URL, plainFont, contentW);
+          + "you focus on the models.", plainFont, contentW);
+        about.setAlignmentX(0f);
+
+        javax.swing.JLabel mail = linkLabel("Questions, bugs and wishes:", CONTACT_EMAIL,
+                "mailto:" + CONTACT_EMAIL, plainFont, contentW);
+        javax.swing.JLabel home = linkLabel("Source code and releases:", GITHUB_URL,
+                GITHUB_URL, plainFont, contentW);
 
         javax.swing.JTextArea notes = wrapped(configNotes(), plainFont, contentW);
         notes.setBorder(javax.swing.BorderFactory.createTitledBorder("Notes"));
 
         javax.swing.JPanel content = new javax.swing.JPanel();
         content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
+        content.add(title);
+        content.add(javax.swing.Box.createVerticalStrut(8));
         content.add(about);
         content.add(javax.swing.Box.createVerticalStrut(10));
-        content.add(shortcutsPanel(plainFont, (int) (contentW * 0.62) - 16));
+        content.add(mail);
+        content.add(javax.swing.Box.createVerticalStrut(4));
+        content.add(home);
+        content.add(javax.swing.Box.createVerticalStrut(10));
+        javax.swing.JPanel shortcuts = shortcutsPanel(plainFont, (int) (contentW * 0.62) - 16);
+        shortcuts.setAlignmentX(0f);   // all left, or BoxLayout shifts them against each other
+        notes.setAlignmentX(0f);
+        content.add(shortcuts);
         content.add(javax.swing.Box.createVerticalStrut(10));
         content.add(notes);
 
@@ -3947,10 +3975,31 @@ public class JRock {
         scroll.getVerticalScrollBar().setUnitIncrement(16);
         scroll.setPreferredSize(new java.awt.Dimension(contentW + 28, contentH));
 
-        // parent is the Help button, so this comes up centred on the Configure dialog
-        // and modal above it - not behind it, which a dialog owned by the frame would be.
-        javax.swing.JOptionPane.showMessageDialog(parent, scroll, "JRock Help",
-                javax.swing.JOptionPane.PLAIN_MESSAGE);
+        // Owned by the window the Help button is in - the Configure dialog - so this is
+        // modal above it rather than behind it, which a dialog owned by the frame would
+        // be. The window and not the button itself, since a dialog is centred on its
+        // parent component: on the button, at the top right of Configure, a Help window
+        // bigger than the room around it was pushed into the top right of the screen.
+        java.awt.Window owner = javax.swing.SwingUtilities.getWindowAncestor(parent);
+        javax.swing.JOptionPane.showMessageDialog(owner != null ? owner : parent, scroll,
+                "JRock Help", javax.swing.JOptionPane.PLAIN_MESSAGE);
+    }
+
+    // A caption and a link after it, wrapped to width, which opens url when clicked.
+    // Swing draws the link but opens nothing by itself, hence the click handler.
+    private static javax.swing.JLabel linkLabel(String caption, String text, String url,
+                                                java.awt.Font font, int width) {
+        javax.swing.JLabel label = new javax.swing.JLabel(
+                "<html><body style='width:" + width + "px'>" + caption + " <a href=\""
+                + url + "\">" + text + "</a></body></html>");
+        label.setFont(font);
+        label.setToolTipText(url);
+        label.setAlignmentX(0f);
+        label.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        label.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) { openUrl(url); }
+        });
+        return label;
     }
 
     // A plain (non-bold) font derived from the default label font, for the prose, the
@@ -4809,7 +4858,9 @@ public class JRock {
         try {
             if (java.awt.Desktop.isDesktopSupported()) {
                 java.awt.Desktop d = java.awt.Desktop.getDesktop();
-                if (d.isSupported(java.awt.Desktop.Action.BROWSE)) {
+                if (url.startsWith("mailto:") && d.isSupported(java.awt.Desktop.Action.MAIL)) {
+                    d.mail(java.net.URI.create(url));
+                } else if (d.isSupported(java.awt.Desktop.Action.BROWSE)) {
                     d.browse(java.net.URI.create(url));
                 }
             }

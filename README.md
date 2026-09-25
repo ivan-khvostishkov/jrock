@@ -526,6 +526,7 @@ from inside the running application, and different for every way of launching it
   `record-transcribe$` (`true`/`false`) says whether a recording is transcribed.
   `record-always-on$` (`true`/`false`) is [Mic always on](#mic-always-on).
   `clock$` (`true`/`false`) is the [**Clock**](#clock) checkbox; absent is `true`.
+  `history$` (`true`/`false`) is the [**History**](#conversation-log) checkbox; absent is `false`.
   `history-limit$` is the [**History limit**](#configure-dialog-top-left-button), a number of
   requests; absent is unlimited, and it is written only once there is a limit.
 
@@ -1344,9 +1345,11 @@ the voice, so the microphone doesn't record the last answer as the next question
   and the reading stops**, and what you say is the next question. On speakers JRock would hear
   its own voice and stop itself, so use headphones or a microphone with a mute button, muted
   whenever you are not speaking.
-- **Each turn stands alone.** The prompt is cleared before every recording and History is off
-  during an automation, so the model hears one question at a time. The whole conversation is
-  still in JRock's transcript.
+- **History is JRock's.** The prompt is cleared before every recording; whether the model also
+  hears the conversation so far is the [**History**](#conversation-log) checkbox, and how much
+  of it the [**History limit**](#configure-dialog-top-left-button) in Configure. With History
+  on, a question the model asked can be answered in the next recording. The whole conversation
+  is in JRock's transcript either way.
 - **The recording comes first in the prompt.** That is what Voxtral wants (see
   [what an audio include is sent as](#what-an-audio-include-is-sent-as)): it takes a recording as the question and answers it.
   After it comes **the appendix**, `jrock-prompt-push-to-talk-appendix.txt` beside the agent,
@@ -1379,7 +1382,7 @@ thread** — they say so rather than deadlocking if you do.
 | Method | What it does |
 |---|---|
 | `automationAwaitReady(long millis)` | Blocks until the window is up and the model list is in. Returns why not — including the missing API key. |
-| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, Extend off, and a log line saying so. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. Refuses if an automation is already running. |
+| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, and a log line saying so. History is left as the checkbox has it. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. Refuses if an automation is already running. |
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
@@ -1484,14 +1487,16 @@ own keeps the one on screen and stores it there.
 The dialog is titled **Configure JRock** and opens with two lines of its own: the version, with
 a **JRock** link to the project on GitHub and a **Help** button at the far end of the same line;
 then, below it, who wrote it — Ivan Khvostishkov, with assistance of Kiro, Claude and JetBrains
-IntelliJ IDEA.
+IntelliJ IDEA. That line wraps on a screen too narrow for it, such as a phone's.
 
 ### Help (the button on the first line)
 
-What JRock is, where to write about it — **jrock@nosocial.net** — the whole **Shortcuts** list
-and the **Notes** on what every setting does and which file keeps it. All of it in one scrolling
-window that opens *on top of* Configure, so anything already typed into the form is still there
-when it closes.
+Which JRock this is — the title and version, repeated at the top — what it is, where to write
+about it — **jrock@nosocial.net** — and where the source is, both as links that open the mail
+program and the browser; then the whole **Shortcuts** list and the **Notes** on what every
+setting does and which file keeps it. All of it in one scrolling window that opens *on top of*
+Configure and centred on it, so anything already typed into the form is still there when it
+closes.
 
 It was in the Configure dialog itself until 2.1.0, above and below the rows it describes: three
 screens of prose in front of someone who opened the dialog to change the model, and no easier to
