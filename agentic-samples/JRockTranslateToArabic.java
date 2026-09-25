@@ -1,9 +1,9 @@
-// A JRock automation: one document in, its translation into English out.
+// A JRock automation: one document in, its translation into Arabic out.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
-//     java -cp jrock.jar JRockTranslateToEnglish.java [--working-dir <dir>]
+//     java -cp jrock.jar JRockTranslateToArabic.java [--working-dir <dir>]
 //                                                     [--prompts-dir <dir>] [document]
 //
 // Without the document it asks for one in a file chooser, opened in the folder this was
@@ -16,17 +16,17 @@
 //
 // What this one does is one pass, not two:
 //
-//   1. jrock-prompt-translate-to-english.txt + the document -> the whole document in
-//      English, saved as <name>-en.txt beside the original.
+//   1. jrock-prompt-translate-to-arabic.txt + the document -> the whole document in
+//      Arabic, saved as <name>-ar.txt beside the original.
 //
 // Which is the shorter half of why both samples are here. An automation is a prompt, an
 // include and a send; the inventory chains two of those and renames files afterwards,
 // this one does a single pass and writes one new file, and the plumbing around them is
 // the same file twice. Copy whichever is closer to the chain you want.
 //
-// The same file is here five more times, one for each of the other official languages
-// of the United Nations: JRockTranslateToArabic, -Chinese, -French, -Russian and
-// -Spanish. They differ in nothing but the class name, the language, its code and the
+// JRockTranslateToEnglish.java is this same file, and so are the ones for the other
+// official languages of the United Nations: JRockTranslateToChinese, -French, -Russian
+// and -Spanish. They differ in nothing but the class name, the language, its code and the
 // prompt they load - one file each, because an agent is one file and its right-click
 // entry is named after it. Change one, change them all.
 //
@@ -38,7 +38,7 @@
 // because a scan has no text layer to read and a translation wants the layout anyway.
 //
 // Nothing is asked and nothing existing is touched: the translation is a new file next to
-// the original, and an existing <name>-en.txt becomes <name>-en-2.txt. So unlike the
+// the original, and an existing <name>-ar.txt becomes <name>-ar-2.txt. So unlike the
 // inventory, which stops to ask before renaming your documents, this one runs through.
 //
 // The saved file is a copy for the archive, not the only place the answer is: the
@@ -59,15 +59,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-public final class JRockTranslateToEnglish {
+public final class JRockTranslateToArabic {
 
     // The prompt, expected beside this file.
-    private static final String PROMPT_TRANSLATE = "jrock-prompt-translate-to-english.txt";
+    private static final String PROMPT_TRANSLATE = "jrock-prompt-translate-to-arabic.txt";
 
-    // What the translation is called: <name>-en.txt beside the original. A suffix and not
+    // What the translation is called: <name>-ar.txt beside the original. A suffix and not
     // a directory, so the pair sits together in one listing - and .txt whatever went in,
     // because what comes back is text even when the original was a scan.
-    private static final String TARGET_SUFFIX = "-en";
+    private static final String TARGET_SUFFIX = "-ar";
     private static final String TARGET_EXTENSION = ".txt";
 
     // JRock's own flags, spelled out here because this automation both reads them and
@@ -183,7 +183,7 @@ public final class JRockTranslateToEnglish {
         check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
         check(JRock.automationBegin("translation of " + document.getFileName()));
 
-        // ---- The pass: the document in English ------------------------------
+        // ---- The pass: the document in Arabic -------------------------------
         System.out.println("Translating with " + PROMPT_TRANSLATE);
         check(JRock.automationLoadPrompt(prompt.toString()));
         dropPlaceholders();
@@ -381,7 +381,7 @@ public final class JRockTranslateToEnglish {
         }
         try {
             java.security.CodeSource code =
-                    JRockTranslateToEnglish.class.getProtectionDomain().getCodeSource();
+                    JRockTranslateToArabic.class.getProtectionDomain().getCodeSource();
             if (code != null && code.getLocation() != null) {
                 Path at = Paths.get(code.getLocation().toURI()).toAbsolutePath().normalize();
                 Path parent = Files.isDirectory(at) ? at : at.getParent();
@@ -504,7 +504,7 @@ public final class JRockTranslateToEnglish {
         onEdt(() -> {
             javax.swing.JFileChooser chooser =
                     new javax.swing.JFileChooser(startIn.toFile());
-            chooser.setDialogTitle("Choose the document to translate into English");
+            chooser.setDialogTitle("Choose the document to translate into Arabic");
             chooser.setAcceptAllFileFilterUsed(false);
             chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                     "Documents, text and images", translatable()));

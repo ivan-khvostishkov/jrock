@@ -25,11 +25,20 @@
 //      while the button is already ready for the next turn. Pressing it stops the
 //      voice, so the microphone does not hear the last answer as the next question.
 //
-// Hands-free, for talking with both hands off the keyboard and the mouse: the lever
-// under the button locks it. With the lever on, one click on the button starts
-// listening and the button stays down until it is clicked again, or the lever is
-// turned off - either of which sends. On the keyboard, Ctrl+Shift turns the lever on
-// and starts listening at once, and Ctrl on its own sends and turns the lever off.
+// Hands-free, for a conversation with both hands off the keyboard and the mouse: the
+// lever under the button (or Ctrl+Shift) hands the listening to JRock's own Mic always
+// on. JRock mutes that for as long as an automation runs - nobody types into the prompt
+// then, so nobody speaks into it either - and the lever lifts the mute
+// (JRock.automationListen). From then on JRock hears when someone starts talking and
+// puts what was said in the prompt once it is quiet again; the agent waits for that
+// (JRock.automationAwaitHeard), sends it, shows and reads out the answer, and listens
+// again - a spoken conversation, turn after turn. Mic always on has to be ticked in
+// JRock for it; the agent says so if it is not. The lever off, the button, or Ctrl on
+// its own ends it and mutes the microphone again, and what was being said is not sent.
+//
+// While a request is on its way the microphone is muted, and while the answer is read
+// aloud JRock does not listen either, so on speakers it does not hear its own voice. The
+// next turn starts when the reading is over - or at once, when the button stops it.
 //
 // Each turn is a question of its own: the prompt is cleared before every recording, and
 // an automation runs with History off, so the model hears one recording at a time and
@@ -68,11 +77,9 @@ public final class JRockPushToTalk {
     // No middle dots as separators: next to "Ctrl" one reads as a full stop.
     private static final String READY =
             "Hold to talk, or hold Ctrl. Ctrl+Shift for hands-free.";
-    private static final String READY_HANDS_FREE =
-            "Hands-free: click to talk, click again to send. Ctrl turns it off.";
     private static final String LISTENING_HELD = "Listening\u2026  let go to send";
     private static final String LISTENING_HANDS_FREE =
-            "Listening, hands-free\u2026  click the button or press Ctrl to send";
+            "Hands-free: just talk, it sends when you stop. Ctrl or the button ends it.";
 
     // Why a step failed, in one sentence (see check).
     private static final class Stop extends RuntimeException {
@@ -100,10 +107,16 @@ public final class JRockPushToTalk {
     // the worker only, so the release's task can tell a turn that never began.
     private static boolean recordingStarted;
 
-    // The lever: on, the button stays down between clicks rather than while held. And
-    // whether Ctrl and Shift are down, so their auto-repeat is not taken for another
-    // press (EDT only).
-    private static boolean handsFree;
+    // How long one wait for speech lasts before the conversation loop looks at the lever
+    // again. Not a limit on anyone talking: a recording under way is waited out.
+    private static final long LISTEN_POLL_MS = 250;
+
+    // The lever: on, JRock listens and the agent converses (see converse). Written on
+    // the EDT, read by the worker's loop too. And, EDT only: whether that loop is
+    // running, and whether Ctrl and Shift are down, so their auto-repeat is not taken
+    // for another press.
+    private static volatile boolean handsFree;
+    private static boolean conversing;
     private static boolean ctrlHeld;
     private static boolean shiftHeld;
 
@@ -138,7 +151,7 @@ public final class JRockPushToTalk {
     // Button (or Ctrl) down. On the EDT.
     private static void press() {
         if (state != State.IDLE) return;
-        setState(State.RECORDING, handsFree ? LISTENING_HANDS_FREE : LISTENING_HELD);
+        setState(State.RECORDING, LISTENING_HELD);
         WORKER.submit(() -> {
             recordingStarted = false;
             try {
@@ -153,10 +166,9 @@ public final class JRockPushToTalk {
         });
     }
 
-    // The button clicked again, Ctrl, or the lever turned off - or, lever off, the
-    // button or Ctrl let go of. Sends what was recorded. On the EDT.
+    // The button or Ctrl let go of. Sends what was recorded. On the EDT.
     private static void release() {
-        if (state != State.RECORDING) return;
+        if (state != State.RECORDING || conversing) return;
         setState(State.ANSWERING, "Sending\u2026");
         WORKER.submit(() -> {
             // Queued behind the press's task, so this knows how that one went.
@@ -164,55 +176,113 @@ public final class JRockPushToTalk {
             String outcome;
             try {
                 check(JRock.automationStopRecording(RECORDING_TIMEOUT_MS));
-                // The last answer goes as the new question does.
-                later(() -> {
-                    answerArea.setText("");
-                    status.setText(wrap("Waiting for the reply\u2026"));
-                });
-                String[] sent = JRock.automationSend(REPLY_TIMEOUT_MS);
-                if (!"1".equals(sent[0])) throw new Stop(sent[3]);
-                String answer = read(JRock.automationMessageFile("assistant", sent[2]));
-                if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
-                later(() -> showAnswer(answer));
-                // Read aloud while the button is free again: a narration that cannot
-                // play is said in the status line, and the turn has still succeeded.
-                String silent = JRock.automationNarrate(answer);
-                outcome = silent == null ? null : "Not read aloud: " + silent;
+                recordingStarted = false;
+                outcome = answer();
             } catch (Stop stop) {
                 outcome = "That turn failed: " + stop.getMessage();
             }
             String said = outcome;
-            later(() -> setState(State.IDLE, said == null ? ready() : said));
+            later(() -> {
+                setState(State.IDLE, said == null ? READY : said);
+                if (handsFree) converseNow();   // the lever went on during the answer
+            });
         });
     }
 
+    // Sends the prompt as it stands, shows the reply in place of the last one and reads
+    // it aloud, while the button is free again. On the worker. Returns null, or what to
+    // say about a narration that could not play - the turn has succeeded all the same.
+    private static String answer() {
+        later(() -> {
+            answerArea.setText("");
+            setState(State.ANSWERING, "Waiting for the reply\u2026");
+        });
+        String[] sent = JRock.automationSend(REPLY_TIMEOUT_MS);
+        if (!"1".equals(sent[0])) throw new Stop(sent[3]);
+        String answer = read(JRock.automationMessageFile("assistant", sent[2]));
+        if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
+        later(() -> showAnswer(answer));
+        String silent = JRock.automationNarrate(answer);
+        return silent == null ? null : "Not read aloud: " + silent;
+    }
+
     // The button or Ctrl let go of, or this window left: the end of a turn only when it
-    // is being held - with the lever on, the button stays down.
+    // is being held - hands-free, nothing is.
     private static void releaseHeld() {
         if (!handsFree) release();
     }
 
-    // The lever moved - clicked, or Ctrl+Shift, or Ctrl alone. Turned off while
-    // listening, it sends, as letting go of a held button would.
+    // The lever moved - clicked, or Ctrl+Shift, or Ctrl alone. On, the conversation
+    // starts - at once, or after the answer on its way. Off, it ends: the microphone is
+    // muted from a thread of its own, since the worker is inside the loop and the EDT
+    // must not call JRock, and that is what brings the loop's wait back.
     private static void setHandsFree(boolean on) {
+        if (on == handsFree) return;
         handsFree = on;
         lever.repaint();
-        if (state == State.RECORDING) {
-            if (!on) release();
-            else status.setText(wrap(LISTENING_HANDS_FREE));
-        } else if (state == State.IDLE) {
-            status.setText(wrap(ready()));
+        if (on) {
+            if (state != State.ANSWERING) converseNow();
+        } else if (conversing) {
+            Thread mute = new Thread(() -> JRock.automationListen(false), "jrock-ptt-mute");
+            mute.setDaemon(true);
+            mute.start();
         }
     }
 
-    // Ctrl+Shift, in either order: the lever on, and listening if nothing else is on.
+    // Ctrl+Shift, in either order: the lever on.
     private static void lockOn() {
-        if (!handsFree) setHandsFree(true);
-        press();
+        setHandsFree(true);
     }
 
-    private static String ready() {
-        return handsFree ? READY_HANDS_FREE : READY;
+    // Starts the conversation loop, unless it is running already. On the EDT.
+    private static void converseNow() {
+        if (conversing) return;
+        conversing = true;
+        setState(State.RECORDING, LISTENING_HANDS_FREE);
+        WORKER.submit(JRockPushToTalk::converse);
+    }
+
+    // Hands-free: JRock listens, the agent sends what it heard, and round again - until
+    // the lever goes off, or a turn fails. On the worker.
+    private static void converse() {
+        String said = null;
+        try {
+            // Ctrl, then Shift: the Ctrl started a held turn, which the lever replaces.
+            if (recordingStarted) {
+                recordingStarted = false;
+                JRock.automationStopRecording(RECORDING_TIMEOUT_MS);
+            }
+            String note = null;
+            while (handsFree) {
+                check(JRock.automationClearPrompt());
+                check(JRock.automationListen(true));
+                String listening = note == null ? LISTENING_HANDS_FREE
+                        : note + " " + LISTENING_HANDS_FREE;
+                later(() -> setState(State.RECORDING, listening));
+                String[] heard;
+                do {
+                    heard = JRock.automationAwaitHeard(LISTEN_POLL_MS);
+                } while (handsFree && !"1".equals(heard[0]) && heard[1] == null);
+                // Muted while the answer is on its way, so the question is not asked twice.
+                JRock.automationListen(false);
+                if (!handsFree) break;   // ended: what was being said is not sent
+                if (!"1".equals(heard[0])) throw new Stop(heard[1]);
+                note = answer();
+            }
+        } catch (Stop stop) {
+            JRock.automationListen(false);
+            said = "Hands-free ended: " + stop.getMessage();
+        }
+        String reason = said;
+        later(() -> {
+            conversing = false;
+            if (reason != null) {
+                handsFree = false;
+                lever.repaint();
+            }
+            setState(State.IDLE, reason == null ? READY : reason);
+            if (handsFree) converseNow();   // turned off and on again in the meantime
+        });
     }
 
     private static void setState(State next, String message) {
@@ -265,6 +335,7 @@ public final class JRockPushToTalk {
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
+                setHandsFree(false);
                 WORKER.submit(() -> {
                     JRock.automationStopNarration();
                     JRock.automationEnd("push-to-talk agent closed");
@@ -272,7 +343,8 @@ public final class JRockPushToTalk {
             }
         });
         // Leaving the window with Ctrl held is a release this window never sees. With the
-        // lever on nothing is being held, so the turn goes on wherever the focus goes.
+        // lever on nothing is being held, so the conversation goes on wherever the
+        // focus goes.
         window.addWindowFocusListener(new java.awt.event.WindowAdapter() {
             @Override public void windowLostFocus(java.awt.event.WindowEvent e) {
                 ctrlHeld = false;
@@ -331,8 +403,8 @@ public final class JRockPushToTalk {
         window.setContentPane(content);
 
         // Ctrl, held, as the keyboard's button - in this window only, so Ctrl+C in
-        // JRock's is still a copy. Shift with it, in either order, is the lever on and
-        // listening; Ctrl alone with the lever on sends and turns it off. The auto-repeat
+        // JRock's is still a copy. Shift with it, in either order, is the lever on; Ctrl
+        // alone with the lever on turns it off, and nothing is sent. The auto-repeat
         // of a held key comes as more presses, and only the first one counts.
         java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
                 .addKeyEventDispatcher(e -> {
@@ -419,7 +491,7 @@ public final class JRockPushToTalk {
     // (a shade lighter under the mouse), red while listening with a soft ring pulsing
     // out from it, amber while the answer is on its way. Held with the mouse; let go of
     // anywhere - dragging off it before letting go still sends, as a walkie-talkie's
-    // button would. With the lever on, clicked once to talk and once more to send.
+    // button would. With the lever on, JRock listens by itself, and a click ends that.
     private static final class TalkButton extends javax.swing.JComponent {
         private static final long serialVersionUID = 1L;   // never leaves this JVM
         private static final int SIZE = 112;
@@ -440,7 +512,7 @@ public final class JRockPushToTalk {
             addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override public void mousePressed(java.awt.event.MouseEvent e) {
                     if (!javax.swing.SwingUtilities.isLeftMouseButton(e) || !inside(e)) return;
-                    if (handsFree && state == State.RECORDING) release();
+                    if (handsFree) setHandsFree(false);
                     else press();
                 }
                 @Override public void mouseReleased(java.awt.event.MouseEvent e) {
@@ -538,8 +610,8 @@ public final class JRockPushToTalk {
             setMaximumSize(size);
             setFocusable(false);   // Ctrl goes to the window, not the lever
             setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-            setToolTipText("On: click the button to talk, click it again to send - "
-                    + "no need to hold it");
+            setToolTipText("On: just talk - JRock hears you, and the agent sends what you "
+                    + "said once you stop. Needs Mic always on ticked in JRock.");
             addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override public void mousePressed(java.awt.event.MouseEvent e) {
                     if (javax.swing.SwingUtilities.isLeftMouseButton(e)) setHandsFree(!handsFree);

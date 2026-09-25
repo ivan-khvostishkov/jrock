@@ -1092,8 +1092,8 @@ there for it, a chain can also run itself: see
 
 ### The samples
 
-`agentic-samples/` holds three prompts — two that chain and one that stands alone — the two
-agents that run them, and doubles as a template for a prompts directory of your own:
+`agentic-samples/` holds prompts that chain and prompts that stand alone, the agents that run
+them, and doubles as a template for a prompts directory of your own:
 
 - **`jrock-prompt-doc-to-ascii.txt`** — turn a document into plain text that keeps its layout:
   ASCII rules for tables, right-aligned text kept right-aligned to a fixed column, centred text
@@ -1113,8 +1113,14 @@ agents that run them, and doubles as a template for a prompts directory of your 
   with no English equivalent given the same treatment (*income tax return
   (Einkommensteuererklaerung)*). What cannot be read becomes `[unreadable]` instead of a guess,
   and what can — a stamp, a signature, a handwritten note — is translated and marked as such.
+- **`jrock-prompt-translate-to-arabic.txt`**, **`-chinese`**, **`-french`**, **`-russian`**,
+  **`-spanish`** — the same prompt for the other official languages of the United Nations.
+  Only the target language changes, along with what goes with it: names written in the target
+  script (Arabic, Simplified Chinese, Cyrillic) or kept as they are in Latin script, the
+  example term translated into that language, and the `Translated from: <language>` line kept
+  in English so an agent can read it back.
 
-All three end in bare `@img` / `@txt` lines. Those are **placeholders, not tokens** — a real
+All of them end in bare `@img` / `@txt` lines. Those are **placeholders, not tokens** — a real
 include token carries a 12-hex-digit hash, so a bare one is only ever sent as the text it is.
 They mark where the attachments belong: put the cursor on that line and press Ctrl+I.
 
@@ -1278,6 +1284,14 @@ and **Export selected Markdown with images as DOCX...** turns it into a document
 [either A4 orientation](#markdown-export-rtf-and-docx) — a translated letter usually wants to
 end up as a letter.
 
+**The other official UN languages** each have an agent of their own, built the same way:
+`JRockTranslateToArabic.java`, `JRockTranslateToChinese.java`, `JRockTranslateToFrench.java`,
+`JRockTranslateToRussian.java` and `JRockTranslateToSpanish.java`. Each loads its own prompt and
+writes `<name>-ar.txt`, `-zh.txt`, `-fr.txt`, `-ru.txt` or `-es.txt`. There is one file per
+language because an agent is one file, and its right-click entry is named after it
+(*Translate To French*, and so on). The files differ in nothing but the language, its code and
+the class name, so a change to one belongs in all six.
+
 Its one real limit is that a reply is one reply: a very long document can run into the model's
 own output limit, and what comes back then is a translation that stops in the middle rather than
 an error. JRock sends no `max_tokens` of its own, on purpose — any number it guessed would
@@ -1309,12 +1323,15 @@ conversation so far is in JRock's window already. Then JRock **reads the whole a
 Narrate selected text does. The button is ready again while it speaks, and pressing it stops
 the voice, so the microphone doesn't record the last answer as the next question.
 
-- **Hands-free**, for talking with both hands free. The **Hands-free** lever under the button
-  locks it. With the lever on, click the button once and it stays down, listening, until you
-  click it again or turn the lever off. Either of those sends. On the keyboard, **Ctrl+Shift**
-  (in either order) turns the lever on and starts listening, so you can let go of both keys.
-  **Ctrl on its own** then sends and turns the lever off. While the lever is on, the recording
-  also keeps going if you switch to another window.
+- **Hands-free**, a spoken conversation with both hands free. The **Hands-free** lever under
+  the button, or **Ctrl+Shift** (in either order), hands the listening to JRock's own
+  [Mic always on](#mic-always-on), which has to be ticked for it. JRock mutes that while an
+  automation runs, and the lever lifts the mute: just talk. Once you stop, what you said is in
+  the prompt, the agent sends it, shows and reads out the answer, and listens again — turn after
+  turn. Turning the lever off, clicking the button or pressing **Ctrl on its own** ends it and
+  mutes the microphone again; what was being said is not sent. The microphone is muted while a
+  question is on its way, and JRock does not listen while it reads the answer aloud, so it
+  doesn't hear its own voice on speakers either. You speak once it has finished.
 - **Each turn stands alone.** The prompt is cleared before every recording and History is off
   during an automation, so the model hears one question at a time. The whole conversation is
   still in JRock's transcript.
@@ -1343,19 +1360,22 @@ thread** — they say so rather than deadlocking if you do.
 | Method | What it does |
 |---|---|
 | `automationAwaitReady(long millis)` | Blocks until the window is up and the model list is in. Returns why not — including the missing API key. |
-| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, Extend off, and a log line saying so. Refuses if an automation is already running. |
+| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, Extend off, and a log line saying so. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. Refuses if an automation is already running. |
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
-| `automationDropPlaceholders()` | Removes the bare `@img` / `@txt` / `@audio` placeholder lines, and returns how many. The include tokens go at the end of the prompt. |
+| `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
+| `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
 | `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
 | `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
 | `automationStopRecording(long millis)` | Stop recording (Ctrl+Space again), and waits until the recording is in the prompt — an `@audio` token, or the transcribed text with **Transcribe** on. Fails when nothing reached the prompt. |
+| `automationListen(boolean on)` | Lifts the mute `automationBegin` put on Mic always on (`true`), or puts it back (`false`). Refuses to listen when Mic always on is off or no microphone is set. |
+| `automationAwaitHeard(long millis)` | Waits for Mic always on to hear someone and for what was said to reach the prompt. Returns `{"1", null}` when it has, `{"0", null}` when nobody spoke in time, `{"0", why not}` when it cannot. A recording under way is waited out, not cut off. |
 | `automationNarrate(String markdown)` | Narrate selected text, for any text: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when no device is set or it isn't connected. (Windows) |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
-| `automationEnd(String note)` | Gives the window back: prompt editable, Send released, and a log line saying so. |
+| `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
 
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the
 name of the file the message was written to (see
@@ -1573,6 +1593,11 @@ it is included or transcribed like any other.
 - **A red dot and "Mic" blink to the left of Clock** whenever the microphone is open: listening,
   or recording from Ctrl+Space, the menu, an agent or Mic always on. They are gone when it is
   closed.
+- **An automation mutes it** for as long as it runs: nobody types into the prompt then, so
+  nobody speaks into it either. The tick stays; listening comes back when the automation ends,
+  or earlier if the agent asks for it — the push-to-talk agent's **Hands-free** does.
+- **Nor does it listen while JRock reads aloud**, or for 0.7 s after, whether the narration
+  came from the menu or an agent: on speakers it would hear its own voice as speech.
 
 ## Markdown export (RTF and DOCX)
 
