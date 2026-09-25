@@ -47,11 +47,13 @@
 // not the conversation so far. The whole conversation is in JRock's transcript all the
 // same, and closing this window hands JRock back to you with it.
 //
-// The recording goes as the prompt, with no text around it - which is what Voxtral
-// wants (see the README): it takes a recording as the question and answers it. One line
-// follows it, <clock><now>...</now></clock>, with the date, the day of the week and the
-// time zone in full: Voxtral does not work with JRock's own Clock, which goes as a
-// system prompt, so the time it needs for "what day is it" comes this way instead.
+// The recording goes first in the prompt - which is what Voxtral wants (see the
+// README): it takes a recording as the question and answers it. After it comes the
+// appendix, jrock-prompt-push-to-talk-appendix.txt beside this file, with #now in it
+// replaced by the date, the time, the day of the week and the time zone in full: Voxtral
+// does not work with JRock's own Clock, which goes as a system prompt, so what it needs
+// for "what day is it" comes this way instead. The file is read again every turn, so an
+// edit to it counts from the next question on.
 //
 // The microphone and the speaker are JRock's to choose, as they are for Ctrl+Space and
 // Narrate in JRock's own window. Either one not set is a message here, not a dialog:
@@ -62,6 +64,7 @@
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public final class JRockPushToTalk {
@@ -85,6 +88,12 @@ public final class JRockPushToTalk {
     private static final String LISTENING_HELD = "Listening\u2026  let go to send";
     private static final String LISTENING_HANDS_FREE =
             "Hands-free: just talk, it sends when you stop. Ctrl or the button ends it.";
+
+    // What goes after every recording, expected beside this file; and the placeholder in
+    // it that becomes the time the question was asked.
+    private static final String PROMPT_APPENDIX = "jrock-prompt-push-to-talk-appendix.txt";
+    private static final String NOW_PLACEHOLDER = "#now";
+    private static Path appendix;
 
     // Why a step failed, in one sentence (see check).
     private static final class Stop extends RuntimeException {
@@ -133,6 +142,8 @@ public final class JRockPushToTalk {
 
     public static void main(String[] args) {
         try {
+            appendix = mustExist(ownDirectory().resolve(PROMPT_APPENDIX));
+            System.out.println("Appendix: " + appendix);
             // JRock's own flags go straight through. A bare argument would be a prompt
             // file JRock loads - harmless, since the prompt is cleared a line later.
             JRock.main(args);
@@ -202,7 +213,10 @@ public final class JRockPushToTalk {
     private static String answer(boolean handsFreeTurn) {
         String prompt = JRock.automationPromptText();
         if (prompt == null) throw new Stop("the prompt could not be read.");
-        check(JRock.automationSetPrompt(prompt.replaceAll("\\s+$", "") + "\n" + clockLine()));
+        String after = read(appendix.toString());
+        if (after == null) throw new Stop("there is no " + appendix + ".");
+        after = after.replace(NOW_PLACEHOLDER, now()).replaceAll("\\s+$", "");
+        check(JRock.automationSetPrompt(prompt.replaceAll("\\s+$", "") + "\n\n" + after + "\n"));
         later(() -> {
             answerArea.setText("");
             setState(State.ANSWERING, "Waiting for the reply\u2026");
@@ -668,30 +682,57 @@ public final class JRockPushToTalk {
     }
 
     // ---- Plumbing ----------------------------------------------------------
-    // The line that goes after the recording: now, in English and in full, e.g.
-    // <clock><now>Friday, 25 September 2026, 10:01:34 Europe/Berlin (Central European
-    // Summer Time, CEST, UTC+02:00)</now></clock>. English because it is the model that
-    // reads it, whatever the language of the question.
-    private static String clockLine() {
+    // What #now becomes: now, in English and in full, e.g. "Friday, 25 September 2026,
+    // 10:01:34 Europe/Berlin (Central European Summer Time, CEST, UTC+02:00)". English
+    // because it is the model that reads it, whatever the language of the question.
+    private static String now() {
         java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
         java.util.Locale en = java.util.Locale.ENGLISH;
         java.time.ZoneId zone = now.getZone();
         boolean summer = zone.getRules().isDaylightSavings(now.toInstant());
         java.util.TimeZone tz = java.util.TimeZone.getTimeZone(zone);
         String offset = now.getOffset().getTotalSeconds() == 0 ? "+00:00" : now.getOffset().getId();
-        return "<clock><now>"
-                + now.format(java.time.format.DateTimeFormatter.ofPattern(
+        return now.format(java.time.format.DateTimeFormatter.ofPattern(
                         "EEEE, d MMMM yyyy, HH:mm:ss", en))
                 + " " + zone.getId()
                 + " (" + tz.getDisplayName(summer, java.util.TimeZone.LONG, en)
                 + ", " + tz.getDisplayName(summer, java.util.TimeZone.SHORT, en)
-                + ", UTC" + offset + ")"
-                + "</now></clock>";
+                + ", UTC" + offset + ")";
     }
 
     // Turns an automation API result into a stop, a null meaning there is nothing wrong.
     private static void check(String problem) {
         if (problem != null) throw new Stop(problem);
+    }
+
+    // A file the agent cannot run without.
+    private static Path mustExist(Path file) {
+        if (!Files.isRegularFile(file)) throw new Stop("there is no " + file + ".");
+        return file;
+    }
+
+    // The directory this source file sits in, which is where the appendix is looked for.
+    // jdk.launcher.sourcefile is set by the launcher in source-file mode (`java
+    // Foo.java`), which is how this is meant to be run; the code source covers a compiled
+    // class, and the working directory is the last resort.
+    private static Path ownDirectory() {
+        String source = System.getProperty("jdk.launcher.sourcefile");
+        if (source != null && !source.isBlank()) {
+            Path parent = Paths.get(source).toAbsolutePath().normalize().getParent();
+            if (parent != null) return parent;
+        }
+        try {
+            java.security.CodeSource code =
+                    JRockPushToTalk.class.getProtectionDomain().getCodeSource();
+            if (code != null && code.getLocation() != null) {
+                Path at = Paths.get(code.getLocation().toURI()).toAbsolutePath().normalize();
+                Path parent = Files.isDirectory(at) ? at : at.getParent();
+                if (parent != null) return parent;
+            }
+        } catch (RuntimeException | java.net.URISyntaxException ignore) {
+            // Fall through to the working directory.
+        }
+        return Paths.get("").toAbsolutePath().normalize();
     }
 
     // A message file's text, or null when there is none to read.
