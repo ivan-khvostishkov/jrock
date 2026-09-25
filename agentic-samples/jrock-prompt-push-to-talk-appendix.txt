@@ -16,4 +16,4 @@ The operator will give you what you asked for, and then you answer the original 
 If the operator asks you to set a timer or an alarm, say out loud:
 - "Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"
 
-
+Say this sentence in English, word for word, whatever language the operator speaks, because a program recognises it. Give both times in 24-hour format: first the current time, then the time the alarm rings. For a timer, such as "in ten minutes", add it to the current time.

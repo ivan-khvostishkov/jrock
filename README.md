@@ -1368,7 +1368,7 @@ the voice, so the microphone doesn't record the last answer as the next question
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
-  appendix asks the model for this sentence — sets an alarm in the [timer agent](#a-fourth-agent-timer-and-alarm-jrocktimerjava).
+  appendix asks the model for this sentence, in English whatever the language — sets an alarm in the [timer agent](#a-fourth-agent-timer-and-alarm-jrocktimerjava).
   The first time is checked against the computer's clock first, and a model more than two
   minutes off sets nothing. The status line says what became of the alarm: set, refused, or
   not set because the timer agent isn't running.
