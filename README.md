@@ -1338,8 +1338,12 @@ the voice, so the microphone doesn't record the last answer as the next question
 - **Each turn stands alone.** The prompt is cleared before every recording and History is off
   during an automation, so the model hears one question at a time. The whole conversation is
   still in JRock's transcript.
-- **The recording is the whole prompt**, with no text around it. That is what Voxtral wants (see
+- **The recording is the prompt**, with no text around it. That is what Voxtral wants (see
   [what an audio include is sent as](#what-an-audio-include-is-sent-as)): it takes a recording as the question and answers it.
+  One line follows it: **the time**, as `<clock><now>Friday, 25 September 2026, 10:01:34
+  Europe/Berlin (Central European Summer Time, CEST, UTC+02:00)</now></clock>` — the date,
+  the day of the week and the time zone in full, in English. Voxtral does not work with
+  JRock's own **Clock**, which goes as a system prompt, so the agent tells it the time this way.
 - **The microphone and the speaker are JRock's to choose.** If either is not set, the agent's
   window says so. Press Ctrl+Space (or Narrate) in JRock's own window once to list the devices
   into Configure, pick one, and carry on. An answer that could not be read aloud still counts as

@@ -47,8 +47,11 @@
 // not the conversation so far. The whole conversation is in JRock's transcript all the
 // same, and closing this window hands JRock back to you with it.
 //
-// The recording goes as the whole prompt, with no text around it - which is what
-// Voxtral wants (see the README): it takes a recording as the question and answers it.
+// The recording goes as the prompt, with no text around it - which is what Voxtral
+// wants (see the README): it takes a recording as the question and answers it. One line
+// follows it, <clock><now>...</now></clock>, with the date, the day of the week and the
+// time zone in full: Voxtral does not work with JRock's own Clock, which goes as a
+// system prompt, so the time it needs for "what day is it" comes this way instead.
 //
 // The microphone and the speaker are JRock's to choose, as they are for Ctrl+Space and
 // Narrate in JRock's own window. Either one not set is a message here, not a dialog:
@@ -197,6 +200,9 @@ public final class JRockPushToTalk {
     // or what to say about a narration that could not play - the turn has succeeded all
     // the same.
     private static String answer(boolean handsFreeTurn) {
+        String prompt = JRock.automationPromptText();
+        if (prompt == null) throw new Stop("the prompt could not be read.");
+        check(JRock.automationSetPrompt(prompt.replaceAll("\\s+$", "") + "\n" + clockLine()));
         later(() -> {
             answerArea.setText("");
             setState(State.ANSWERING, "Waiting for the reply\u2026");
@@ -662,6 +668,27 @@ public final class JRockPushToTalk {
     }
 
     // ---- Plumbing ----------------------------------------------------------
+    // The line that goes after the recording: now, in English and in full, e.g.
+    // <clock><now>Friday, 25 September 2026, 10:01:34 Europe/Berlin (Central European
+    // Summer Time, CEST, UTC+02:00)</now></clock>. English because it is the model that
+    // reads it, whatever the language of the question.
+    private static String clockLine() {
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+        java.util.Locale en = java.util.Locale.ENGLISH;
+        java.time.ZoneId zone = now.getZone();
+        boolean summer = zone.getRules().isDaylightSavings(now.toInstant());
+        java.util.TimeZone tz = java.util.TimeZone.getTimeZone(zone);
+        String offset = now.getOffset().getTotalSeconds() == 0 ? "+00:00" : now.getOffset().getId();
+        return "<clock><now>"
+                + now.format(java.time.format.DateTimeFormatter.ofPattern(
+                        "EEEE, d MMMM yyyy, HH:mm:ss", en))
+                + " " + zone.getId()
+                + " (" + tz.getDisplayName(summer, java.util.TimeZone.LONG, en)
+                + ", " + tz.getDisplayName(summer, java.util.TimeZone.SHORT, en)
+                + ", UTC" + offset + ")"
+                + "</now></clock>";
+    }
+
     // Turns an automation API result into a stop, a null meaning there is nothing wrong.
     private static void check(String problem) {
         if (problem != null) throw new Stop(problem);
