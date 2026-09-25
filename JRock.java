@@ -676,6 +676,13 @@ public class JRock {
     // Whether the Clock checkbox is ticked: true or false, and absent is true - the
     // checkbox's default, and what every file written before it was kept meant.
     private static final String CONFIG_CLOCK = "clock";
+    // How many earlier requests History sends, each with the answers after it: a
+    // positive number, and absent (or 0) is all of them. Per folder, like the model it
+    // is usually a matter of - one model's context holds a long conversation, another's
+    // does not.
+    private static final String CONFIG_HISTORY_LIMIT = "history-limit";
+    private static volatile int historyLimit = 0;
+    private static final String HISTORY_UNLIMITED = "Unlimited";
     private static volatile boolean clockOn = true;
 
     // Written above the settings, and the only documentation the format needs. The
@@ -723,6 +730,7 @@ public class JRock {
             recordTranscribe = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_TRANSCRIBE));
             micAlwaysOn = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_ALWAYS_ON));
             clockOn = !"false".equalsIgnoreCase(settings.get(CONFIG_CLOCK));
+            historyLimit = parseHistoryLimit(settings.get(CONFIG_HISTORY_LIMIT), 0);
             settingsSource = "JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
@@ -775,6 +783,9 @@ public class JRock {
             appendSetting(text, CONFIG_RECORD_ALWAYS_ON, String.valueOf(micAlwaysOn));
         }
         appendSetting(text, CONFIG_CLOCK, String.valueOf(clockOn));
+        if (historyLimit > 0) {   // unlimited: left out, which reads back as unlimited
+            appendSetting(text, CONFIG_HISTORY_LIMIT, String.valueOf(historyLimit));
+        }
         atomicWriteQuietly(configFile(), text.toString());
     }
 
@@ -798,6 +809,37 @@ public class JRock {
         } catch (NumberFormatException ex) {
             imagesDpiNote = "\"" + stored.trim() + "\" is not a number - ignored";
         }
+    }
+
+    // A History limit as the config file or the Configure dialog has it: a whole number
+    // of requests, where 0, "Unlimited" or nothing at all is no limit. Anything else -
+    // a typo, a negative - is `otherwise`, so a bad value never becomes a limit nobody
+    // chose.
+    static int parseHistoryLimit(String text, int otherwise) {
+        if (text == null) return 0;
+        String t = text.trim();
+        if (t.isEmpty() || t.equalsIgnoreCase(HISTORY_UNLIMITED)) return 0;
+        try {
+            int n = Integer.parseInt(t);
+            return n >= 0 ? n : otherwise;
+        } catch (NumberFormatException ex) {
+            return otherwise;
+        }
+    }
+
+    // The part of the dialog History sends: the last `limit` requests, each with what
+    // came after it - its answer, or answers - so 4 is at most 8 messages when every
+    // request was answered once. 0 is everything. Cut at a request, never between one
+    // and its answer, so the model never gets an answer without its question.
+    static java.util.List<String[]> limitHistory(java.util.List<String[]> dialog, int limit) {
+        if (limit <= 0) return dialog;
+        int requests = 0;
+        for (int i = dialog.size() - 1; i >= 0; i--) {
+            if (ROLE_HUMAN.equals(dialog.get(i)[0]) && ++requests == limit) {
+                return dialog.subList(i, dialog.size());
+            }
+        }
+        return dialog;
     }
 
     // What the session report should say about a stored images DPI it could not use.
@@ -1947,7 +1989,8 @@ public class JRock {
             boolean extend = extendMode.isSelected();
             boolean clock = clockMode.isSelected();
             java.util.List<String[]> history = extend
-                    ? log.dialogHistory() : java.util.Collections.emptyList();
+                    ? limitHistory(log.dialogHistory(), historyLimit)
+                    : java.util.Collections.emptyList();
             log.human(prompt, extend);
             log.gray("");                        // closes the input message block
 
@@ -1991,7 +2034,8 @@ public class JRock {
             }
 
             log.gray(extend
-                    ? "Calling " + pathOf(endpoint()) + " (extend: " + history.size() + " prior turns) ..."
+                    ? "Calling " + pathOf(endpoint()) + " (extend: " + history.size() + " prior turns"
+                      + (historyLimit > 0 ? ", History limit " + historyLimit : "") + ") ..."
                     : "Calling " + pathOf(endpoint()) + " ...");
             new SwingWorker<String[], Void>() {
                 @Override
@@ -3624,6 +3668,20 @@ public class JRock {
         javax.swing.JPanel dpiRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         dpiRow.add(dpiF, BorderLayout.WEST);
 
+        // How much of the conversation History sends. Editable, since any number is a
+        // number worth having; the list only offers the usual ones.
+        javax.swing.JComboBox<String> historyF = new javax.swing.JComboBox<>(new String[] {
+                HISTORY_UNLIMITED, "1", "2", "3", "4", "5", "8", "10", "20", "50" });
+        historyF.setEditable(true);
+        historyF.setName("historyLimit");
+        historyF.setSelectedItem(historyLimit > 0 ? String.valueOf(historyLimit) : HISTORY_UNLIMITED);
+        historyF.setFont(historyF.getFont().deriveFont(java.awt.Font.PLAIN));
+        historyF.setToolTipText("With History ticked, how many earlier requests go with "
+                + "each message, each with its answer: 4 sends at most 8 earlier messages. "
+                + "Unlimited sends the whole conversation.");
+        javax.swing.JPanel historyRow = new javax.swing.JPanel(new BorderLayout(12, 0));
+        historyRow.add(historyF, BorderLayout.WEST);
+
         javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
         c.insets = new java.awt.Insets(4, 4, 4, 4);
@@ -3638,6 +3696,7 @@ public class JRock {
         addRow(fields, c, row++, "AWS region:", regionF);
         addRow(fields, c, row++, "Model:", modelF);
         addRow(fields, c, row++, "", autoBackupF);
+        addRow(fields, c, row++, "History limit:", historyRow);
         addRow(fields, c, row++, "Images DPI:", dpiRow);
         if (deviceF != null) addRow(fields, c, row++, "Narrate on:", deviceF);
         if (micF != null) addRow(fields, c, row++, "Record from:", micF);
@@ -3752,6 +3811,10 @@ public class JRock {
         Object selected = modelF.getEditor().getItem();  // typed or picked value
         String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
+
+        // The History limit: a value that is no number keeps the one there was.
+        Object limit = historyF.getEditor().getItem();
+        historyLimit = parseHistoryLimit(limit == null ? "" : limit.toString(), historyLimit);
 
         // Image resolution: picked from the list, so always valid.
         Object dpi = dpiF.getSelectedItem();
@@ -7252,7 +7315,7 @@ public class JRock {
         String token = "@" + kind + " " + hash;
         boolean alreadyPresent = input.getText().contains(token);
         if (!alreadyPresent && extend) {
-            for (String[] turn : log.dialogHistory()) {
+            for (String[] turn : limitHistory(log.dialogHistory(), historyLimit)) {
                 if (ROLE_HUMAN.equals(turn[0]) && turn[1].contains(token)) {
                     alreadyPresent = true;
                     break;

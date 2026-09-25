@@ -388,7 +388,8 @@ Built-in cards include:
 - **Dialog only** mode (Ctrl+D) hides the gray system lines, leaving a clean, copy-pastable
   transcript.
 - **History** mode (Ctrl+E): each send includes the full prior dialog so the model sees a
-  continuous conversation (stateless multi-turn). In this mode role headers are
+  continuous conversation (stateless multi-turn) — or only its last requests, each with its
+  answer, when a [**History limit**](#configure-dialog-top-left-button) is set. In this mode role headers are
   timestamped (e.g. `[OPERATOR'S ASSISTANT] · Monday, 14 September 2026, 10:01:34`) so the
   time order of stateless turns is visible.
 - **Enter** — the checkbox beside the Send button, **off when JRock starts and never
@@ -525,6 +526,8 @@ from inside the running application, and different for every way of launching it
   `record-transcribe$` (`true`/`false`) says whether a recording is transcribed.
   `record-always-on$` (`true`/`false`) is [Mic always on](#mic-always-on).
   `clock$` (`true`/`false`) is the [**Clock**](#clock) checkbox; absent is `true`.
+  `history-limit$` is the [**History limit**](#configure-dialog-top-left-button), a number of
+  requests; absent is unlimited, and it is written only once there is a limit.
 
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser both
@@ -1435,6 +1438,13 @@ that you cannot.
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
   long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
   only when it is **off**, so nobody counts on a backup that isn't being taken.
+- **History limit** — how much of the conversation [**History**](#conversation-log) sends with each
+  message: the last *N* requests, each with the answer after it, so **4** is at most 8 earlier
+  messages before the new prompt. **Unlimited** (the default) sends it all. The cut is always
+  at a request, never between one and its answer. Pick from the list or type any number; a
+  value that is no number keeps the limit there was. An `#include` already sent in a request
+  the limit leaves out is sent again, since the model no longer sees it. Kept in
+  `JRock/jrock-config.txt`, per folder, like the model it usually depends on.
 - **Images DPI** — how fine a picture JRock keeps, per inch of page: 72 / 96 (screen), **150**
   (documents, the default), 203 (fax/receipt), 300 (print). The image is what the model actually
   sees, so this is a real trade-off — too low and small print is unreadable, too high and you pay
