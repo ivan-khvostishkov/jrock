@@ -1328,8 +1328,9 @@ the voice, so the microphone doesn't record the last answer as the next question
   [Mic always on](#mic-always-on), which has to be ticked for it. JRock mutes that while an
   automation runs, and the lever lifts the mute: just talk. Once you stop, what you said is in
   the prompt, the agent sends it, shows and reads out the answer, and listens again — turn after
-  turn. Turning the lever off, clicking the button or pressing **Ctrl on its own** ends it and
-  mutes the microphone again; what was being said is not sent. The microphone is muted while a
+  turn. Turning the lever off, clicking the button or pressing **Ctrl on its own** ends it: the
+  microphone is muted again, what was being said is not sent, and an answer being read out
+  stops (one still on its way is shown, not read). The microphone is muted while a
   question is on its way, and listens again while the answer is read aloud: **start talking
   and the reading stops**, and what you say is the next question. On speakers JRock would hear
   its own voice and stop itself, so use headphones or a microphone with a mute button, muted

@@ -34,7 +34,8 @@
 // (JRock.automationAwaitHeard), sends it, shows and reads out the answer, and listens
 // again - a spoken conversation, turn after turn. Mic always on has to be ticked in
 // JRock for it; the agent says so if it is not. The lever off, the button, or Ctrl on
-// its own ends it and mutes the microphone again, and what was being said is not sent.
+// its own ends it: the microphone is muted again, what was being said is not sent, and
+// the answer being read out stops.
 //
 // While a request is on its way the microphone is muted. While the answer is read aloud
 // JRock listens again, and speaking stops the reading and starts the next question - so
@@ -178,7 +179,7 @@ public final class JRockPushToTalk {
             try {
                 check(JRock.automationStopRecording(RECORDING_TIMEOUT_MS));
                 recordingStarted = false;
-                outcome = answer();
+                outcome = answer(false);
             } catch (Stop stop) {
                 outcome = "That turn failed: " + stop.getMessage();
             }
@@ -191,9 +192,11 @@ public final class JRockPushToTalk {
     }
 
     // Sends the prompt as it stands, shows the reply in place of the last one and reads
-    // it aloud, while the button is free again. On the worker. Returns null, or what to
-    // say about a narration that could not play - the turn has succeeded all the same.
-    private static String answer() {
+    // it aloud, while the button is free again - unless it is a hands-free turn and
+    // hands-free has ended while the reply was on its way. On the worker. Returns null,
+    // or what to say about a narration that could not play - the turn has succeeded all
+    // the same.
+    private static String answer(boolean handsFreeTurn) {
         later(() -> {
             answerArea.setText("");
             setState(State.ANSWERING, "Waiting for the reply\u2026");
@@ -203,6 +206,7 @@ public final class JRockPushToTalk {
         String answer = read(JRock.automationMessageFile("assistant", sent[2]));
         if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
         later(() -> showAnswer(answer));
+        if (handsFreeTurn && !handsFree) return null;
         String silent = JRock.automationNarrate(answer);
         return silent == null ? null : "Not read aloud: " + silent;
     }
@@ -215,8 +219,9 @@ public final class JRockPushToTalk {
 
     // The lever moved - clicked, or Ctrl+Shift, or Ctrl alone. On, the conversation
     // starts - at once, or after the answer on its way. Off, it ends: the microphone is
-    // muted from a thread of its own, since the worker is inside the loop and the EDT
-    // must not call JRock, and that is what brings the loop's wait back.
+    // muted and the answer being read out stops, from a thread of its own, since the
+    // worker is inside the loop and the EDT must not call JRock. The mute is what brings
+    // the loop's wait back.
     private static void setHandsFree(boolean on) {
         if (on == handsFree) return;
         handsFree = on;
@@ -224,7 +229,10 @@ public final class JRockPushToTalk {
         if (on) {
             if (state != State.ANSWERING) converseNow();
         } else if (conversing) {
-            Thread mute = new Thread(() -> JRock.automationListen(false), "jrock-ptt-mute");
+            Thread mute = new Thread(() -> {
+                JRock.automationListen(false);
+                JRock.automationStopNarration();
+            }, "jrock-ptt-mute");
             mute.setDaemon(true);
             mute.start();
         }
@@ -268,7 +276,7 @@ public final class JRockPushToTalk {
                 JRock.automationListen(false);
                 if (!handsFree) break;   // ended: what was being said is not sent
                 if (!"1".equals(heard[0])) throw new Stop(heard[1]);
-                note = answer();
+                note = answer(true);
             }
         } catch (Stop stop) {
             JRock.automationListen(false);
