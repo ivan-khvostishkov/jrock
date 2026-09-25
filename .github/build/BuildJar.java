@@ -41,7 +41,7 @@ public class BuildJar {
     // chain them. They are part of what JRock is for rather than part of how it is
     // built, and a download that has the application but none of them starts from an
     // empty prompt.
-    private static final String SAMPLES_DIR = "automation-samples";
+    private static final String SAMPLES_DIR = "agentic-samples";
 
     // The folder JRock keeps its own files in, under whichever directory it runs in -
     // which can be the samples directory itself. Never packed; see the walk below.
@@ -101,7 +101,7 @@ public class BuildJar {
         System.out.println("MD5:     " + md5);
 
         // The sample prompts and automation scripts, as forward-slash names under
-        // automation-samples/ and sorted for the same reason the classes are: the zip
+        // agentic-samples/ and sorted for the same reason the classes are: the zip
         // has to be reproducible too, and a directory listing's order is the file
         // system's business.
         //

@@ -49,10 +49,10 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   opens with its headings, tables and **the pictures it was given** intact
   ([**Markdown export**](#markdown-export-rtf-and-docx)).
 - **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
-  workflow, which is Bedrock Prompt management and Flows without the cloud
-  ([`automation-samples/`](#prompt-library-and-chaining-automation-samples)) — and single-file
-  **automations** that run such a chain by driving the real window, so you watch it
-  work and carry on the conversation when it's done
+  workflow, which is Bedrock Prompt management without the cloud
+  ([`agentic-samples/`](#prompt-library-and-chaining-agentic-samples)) — and single-file
+  **agents** that run such a chain by driving the real window, like AgentCore on your own
+  machine, so you watch it work and carry on the conversation when it's done
   ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
 - **Keyboard-driven**, with a Configure dialog for API key, region, model and working directory.
 
@@ -116,10 +116,10 @@ since otherwise the flag would pin every future launch to today's folder. So the
 follows you into every folder; see
 [Explorer right-click integration](#windows-explorer-right-click-integration).
 
-For a ready-made one, point it at **`automation-samples/`** in this repository — three prompts,
+For a ready-made one, point it at **`agentic-samples/`** in this repository — three prompts,
 two of which chain into a document-archiving workflow, and the two agents that run them, plus
 a template for a library of your own. See
-[Prompt library and chaining](#prompt-library-and-chaining-automation-samples).
+[Prompt library and chaining](#prompt-library-and-chaining-agentic-samples).
 
 `--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file. The
 directory is reported in the startup log whenever it isn't just the working directory —
@@ -519,6 +519,7 @@ from inside the running application, and different for every way of launching it
   and the one microphone [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from.
   Each is written only once one is set, and there is no default for either. On Windows,
   `record-transcribe$` (`true`/`false`) says whether a recording is transcribed.
+  `record-always-on$` (`true`/`false`) is [Mic always on](#mic-always-on).
 
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser both
@@ -1053,14 +1054,21 @@ becomes a base64 image part, `@txt` becomes a text part with the file's contents
 becomes a base64 [`input_audio` part](#what-an-audio-include-is-sent-as). In Extend mode,
 includes in prior turns are expanded too.
 
-## Prompt library and chaining (`automation-samples/`)
+## Prompt library and chaining (`agentic-samples/`)
 
 Bedrock has a managed answer to reusable prompts:
 [Prompt management](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-management.html)
 stores prompts as AWS resources with *variables*, *variants* and immutable *versions*, edited in
 a console *prompt builder*; [Flows](https://docs.aws.amazon.com/bedrock/latest/userguide/flows.html)
 chains them by wiring one node's output into another's input, then publishes a version, points
-an *alias* at it, and runs it with `InvokeFlow`.
+an *alias* at it, and runs it with `InvokeFlow`. Flows is visual orchestration, though; code that
+runs such a chain by itself is closer to
+[AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html),
+which hosts agents you write, runs them, and gives them tools to act with.
+
+The prompts in `agentic-samples/` are the Prompt management half, and the agents beside them
+are the AgentCore half — AgentCore on the local machine, with the JRock window as the runtime
+and its automation API as the tools.
 
 JRock does the same thing with **plain text files in a folder you own**. A prompt is a `.txt`
 file; the library is a directory ([the prompts directory](#the-prompts-directory)); a variable
@@ -1084,7 +1092,7 @@ there for it, a chain can also run itself: see
 
 ### The samples
 
-`automation-samples/` holds three prompts — two that chain and one that stands alone — the two
+`agentic-samples/` holds three prompts — two that chain and one that stands alone — the two
 agents that run them, and doubles as a template for a prompts directory of your own:
 
 - **`jrock-prompt-doc-to-ascii.txt`** — turn a document into plain text that keeps its layout:
@@ -1151,7 +1159,7 @@ text file.
 ### Automating the chain (`JRockDocInventory.java`)
 
 The eight steps above are a loop you run per document, and the third file in
-`automation-samples/` runs them for you. It is one Java file, started the way JRock is:
+`agentic-samples/` runs them for you. It is one Java file, started the way JRock is:
 
 ```
 java -cp jrock.jar JRockDocInventory.java document.pdf   # no argument: it asks for the file
@@ -1205,7 +1213,7 @@ file to JRock, so the two are told apart on the way in. That is what
 with `--working-dir` and no document (so the chooser asks, in that folder), one with the clicked
 file appended.
 
-**Copy `jrock.jar` into `automation-samples/` first.** Nothing downloads it: take it from a
+**Copy `jrock.jar` into `agentic-samples/` first.** Nothing downloads it: take it from a
 [reproducible build](#reproducible-builds) artifact, or build it with
 `java .github/build/BuildJar.java`, and put it next to the script. That copy is what enables
 automations, and it is deliberately a manual act — an automation directory is a jar, some
@@ -1295,17 +1303,27 @@ round button. **Hold the button, or hold Ctrl** while that window has the focus,
 records from its **Record from** microphone. Let go and the recording goes into the prompt the
 way Configure says: an `@audio` token, or with **Transcribe recordings into the prompt** ticked,
 the text Windows heard. The agent waits until it is there (the recording thread has finished,
-transcription included), presses Send, waits for the reply, and prints the exchange in its own
-window. Then the button is ready again.
+transcription included) and presses Send. Sending empties the answer area in the agent's window.
+When the reply comes it is shown there, so the area only ever holds the last answer. The
+conversation so far is in JRock's window already. Then JRock **reads the whole answer aloud** on its **Narrate on** device, the same way
+Narrate selected text does. The button is ready again while it speaks, and pressing it stops
+the voice, so the microphone doesn't record the last answer as the next question.
 
+- **Hands-free**, for talking with both hands free. The **Hands-free** lever under the button
+  locks it. With the lever on, click the button once and it stays down, listening, until you
+  click it again or turn the lever off. Either of those sends. On the keyboard, **Ctrl+Shift**
+  (in either order) turns the lever on and starts listening, so you can let go of both keys.
+  **Ctrl on its own** then sends and turns the lever off. While the lever is on, the recording
+  also keeps going if you switch to another window.
 - **Each turn stands alone.** The prompt is cleared before every recording and History is off
   during an automation, so the model hears one question at a time. The whole conversation is
   still in JRock's transcript.
 - **The recording is the whole prompt**, with no text around it. That is what Voxtral wants (see
   [what an audio include is sent as](#what-an-audio-include-is-sent-as)): it takes a recording as the question and answers it.
-- **The microphone is JRock's to choose.** If none is set, the agent's window says so. Press
-  Ctrl+Space in JRock's own window once to list the microphones into Configure, pick one, and
-  hold the button again.
+- **The microphone and the speaker are JRock's to choose.** If either is not set, the agent's
+  window says so. Press Ctrl+Space (or Narrate) in JRock's own window once to list the devices
+  into Configure, pick one, and carry on. An answer that could not be read aloud still counts as
+  answered: it is on the screen.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 
@@ -1330,8 +1348,10 @@ thread** — they say so rather than deadlocking if you do.
 | `automationDropPlaceholders()` | Removes the bare `@img` / `@txt` / `@audio` placeholder lines, and returns how many. The include tokens go at the end of the prompt. |
 | `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
-| `automationStartRecording()` | Ctrl+Space pressed: records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
-| `automationStopRecording(long millis)` | Ctrl let go of, and waits until the recording is in the prompt — an `@audio` token, or the transcribed text with **Transcribe** on. Fails when nothing reached the prompt. |
+| `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
+| `automationStopRecording(long millis)` | Stop recording (Ctrl+Space again), and waits until the recording is in the prompt — an `@audio` token, or the transcribed text with **Transcribe** on. Fails when nothing reached the prompt. |
+| `automationNarrate(String markdown)` | Narrate selected text, for any text: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when no device is set or it isn't connected. (Windows) |
+| `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
@@ -1488,9 +1508,11 @@ says what is happening: how many characters, which voice, and when it finishes.
 
 ### Recording from the microphone (Ctrl+Space)
 
-The other direction. **Hold Ctrl+Space** in the JRock window and the log says the recording has
-started. **Let go of Ctrl** (Space may come up first) and the log says the recording is done. The
-recording is saved as `JRock/wav/recording-<date>-<time>.wav` and included as `@audio` at the
+The other direction. **Press Ctrl+Space** in the JRock window — it counts once both keys are up,
+in either order — and the log says the recording has started. **Press Ctrl+Space again** and the
+log says the recording is done: it is a toggle, so you can talk with your hands off the keyboard.
+The prompt's right-click menu has the same toggle, **Start recording** / **Stop recording**, as
+the log's has Narrate selected text / Stop narrating. The recording is saved as `JRock/wav/recording-<date>-<time>.wav` and included as `@audio` at the
 prompt cursor, as if you had picked that file with Ctrl+I. It works on any desktop, not just
 Windows, but not in the browser.
 
@@ -1505,9 +1527,9 @@ Windows, but not in the browser.
   seconds. The Windows driver refreshes its own device list every five, so a change shows up
   within about seven seconds. The startup report says whether the microphone is connected.
 - **16 kHz, 16-bit mono** when the microphone offers it, which is plenty for speech. Otherwise
-  44.1 or 48 kHz. Leaving the window while recording ends the recording, because a Ctrl
-  released in another window is never seen.
-- **Recording continues for 0.3 s after you let go of Ctrl.** The key usually comes up while the
+  44.1 or 48 kHz. Leaving the window while recording does not end the recording; come back and
+  press Ctrl+Space (or Stop recording) to end it.
+- **Recording continues for 0.3 s after you stop it.** The stop usually comes while the
   last word is still being said, and without the extra time that word is cut off. A recognizer
   then hears half a word as a different one.
 - **A new file for every recording**, named for the moment it was made. An include is checked
@@ -1531,6 +1553,26 @@ Windows, but not in the browser.
   Voxtral transcribes it if the `@audio` token comes first and the text after it asks for
   exactly that, e.g. *"Transcribe this audio verbatim in its original language. Output only the
   transcript."*
+
+### Mic always on
+
+Tick **Mic always on** (the prompt's right-click menu, or the checkbox under **Record from:** in
+Configure, kept per folder as `record-always-on$`) and the microphone listens all the time.
+**Speech** starts a recording, as if you had pressed Ctrl+Space. **1.5 s of quiet** ends it, and
+it is included or transcribed like any other.
+
+- **Nothing from before the moment it was heard is kept.** Start with a word to be heard by, e.g.
+  *"Hey, Tovarisch, what is …"*, and the words after it are recorded.
+- **What counts as speech:** loud enough over the room's own noise, most of it in the voice band
+  (250–4000 Hz), for about 0.2 s, and spread over many frequencies. It doesn't matter who is
+  speaking; a voice on the radio is a voice too. A **doorbell or a phone ringing** is one or two
+  pure tones, with nearly all its energy in a few frequencies. That is what keeps it out: rings
+  are never looked for as such. A click or a key hit is over long before 0.2 s.
+- The thresholds are starting values, tested against synthetic sounds in `JRockEarsTest`. A
+  given microphone and room may need them tuned (`JRock.Ears`).
+- **A red dot and "Mic" blink to the left of Clock** whenever the microphone is open: listening,
+  or recording from Ctrl+Space, the menu, an agent or Mic always on. They are gone when it is
+  closed.
 
 ## Markdown export (RTF and DOCX)
 
@@ -1642,7 +1684,10 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
   URL...* (which downloads an address into `JRock/urls/` and includes it as text or as a
   picture, according to what it answered with — see [**fetching a
-  URL**](#fetching-a-url)), *Reload all includes* (which rebuilds the hash → path map from
+  URL**](#fetching-a-url)), *Start recording* / *Stop recording* (the
+  [**Ctrl+Space**](#recording-from-the-microphone-ctrlspace) toggle; not in the browser),
+  *Mic always on* (see [**Mic always on**](#mic-always-on)),
+  *Reload all includes* (which rebuilds the hash → path map from
   the log, so a conversation survives a restart), Load prompt from file..., Save prompt copy
   as..., then Cut / Copy / Paste / **Select all** / Undo / Redo. Those last ones are there for
   a touch device, which has no keyboard to press Ctrl+A on: *Select all* followed by Backspace
@@ -1802,7 +1847,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+I | Include text/image/audio files, a PDF, an RTF or a DOCX (multi-select) |
 | Ctrl+Shift+I | The same, keeping a copy of each file under `JRock/includes/` |
 | Ctrl+U | Fetch a URL and include what it answers with |
-| Ctrl+Space (held) | Record from the microphone; let go of Ctrl to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
+| Ctrl+Space | Start recording from the microphone; again to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle History (send the prior dialog too) |
 | Ctrl+M | Move & resize the window |
@@ -1823,10 +1868,10 @@ For robustness the build runs on **three operating systems** and publishes three
 
 Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
 (`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
-`JRock.java`, the sample prompts and the automation scripts) and `automation-samples/` loose
+`JRock.java`, the sample prompts and the automation scripts) and `agentic-samples/` loose
 beside it, so the samples can be read without unpacking anything — and so an
 [automation](#automating-the-chain-jrockdocinventoryjava) is one `cp jrock.jar
-automation-samples/` away from running. Because the build is reproducible, the `jrock.jar`
+agentic-samples/` away from running. Because the build is reproducible, the `jrock.jar`
 inside all three archives is identical.
 
 To verify and run JRock from a build artifact, unzip it, then:
