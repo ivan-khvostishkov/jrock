@@ -36,9 +36,10 @@
 // JRock for it; the agent says so if it is not. The lever off, the button, or Ctrl on
 // its own ends it and mutes the microphone again, and what was being said is not sent.
 //
-// While a request is on its way the microphone is muted, and while the answer is read
-// aloud JRock does not listen either, so on speakers it does not hear its own voice. The
-// next turn starts when the reading is over - or at once, when the button stops it.
+// While a request is on its way the microphone is muted. While the answer is read aloud
+// JRock listens again, and speaking stops the reading and starts the next question - so
+// on speakers a microphone with a mute button, or headphones, keeps JRock from hearing
+// its own voice.
 //
 // Each turn is a question of its own: the prompt is cleared before every recording, and
 // an automation runs with History off, so the model hears one recording at a time and

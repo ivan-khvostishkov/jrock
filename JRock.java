@@ -5314,8 +5314,6 @@ public class JRock {
         volatile javax.sound.sampled.SourceDataLine line;
     }
     private static volatile Narration narration;
-    // When the last narration stopped, however it did, for Mic always on's tail.
-    private static volatile long narrationEndedAt;
 
     // The SAPI side, run as powershell -Command. Everything it says goes to stderr, one
     // line each - the voice it picked ("voice|<name>|<culture>"), or that none speaks the
@@ -5554,7 +5552,6 @@ public class JRock {
     // Ends a narration where it stands: the process killed (the voice stops mid-word)
     // and the line stopped, flushed and closed, which also returns a write blocked on it.
     private static void stopNarration(Narration n) {
-        narrationEndedAt = System.currentTimeMillis();
         Process p = n.process;
         if (p != null) p.destroy();
         javax.sound.sampled.SourceDataLine line = n.line;
@@ -5754,16 +5751,6 @@ public class JRock {
     // it, for automationAwaitHeard.
     private static volatile Recording heardRecording;
     private static volatile String heardPromptBefore;
-    // Mic always on does not listen while JRock is reading aloud, nor for this long after
-    // - on speakers rather than headphones it would hear its own voice, and the room
-    // rings on for a moment after it stops.
-    private static final long NARRATION_TAIL_MS = 700;
-
-    // Whether JRock is reading aloud, or has only just stopped.
-    private static boolean narratingNow() {
-        return narration != null
-                || System.currentTimeMillis() - narrationEndedAt < NARRATION_TAIL_MS;
-    }
 
     // Whether the microphone is open right now - listening or recording, however it was
     // started. What the red dot beside Clock shows.
@@ -5809,8 +5796,7 @@ public class JRock {
                 try {
                     String device = recordDevice;
                     javax.sound.sampled.Mixer mixer = micAlwaysOn && !micMuted && recording == null
-                            && recordLine == null && !device.isEmpty() && !narratingNow()
-                            ? inputMixer(device) : null;
+                            && recordLine == null && !device.isEmpty() ? inputMixer(device) : null;
                     if (mixer == null) { Thread.sleep(250); continue; }
                     javax.sound.sampled.TargetDataLine line = openMicLine(mixer);
                     if (line == null) {
@@ -5823,7 +5809,7 @@ public class JRock {
                     byte[] buf = new byte[ears.chunkBytes(format.getChannels())];
                     long checkAt = System.currentTimeMillis() + 2000;
                     while (micAlwaysOn && !micMuted && recording == null && ears.heard == null
-                            && narration == null && device.equals(recordDevice) && line.isOpen()) {
+                            && device.equals(recordDevice) && line.isOpen()) {
                         int n = line.read(buf, 0, buf.length);
                         ears.feed(buf, Math.max(n, 0), format.getChannels());
                         if (System.currentTimeMillis() > checkAt) {   // pulled out?
@@ -5839,12 +5825,23 @@ public class JRock {
                     }
                     ears.quietMs = 0;
                     onEdt(() -> {
-                        if (recording == null && !micMuted && narration == null) {
+                        if (recording == null && !micMuted) {
+                            // Speaking over a narration stops it, the way one person
+                            // stops talking when the other starts: the question that
+                            // follows is recorded, not the rest of the answer. On
+                            // speakers JRock's own voice does it too - a microphone
+                            // with a mute button, or headphones, is what keeps that out.
+                            Narration playing = narration;
+                            if (playing != null) {
+                                narration = null;   // first, so its thread knows it was a stop
+                                stopNarration(playing);
+                                log.gray("Narration stopped: speech heard.");
+                            }
                             heardPromptBefore = input.getText();
                             startRecording(frame, input, log, extend.getAsBoolean(), line, ears);
                             heardRecording = recording;
                         } else {
-                            line.close();   // Ctrl+Space got there first, a mute, or a narration
+                            line.close();   // Ctrl+Space got there first, or a mute
                         }
                         listenLine = null;
                     });
