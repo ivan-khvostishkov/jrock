@@ -56,6 +56,13 @@
 // for "what day is it" comes this way instead. The file is read again every turn, so an
 // edit to it counts from the next question on.
 //
+// Alarms: an answer that says "Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss" -
+// which the appendix asks the model for - is taken at its word. The first time is checked
+// against this machine's clock first, within ALARM_CLOCK_SLACK_S, so a model that has the
+// time wrong sets nothing; then the second goes to the timer agent (JRockTimer.java) on
+// 127.0.0.1:TIMER_PORT, which answers 1 when it has set it. Either way, the status line
+// says what became of it.
+//
 // The microphone and the speaker are JRock's to choose, as they are for Ctrl+Space and
 // Narrate in JRock's own window. Either one not set is a message here, not a dialog:
 // press Ctrl+Space (or Narrate) in JRock once to list the devices into Configure, pick
@@ -130,6 +137,22 @@ public final class JRockPushToTalk {
     // enough that a failure which repeats at once - a microphone not back yet - does not
     // spin, short enough that the operator can simply say it again.
     private static final long RETRY_PAUSE_MS = 2000;
+
+    // The sentence an answer sets an alarm with, the time the model thinks it is and the
+    // time to ring. The apostrophe as typed or as typeset, and "I am" too, since a model
+    // writes either.
+    private static final java.util.regex.Pattern ALARM = java.util.regex.Pattern.compile(
+            "Now is (\\d{1,2}:\\d{2}:\\d{2}),? I(?:['’]m| am) setting an alarm for "
+            + "(\\d{1,2}:\\d{2}:\\d{2})", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    // How far the model's "now" may be from this machine's and still be believed: the
+    // time a reply takes, and then some.
+    private static final long ALARM_CLOCK_SLACK_S = 120;
+
+    // The timer agent's port - JRockTimer.PORT, the first of JRock's agents' ports - and
+    // how long it has to answer, on the same machine.
+    private static final int TIMER_PORT = 47470;
+    private static final int TIMER_TIMEOUT_MS = 3000;
 
     // The lever: on, JRock listens and the agent converses (see converse). Written on
     // the EDT, read by the worker's loop too. And, EDT only: whether that loop is
@@ -232,9 +255,51 @@ public final class JRockPushToTalk {
         String answer = read(JRock.automationMessageFile("assistant", sent[2]));
         if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
         later(() -> showAnswer(answer));
-        if (handsFreeTurn && !handsFree) return null;
+        String alarm = alarmIn(answer);
+        if (handsFreeTurn && !handsFree) return alarm;
         String silent = JRock.automationNarrate(answer);
-        return silent == null ? null : "Not read aloud: " + silent;
+        String notRead = silent == null ? null : "Not read aloud: " + silent;
+        return alarm == null ? notRead : notRead == null ? alarm : alarm + " " + notRead;
+    }
+
+    // Sets the alarm an answer asks for, if it asks for one. Returns null when it does
+    // not, and otherwise what became of the alarm.
+    private static String alarmIn(String answer) {
+        java.util.regex.Matcher m = ALARM.matcher(answer);
+        if (!m.find()) return null;
+        java.time.LocalTime said;
+        try {
+            said = java.time.LocalTime.parse(pad(m.group(1)));
+            java.time.LocalTime.parse(pad(m.group(2)));
+        } catch (java.time.format.DateTimeParseException ex) {
+            return "Alarm not set: " + ex.getParsedString() + " is not a time.";
+        }
+        // Around midnight either one may be on the other side of it.
+        long off = Math.abs(java.time.Duration.between(said, java.time.LocalTime.now()).getSeconds());
+        off = Math.min(off, 24 * 3600 - off);
+        if (off > ALARM_CLOCK_SLACK_S) {
+            return "Alarm not set: the model said it is " + m.group(1) + ", which is "
+                    + (off / 60) + " minutes off this computer's clock.";
+        }
+        try (java.net.Socket timer = new java.net.Socket()) {
+            timer.connect(new java.net.InetSocketAddress(
+                    java.net.InetAddress.getLoopbackAddress(), TIMER_PORT), TIMER_TIMEOUT_MS);
+            timer.setSoTimeout(TIMER_TIMEOUT_MS);
+            timer.getOutputStream().write((pad(m.group(2)) + "\n").getBytes(StandardCharsets.US_ASCII));
+            timer.getOutputStream().flush();
+            int reply = timer.getInputStream().read();
+            return reply == '1' ? "Alarm set for " + pad(m.group(2)) + "."
+                    : "Alarm not set: the timer refused " + pad(m.group(2)) + ".";
+        } catch (java.net.ConnectException ex) {
+            return "Alarm not set: the timer agent is not running (JRockTimer.java).";
+        } catch (IOException ex) {
+            return "Alarm not set: the timer agent did not answer (" + ex.getMessage() + ").";
+        }
+    }
+
+    // 7:30:00 as 07:30:00, which is what LocalTime.parse takes.
+    private static String pad(String time) {
+        return time.length() == 7 ? "0" + time : time;
     }
 
     // The button or Ctrl let go of, or this window left: the end of a turn only when it
