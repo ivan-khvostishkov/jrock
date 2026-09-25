@@ -1606,6 +1606,10 @@ it is included or transcribed like any other.
 - **A red dot and "Mic" blink to the left of Clock** whenever the microphone is open: listening,
   or recording from Ctrl+Space, the menu, an agent or Mic always on. They are gone when it is
   closed.
+- **Unplug the microphone and it stops listening; plug it back in and it listens again**, on
+  the device as it is now, within the few seconds it takes Windows to notice (the log says
+  "Microphone connected: …"). A microphone muted with its own button is not unplugged: it
+  goes on delivering silence, and speech is heard again the moment it is unmuted.
 - **An automation mutes it** for as long as it runs: nobody types into the prompt then, so
   nobody speaks into it either. The tick stays; listening comes back when the automation ends,
   or earlier if the agent asks for it — the push-to-talk agent's **Hands-free** does.
