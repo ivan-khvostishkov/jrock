@@ -20,8 +20,8 @@
 //   2. A small window opens beside JRock's: a time, hh:mm:ss, and Set. Set, and a short
 //      rising chirp says the alarm is on. The list under it counts down to every alarm set
 //      since the window opened - nothing is kept across runs.
-//   3. At the time, the alarm rings - beep-beep-beep-beep, over and over - for
-//      RING_MS, or until it is stopped: Remove, Delete or Escape on it in the list.
+//   3. At the time, the alarm rings once - beep-beep-beep-beep - and the list shows it
+//      rang. Remove (or Delete, or Escape on it in the list) takes an alarm off the list.
 //
 // The time is the time of day the alarm rings, 24-hour: 07:30:00 is half past seven, today
 // if that is still to come and tomorrow if it has gone. "+hh:mm:ss" is a timer instead:
@@ -71,9 +71,6 @@ public final class JRockTimer {
 
     // Starting a JVM's worth of Swing, on a cold machine.
     private static final long READY_TIMEOUT_MS = 120_000;
-
-    // How long an alarm rings when nobody stops it.
-    private static final long RING_MS = 60_000;
 
     // How long a client has to send its line, and the longest line taken - a time is
     // nine characters, and anything much longer is not one.
@@ -184,25 +181,14 @@ public final class JRockTimer {
         if (alarm.phase == Phase.REMOVED) return;
         alarm.phase = Phase.RINGING;
         later(() -> {
-            say("Ringing: " + ringsAt(alarm) + ". Remove it to stop.");
+            say("Ringing: " + ringsAt(alarm) + ".");
             list.repaint();
         });
-        long until = System.currentTimeMillis() + RING_MS;
-        SOUND.submit(() -> ringOnce(alarm, until));
-    }
-
-    // One pattern of the ring, and the next one queued behind whatever else is waiting
-    // to play - so a confirmation, or a second alarm, is heard within a pattern rather
-    // than after the whole ring. On the SOUND thread.
-    private static void ringOnce(Alarm alarm, long until) {
-        boolean played = alarm.phase == Phase.RINGING
-                && play(ring(), () -> alarm.phase != Phase.RINGING);
-        if (played && alarm.phase == Phase.RINGING && System.currentTimeMillis() < until) {
-            SOUND.submit(() -> ringOnce(alarm, until));
-            return;
-        }
-        if (alarm.phase == Phase.RINGING) alarm.phase = Phase.RANG;
-        later(list::repaint);
+        SOUND.submit(() -> {
+            if (alarm.phase == Phase.RINGING) play(ring(), () -> alarm.phase != Phase.RINGING);
+            if (alarm.phase == Phase.RINGING) alarm.phase = Phase.RANG;
+            later(list::repaint);
+        });
     }
 
     // ---- The server ------------------------------------------------------------
@@ -272,14 +258,13 @@ public final class JRockTimer {
         return concat(tone(880, 90, 0.45), silence(40), tone(1318.5, 150, 0.45));
     }
 
-    // Ringing: the alarm clock's four quick beeps, and a pause. Played over and over.
+    // Ringing: the alarm clock's four quick beeps, played once.
     private static byte[] ring() {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         for (int i = 0; i < 4; i++) {
             out.writeBytes(tone(1000, 110, 0.6));
             out.writeBytes(silence(90));
         }
-        out.writeBytes(silence(500));
         return out.toByteArray();
     }
 

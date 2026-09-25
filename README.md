@@ -1389,8 +1389,8 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   still to come, and otherwise tomorrow. `+hh:mm:ss` is a timer instead: `+00:05:00` rings in
   five minutes.
 - **Sounds**: a short rising chirp when an alarm is set, and an alarm clock's four quick beeps,
-  over and over, when it rings — for a minute, or until you stop it with **Remove**
-  (or Delete or Escape on it in the list). The agent makes the sounds itself, with no files,
+  once, when it rings. **Remove** (or Delete or Escape on it in the list) takes an alarm off
+  the list, and stops it if it is still beeping. The agent makes the sounds itself, with no files,
   and plays them with Java Sound on JRock's [**Narrate on**](#narrate-windows) speaker, never
   on the Windows default. That device name is the only thing it takes from JRock's settings
   (`JRock.automationNarrateDevice()`). If no speaker is set, or it isn't connected, the window
