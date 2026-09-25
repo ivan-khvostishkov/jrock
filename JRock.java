@@ -5759,6 +5759,14 @@ public class JRock {
     // recording has, until it is closed - which after a stop is RECORD_TAIL_MS later.
     private static volatile javax.sound.sampled.TargetDataLine listenLine;
     private static volatile javax.sound.sampled.TargetDataLine recordLine;
+    // When the listener's last read came back, or MAX_VALUE while it is not reading. A
+    // microphone pulled out can leave a read that never returns, or a line that returns
+    // nothing - and one plugged back in is a new device behind the same name, which the
+    // old line never hears. A read this long without data counts as the line gone, and
+    // the listener opens the microphone afresh (see watchMicrophone for the read that
+    // never returns). A muted microphone is not that: it delivers silence, on time.
+    private static volatile long listenReadAt = Long.MAX_VALUE;
+    private static final long LISTEN_STALL_MS = 1500;
     private static final int RECORD_SILENCE_MS = 1500;
     // Held from automationBegin to automationEnd: Mic always on does not listen then,
     // whatever it is set to - a prompt nobody may type into is not one to speak into
@@ -5821,20 +5829,32 @@ public class JRock {
                         throw new IllegalArgumentException(
                                 "it offers none of the 16-bit formats JRock records in");
                     }
+                    listenReadAt = System.currentTimeMillis();
                     listenLine = line;
                     javax.sound.sampled.AudioFormat format = line.getFormat();
                     Ears ears = new Ears(format.getSampleRate());
                     byte[] buf = new byte[ears.chunkBytes(format.getChannels())];
                     long checkAt = System.currentTimeMillis() + 2000;
+                    long dataAt = System.currentTimeMillis();
                     while (micAlwaysOn && !micMuted && recording == null && ears.heard == null
                             && device.equals(recordDevice) && line.isOpen()) {
                         int n = line.read(buf, 0, buf.length);
-                        ears.feed(buf, Math.max(n, 0), format.getChannels());
+                        long now = System.currentTimeMillis();
+                        listenReadAt = now;
+                        if (n > 0) {
+                            dataAt = now;
+                        } else {
+                            if (now - dataAt > LISTEN_STALL_MS) break;   // gone: reopen
+                            Thread.sleep(20);
+                            continue;
+                        }
+                        ears.feed(buf, n, format.getChannels());
                         if (System.currentTimeMillis() > checkAt) {   // pulled out?
                             checkAt += 2000;
                             if (inputMixer(device) == null) break;
                         }
                     }
+                    listenReadAt = Long.MAX_VALUE;   // not reading: nothing to watch
                     lastProblem = null;
                     if (ears.heard == null || !line.isOpen()) {
                         listenLine = null;
@@ -5866,7 +5886,13 @@ public class JRock {
                 } catch (InterruptedException ex) {
                     return;
                 } catch (javax.sound.sampled.LineUnavailableException
-                         | IllegalArgumentException ex) {
+                         | RuntimeException ex) {
+                    // Any RuntimeException, not only the IllegalArgumentException above:
+                    // a driver whose device is pulled out mid-read may throw anything,
+                    // and a listener thread that died of it would never listen again.
+                    javax.sound.sampled.TargetDataLine open = listenLine;
+                    if (open != null) open.close();
+                    listenReadAt = Long.MAX_VALUE;
                     listenLine = null;
                     // Said once, not every quarter of a second it goes on failing.
                     String problem = "Mic always on cannot listen on " + recordDevice + ": "
@@ -6075,6 +6101,16 @@ public class JRock {
                 if (present != null && now != present) {
                     log.gray((now ? "Microphone connected: " : "Microphone disconnected: ")
                             + device);
+                }
+                // Mic always on's line, closed when the microphone goes - listening stops
+                // at once - and when it comes back, so the listener opens the device that
+                // is there now rather than going on with the one that went. And closed
+                // when a read has not come back for a while, which is what a pulled-out
+                // microphone can do; closing it is what returns the read.
+                javax.sound.sampled.TargetDataLine listening = listenLine;
+                if (listening != null && ((present != null && now != present)
+                        || System.currentTimeMillis() - listenReadAt > 2 * LISTEN_STALL_MS)) {
+                    listening.close();
                 }
                 present = now;
             }
