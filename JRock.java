@@ -717,6 +717,7 @@ public class JRock {
             String mic = settings.get(CONFIG_RECORD_DEVICE);
             recordDevice = (mic == null) ? "" : mic.trim();
             recordTranscribe = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_TRANSCRIBE));
+            micAlwaysOn = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_ALWAYS_ON));
             settingsSource = "JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
@@ -764,6 +765,9 @@ public class JRock {
         appendSetting(text, CONFIG_RECORD_DEVICE, recordDevice);     // likewise
         if (transcribeAvailable()) {
             appendSetting(text, CONFIG_RECORD_TRANSCRIBE, String.valueOf(recordTranscribe));
+        }
+        if (recordAvailable()) {
+            appendSetting(text, CONFIG_RECORD_ALWAYS_ON, String.valueOf(micAlwaysOn));
         }
         atomicWriteQuietly(configFile(), text.toString());
     }
@@ -1669,7 +1673,8 @@ public class JRock {
                     : recordDevice + (inputMixer(recordDevice) != null
                                       ? ", connected" : ", NOT connected"))
                     + (recordTranscribe && transcribeAvailable()
-                       ? " - transcribed into the prompt" : ""));
+                       ? " - transcribed into the prompt" : "")
+                    + (micAlwaysOn ? " - mic always on" : ""));
         }
         if (promptSourceNote != null) {
             log.gray("Prompt source: " + promptSourceNote);
@@ -2125,6 +2130,41 @@ public class JRock {
         sendSide.add(enterSends);
         javax.swing.JPanel extendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        // The microphone, whenever it is open - listening or recording, from a key, the
+        // menu, an agent or Mic always on: a red dot, blinking, and "Mic". Gone when it
+        // is closed. Looked at twice a second rather than told, since four different
+        // things open it.
+        if (recordAvailable()) {
+            javax.swing.JLabel mic = new javax.swing.JLabel("Mic");
+            mic.setFont(mic.getFont().deriveFont(java.awt.Font.PLAIN));
+            mic.setToolTipText("The microphone is open");
+            boolean[] lit = { true };
+            mic.setIcon(new javax.swing.Icon() {
+                @Override public void paintIcon(java.awt.Component c, java.awt.Graphics g,
+                                                int x, int y) {
+                    if (!lit[0]) return;
+                    java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                            java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setColor(new java.awt.Color(0xE53935));
+                    g2.fillOval(x, y + 1, 9, 9);
+                    g2.dispose();
+                }
+                @Override public int getIconWidth() { return 9; }
+                @Override public int getIconHeight() { return 11; }
+            });
+            mic.setIconTextGap(5);
+            // The gap before Clock on the label itself, so it goes when the label does.
+            mic.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 0, 0, 10));
+            mic.setVisible(false);
+            new javax.swing.Timer(500, e -> {
+                boolean open = micOpen();
+                lit[0] = !lit[0] || !mic.isVisible();   // lit the moment it appears
+                if (open != mic.isVisible()) mic.setVisible(open);
+                mic.repaint();
+            }).start();
+            extendSide.add(mic);
+        }
         extendSide.add(clockMode);
         extendSide.add(javax.swing.Box.createHorizontalStrut(10));
         extendSide.add(extendMode);
@@ -2243,46 +2283,61 @@ public class JRock {
             }
         });
 
-        // Ctrl+Space, held, records from the microphone: pressed starts it, and letting
-        // go of Ctrl - not of Space - ends it and includes it (see the Record section).
+        // Ctrl+Space toggles a recording from the microphone: pressed and let go of - both
+        // keys up, in either order - it starts one, and the same again stops it and
+        // includes it (see the Record section). On the release rather than the press, so
+        // a "set up the microphone" dialog never opens under a key still held down.
         // A KeyEventDispatcher rather than a key binding, because a binding sees the press
         // but not the release of a modifier, and because the auto-repeat of a held key
-        // has to be swallowed rather than start a recording per repeat.
+        // has to be swallowed rather than count as a second press.
         if (recordAvailable()) {
             java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
                     .addKeyEventDispatcher(e -> {
-                // Space let go of, wherever: only then may the next press record again,
-                // so the auto-repeat of one held press is never a second recording (or a
-                // second "set up the microphone" dialog).
+                boolean inFrame = javax.swing.SwingUtilities.getWindowAncestor(
+                        e.getComponent()) == frame || e.getComponent() == frame;
+                // Space let go of, wherever: the chord is done once Ctrl is up too.
                 if (e.getID() == KeyEvent.KEY_RELEASED && e.getKeyCode() == KeyEvent.VK_SPACE) {
                     recordSpaceHeld = false;
+                    if (recordChord && !e.isControlDown()) {
+                        recordChord = false;
+                        toggleRecording(frame, input, log, extendMode.isSelected());
+                    }
+                    return inFrame && e.isControlDown();
                 }
-                if (javax.swing.SwingUtilities.getWindowAncestor(e.getComponent()) != frame
-                        && e.getComponent() != frame) return false;
+                if (e.getID() == KeyEvent.KEY_RELEASED && e.getKeyCode() == KeyEvent.VK_CONTROL) {
+                    if (recordChord && !recordSpaceHeld) {
+                        recordChord = false;
+                        toggleRecording(frame, input, log, extendMode.isSelected());
+                    }
+                    return false;
+                }
+                if (!inFrame) return false;
                 if (e.getKeyCode() == KeyEvent.VK_SPACE || e.getKeyChar() == ' ') {
                     if (!e.isControlDown() || e.isAltDown() || e.isShiftDown()) return false;
-                    if (e.getID() == KeyEvent.KEY_PRESSED && !recordSpaceHeld
-                            && recording == null) {
+                    if (e.getID() == KeyEvent.KEY_PRESSED && !recordSpaceHeld) {
                         recordSpaceHeld = true;
-                        startRecording(frame, input, log, extendMode.isSelected());
+                        recordChord = true;
                     }
-                    return true;   // the press, its repeats, the typed space, the release
+                    return true;   // the press, its repeats, the typed space
                 }
-                if (e.getID() == KeyEvent.KEY_RELEASED && e.getKeyCode() == KeyEvent.VK_CONTROL
-                        && recording != null) {
-                    stopRecording(log);
+                // Another key with Ctrl still down is another shortcut: Ctrl+Space, then
+                // Ctrl+V before letting go, pastes and records nothing.
+                if (e.getID() == KeyEvent.KEY_PRESSED && e.getKeyCode() != KeyEvent.VK_CONTROL) {
+                    recordChord = false;
                 }
                 return false;
             });
-            // Ctrl let go of in another window is a release this one never sees: leaving
-            // the window ends the recording the same way.
+            // A release in another window is one this one never sees: leaving the window
+            // forgets a half-done chord. A recording already running goes on - it is a
+            // toggle, so it stops when asked to, not when the focus moves.
             frame.addWindowFocusListener(new java.awt.event.WindowAdapter() {
                 @Override public void windowLostFocus(java.awt.event.WindowEvent e) {
                     recordSpaceHeld = false;
-                    if (recording != null) stopRecording(log);
+                    recordChord = false;
                 }
             });
             watchMicrophone(log);
+            listenForVoice(frame, input, log, extendMode::isSelected);
         }
 
         // Configure button: opens the settings dialog, then re-runs the session
@@ -2370,6 +2425,25 @@ public class JRock {
         // according to what it answered with (see fetchUrl).
         addMenuItem(promptMenu, "Fetch URL...",
                 () -> showFetchUrlDialog(frame, input, log, extendMode.isSelected()));
+        // Ctrl+Space from the menu: one item for both directions, as Narrate is in the
+        // log menu - while a recording runs it stops it.
+        javax.swing.JMenuItem recordItem = recordAvailable()
+                ? addMenuItem(promptMenu, RECORD_LABEL,
+                        () -> toggleRecording(frame, input, log, extendMode.isSelected()))
+                : null;
+        // And the listening that starts one by itself, ticked or not; per folder, so it
+        // is written to the config as Configure's checkbox would.
+        javax.swing.JCheckBoxMenuItem alwaysOnItem = null;
+        if (recordAvailable()) {
+            javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem("Mic always on");
+            item.addActionListener(e -> {
+                setMicAlwaysOn(item.isSelected(), log);
+                saveConfigQuietly();
+            });
+            promptMenu.add(item);
+            alwaysOnItem = item;
+        }
+        javax.swing.JCheckBoxMenuItem alwaysOnShown = alwaysOnItem;
         // Next to it, the repair for a conversation that outlived the session that
         // started it: the includes are read back out of the log rather than attached
         // again one by one (see reloadAllIncludes).
@@ -2404,6 +2478,10 @@ public class JRock {
                 copyItem.setEnabled(selected);
                 undoItem.setEnabled(promptUndo.canUndo());
                 redoItem.setEnabled(promptUndo.canRedo());
+                if (recordItem != null) {
+                    recordItem.setText(recording != null ? "Stop recording" : RECORD_LABEL);
+                }
+                if (alwaysOnShown != null) alwaysOnShown.setSelected(micAlwaysOn);
             }
             @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) { }
             @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) { }
@@ -2525,7 +2603,7 @@ public class JRock {
     // ---- Automation API (public) -------------------------------------------
     // The window, driven from outside it: a program in the same JVM does what a user
     // would do by hand - load a prompt, include a file, press Send, read the reply -
-    // while the user watches it happen. See automation-samples/ for one that chains
+    // while the user watches it happen. See agentic-samples/ for one that chains
     // the two sample prompts into a document archive.
     //
     // Why a public API at all. Chaining prompts is a habit rather than a one-off (see
@@ -2926,7 +3004,7 @@ public class JRock {
     // A USB microphone waking up takes a second or so; this is for one that never does.
     private static final long RECORD_OPEN_TIMEOUT_MS = 5_000;
 
-    // Starts recording from the microphone set in Configure > Record from, as pressing
+    // Starts recording from the microphone set in Configure > Record from, as
     // Ctrl+Space does, and returns once the microphone is open and listening - null - or
     // with why nothing is being recorded.
     //
@@ -2974,7 +3052,7 @@ public class JRock {
         return null;
     }
 
-    // Stops the recording automationStartRecording started, as letting go of Ctrl does,
+    // Stops the recording automationStartRecording started, as Ctrl+Space again does,
     // and waits until it has reached the prompt: null when it has, and otherwise why
     // not - nothing was recorded or recognized, the microphone went away, the file could
     // not be written.
@@ -3009,6 +3087,48 @@ public class JRock {
             return "nothing from the recording reached the prompt - the log says why.";
         }
         return null;
+    }
+
+    // Reads markdown aloud, as Narrate selected text does with a selection: the Markdown
+    // taken out, a voice in the language of the text, on the device set in Configure >
+    // Narrate on. Returns null once the narration has started - it plays on while the
+    // automation goes on - or why nothing is being said. One already playing is stopped
+    // first, as two voices at once would talk over each other.
+    //
+    // Unlike the menu item, an unset device is a refusal and not the "set up the output
+    // device" dialog, for the reason automationStartRecording gives.
+    public static String automationNarrate(String markdown) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        if (!narrateAvailable()) return "narration is not available here (Windows only).";
+        if (narrateDevice.isEmpty()) {
+            return "no output device is set. Press Narrate in JRock's log menu to list them, "
+                    + "pick one in Configure > Narrate on, and run this again.";
+        }
+        if (outputMixer(narrateDevice) == null) {
+            return "the output device \"" + narrateDevice + "\" is not connected.";
+        }
+        String text = narrationText(markdown == null ? "" : markdown);
+        if (text.isBlank()) return "there is nothing to narrate - the text is only markup.";
+        Ui live = ui;
+        onEdt(() -> {
+            automationStopNarration();
+            narrate(live.frame, live.log, text);
+        });
+        return null;
+    }
+
+    // Stops the narration playing, if one is - whoever started it. Returns whether one
+    // was. A push-to-talk agent calls it as the button goes down, so the microphone does
+    // not record the answer to the last question as the next one.
+    public static boolean automationStopNarration() {
+        Narration playing = narration;
+        if (playing == null) return false;
+        narration = null;    // first, so the playing thread knows this was a stop
+        stopNarration(playing);
+        Ui live = ui;
+        if (live != null) live.log.gray("Narration stopped.");
+        return true;
     }
 
     // Leaves automation mode: the prompt is editable again, Send is released, and
@@ -3368,6 +3488,17 @@ public class JRock {
                     + "Windows speech recognition and typed into the prompt, instead of "
                     + "being included as @audio");
         }
+        // Under both, since it is about when the microphone records, not what from.
+        javax.swing.JCheckBox alwaysOnF = null;
+        if (micF != null) {
+            alwaysOnF = new javax.swing.JCheckBox(
+                    "Mic always on: record when speech is heard", micAlwaysOn);
+            alwaysOnF.setName("recordAlwaysOn");
+            alwaysOnF.setFont(alwaysOnF.getFont().deriveFont(java.awt.Font.PLAIN));
+            alwaysOnF.setToolTipText("The microphone listens all the time; speech starts a "
+                    + "recording, and " + RECORD_SILENCE_MS / 1000.0
+                    + " s of quiet ends it. Start with a word to be heard by.");
+        }
 
         // Image resolution: a fixed list, so not editable - unlike the model, an
         // arbitrary number here has no meaning worth supporting.
@@ -3413,6 +3544,7 @@ public class JRock {
         if (deviceF != null) addRow(fields, c, row++, "Narrate on:", deviceF);
         if (micF != null) addRow(fields, c, row++, "Record from:", micF);
         if (transcribeF != null) addRow(fields, c, row++, "", transcribeF);
+        if (alwaysOnF != null) addRow(fields, c, row++, "", alwaysOnF);
 
         java.awt.Font plainFont = plainLabelFont();
 
@@ -3538,6 +3670,7 @@ public class JRock {
             recordDevice = (mic == null) ? "" : mic.toString().trim();
         }
         if (transcribeF != null) recordTranscribe = transcribeF.isSelected();
+        if (alwaysOnF != null) micAlwaysOn = alwaysOnF.isSelected();
 
         // Autobackup: the idle timer reads this when it next fires, so a change here
         // applies to the spell of inactivity that starts the moment this dialog closes.
@@ -3724,10 +3857,15 @@ public class JRock {
                ? "Record from is the one microphone Ctrl+Space records from, kept there "
                + "too and set the same way: it starts empty, Ctrl+Space lists the "
                + "microphones here, and a disconnected one fails rather than falling back. "
-               + "Hold Ctrl+Space to record, let go of Ctrl to stop; the recording is "
+               + "Press Ctrl+Space to start recording, and again to stop; the recording is "
                + "saved as JRock/wav/recording-<date>-<time>.wav, a new file each time, and "
                + "included as @audio, as Ctrl+I would. The log says when the microphone "
                + "is connected and disconnected.\n\n"
+               + "With Mic always on ticked (here, or in the prompt's menu), the microphone "
+               + "listens all the time: speech starts a recording, and "
+               + RECORD_SILENCE_MS / 1000.0 + " s of quiet ends it. What was said before "
+               + "it was heard is not kept, so start with a word to be heard by. "
+               + "A red dot and \"Mic\" beside Clock show whenever the microphone is open.\n\n"
                + (transcribeAvailable()
                   ? "With Transcribe recordings ticked, Windows speech recognition turns the "
                   + "recording into text typed into the prompt instead, and the audio is one "
@@ -3765,7 +3903,7 @@ public class JRock {
             {"Ctrl+I", "Include a text, image, audio, PDF, RTF or DOCX file"},
             {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
             {"Ctrl+U", "Fetch a URL and include what it answers with"},
-            {"Ctrl+Space", "Hold to record from the microphone; let go of Ctrl to include "
+            {"Ctrl+Space", "Start recording from the microphone; again to stop and include "
                     + "it (or type it, with Transcribe on)"},
             {"Ctrl+D", "Toggle Dialog only"},
             {"Ctrl+E", "Toggle History (send the prior dialog too)"},
@@ -5196,6 +5334,12 @@ public class JRock {
             log.gray("Nothing to narrate: the selection is only markup.");
             return;
         }
+        narrate(frame, log, text);
+    }
+
+    // Reads text - already through narrationText - aloud on the configured device, on
+    // a thread of its own, and returns at once. The menu item's and automationNarrate's.
+    private static void narrate(JFrame frame, LogView log, String text) {
         String lang = narrationLanguage(text);
         String device = narrateDevice;
         Narration mine = new Narration();
@@ -5430,11 +5574,12 @@ public class JRock {
         return best;
     }
 
-    // ---- Record (Ctrl+Space held) --------------------------------------------
-    // Narrate's other half: speech in rather than out. Ctrl+Space pressed starts a
-    // recording from the one microphone named in Configure (record-device$), letting go
-    // of Ctrl ends it, and the recording is saved as JRock/wav/recording-<time>.wav and
-    // included as @audio exactly as Ctrl+I would include that file.
+    // ---- Record (Ctrl+Space, a toggle) ---------------------------------------
+    // Narrate's other half: speech in rather than out. Ctrl+Space pressed and let go of
+    // (or Start recording in the prompt menu) starts a recording from the one microphone
+    // named in Configure (record-device$), the same again ends it, and the recording is
+    // saved as JRock/wav/recording-<time>.wav and included as @audio exactly as Ctrl+I
+    // would include that file.
     //
     // The microphone is set the way the speaker is, for the same reason: Windows moves
     // its default input to whatever headset was plugged in last. So there is no
@@ -5489,10 +5634,254 @@ public class JRock {
         volatile Thread thread;
     }
     private static volatile Recording recording;
-    // How long a recording goes on after Ctrl is let go of (see startRecording).
+    // How long a recording goes on after it is stopped (see startRecording).
     private static final int RECORD_TAIL_MS = 300;
-    // Space down since the press that started the last recording (EDT only).
+    // Space down since the last Ctrl+Space press, so its auto-repeat is not another one;
+    // and a Ctrl+Space pressed whose keys are not both up yet (EDT only).
     private static boolean recordSpaceHeld;
+    private static boolean recordChord;
+    private static final String RECORD_LABEL = "Start recording";
+
+    // Ctrl+Space, or the prompt menu's item: stops the recording running, or starts one.
+    private static void toggleRecording(JFrame frame, JTextArea input, LogView log,
+                                        boolean extend) {
+        if (recording != null) stopRecording(log);
+        else startRecording(frame, input, log, extend);
+    }
+
+    // ---- Mic always on ------------------------------------------------------
+    // The microphone stays open and listens (see listenForVoice), and speech starts a
+    // recording as Ctrl+Space would; RECORD_SILENCE_MS of quiet ends it, and it is
+    // included or transcribed like any other. Nothing is kept from before the moment it
+    // was heard, so a sentence gets a word in front of it to be heard by -
+    // "Hey, Tovarisch, ...". Per folder, as record-always-on$ in the config.
+    private static final String CONFIG_RECORD_ALWAYS_ON = "record-always-on";
+    private static volatile boolean micAlwaysOn = false;
+    // The line the listener has open, or null when it is not listening; and the one a
+    // recording has, until it is closed - which after a stop is RECORD_TAIL_MS later.
+    private static volatile javax.sound.sampled.TargetDataLine listenLine;
+    private static volatile javax.sound.sampled.TargetDataLine recordLine;
+    private static final int RECORD_SILENCE_MS = 1500;
+
+    // Whether the microphone is open right now - listening or recording, however it was
+    // started. What the red dot beside Clock shows.
+    private static boolean micOpen() {
+        return listenLine != null || recordLine != null;
+    }
+
+    // Mic always on turned on or off, from the prompt menu or Configure.
+    private static void setMicAlwaysOn(boolean on, LogView log) {
+        if (on == micAlwaysOn) return;
+        micAlwaysOn = on;
+        javax.sound.sampled.TargetDataLine line = listenLine;
+        if (!on && line != null) line.close();   // unblocks the listener's read
+        log.gray(!on ? "Mic always on: off."
+                : recordDevice.isEmpty()
+                ? "Mic always on: on, but no microphone is set - press Ctrl+Space to list "
+                  + "them, and pick one in Configure > Record from."
+                : "Mic always on: listening on " + recordDevice + " for speech.");
+    }
+
+    // The listener, one daemon thread for the session. While Mic always on is on, a
+    // microphone is set and connected, and nothing else is recording, it holds the line
+    // open and feeds it to an Ears; once that has heard something, the line is handed
+    // to startRecording as it is, and listening resumes after that recording is done.
+    private static void listenForVoice(JFrame frame, JTextArea input, LogView log,
+                                       java.util.function.BooleanSupplier extend) {
+        Thread t = new Thread(() -> {
+            String lastProblem = null;
+            while (true) {
+                try {
+                    String device = recordDevice;
+                    javax.sound.sampled.Mixer mixer = micAlwaysOn && recording == null
+                            && recordLine == null && !device.isEmpty() ? inputMixer(device) : null;
+                    if (mixer == null) { Thread.sleep(250); continue; }
+                    javax.sound.sampled.TargetDataLine line = openMicLine(mixer);
+                    if (line == null) {
+                        throw new IllegalArgumentException(
+                                "it offers none of the 16-bit formats JRock records in");
+                    }
+                    listenLine = line;
+                    javax.sound.sampled.AudioFormat format = line.getFormat();
+                    Ears ears = new Ears(format.getSampleRate());
+                    byte[] buf = new byte[ears.chunkBytes(format.getChannels())];
+                    long checkAt = System.currentTimeMillis() + 2000;
+                    while (micAlwaysOn && recording == null && ears.heard == null
+                            && device.equals(recordDevice) && line.isOpen()) {
+                        int n = line.read(buf, 0, buf.length);
+                        ears.feed(buf, Math.max(n, 0), format.getChannels());
+                        if (System.currentTimeMillis() > checkAt) {   // pulled out?
+                            checkAt += 2000;
+                            if (inputMixer(device) == null) break;
+                        }
+                    }
+                    lastProblem = null;
+                    if (ears.heard == null || !line.isOpen()) {
+                        listenLine = null;
+                        line.close();
+                        continue;
+                    }
+                    ears.quietMs = 0;
+                    onEdt(() -> {
+                        if (recording == null) {
+                            startRecording(frame, input, log, extend.getAsBoolean(), line, ears);
+                        } else {
+                            line.close();   // Ctrl+Space got there first
+                        }
+                        listenLine = null;
+                    });
+                } catch (InterruptedException ex) {
+                    return;
+                } catch (javax.sound.sampled.LineUnavailableException
+                         | IllegalArgumentException ex) {
+                    listenLine = null;
+                    // Said once, not every quarter of a second it goes on failing.
+                    String problem = "Mic always on cannot listen on " + recordDevice + ": "
+                            + ex.getMessage();
+                    if (!problem.equals(lastProblem)) log.gray(problem);
+                    lastProblem = problem;
+                    try { Thread.sleep(2000); } catch (InterruptedException stop) { return; }
+                }
+            }
+        }, "jrock-listen");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    // What the microphone hears, a chunk at a time (512 samples at 16 kHz, 1024 above
+    // 24 kHz, 20-30 ms either way): speech or not. Each chunk is Hann-windowed and
+    // FFT'd, and its energy looked at in three ways:
+    //
+    //   - loud: how far over the room's own noise floor it is;
+    //   - where: how much is in the voice band (250-4000 Hz);
+    //   - how peaked: how much the strongest few frequencies hold. A doorbell or a phone
+    //     ringing is one tone or two, and nearly all of its energy is in a handful of
+    //     frequencies; a voice spreads over many. That one rule is what keeps rings
+    //     out - they are never looked for as such.
+    //
+    // Speech: loud, mostly in the voice band, not peaked - for SPEECH_MS, give or take
+    // the gaps between syllables. A click or a key hit is over long before that. Who is
+    // talking does not matter: a voice on the radio is a voice.
+    //
+    // The thresholds are first guesses to tune against a real microphone.
+    static final class Ears {
+        private static final double VOICE_LO_HZ = 250, VOICE_HI_HZ = 4000;
+        private static final double SPEECH_DB = 10;   // over the floor
+        // Full scale is 1: -50 dBFS mean square at least, so a silent room's floor does
+        // not make a breath speech.
+        private static final double SPEECH_MIN = 1e-5;
+        private static final double VOICE_SHARE = 0.6;
+        // A tone or two puts over 95% of its energy in its 8 strongest bins, and a vowel
+        // (the one in JRockEarsTest) 60-75%: 90% is between them.
+        private static final int PEAK_BINS = 8;
+        private static final double PEAK_SHARE = 0.9;
+        private static final int SPEECH_MS = 200;
+
+        private final double rate;
+        private final int n;
+        final int chunkMs;
+        private final double[] window, re, im;
+        private int filled;
+        private double floor = -1;
+        private int speechMs;
+        String heard;                     // "speech", once it is heard
+        int quietMs;                      // since the last loud chunk in the voice band
+
+        Ears(double sampleRate) {
+            rate = sampleRate;
+            n = sampleRate > 24000 ? 1024 : 512;
+            chunkMs = (int) (n * 1000 / sampleRate);
+            window = new double[n];
+            re = new double[n];
+            im = new double[n];
+            for (int i = 0; i < n; i++) window[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1));
+        }
+
+        // One chunk's worth of 16-bit little-endian frames.
+        int chunkBytes(int channels) {
+            return n * 2 * channels;
+        }
+
+        // 16-bit little-endian PCM, any number of whole frames; the channels averaged.
+        void feed(byte[] pcm, int len, int channels) {
+            int frame = 2 * channels;
+            for (int i = 0; i + frame <= len; i += frame) {
+                double s = 0;
+                for (int c = 0; c < channels; c++) {
+                    s += (short) ((pcm[i + 2 * c] & 0xFF) | (pcm[i + 2 * c + 1] << 8));
+                }
+                re[filled++] = s / channels / 32768.0;
+                if (filled == n) {
+                    chunk();
+                    filled = 0;
+                }
+            }
+        }
+
+        private void chunk() {
+            double level = 0;
+            for (int i = 0; i < n; i++) {
+                level += re[i] * re[i];
+                re[i] *= window[i];
+                im[i] = 0;
+            }
+            level /= n;
+            fft(re, im);
+            double[] power = new double[n / 2];
+            double total = 0, voice = 0;
+            for (int k = 1; k < n / 2; k++) {   // bin 0 is DC, not sound
+                power[k] = re[k] * re[k] + im[k] * im[k];
+                double hz = k * rate / n;
+                total += power[k];
+                if (hz >= VOICE_LO_HZ && hz < VOICE_HI_HZ) voice += power[k];
+            }
+            java.util.Arrays.sort(power);
+            double peak = 0;
+            for (int k = 1; k <= PEAK_BINS; k++) peak += power[power.length - k];
+            if (floor < 0) floor = Math.max(level, 1e-10);
+            double overDb = 10 * Math.log10(Math.max(level, 1e-12) / Math.max(floor, 1e-12));
+            boolean spread = total > 0 && peak / total < PEAK_SHARE;
+            boolean voiced = total > 0 && voice / total >= VOICE_SHARE
+                    && overDb >= SPEECH_DB && level >= SPEECH_MIN;
+
+            speechMs = voiced && spread ? speechMs + chunkMs : Math.max(0, speechMs - chunkMs);
+            if (heard == null && speechMs >= SPEECH_MS) heard = "speech";
+
+            quietMs = voiced ? 0 : quietMs + chunkMs;
+            // The floor follows the room: down at once, up quickly through what is not
+            // loud and slowly - under 3 dB a second - through what is, so a voice going
+            // on without a pause does not become the floor. The pauses between words
+            // bring it back down anyway.
+            if (level < floor) floor = Math.max(level, 1e-10);
+            else floor = Math.min(level, floor * (overDb < SPEECH_DB ? 1.2 : 1.02));
+        }
+
+        // In-place radix-2 FFT; re.length a power of two.
+        private static void fft(double[] re, double[] im) {
+            int n = re.length;
+            for (int i = 1, j = 0; i < n; i++) {
+                int bit = n >> 1;
+                for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+                j |= bit;
+                if (i < j) {
+                    double t = re[i]; re[i] = re[j]; re[j] = t;
+                    t = im[i]; im[i] = im[j]; im[j] = t;
+                }
+            }
+            for (int len = 2; len <= n; len <<= 1) {
+                double a = -2 * Math.PI / len;
+                for (int i = 0; i < n; i += len) {
+                    for (int k = 0; k < len / 2; k++) {
+                        double wr = Math.cos(a * k), wi = Math.sin(a * k);
+                        int p = i + k, q = p + len / 2;
+                        double xr = re[q] * wr - im[q] * wi, xi = re[q] * wi + im[q] * wr;
+                        re[q] = re[p] - xr; im[q] = im[p] - xi;
+                        re[p] += xr;        im[p] += xi;
+                    }
+                }
+            }
+        }
+    }
 
     // The microphones: mixers that can capture (a TargetDataLine), without the aliases.
     static java.util.List<String> inputDeviceNames() {
@@ -5568,10 +5957,36 @@ public class JRock {
                 + "press Ctrl+Space to list the microphones anew.";
     }
 
-    // Ctrl+Space pressed. On the EDT; the microphone is looked for and read on a thread
+    // Opens and starts a line on the microphone in the first of RECORD_FORMATS it offers,
+    // with half a second of buffer; null when it offers none of them.
+    private static javax.sound.sampled.TargetDataLine openMicLine(javax.sound.sampled.Mixer mixer)
+            throws javax.sound.sampled.LineUnavailableException {
+        for (javax.sound.sampled.AudioFormat f : RECORD_FORMATS) {
+            javax.sound.sampled.DataLine.Info info = new javax.sound.sampled.DataLine.Info(
+                    javax.sound.sampled.TargetDataLine.class, f);
+            if (!mixer.isLineSupported(info)) continue;
+            javax.sound.sampled.TargetDataLine line =
+                    (javax.sound.sampled.TargetDataLine) mixer.getLine(info);
+            line.open(f, (int) f.getSampleRate() * f.getFrameSize() / 2);
+            line.start();
+            return line;
+        }
+        return null;
+    }
+
+    // Ctrl+Space, or Start recording. On the EDT; the microphone is looked for and read on a thread
     // of its own, so a slow driver does not hold up the window.
     private static void startRecording(JFrame frame, JTextArea input, LogView log,
                                        boolean extend) {
+        startRecording(frame, input, log, extend, null, null);
+    }
+
+    // The same, from Mic always on: heardOn is the line the listener heard something on,
+    // taken over as it is so nothing is lost to reopening it, and ears goes on listening
+    // - for the silence that ends this recording, rather than a key.
+    private static void startRecording(JFrame frame, JTextArea input, LogView log,
+                                       boolean extend,
+                                       javax.sound.sampled.TargetDataLine heardOn, Ears ears) {
         String device = recordDevice;
         Recording mine = new Recording();
         recording = mine;
@@ -5579,6 +5994,11 @@ public class JRock {
             java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
             javax.sound.sampled.AudioFormat format = null;
             try {
+                // Ctrl+Space while Mic always on is listening: the listener lets go of the
+                // microphone within a read, and some drivers open it only once.
+                for (int i = 0; heardOn == null && listenLine != null && i < 100; i++) {
+                    Thread.sleep(10);
+                }
                 if (device.isEmpty()) {
                     recording = null;   // nothing to let go of: the dialog takes the focus
                     java.util.List<String> found = inputDeviceNames();
@@ -5593,33 +6013,31 @@ public class JRock {
                                  + "pick the one to record from, then OK." + list));
                     return;
                 }
-                javax.sound.sampled.Mixer mixer = inputMixer(device);
-                if (mixer == null) {
-                    log.gray(micGoneMessage(device, "nothing was recorded"));
-                    return;
-                }
-                javax.sound.sampled.TargetDataLine line = null;
-                for (javax.sound.sampled.AudioFormat f : RECORD_FORMATS) {
-                    javax.sound.sampled.DataLine.Info info = new javax.sound.sampled.DataLine.Info(
-                            javax.sound.sampled.TargetDataLine.class, f);
-                    if (!mixer.isLineSupported(info)) continue;
-                    line = (javax.sound.sampled.TargetDataLine) mixer.getLine(info);
-                    format = f;
-                    break;
-                }
+                javax.sound.sampled.TargetDataLine line = heardOn;
                 if (line == null) {
-                    log.gray("The microphone \"" + device + "\" offers none of the 16-bit "
-                            + "formats JRock records in - nothing was recorded.");
-                    return;
+                    javax.sound.sampled.Mixer mixer = inputMixer(device);
+                    if (mixer == null) {
+                        log.gray(micGoneMessage(device, "nothing was recorded"));
+                        return;
+                    }
+                    line = openMicLine(mixer);
+                    if (line == null) {
+                        log.gray("The microphone \"" + device + "\" offers none of the 16-bit "
+                                + "formats JRock records in - nothing was recorded.");
+                        return;
+                    }
                 }
-                int second = (int) format.getSampleRate() * format.getFrameSize();
-                line.open(format, second / 2);
                 mine.line = line;
-                line.start();
-                log.gray("Recording from " + device + " (" + (int) format.getSampleRate()
-                        + " Hz" + (format.getChannels() == 2 ? ", stereo" : "") + ")... "
-                        + "let go of Ctrl to stop.");
-                // A tenth of a second a read, so letting go of Ctrl is answered within one;
+                recordLine = line;
+                format = line.getFormat();
+                int second = (int) format.getSampleRate() * format.getFrameSize();
+                log.gray(ears != null
+                        ? "Heard " + ears.heard + ": recording from " + device + " until it "
+                          + "is quiet again (or Ctrl+Space)."
+                        : "Recording from " + device + " (" + (int) format.getSampleRate()
+                          + " Hz" + (format.getChannels() == 2 ? ", stereo" : "") + ")... "
+                          + "Ctrl+Space again to stop.");
+                // A tenth of a second a read, so a stop is answered within one;
                 // whole frames, and the device looked for again every two seconds.
                 byte[] buf = new byte[Math.max(format.getFrameSize(),
                         second / 10 / format.getFrameSize() * format.getFrameSize())];
@@ -5629,12 +6047,19 @@ public class JRock {
                     int n = line.read(buf, 0, buf.length);
                     if (n <= 0 && mine.stop) break;
                     bytes.write(buf, 0, Math.max(n, 0));
+                    if (ears != null) {
+                        ears.feed(buf, Math.max(n, 0), format.getChannels());
+                        if (ears.quietMs >= RECORD_SILENCE_MS) {
+                            log.gray("Quiet again: the recording stops.");
+                            break;
+                        }
+                    }
                     if (bytes.size() >= nextCheck) {
                         nextCheck += 2L * second;
                         if (inputMixer(device) == null) { gone = true; break; }
                     }
                 }
-                // Ctrl comes up as the last word is still being said, so the recording
+                // The stop comes as the last word is still being said, so the recording
                 // goes on for RECORD_TAIL_MS more: without it the word is cut off, and a
                 // recognizer hears half a word as another one.
                 if (!gone) {
@@ -5649,7 +6074,7 @@ public class JRock {
                 }
                 line.stop();
                 if (!gone) {
-                    // What was already captured when Ctrl came up is part of it.
+                    // What was already captured at the stop is part of it.
                     int left = line.available() / format.getFrameSize() * format.getFrameSize();
                     if (left > 0) {
                         byte[] rest = new byte[left];
@@ -5658,6 +6083,7 @@ public class JRock {
                     }
                 }
                 line.close();
+                recordLine = null;
                 double seconds = bytes.size() / (double) second;
                 if (gone) {
                     log.gray(micGoneMessage(device, "the recording was stopped and not "
@@ -5708,9 +6134,12 @@ public class JRock {
                         + "microphone.");
             } catch (IOException ex) {
                 log.gray("Recording failed: " + ex.getMessage());
+            } catch (InterruptedException ex) {
+                // Never interrupted: a daemon, stopped through mine.stop.
             } finally {
                 javax.sound.sampled.TargetDataLine line = mine.line;
                 if (line != null && line.isOpen()) line.close();
+                if (line != null && recordLine == line) recordLine = null;
                 if (recording == mine) recording = null;
             }
         }, "jrock-record");
@@ -5719,7 +6148,7 @@ public class JRock {
         t.start();
     }
 
-    // Ctrl let go of (or the window left). The recording thread notices within a read;
+    // Ctrl+Space again, or Stop recording. The recording thread notices within a read;
     // a line that stopped answering - a microphone pulled out mid-read - is closed
     // after a moment, which returns the read it was blocked in.
     private static void stopRecording(LogView log) {
@@ -5773,7 +6202,7 @@ public class JRock {
             "  while ($true) {",
             // The end of the file is a null result when it ends in silence, but an
             // InvalidOperationException ("No audio input is supplied") when it ends
-            // mid-word - which a recording cut by letting go of Ctrl usually does.
+            // mid-word - which a recording stopped by Ctrl+Space usually does.
             "    try { $res = $r.Recognize() } catch {",
             "      if ($_.Exception.InnerException -is [InvalidOperationException]) { break }",
             "      throw",

@@ -54,7 +54,7 @@ jobs:
         # JRock.java, jrock.jar) resolve there; the tool source lives in .github/build.
         run: java .github/build/BuildJar.java
 
-      # The automation scripts in automation-samples/ are run as
+      # The automation scripts in agentic-samples/ are run as
       # `java -cp jrock.jar Script.java` against a jar the user copies in by hand, so
       # they are compiled here against the jar this job just built - which checks both
       # that they compile and that the public automation API they call is still there.
@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           javac -encoding UTF-8 --release 11 -cp jrock.jar \
-                -d out-automation automation-samples/*.java
+                -d out-automation agentic-samples/*.java
 
       - name: Show checksums (job summary)
         shell: bash
@@ -89,7 +89,7 @@ jobs:
             jrock.jar.sha256
             jrock.jar.md5
             jrock-src.zip
-            automation-samples/
+            agentic-samples/
           if-no-files-found: error
 
       # Assemble the CheerpJ web bundle for Amplify: a flat directory with
