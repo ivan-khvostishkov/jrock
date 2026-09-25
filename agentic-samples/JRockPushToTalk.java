@@ -42,10 +42,11 @@
 // on speakers a microphone with a mute button, or headphones, keeps JRock from hearing
 // its own voice.
 //
-// Each turn is a question of its own: the prompt is cleared before every recording, and
-// an automation runs with History off, so the model hears one recording at a time and
-// not the conversation so far. The whole conversation is in JRock's transcript all the
-// same, and closing this window hands JRock back to you with it.
+// The prompt is cleared before every recording, and History is as JRock has it: on, the
+// model hears the conversation so far - as much as the History limit in Configure lets
+// through - so a question it asked can be answered in the next recording; off, each
+// turn stands alone. The whole conversation is in JRock's transcript either way, and
+// closing this window hands JRock back to you with it.
 //
 // The recording goes first in the prompt - which is what Voxtral wants (see the
 // README): it takes a recording as the question and answers it. After it comes the
