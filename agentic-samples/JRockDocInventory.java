@@ -217,9 +217,7 @@ public final class JRockDocInventory {
         // ---- Pass one: the document as plain text --------------------------
         System.out.println("Pass 1: " + PROMPT_ASCII);
         check(JRock.automationLoadPrompt(ascii.toString()));
-        // The bare "@img" / "@txt" lines the sample prompts end with are placeholders a
-        // person reads and presses Ctrl+I on; a program has to be told.
-        JRock.automationDropPlaceholders();
+        dropPlaceholders();
         check(JRock.automationInclude(document.toString(), kind));
         String text = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
 
@@ -232,7 +230,7 @@ public final class JRockDocInventory {
         // ---- Pass two: a name for it --------------------------------------
         System.out.println("Pass 2: " + PROMPT_NAME);
         check(JRock.automationLoadPrompt(inventory.toString()));
-        JRock.automationDropPlaceholders();
+        dropPlaceholders();
         check(JRock.automationInclude(twin.toString(), "txt"));
         String answer = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
         String base = baseName(answer);
@@ -433,6 +431,24 @@ public final class JRockDocInventory {
     // Turns an automation API result into a stop, a null meaning there is nothing wrong.
     private static void check(String problem) {
         if (problem != null) throw new Stop(problem);
+    }
+
+    // Takes the bare "@img" / "@txt" lines out of the prompt just loaded. The sample
+    // prompts end with them as placeholders: a person reads them as "the attachments go
+    // here" and presses Ctrl+I on one. This automation includes the document itself, so
+    // they go - and what is left ends with one newline, as each include token goes on a
+    // line of its own at the end of it. They are no tokens (a token carries a
+    // 12-hex-digit hash), so one left in would go out as the word it is.
+    private static void dropPlaceholders() {
+        String prompt = JRock.automationPromptText();
+        if (prompt == null) throw new Stop("the prompt could not be read.");
+        StringBuilder kept = new StringBuilder();
+        for (String line : prompt.split("\n", -1)) {
+            String bare = line.trim();
+            if (bare.equals("@img") || bare.equals("@txt") || bare.equals("@audio")) continue;
+            kept.append(line).append('\n');
+        }
+        check(JRock.automationSetPrompt(kept.toString().replaceAll("\n+$", "\n")));
     }
 
     // The reply a send produced, read out of its own file under JRock/messages/.

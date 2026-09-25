@@ -2710,7 +2710,9 @@ public class JRock {
     }
 
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
-    // and History is turned off. Returns null, or why it refused.
+    // History is turned off, and Mic always on is muted - nobody types into the prompt
+    // now, so nobody speaks into it either (see automationListen). Returns null, or why
+    // it refused.
     //
     // what finishes the sentence "Automation started: ", so the transcript says which
     // automation this was - the log being the only record of it afterwards.
@@ -2721,6 +2723,7 @@ public class JRock {
         if (live == null) return "JRock has no window yet - call main() and wait for it.";
         if (automating) return "an automation is already running.";
         automating = true;
+        setMicMuted(true);
         onEdt(() -> {
             automationExtendWas = live.extend.isSelected();
             live.extend.setSelected(false);
@@ -2729,7 +2732,8 @@ public class JRock {
         });
         live.log.gray("Automation started: " + what);
         live.log.gray("The prompt is read-only and Send is held until it finishes; "
-                + "\"History\" is off for the duration.");
+                + "\"History\" is off for the duration"
+                + (micAlwaysOn ? ", and Mic always on is muted." : "."));
         live.log.gray("");
         return null;
     }
@@ -2786,42 +2790,31 @@ public class JRock {
         return null;
     }
 
-    // Removes the bare "@img" / "@txt" / "@audio" lines a sample prompt ends with, leaving
-    // the caret at the end of what is left. Returns how many lines it removed.
-    //
-    // Those lines are placeholders and not tokens - a token carries a 12-hex-digit
-    // hash - so left in place they are sent as the two words they are. A person reads
-    // them as "the attachments belong here" and presses Ctrl+I on one; a program has to
-    // be told, and this is the telling. Call it after automationLoadPrompt and before
-    // the includes.
-    public static int automationDropPlaceholders() {
-        if (requireAutomation() != null) return 0;
+    // The prompt's text as it stands, or null when no automation is running. What a
+    // prompt means - which lines are placeholders, what to fill in - is the
+    // automation's to know, so JRock hands over the text and takes it back
+    // (automationSetPrompt) rather than guessing.
+    public static String automationPromptText() {
+        if (requireAutomation() != null) return null;
         Ui live = ui;
-        int[] removed = { 0 };
+        String[] text = { null };
+        onEdt(() -> text[0] = live.input.getText());
+        return text[0];
+    }
+
+    // Replaces the prompt's text, as typing it would, and leaves the caret at the end -
+    // which is where automationInclude puts its tokens, each on a line of its own, so a
+    // text that is to be followed by one should end with a newline. Returns null, or
+    // why not.
+    public static String automationSetPrompt(String text) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
         onEdt(() -> {
-            java.util.List<String> keep = new ArrayList<>();
-            for (String line : live.input.getText().split("\n", -1)) {
-                String bare = line.trim();
-                if (bare.equals("@img") || bare.equals("@txt") || bare.equals("@audio")) {
-                    removed[0]++;
-                } else {
-                    keep.add(line);
-                }
-            }
-            if (removed[0] == 0) return;
-            String text = String.join("\n", keep);
-            // The tokens are inserted AT the caret, each with its own newline after it,
-            // so the caret has to sit at the start of a line - which at the end of the
-            // text means the text has to end with one.
-            if (!text.endsWith("\n")) text = text + "\n";
-            live.input.setText(text);
+            live.input.setText(text == null ? "" : text);   // triggers the autosave
             live.input.setCaretPosition(live.input.getDocument().getLength());
         });
-        if (removed[0] > 0) {
-            live.log.gray("Dropped " + removed[0] + " placeholder line(s) from the prompt; "
-                    + "the include tokens go at the end of it.");
-        }
-        return removed[0];
+        return null;
     }
 
     // Includes one file in the prompt under the kind the include dialog's filters stand
@@ -3131,8 +3124,94 @@ public class JRock {
         return true;
     }
 
-    // Leaves automation mode: the prompt is editable again, Send is released, and
-    // History goes back to what the user had it at. note finishes the
+    // Mic always on during an automation: true lifts the mute automationBegin put on it,
+    // so JRock listens for speech as it does by hand; false puts the mute back, and
+    // stops a recording it started where it is. Returns null, or why nothing will be
+    // heard - the setting is the user's, and this only lifts the automation's mute; it
+    // never turns the microphone on by itself.
+    public static String automationListen(boolean on) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        if (!on) {
+            setMicMuted(true);
+            return null;
+        }
+        if (!recordAvailable()) return "recording is not available here.";
+        if (!micAlwaysOn) {
+            return "Mic always on is off - tick it in JRock's prompt menu or in Configure, "
+                    + "and try again.";
+        }
+        if (recordDevice.isEmpty()) {
+            return "no microphone is set. Press Ctrl+Space in JRock to list them, pick one "
+                    + "in Configure > Record from, and try again.";
+        }
+        heardRecording = null;   // only what is heard from now on
+        setMicMuted(false);
+        return null;
+    }
+
+    // How long a heard recording gets, from the quiet that ends it, to reach the prompt:
+    // a file write for an @audio token, or as long as Windows takes to transcribe it.
+    private static final long HEARD_SAVE_TIMEOUT_MS = 120_000;
+
+    // Waits for Mic always on to hear someone and put what was said in the prompt - the
+    // spoken counterpart of automationStopRecording, after automationListen(true).
+    // Returns two strings, in the shape automationSend uses:
+    //
+    //   [0] "1" once a recording it started has reached the prompt, "0" when not
+    //   [1] why not - or null when nobody spoke within timeoutMillis, which is no
+    //       failure but a quiet room, and the listening goes on
+    //
+    // The timeout is for speech to START. A recording under way is waited for until the
+    // quiet that ends it, and its transcription after that, so a short timeout polled in
+    // a loop never cuts anyone off.
+    public static String[] automationAwaitHeard(long timeoutMillis) {
+        String problem = requireAutomation();
+        if (problem != null) return new String[] { "0", problem };
+        long deadline = System.currentTimeMillis() + Math.max(0, timeoutMillis);
+        Recording r;
+        while ((r = heardRecording) == null) {
+            if (micMuted) {
+                return new String[] { "0", "Mic always on is muted - call "
+                        + "automationListen(true) first." };
+            }
+            if (System.currentTimeMillis() > deadline) return new String[] { "0", null };
+            try {
+                Thread.sleep(AUTOMATION_POLL_MS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return new String[] { "0", "interrupted while listening." };
+            }
+        }
+        heardRecording = null;
+        try {
+            // Unbounded until the quiet, which the recording thread watches for itself:
+            // its line closes the moment it stops capturing.
+            while (r.thread.isAlive() && (r.line == null || r.line.isOpen())) {
+                r.thread.join(AUTOMATION_POLL_MS);
+            }
+            r.thread.join(HEARD_SAVE_TIMEOUT_MS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return new String[] { "0", "interrupted while the recording was being saved." };
+        }
+        if (r.thread.isAlive()) {
+            return new String[] { "0", "the recording did not reach the prompt within "
+                    + HEARD_SAVE_TIMEOUT_MS + " ms." };
+        }
+        Ui live = ui;
+        String[] now = { null };
+        onEdt(() -> now[0] = live.input.getText());
+        if (now[0].equals(heardPromptBefore)) {
+            return new String[] { "0", "nothing from the recording reached the prompt - "
+                    + "the log says why." };
+        }
+        return new String[] { "1", null };
+    }
+
+    // Leaves automation mode: the prompt is editable again, Send is released, History
+    // goes back to what the user had it at, and Mic always on listens again if it is
+    // set to. note finishes the
     // sentence "Automation finished: ", or is null for the sentence on its own.
     //
     // The window stays open with the whole run in its log, and the conversation can be
@@ -3147,6 +3226,7 @@ public class JRock {
             live.sendGate.accept(true);
         });
         automating = false;
+        setMicMuted(false);
         live.log.gray(note == null ? "Automation finished."
                                   : "Automation finished: " + note);
         live.log.gray("The prompt is editable again - carry on from here.");
@@ -5234,6 +5314,8 @@ public class JRock {
         volatile javax.sound.sampled.SourceDataLine line;
     }
     private static volatile Narration narration;
+    // When the last narration stopped, however it did, for Mic always on's tail.
+    private static volatile long narrationEndedAt;
 
     // The SAPI side, run as powershell -Command. Everything it says goes to stderr, one
     // line each - the voice it picked ("voice|<name>|<culture>"), or that none speaks the
@@ -5472,6 +5554,7 @@ public class JRock {
     // Ends a narration where it stands: the process killed (the voice stops mid-word)
     // and the line stopped, flushed and closed, which also returns a write blocked on it.
     private static void stopNarration(Narration n) {
+        narrationEndedAt = System.currentTimeMillis();
         Process p = n.process;
         if (p != null) p.destroy();
         javax.sound.sampled.SourceDataLine line = n.line;
@@ -5662,6 +5745,25 @@ public class JRock {
     private static volatile javax.sound.sampled.TargetDataLine listenLine;
     private static volatile javax.sound.sampled.TargetDataLine recordLine;
     private static final int RECORD_SILENCE_MS = 1500;
+    // Held from automationBegin to automationEnd: Mic always on does not listen then,
+    // whatever it is set to - a prompt nobody may type into is not one to speak into
+    // either. automationListen lifts it for an automation that wants to be spoken to.
+    // The setting itself is never touched.
+    private static volatile boolean micMuted = false;
+    // The last recording Mic always on started, and the prompt as it was just before
+    // it, for automationAwaitHeard.
+    private static volatile Recording heardRecording;
+    private static volatile String heardPromptBefore;
+    // Mic always on does not listen while JRock is reading aloud, nor for this long after
+    // - on speakers rather than headphones it would hear its own voice, and the room
+    // rings on for a moment after it stops.
+    private static final long NARRATION_TAIL_MS = 700;
+
+    // Whether JRock is reading aloud, or has only just stopped.
+    private static boolean narratingNow() {
+        return narration != null
+                || System.currentTimeMillis() - narrationEndedAt < NARRATION_TAIL_MS;
+    }
 
     // Whether the microphone is open right now - listening or recording, however it was
     // started. What the red dot beside Clock shows.
@@ -5679,7 +5781,20 @@ public class JRock {
                 : recordDevice.isEmpty()
                 ? "Mic always on: on, but no microphone is set - press Ctrl+Space to list "
                   + "them, and pick one in Configure > Record from."
-                : "Mic always on: listening on " + recordDevice + " for speech.");
+                : "Mic always on: listening on " + recordDevice + " for speech"
+                  + (micMuted ? ", once the automation running lets it." : "."));
+    }
+
+    // The automation's mute on (see micMuted) or off. On, it also stops a recording that
+    // Mic always on started, where it is - what it recorded still goes to the prompt.
+    private static void setMicMuted(boolean muted) {
+        micMuted = muted;
+        if (!muted) return;
+        javax.sound.sampled.TargetDataLine line = listenLine;
+        if (line != null) line.close();   // unblocks the listener's read
+        Recording heard = heardRecording;
+        Ui live = ui;
+        if (heard != null && recording == heard && live != null) stopRecording(live.log);
     }
 
     // The listener, one daemon thread for the session. While Mic always on is on, a
@@ -5693,8 +5808,9 @@ public class JRock {
             while (true) {
                 try {
                     String device = recordDevice;
-                    javax.sound.sampled.Mixer mixer = micAlwaysOn && recording == null
-                            && recordLine == null && !device.isEmpty() ? inputMixer(device) : null;
+                    javax.sound.sampled.Mixer mixer = micAlwaysOn && !micMuted && recording == null
+                            && recordLine == null && !device.isEmpty() && !narratingNow()
+                            ? inputMixer(device) : null;
                     if (mixer == null) { Thread.sleep(250); continue; }
                     javax.sound.sampled.TargetDataLine line = openMicLine(mixer);
                     if (line == null) {
@@ -5706,8 +5822,8 @@ public class JRock {
                     Ears ears = new Ears(format.getSampleRate());
                     byte[] buf = new byte[ears.chunkBytes(format.getChannels())];
                     long checkAt = System.currentTimeMillis() + 2000;
-                    while (micAlwaysOn && recording == null && ears.heard == null
-                            && device.equals(recordDevice) && line.isOpen()) {
+                    while (micAlwaysOn && !micMuted && recording == null && ears.heard == null
+                            && narration == null && device.equals(recordDevice) && line.isOpen()) {
                         int n = line.read(buf, 0, buf.length);
                         ears.feed(buf, Math.max(n, 0), format.getChannels());
                         if (System.currentTimeMillis() > checkAt) {   // pulled out?
@@ -5723,10 +5839,12 @@ public class JRock {
                     }
                     ears.quietMs = 0;
                     onEdt(() -> {
-                        if (recording == null) {
+                        if (recording == null && !micMuted && narration == null) {
+                            heardPromptBefore = input.getText();
                             startRecording(frame, input, log, extend.getAsBoolean(), line, ears);
+                            heardRecording = recording;
                         } else {
-                            line.close();   // Ctrl+Space got there first
+                            line.close();   // Ctrl+Space got there first, a mute, or a narration
                         }
                         listenLine = null;
                     });

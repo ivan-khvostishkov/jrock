@@ -1,4 +1,4 @@
-// A JRock automation: one document in, an English translation of it out.
+// A JRock automation: one document in, its translation into English out.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
@@ -23,6 +23,12 @@
 // include and a send; the inventory chains two of those and renames files afterwards,
 // this one does a single pass and writes one new file, and the plumbing around them is
 // the same file twice. Copy whichever is closer to the chain you want.
+//
+// The same file is here five more times, one for each of the other official languages
+// of the United Nations: JRockTranslateToArabic, -Chinese, -French, -Russian and
+// -Spanish. They differ in nothing but the class name, the language, its code and the
+// prompt they load - one file each, because an agent is one file and its right-click
+// entry is named after it. Change one, change them all.
 //
 // The document can be any kind JRock can include, and the kind is chosen from the
 // extension (see includeKind) - which is what makes this one worth installing as an
@@ -61,8 +67,8 @@ public final class JRockTranslateToEnglish {
     // What the translation is called: <name>-en.txt beside the original. A suffix and not
     // a directory, so the pair sits together in one listing - and .txt whatever went in,
     // because what comes back is text even when the original was a scan.
-    private static final String ENGLISH_SUFFIX = "-en";
-    private static final String ENGLISH_EXTENSION = ".txt";
+    private static final String TARGET_SUFFIX = "-en";
+    private static final String TARGET_EXTENSION = ".txt";
 
     // JRock's own flags, spelled out here because this automation both reads them and
     // passes them on (see parseArgs).
@@ -180,21 +186,19 @@ public final class JRockTranslateToEnglish {
         // ---- The pass: the document in English ------------------------------
         System.out.println("Translating with " + PROMPT_TRANSLATE);
         check(JRock.automationLoadPrompt(prompt.toString()));
-        // The bare "@img" / "@txt" lines the sample prompts end with are placeholders a
-        // person reads and presses Ctrl+I on; a program has to be told.
-        JRock.automationDropPlaceholders();
+        dropPlaceholders();
         check(JRock.automationInclude(document.toString(), kind));
-        String english = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
-        if (english.isBlank()) throw new Stop("the reply was empty.");
+        String translation = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
+        if (translation.isBlank()) throw new Stop("the reply was empty.");
 
         // Beside the original and named after it, which is what keeps the pair together
         // in a folder sorted by name.
-        Path target = free(document.getParent(), stem(document) + ENGLISH_SUFFIX,
-                ENGLISH_EXTENSION);
-        Files.write(target, english.getBytes(StandardCharsets.UTF_8));
+        Path target = free(document.getParent(), stem(document) + TARGET_SUFFIX,
+                TARGET_EXTENSION);
+        Files.write(target, translation.getBytes(StandardCharsets.UTF_8));
         System.out.println("Wrote " + target);
 
-        String from = sourceLanguage(english);
+        String from = sourceLanguage(translation);
         return "wrote " + target.getFileName()
                 + (from == null ? "" : ", translated from " + from);
     }
@@ -414,6 +418,24 @@ public final class JRockTranslateToEnglish {
         if (problem != null) throw new Stop(problem);
     }
 
+    // Takes the bare "@img" / "@txt" lines out of the prompt just loaded. The sample
+    // prompts end with them as placeholders: a person reads them as "the attachments go
+    // here" and presses Ctrl+I on one. This automation includes the document itself, so
+    // they go - and what is left ends with one newline, as each include token goes on a
+    // line of its own at the end of it. They are no tokens (a token carries a
+    // 12-hex-digit hash), so one left in would go out as the word it is.
+    private static void dropPlaceholders() {
+        String prompt = JRock.automationPromptText();
+        if (prompt == null) throw new Stop("the prompt could not be read.");
+        StringBuilder kept = new StringBuilder();
+        for (String line : prompt.split("\n", -1)) {
+            String bare = line.trim();
+            if (bare.equals("@img") || bare.equals("@txt") || bare.equals("@audio")) continue;
+            kept.append(line).append('\n');
+        }
+        check(JRock.automationSetPrompt(kept.toString().replaceAll("\n+$", "\n")));
+    }
+
     // The reply a send produced, read out of its own file under JRock/messages/.
     //
     // The request's file is checked and not read, which is the point of checking it: if
@@ -446,9 +468,9 @@ public final class JRockTranslateToEnglish {
             java.util.regex.Pattern.compile(
                     "(?i)^\\s*translated\\s+from\\s*:\\s*(.{1,60}?)\\s*$");
 
-    private static String sourceLanguage(String english) {
-        int end = english.indexOf('\n');
-        String first = (end < 0) ? english : english.substring(0, end);
+    private static String sourceLanguage(String translation) {
+        int end = translation.indexOf('\n');
+        String first = (end < 0) ? translation : translation.substring(0, end);
         java.util.regex.Matcher m = TRANSLATED_FROM.matcher(first);
         return m.matches() ? m.group(1) : null;
     }
