@@ -455,6 +455,10 @@ The zone is named in full (`Europe/Berlin`), not just offset: a model that knows
 about summer time, holidays and business hours, which an offset alone doesn't say. Without this
 a model has no idea what day it is - the request carries no clock of its own.
 
+The checkbox is kept per folder, as `clock$` in
+[`JRock/jrock-config.txt`](#persistence-crash-recovery--full-local-history), so a folder whose
+model cannot take a `system` message — Voxtral, say — stays unticked from one start to the next.
+
 It is **not** part of the conversation. It is never shown as a turn, never resent by *Extend
 conversation*, and never read back from disk: what goes with the request is always the time
 **now**, not the time some earlier message was sent. It is saved once, for debugging, as
@@ -520,6 +524,7 @@ from inside the running application, and different for every way of launching it
   Each is written only once one is set, and there is no default for either. On Windows,
   `record-transcribe$` (`true`/`false`) says whether a recording is transcribed.
   `record-always-on$` (`true`/`false`) is [Mic always on](#mic-always-on).
+  `clock$` (`true`/`false`) is the [**Clock**](#clock) checkbox; absent is `true`.
 
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser both
@@ -784,7 +789,8 @@ megabyte of it.
 
 One thing to know before sending, though: the [**Clock**](#clock) is a `system` message, and a
 model that listens may refuse one beside a recording. A send with both warns and then goes as it
-is; unticking **Clock** is the fix, and it is yours to make.
+is; unticking **Clock** is the fix, and it is yours to make — once per folder, since the folder
+remembers it.
 
 **Fetch URL** does not download audio; audio comes from Ctrl+I.
 
