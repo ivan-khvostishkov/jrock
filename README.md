@@ -1340,7 +1340,9 @@ the voice, so the microphone doesn't record the last answer as the next question
   the prompt, the agent sends it, shows and reads out the answer, and listens again — turn after
   turn. Turning the lever off, clicking the button or pressing **Ctrl on its own** ends it: the
   microphone is muted again, what was being said is not sent, and an answer being read out
-  stops (one still on its way is shown, not read). The microphone is muted while a
+  stops (one still on its way is shown, not read). Nothing else ends it: a turn that fails —
+  a recording a Bluetooth headset dropped out of, a request that went wrong — is shown on the
+  button, and two seconds later JRock listens again, so you just say it again. The microphone is muted while a
   question is on its way, and listens again while the answer is read aloud: **start talking
   and the reading stops**, and what you say is the next question. On speakers JRock would hear
   its own voice and stop itself, so use headphones or a microphone with a mute button, muted
