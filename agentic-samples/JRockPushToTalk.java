@@ -126,6 +126,11 @@ public final class JRockPushToTalk {
     // again. Not a limit on anyone talking: a recording under way is waited out.
     private static final long LISTEN_POLL_MS = 250;
 
+    // How long hands-free waits after a turn that failed before it listens again: long
+    // enough that a failure which repeats at once - a microphone not back yet - does not
+    // spin, short enough that the operator can simply say it again.
+    private static final long RETRY_PAUSE_MS = 2000;
+
     // The lever: on, JRock listens and the agent converses (see converse). Written on
     // the EDT, read by the worker's loop too. And, EDT only: whether that loop is
     // running, and whether Ctrl and Shift are down, so their auto-repeat is not taken
@@ -273,7 +278,9 @@ public final class JRockPushToTalk {
     }
 
     // Hands-free: JRock listens, the agent sends what it heard, and round again - until
-    // the lever goes off, or a turn fails. On the worker.
+    // the lever goes off. A turn that fails does not end it: the reason is shown, and
+    // after a moment JRock listens again, so the operator says it again - a Bluetooth
+    // headset that dropped out for a moment is usually back by then. On the worker.
     private static void converse() {
         String said = null;
         try {
@@ -284,21 +291,34 @@ public final class JRockPushToTalk {
             }
             String note = null;
             while (handsFree) {
-                check(JRock.automationClearPrompt());
-                check(JRock.automationListen(true));
-                String listening = note == null ? LISTENING_HANDS_FREE
-                        : note + " " + LISTENING_HANDS_FREE;
-                later(() -> setState(State.RECORDING, listening));
-                String[] heard;
-                do {
-                    heard = JRock.automationAwaitHeard(LISTEN_POLL_MS);
-                } while (handsFree && !"1".equals(heard[0]) && heard[1] == null);
-                // Muted while the answer is on its way, so the question is not asked twice.
-                JRock.automationListen(false);
-                if (!handsFree) break;   // ended: what was being said is not sent
-                if (!"1".equals(heard[0])) throw new Stop(heard[1]);
-                note = answer(true);
+                try {
+                    check(JRock.automationClearPrompt());
+                    check(JRock.automationListen(true));
+                    String listening = note == null ? LISTENING_HANDS_FREE
+                            : note + " " + LISTENING_HANDS_FREE;
+                    later(() -> setState(State.RECORDING, listening));
+                    String[] heard;
+                    do {
+                        heard = JRock.automationAwaitHeard(LISTEN_POLL_MS);
+                    } while (handsFree && !"1".equals(heard[0]) && heard[1] == null);
+                    // Muted while the answer is on its way, so the question is not asked twice.
+                    JRock.automationListen(false);
+                    if (!handsFree) break;   // ended: what was being said is not sent
+                    if (!"1".equals(heard[0])) throw new Stop(heard[1]);
+                    note = answer(true);
+                } catch (Stop failed) {
+                    JRock.automationListen(false);
+                    note = "That did not work: " + failed.getMessage() + " Say it again.";
+                    String shown = note;
+                    later(() -> setState(State.IDLE, shown));
+                    for (long w = 0; handsFree && w < RETRY_PAUSE_MS; w += LISTEN_POLL_MS) {
+                        Thread.sleep(LISTEN_POLL_MS);
+                    }
+                }
             }
+        } catch (InterruptedException stopped) {
+            Thread.currentThread().interrupt();
+            said = "Hands-free ended: the agent is shutting down.";
         } catch (Stop stop) {
             JRock.automationListen(false);
             said = "Hands-free ended: " + stop.getMessage();
