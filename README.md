@@ -1367,6 +1367,46 @@ the voice, so the microphone doesn't record the last answer as the next question
   answered: it is on the screen.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
+- **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
+  appendix asks the model for this sentence — sets an alarm in the [timer agent](#a-fourth-agent-timer-and-alarm-jrocktimerjava).
+  The first time is checked against the computer's clock first, and a model more than two
+  minutes off sets nothing. The status line says what became of the alarm: set, refused, or
+  not set because the timer agent isn't running.
+
+### A fourth agent: timer and alarm (`JRockTimer.java`)
+
+The one to show first: **no Bedrock API key needed**, since nothing in it calls a model.
+
+```
+java -cp jrock.jar JRockTimer.java --working-dir D:\Timer
+```
+
+It starts JRock and takes it as an automation, which mutes Mic always on, so this JRock never
+records what you say to another one. Then it opens a small window: a time and **Set**, with the
+alarms set since it opened listed underneath, each counting down. Nothing is kept across runs.
+
+- **The time is when the alarm rings**, 24-hour `hh:mm:ss`: `07:30:00` is today if that is
+  still to come, and otherwise tomorrow. `+hh:mm:ss` is a timer instead: `+00:05:00` rings in
+  five minutes.
+- **Sounds**: a short rising chirp when an alarm is set, and an alarm clock's four quick beeps,
+  over and over, when it rings — for a minute, or until you stop it with **Remove**
+  (or Delete or Escape on it in the list). The agent makes the sounds itself, with no files,
+  and plays them with Java Sound on JRock's [**Narrate on**](#narrate-windows) speaker, never
+  on the Windows default. That device name is the only thing it takes from JRock's settings
+  (`JRock.automationNarrateDevice()`). If no speaker is set, or it isn't connected, the window
+  says so, and the alarm still shows.
+- **Other agents set alarms** over TCP, on `127.0.0.1:47470` only. Connect, send the time as
+  above and a newline, and read one line back: `1` means the alarm is set, `0` means it isn't.
+  Then close the connection. [Push-to-talk](#a-third-agent-push-to-talk-jrockpushtotalkjava)
+  does this.
+- **JRock's agents' ports** are **47470–47479**, and the timer has the first. The range is
+  below Windows' dynamic range (49152 and up, where the system hands out ports and Hyper-V
+  reserves blocks of them), and no well-known service uses it. Another timer already running
+  on the port is reported in the window. Alarms can still be set there by hand.
+- **Run it in a folder of its own.** JRock keeps one log per folder and writes it whole, so two
+  JRocks in one folder, such as this one and push-to-talk's, overwrite each other's log. A
+  folder with no key is fine. Set its **Narrate on** once: press Narrate in its JRock's log
+  menu to list the devices, then pick one in Configure.
 
 ### The automation API
 
@@ -1399,6 +1439,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
+| `automationNarrateDevice()` | The **Narrate on** speaker's name, or `""` when none is set — for an agent that plays sounds of its own on it. Needs no `automationBegin`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
 
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the

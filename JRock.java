@@ -2776,6 +2776,14 @@ public class JRock {
         return live == null ? null : live.frame;
     }
 
+    // The speaker set in Configure > Narrate on, by the name Java Sound gives it, or ""
+    // when none is set. Only the name, for an agent that plays sounds of its own on the
+    // device the user chose for JRock's voice; read it each time, since Configure can
+    // change it meanwhile. Needs no automation to be running.
+    public static String automationNarrateDevice() {
+        return narrateDevice;
+    }
+
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
     // and Mic always on is muted - nobody types into the prompt
     // now, so nobody speaks into it either (see automationListen). Returns null, or why
@@ -5422,7 +5430,7 @@ public class JRock {
 
     // The configured device (empty = not set), and the devices last listed for the
     // Configure dropdown - empty until Narrate has listed them.
-    private static String narrateDevice = "";
+    private static volatile String narrateDevice = "";
     private static java.util.List<String> outputDevices = new ArrayList<>();
 
     // The one name among Java Sound's mixers that is not a device but a pointer to the
