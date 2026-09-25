@@ -673,6 +673,10 @@ public class JRock {
     // Whether a recording is transcribed into the prompt rather than included: true or
     // false, and absent is false.
     private static final String CONFIG_RECORD_TRANSCRIBE = "record-transcribe";
+    // Whether the Clock checkbox is ticked: true or false, and absent is true - the
+    // checkbox's default, and what every file written before it was kept meant.
+    private static final String CONFIG_CLOCK = "clock";
+    private static volatile boolean clockOn = true;
 
     // Written above the settings, and the only documentation the format needs. The
     // format itself exists for one reason: a value is a whole line of its own, so it
@@ -718,6 +722,7 @@ public class JRock {
             recordDevice = (mic == null) ? "" : mic.trim();
             recordTranscribe = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_TRANSCRIBE));
             micAlwaysOn = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_ALWAYS_ON));
+            clockOn = !"false".equalsIgnoreCase(settings.get(CONFIG_CLOCK));
             settingsSource = "JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
@@ -769,6 +774,7 @@ public class JRock {
         if (recordAvailable()) {
             appendSetting(text, CONFIG_RECORD_ALWAYS_ON, String.valueOf(micAlwaysOn));
         }
+        appendSetting(text, CONFIG_CLOCK, String.valueOf(clockOn));
         atomicWriteQuietly(configFile(), text.toString());
     }
 
@@ -1607,6 +1613,10 @@ public class JRock {
         // loadFromDisk for the same reason the report lines are: it replaces the entry
         // list, so anything logged before it would be wiped.
         adoptSettingsOfWorkingDir();
+        // The one setting with a control of its own on the main window, which shows the
+        // folder's value as soon as there is a window (at startup, it is made with it).
+        Ui shown = ui;
+        if (shown != null) shown.clock.setSelected(clockOn);
 
         // The session report begins here; the working directory is its first line.
         // A restored log already ends with its own trailing blank line.
@@ -1879,10 +1889,15 @@ public class JRock {
 
         // "Clock" mode: tell the model what time it is here, with each message. On by
         // default - a model that has to guess the date guesses wrong, and one extra
-        // short message is a cheap way to stop it (see clockMessage).
-        javax.swing.JCheckBox clockMode = new javax.swing.JCheckBox("Clock", true);
+        // short message is a cheap way to stop it (see clockMessage). Kept per folder, as
+        // clock$ in the config: a folder whose model cannot take it (Voxtral) keeps it off.
+        javax.swing.JCheckBox clockMode = new javax.swing.JCheckBox("Clock", clockOn);
         clockMode.setToolTipText(
                 "Send the local time and time zone with each message, as <clock><now>...</now></clock>");
+        clockMode.addActionListener(e -> {
+            clockOn = clockMode.isSelected();
+            saveConfigQuietly();
+        });
 
         JButton send = new JButton("Send (Ctrl-Enter)");
 
@@ -2535,7 +2550,7 @@ public class JRock {
         // The window is now complete, so publish its parts for the automation API -
         // last, and only once, so nothing can be driven from outside before all of it
         // exists (see the Automation API section).
-        ui = new Ui(frame, input, log, send, extendMode, sendGate);
+        ui = new Ui(frame, input, log, send, extendMode, clockMode, sendGate);
 
         frame.setVisible(true);
     }
@@ -2643,12 +2658,15 @@ public class JRock {
         final LogView log;
         final JButton send;
         final javax.swing.JCheckBox extend;
+        final javax.swing.JCheckBox clock;
         final java.util.function.Consumer<Boolean> sendGate;
 
         Ui(JFrame frame, JTextArea input, LogView log, JButton send,
-           javax.swing.JCheckBox extend, java.util.function.Consumer<Boolean> sendGate) {
+           javax.swing.JCheckBox extend, javax.swing.JCheckBox clock,
+           java.util.function.Consumer<Boolean> sendGate) {
             this.frame = frame; this.input = input; this.log = log;
-            this.send = send; this.extend = extend; this.sendGate = sendGate;
+            this.send = send; this.extend = extend; this.clock = clock;
+            this.sendGate = sendGate;
         }
     }
 
