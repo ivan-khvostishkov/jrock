@@ -1608,7 +1608,10 @@ it is included or transcribed like any other.
   closed.
 - **Unplug the microphone and it stops listening; plug it back in and it listens again**, on
   the device as it is now, within the few seconds it takes Windows to notice (the log says
-  "Microphone connected: …"). A microphone muted with its own button is not unplugged: it
+  "Microphone connected: …"). One that goes **mid-recording** — unplugged, or a Bluetooth
+  headset switched off — ends the recording there: what it got goes to the prompt like any
+  other recording, and the red dot goes out until the microphone is back. That holds for a
+  Ctrl+Space recording too. A microphone muted with its own button is not unplugged: it
   goes on delivering silence, and speech is heard again the moment it is unmuted.
 - **An automation mutes it** for as long as it runs: nobody types into the prompt then, so
   nobody speaks into it either. The tick stays; listening comes back when the automation ends,

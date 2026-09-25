@@ -5766,6 +5766,9 @@ public class JRock {
     // the listener opens the microphone afresh (see watchMicrophone for the read that
     // never returns). A muted microphone is not that: it delivers silence, on time.
     private static volatile long listenReadAt = Long.MAX_VALUE;
+    // The same for a recording's reads: a microphone gone mid-recording ends it there,
+    // and what it got goes to the prompt.
+    private static volatile long recordReadAt = Long.MAX_VALUE;
     private static final long LISTEN_STALL_MS = 1500;
     private static final int RECORD_SILENCE_MS = 1500;
     // Held from automationBegin to automationEnd: Mic always on does not listen then,
@@ -6107,16 +6110,34 @@ public class JRock {
                 // is there now rather than going on with the one that went. And closed
                 // when a read has not come back for a while, which is what a pulled-out
                 // microphone can do; closing it is what returns the read.
+                boolean changed = present != null && now != present;
+                long at = System.currentTimeMillis();
                 javax.sound.sampled.TargetDataLine listening = listenLine;
-                if (listening != null && ((present != null && now != present)
-                        || System.currentTimeMillis() - listenReadAt > 2 * LISTEN_STALL_MS)) {
-                    listening.close();
+                if (listening != null
+                        && (changed || at - listenReadAt > 2 * LISTEN_STALL_MS)) {
+                    closeQuietly(listening);
+                }
+                // A recording's line likewise: closed, the recording ends there and
+                // what it got goes to the prompt (see startRecording).
+                javax.sound.sampled.TargetDataLine recorded = recordLine;
+                if (recorded != null && (!now || at - recordReadAt > 2 * LISTEN_STALL_MS)) {
+                    closeQuietly(recorded);
                 }
                 present = now;
             }
         }, "jrock-mic-watch");
         t.setDaemon(true);
         t.start();
+    }
+
+    // Closes a microphone line whose device may be gone, when the driver can throw
+    // rather than close.
+    private static void closeQuietly(javax.sound.sampled.TargetDataLine line) {
+        try {
+            line.close();
+        } catch (RuntimeException deadDriver) {
+            // closed as far as it can be
+        }
     }
 
     private static String micGoneMessage(String device, String outcome) {
@@ -6197,6 +6218,7 @@ public class JRock {
                     }
                 }
                 mine.line = line;
+                recordReadAt = System.currentTimeMillis();
                 recordLine = line;
                 format = line.getFormat();
                 int second = (int) format.getSampleRate() * format.getFrameSize();
@@ -6207,27 +6229,49 @@ public class JRock {
                           + " Hz" + (format.getChannels() == 2 ? ", stereo" : "") + ")... "
                           + "Ctrl+Space again to stop.");
                 // A tenth of a second a read, so a stop is answered within one;
-                // whole frames, and the device looked for again every two seconds.
+                // whole frames, and the device looked for again every two seconds - by
+                // the clock, since a microphone that has gone delivers no bytes to count.
+                // A read that brings nothing for LISTEN_STALL_MS, or a line closed under
+                // it (watchMicrophone, for a read that hung), is the microphone gone too.
                 byte[] buf = new byte[Math.max(format.getFrameSize(),
                         second / 10 / format.getFrameSize() * format.getFrameSize())];
-                long nextCheck = 2L * second;
+                long checkAt = System.currentTimeMillis() + 2000;
+                long dataAt = System.currentTimeMillis();
                 boolean gone = false;
                 while (!mine.stop) {
-                    int n = line.read(buf, 0, buf.length);
-                    if (n <= 0 && mine.stop) break;
-                    bytes.write(buf, 0, Math.max(n, 0));
+                    int n;
+                    try {
+                        n = line.read(buf, 0, buf.length);
+                    } catch (RuntimeException deadDriver) {
+                        gone = true;   // what it got so far still goes to the prompt
+                        break;
+                    }
+                    long now = System.currentTimeMillis();
+                    recordReadAt = now;
+                    if (n <= 0) {
+                        if (mine.stop) break;
+                        if (!line.isOpen() || now - dataAt > LISTEN_STALL_MS) {
+                            gone = true;
+                            break;
+                        }
+                        Thread.sleep(20);
+                        continue;
+                    }
+                    dataAt = now;
+                    bytes.write(buf, 0, n);
                     if (ears != null) {
-                        ears.feed(buf, Math.max(n, 0), format.getChannels());
+                        ears.feed(buf, n, format.getChannels());
                         if (ears.quietMs >= RECORD_SILENCE_MS) {
                             log.gray("Quiet again: the recording stops.");
                             break;
                         }
                     }
-                    if (bytes.size() >= nextCheck) {
-                        nextCheck += 2L * second;
+                    if (now > checkAt) {
+                        checkAt = now + 2000;
                         if (inputMixer(device) == null) { gone = true; break; }
                     }
                 }
+                recordReadAt = Long.MAX_VALUE;
                 // The stop comes as the last word is still being said, so the recording
                 // goes on for RECORD_TAIL_MS more: without it the word is cut off, and a
                 // recognizer hears half a word as another one.
@@ -6241,7 +6285,11 @@ public class JRock {
                         bytes.write(rest, got - n, n);
                     }
                 }
-                line.stop();
+                try {
+                    line.stop();
+                } catch (RuntimeException deadDriver) {
+                    // gone: nothing to stop
+                }
                 if (!gone) {
                     // What was already captured at the stop is part of it.
                     int left = line.available() / format.getFrameSize() * format.getFrameSize();
@@ -6251,14 +6299,16 @@ public class JRock {
                         if (n > 0) bytes.write(rest, 0, n);
                     }
                 }
-                line.close();
+                try {
+                    line.close();
+                } catch (RuntimeException deadDriver) {
+                    // gone: closed as far as it can be
+                }
                 recordLine = null;
                 double seconds = bytes.size() / (double) second;
-                if (gone) {
-                    log.gray(micGoneMessage(device, "the recording was stopped and not "
-                            + "included"));
-                    return;
-                }
+                // Gone: the recording ends where the microphone went, and what it got
+                // goes to the prompt like any other - it was said, and it is all there is.
+                if (gone) log.gray(micGoneMessage(device, "the recording stops there"));
                 if (bytes.size() == 0) {
                     log.gray("Recording done - nothing was recorded, so nothing was included.");
                     return;
@@ -6306,8 +6356,13 @@ public class JRock {
             } catch (InterruptedException ex) {
                 // Never interrupted: a daemon, stopped through mine.stop.
             } finally {
+                recordReadAt = Long.MAX_VALUE;
                 javax.sound.sampled.TargetDataLine line = mine.line;
-                if (line != null && line.isOpen()) line.close();
+                try {
+                    if (line != null && line.isOpen()) line.close();
+                } catch (RuntimeException deadDriver) {
+                    // gone: closed as far as it can be
+                }
                 if (line != null && recordLine == line) recordLine = null;
                 if (recording == mine) recording = null;
             }
