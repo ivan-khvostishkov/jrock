@@ -1372,6 +1372,20 @@ the voice, so the microphone doesn't record the last answer as the next question
   The first time is checked against the computer's clock first, and a model more than two
   minutes off sets nothing. The status line says what became of the alarm: set, refused, or
   not set because the timer agent isn't running.
+- **Location.** When the whole answer is *"I need to know your location"*, the agent does not
+  show it or read it aloud. It sends `#here` to the
+  [location agent](#a-fifth-agent-location-jrocklocationjava) and gives the model the line that
+  comes back, unchanged, as the next prompt, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`.
+  The reply to that is the turn's answer. This happens at most once a turn. The model knows
+  which question the location answers only with History on.
+- **Weather.** When the whole answer is *"I need weather for this location: …"*, the agent
+  does not show it or read it aloud either. If the location has no coordinates, the location
+  agent is asked for them first. If the model already has them from `#here`, they are used as
+  given. The [weather agent](#a-sixth-agent-weather-jrockweatherjava) returns a checked
+  open-meteo.com address. The agent fetches that address into
+  `jrock-prompt-ptt-weather.txt`, the way Fetch URL does, and the model's report is read
+  aloud. Without the other agents, the request is shown and read aloud after all, and the
+  status line says why. See [Multi-agent collaboration](#multi-agent-collaboration).
 
 ### A fourth agent: timer and alarm (`JRockTimer.java`)
 
@@ -1399,7 +1413,8 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   above and a newline, and read one line back: `1` means the alarm is set, `0` means it isn't.
   Then close the connection. [Push-to-talk](#a-third-agent-push-to-talk-jrockpushtotalkjava)
   does this.
-- **JRock's agents' ports** are **47470–47479**, and the timer has the first. The range is
+- **JRock's agents' ports** are **47470–47479**. The timer has the first, the location agent
+  47471, and the weather agent 47472. The range is
   below Windows' dynamic range (49152 and up, where the system hands out ports and Hyper-V
   reserves blocks of them), and no well-known service uses it. Another timer already running
   on the port is reported in the window. Alarms can still be set there by hand.
@@ -1407,6 +1422,184 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   JRocks in one folder, such as this one and push-to-talk's, overwrite each other's log. A
   folder with no key is fine. Set its **Narrate on** once: press Narrate in its JRock's log
   menu to list the devices, then pick one in Configure.
+
+### A fifth agent: location (`JRockLocation.java`)
+
+It knows where the operator is and tells other agents.
+
+```
+java -cp jrock.jar JRockLocation.java --working-dir D:\Location
+```
+
+It starts JRock and takes it as an automation, like the timer, and opens a small window.
+**Nothing is kept across runs**, so the location is entered and refreshed at every start.
+
+- **Place**: typed, or **Determine automatically** (then the field is greyed out and shows
+  what was found).
+- **Coordinates**: *Enter manually*, *From GPS* (Windows location, through PowerShell's
+  `GeoCoordinateWatcher`), or *From the place (openstreetmap.org)*. In the two automatic modes
+  Lat and Lon are greyed out. The agent locates once at startup.
+- **Round to**: *Don't*, or 2–6 digits. Only the line sent to other agents is rounded; the
+  fields keep every digit.
+- **Refresh GPS every**: *Don't*, 5 or 30 min.
+- **Looking things up on openstreetmap.org goes through the agent's own JRock.** For example,
+  to name the place at some coordinates:
+  1. `jrock-prompt-gps-to-place-url.txt` asks the model for a web address on openstreetmap.org.
+  2. The first `http(s)://` address in the reply is **checked**: it must parse as a Java URL,
+     use `https`, have no user name, use port 443 or none, and be `openstreetmap.org` itself or
+     one of its subdomains.
+  3. JRock's [Fetch URL](#fetching-a-url) fetches it into `jrock-prompt-gps-to-place-name.txt`.
+  4. The model reads the place from what came back, or says `NOT FOUND`.
+
+  A place goes to coordinates the same way, with `jrock-prompt-place-to-gps-url.txt` and
+  `jrock-prompt-place-to-gps.txt`. The prompts name only the site: building the address and
+  its query string is left to the model.
+- **Other agents ask** on `127.0.0.1:47471`. They send one line and read one line back, and the
+  agent closes the connection after it. A line is a place, coordinates, or both, comma-separated
+  and latitude first: `Munich, Bavaria`, `Lat: 48.13, Lon: 11.59`, or
+  `Munich, Bavaria, Lat: 48.13, Lon: 11.59`. The half that is missing is found. **`#here`**
+  means where the operator is now, as the window has it set. An empty line back means not known,
+  and the window says why.
+- **Caching.** Answers for places and coordinates are kept for the run. `#here` is kept only
+  while Refresh GPS is on. Then the GPS is read again every 5 or 30 min, and the place is looked
+  up again if it is automatic, so `#here` is answered at once.
+- **Run it in a folder of its own**, with History off there. A key is needed only for the
+  openstreetmap.org lookups; GPS and typed values work without one.
+
+### A sixth agent: weather (`JRockWeather.java`)
+
+It turns a location into a checked address for the weather on open-meteo.com. It does not fetch
+the weather itself: the agent that asked does that.
+
+```
+java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
+```
+
+- **Other agents ask** on `127.0.0.1:47472`. They send a location in the location agent's line
+  format, **with coordinates**, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`. They get back
+  one line: the address, or an empty line and the reason in the window.
+- `jrock-prompt-weather-url.txt` asks the model for the open-meteo.com address with the current
+  weather and the forecast, in Celsius and in the local time zone. The address is checked the
+  way the location agent checks its own, but against `open-meteo.com` and its subdomains.
+  Addresses are kept for the run, by coordinates.
+- The window lists the lines asked for and the addresses given, and has a field and **Get
+  address** to try one by hand.
+- It needs a key. **Run it in a folder of its own**, with History off there.
+
+### Multi-agent collaboration
+
+The agents are separate programs, each with a JRock of its own, and they talk over loopback TCP
+in plain lines of text. Only push-to-talk talks to a person: it hears the operator through the
+microphone and answers through the speaker. Everything else is **robot to robot**:
+- the sentences the model says for a program to recognise (it is told to say them in English,
+  word for word),
+- the lines between the agents,
+- the web addresses each agent's model gives and the agent checks before anything is fetched.
+
+Push-to-talk never reads those aloud.
+
+In the diagrams, the **yellow** parts are spoken between the operator and push-to-talk. The
+**blue** parts are robot-to-robot: between the agents, their models, and the websites.
+
+**The weather where the operator is.** Two model requests, three agents and two websites, and
+the operator hears only the question and the report:
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    box Push-to-talk
+        participant PTT as JRockPushToTalk
+        participant PM as its JRock (model)
+    end
+    box Location, 127.0.0.1:47471
+        participant Loc as JRockLocation
+        participant LM as its JRock (model)
+    end
+    box Weather, 127.0.0.1:47472
+        participant Wx as JRockWeather
+        participant WM as its JRock (model)
+    end
+    participant OSM as openstreetmap.org
+    participant OM as open-meteo.com
+
+    rect rgb(255, 245, 200)
+        Op->>PTT: speaks: "What's the weather like here?"
+    end
+    rect rgb(220, 235, 255)
+        PTT->>PM: recording + appendix (#35;now = the time)
+        PM-->>PTT: "I need to know your location"
+        Note over PTT: recognised: not shown, not read aloud
+        PTT->>Loc: #35;here
+        alt Refresh GPS on: cached
+            Loc-->>Loc: last fix and place
+        else looked up now
+            Loc->>Loc: GPS (Windows location): Lat, Lon
+            Loc->>LM: jrock-prompt-gps-to-place-url.txt (#35;lat, #35;lon)
+            LM-->>Loc: https://...openstreetmap.org/...
+            Note over Loc: address checked: https, openstreetmap.org
+            Loc->>LM: Fetch URL into jrock-prompt-gps-to-place-name.txt
+            LM->>OSM: GET
+            OSM-->>LM: JSON
+            LM-->>Loc: "Munich, Bavaria"
+        end
+        Loc-->>PTT: Munich, Bavaria, Lat: 48.13, Lon: 11.59
+        PTT->>PM: that line, unchanged
+        PM-->>PTT: "I need weather for this location: Munich, Bavaria, Lat: 48.13, Lon: 11.59"
+        Note over PTT: recognised: not shown, not read aloud
+        PTT->>Wx: Munich, Bavaria, Lat: 48.13, Lon: 11.59
+        Wx->>WM: jrock-prompt-weather-url.txt (#35;place, #35;lat, #35;lon)
+        WM-->>Wx: https://api.open-meteo.com/v1/forecast?latitude=48.13&...
+        Note over Wx: address checked: https, open-meteo.com
+        Wx-->>PTT: https://api.open-meteo.com/v1/forecast?...
+        PTT->>PM: Fetch URL into jrock-prompt-ptt-weather.txt (#35;location)
+        PM->>OM: GET
+        OM-->>PM: JSON
+        PM-->>PTT: the weather report
+    end
+    rect rgb(255, 245, 200)
+        PTT->>Op: reads aloud: "In Munich it is now Saturday the twenty-sixth ..."
+    end
+```
+
+If the operator names a place instead, as in "What's the weather in Berlin?", the model asks
+straight away: *"I need weather for this location: Berlin"*. That line has no coordinates, so
+push-to-talk first sends `Berlin` to the location agent. That agent looks the coordinates up
+through openstreetmap.org, the same way it looks up a place above. The rest is the same.
+
+**Setting an alarm.** Here the sentence the program recognises is also what the operator
+hears:
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    box Push-to-talk
+        participant PTT as JRockPushToTalk
+        participant PM as its JRock (model)
+    end
+    participant Tm as JRockTimer, 127.0.0.1:47470
+
+    rect rgb(255, 245, 200)
+        Op->>PTT: speaks: "Set a timer for ten minutes"
+    end
+    rect rgb(220, 235, 255)
+        PTT->>PM: recording + appendix (#35;now = 10:01:34 ...)
+        PM-->>PTT: "Now is 10:01:34, I'm setting an alarm for 10:11:34"
+        Note over PTT: recognised, and 10:01:34 checked against the clock (2 min)
+        PTT->>Tm: 10:11:34
+        Tm-->>PTT: 1
+        Note over PTT: status line: alarm set
+    end
+    rect rgb(255, 245, 200)
+        Tm->>Op: a short rising chirp
+        PTT->>Op: reads aloud: "Now is 10:01:34, I'm setting an alarm for 10:11:34"
+        Note over Tm: ten minutes later
+        Tm->>Op: four quick beeps, once
+    end
+```
+
+The agents find each other only by port, with nothing to configure. One that isn't running is
+a *connection refused*: push-to-talk says so on its status line, and reads the model's own
+answer aloud instead.
 
 ### The automation API
 
@@ -1429,6 +1622,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
 | `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
+| `automationFetchUrl(String url)` | [Fetch URL](#fetching-a-url) (Ctrl+U), for a URL given: the page goes in at the cursor, as a link and an include. A refused URL is a returned reason, not a dialog. Fails when nothing was inserted. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
 | `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
 | `automationStopRecording(long millis)` | Stop recording (Ctrl+Space again), and waits until the recording is in the prompt — an `@audio` token, or the transcribed text with **Transcribe** on. Fails when nothing reached the prompt. |

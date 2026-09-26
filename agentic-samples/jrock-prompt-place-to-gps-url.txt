@@ -1,0 +1,5 @@
+Tell me the web address on openstreetmap.org that gives the latitude and longitude of the place below. It will be fetched as it is, by a program, so it has to work without a browser and without cross-origin (CORS) restrictions.
+
+Reply with the address alone, on one line, with nothing before or after it.
+
+Place: #place

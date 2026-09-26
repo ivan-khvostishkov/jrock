@@ -2952,6 +2952,34 @@ public class JRock {
         return null;
     }
 
+    // Fetches one address and inserts it at the end of the prompt, exactly as Fetch URL
+    // (Ctrl+U) does: the "[](url)" link, and under it the @txt or @img token of what came
+    // back, saved under JRock/urls/. Returns null, or why nothing was inserted - the
+    // reason the dialog would have shown by hand. Blocks for as long as the server takes.
+    //
+    // Any http or https address is fetched, as by hand; which addresses an agent should
+    // ask for is the agent's to decide.
+    public static String automationFetchUrl(String url) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        if (url == null || url.isBlank()) return "no URL was given.";
+        int before = promptTokenCount(live);
+        automationUrlRefusal = null;
+        try {
+            fetchUrl(live.frame, live.input, live.log, false, url.trim());
+        } catch (RuntimeException ex) {
+            return "fetching " + url + " failed: " + ex;
+        } finally {
+            live.log.gray("");   // closes the block, as the dialog's own done() does
+        }
+        if (promptTokenCount(live) == before) {
+            String why = automationUrlRefusal;
+            return why != null ? why : "nothing was inserted from " + url + " - the log says why.";
+        }
+        return null;
+    }
+
     // Sends the prompt as it stands and waits for the reply: the Send button pressed,
     // and the answer logged and written to its own file, exactly as by hand.
     //
@@ -7642,12 +7670,21 @@ public class JRock {
 
     // Reports a URL insert that cannot go on: the reason in the log, where the rest of
     // the fetch is recorded, and the same reason in a dialog - this one was asked for by
-    // hand, and the answer to it is that nothing was inserted.
+    // hand, and the answer to it is that nothing was inserted. Under an automation there
+    // is nobody to press OK - a dialog would hold the agent until someone did - so the
+    // reason is kept for automationFetchUrl to return instead.
     private static void urlRefused(JFrame frame, LogView log, String title, String message) {
         log.gray(message);
+        if (automating) {
+            automationUrlRefusal = message;
+            return;
+        }
         onEdt(() -> javax.swing.JOptionPane.showMessageDialog(frame, message, title,
                 javax.swing.JOptionPane.WARNING_MESSAGE));
     }
+
+    // Why the last fetch under an automation inserted nothing (see urlRefused).
+    private static volatile String automationUrlRefusal;
 
     // The media type out of a Content-Type header: lower-cased, without its
     // parameters. "text/html; charset=utf-8" -> "text/html". "" when there is none.

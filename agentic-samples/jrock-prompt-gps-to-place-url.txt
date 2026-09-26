@@ -1,0 +1,5 @@
+Tell me the web address on openstreetmap.org that names the town or city at the coordinates below, in English. It will be fetched as it is, by a program, so it has to work without a browser and without cross-origin (CORS) restrictions.
+
+Reply with the address alone, on one line, with nothing before or after it.
+
+Lat: #lat, Lon: #lon

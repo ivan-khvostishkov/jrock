@@ -1,0 +1,9 @@
+Below is what openstreetmap.org answered when asked where a place is, fetched from the address above it.
+
+Tell me the latitude and longitude of the best match, copying every digit as it is given, in exactly this form and with nothing before or after it:
+
+Lat: <latitude>, Lon: <longitude>
+
+If it found no place, reply with NOT FOUND and nothing else.
+
+#url

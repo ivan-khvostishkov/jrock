@@ -1,0 +1,7 @@
+Below is the current weather and the forecast from open-meteo.com for #location, fetched from the address above it.
+
+Tell me the day of the week and the day of the month it is there now, the weather now, and the forecast in detail. Name the place, without its region or country. Give temperatures in degrees Celsius.
+
+Your answer is read aloud to the operator, like a weather report on the radio: in the language the operator speaks, in plain spoken sentences, with no lists, tables, formatting or emoji. If there is no weather in the data, say so - do not make it up.
+
+#url
