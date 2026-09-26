@@ -63,6 +63,23 @@
 // 127.0.0.1:TIMER_PORT, which answers 1 when it has set it. Either way, the status line
 // says what became of it.
 //
+// Location: an answer that is only "I need to know your location" - which the appendix
+// asks the model for, in English - is neither shown nor read aloud. The location agent
+// (JRockLocation.java) on 127.0.0.1:LOCATION_PORT is sent "#here", and the line it sends
+// back - "Munich, Bavaria, Lat: 48.13, Lon: 11.59" - goes to the model as it is, as the
+// next prompt; its reply is the turn's answer. Once a turn. The model knows which
+// question that answers only with History on. Without the agent, or when it does not
+// know, the request is shown and read aloud after all, and the status line says why.
+//
+// Weather: an answer that is only "I need weather for this location: ..." is not shown or
+// read aloud either. A location with no coordinates in it - "Munich" - goes to the
+// location agent first, for them; one the model already has from "#here" is used as it
+// is. The location goes to the weather agent (JRockWeather.java) on
+// 127.0.0.1:WEATHER_PORT, which answers with a checked address on open-meteo.com; that
+// is fetched, as Fetch URL does, into jrock-prompt-ptt-weather.txt beside this file, and
+// the model's report from it is the turn's answer, read aloud. Once a turn, after the
+// location if that came first.
+//
 // The microphone and the speaker are JRock's to choose, as they are for Ctrl+Space and
 // Narrate in JRock's own window. Either one not set is a message here, not a dialog:
 // press Ctrl+Space (or Narrate) in JRock once to list the devices into Configure, pick
@@ -153,6 +170,35 @@ public final class JRockPushToTalk {
     // how long it has to answer, on the same machine.
     private static final int TIMER_PORT = 47470;
     private static final int TIMER_TIMEOUT_MS = 3000;
+
+    // The answer that asks where the operator is - the whole of it, as the appendix asks,
+    // give or take quotes and a full stop.
+    private static final java.util.regex.Pattern LOCATION_REQUEST = java.util.regex.Pattern.compile(
+            "^\\W*I need to know your location\\W*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    // The answer that asks for the weather, and the location it is for - the whole of
+    // the answer, as the location request is.
+    private static final java.util.regex.Pattern WEATHER_REQUEST = java.util.regex.Pattern.compile(
+            "^\\W*I need weather for this location:\\s*(.*\\S)\\s*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
+    // Coordinates in a location line, as the location agent writes them - which the model
+    // may already have from it, and then they are used as they are.
+    private static final java.util.regex.Pattern COORDINATES = java.util.regex.Pattern.compile(
+            "Lat(?:itude)?\\s*:\\s*[-+]?\\d", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    // The prompt the weather is fetched into, beside this file: #location is where it is
+    // for, #url where the page goes.
+    private static final String WEATHER_PROMPT = "jrock-prompt-ptt-weather.txt";
+
+    // The location and weather agents' ports - JRockLocation.PORT and JRockWeather.PORT,
+    // the second and third of JRock's agents' ports - and how long an agent has: at once
+    // to take the connection, and for the answer as long as two questions to its own
+    // model and a page fetched take.
+    private static final int LOCATION_PORT = 47471;
+    private static final int WEATHER_PORT = 47472;
+    private static final int AGENT_CONNECT_MS = 3000;
+    private static final int AGENT_TIMEOUT_MS = 180_000;
 
     // The lever: on, JRock listens and the agent converses (see converse). Written on
     // the EDT, read by the worker's loop too. And, EDT only: whether that loop is
@@ -246,20 +292,133 @@ public final class JRockPushToTalk {
         if (after == null) throw new Stop("there is no " + appendix + ".");
         after = after.replace(NOW_PLACEHOLDER, now()).replaceAll("\\s+$", "");
         check(JRock.automationSetPrompt(prompt.replaceAll("\\s+$", "") + "\n\n" + after + "\n"));
+        String answer = sendAndRead("Waiting for the reply\u2026");
+        // A request for the location or the weather is not shown or read aloud: the
+        // operator did not ask for it, and what it asks for goes to the model instead.
+        // Each once a turn - the location, then the weather for it, is a turn that goes
+        // well - so a model that asks again is heard rather than asked forever.
+        String note = null;
+        boolean askedLocation = false, askedWeather = false;
+        while (note == null) {
+            java.util.regex.Matcher weather = WEATHER_REQUEST.matcher(answer.trim());
+            if (!askedLocation && LOCATION_REQUEST.matcher(answer.trim()).matches()) {
+                askedLocation = true;
+                later(() -> setState(State.ANSWERING, "Looking up the location\u2026"));
+                String[] here = askAgent(LOCATION_PORT, "#here", "location", "JRockLocation.java");
+                if (here[0] == null) {
+                    note = "Location not sent: " + here[1];
+                    break;
+                }
+                check(JRock.automationClearPrompt());
+                check(JRock.automationSetPrompt(here[0]));
+                answer = sendAndRead("Sent the location, waiting for the reply\u2026");
+            } else if (!askedWeather && weather.matches()) {
+                askedWeather = true;
+                String[] report = weather(weather.group(1));
+                if (report[0] == null) {
+                    note = "Weather not fetched: " + report[1];
+                    break;
+                }
+                answer = report[0];
+            } else {
+                break;
+            }
+        }
+        String reply = answer;
+        later(() -> showAnswer(reply));
+        String alarm = alarmIn(reply);
+        if (handsFreeTurn && !handsFree) return join(note, alarm);
+        String silent = JRock.automationNarrate(reply);
+        return join(note, alarm, silent == null ? null : "Not read aloud: " + silent);
+    }
+
+    // The weather for a location the model named: its coordinates from the location
+    // agent, if the model gave none; the address to fetch from the weather agent; and
+    // the model's report of what is there, fetched into the weather prompt. Returns
+    // { report, null }, or { null, why not }. On the worker.
+    private static String[] weather(String location) {
+        String where = location.trim().replaceAll("[.\"'\u201c\u201d]+$", "").trim();
+        if (!COORDINATES.matcher(where).find()) {
+            String named = where;
+            later(() -> setState(State.ANSWERING, "Looking up where " + named + " is\u2026"));
+            String[] found = askAgent(LOCATION_PORT, named, "location", "JRockLocation.java");
+            if (found[0] == null) return found;
+            if (!COORDINATES.matcher(found[0]).find()) {
+                return new String[] { null, "the location agent found no coordinates for " + named + "." };
+            }
+            where = found[0];
+        }
+        String at = where;
+        later(() -> setState(State.ANSWERING, "Finding the weather for " + at + "\u2026"));
+        String[] url = askAgent(WEATHER_PORT, at, "weather", "JRockWeather.java");
+        if (url[0] == null) return url;
+        String prompt = read(ownDirectory().resolve(WEATHER_PROMPT).toString());
+        if (prompt == null) return new String[] { null, "there is no " + WEATHER_PROMPT + "." };
+        prompt = prompt.replace("#location", at);
+        int cut = prompt.indexOf("#url");
+        String before = cut < 0 ? prompt.replaceAll("\\s+$", "") + "\n\n" : prompt.substring(0, cut);
+        String after = cut < 0 ? "" : prompt.substring(cut + "#url".length());
+        later(() -> setState(State.ANSWERING, "Fetching the weather\u2026"));
+        check(JRock.automationClearPrompt());
+        check(JRock.automationSetPrompt(before));
+        String fetched = JRock.automationFetchUrl(url[0]);
+        if (fetched != null) return new String[] { null, fetched };
+        if (!after.isBlank()) {
+            String sofar = JRock.automationPromptText();
+            if (sofar == null) throw new Stop("the prompt could not be read.");
+            check(JRock.automationSetPrompt(sofar + after));
+        }
+        return new String[] { sendAndRead("Fetched the weather, waiting for the report\u2026"), null };
+    }
+
+    // Sends the prompt as it stands and returns the reply, the answer area emptied and
+    // the status line saying waiting while it comes. On the worker.
+    private static String sendAndRead(String waiting) {
         later(() -> {
             answerArea.setText("");
-            setState(State.ANSWERING, "Waiting for the reply\u2026");
+            setState(State.ANSWERING, waiting);
         });
         String[] sent = JRock.automationSend(REPLY_TIMEOUT_MS);
         if (!"1".equals(sent[0])) throw new Stop(sent[3]);
         String answer = read(JRock.automationMessageFile("assistant", sent[2]));
         if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
-        later(() -> showAnswer(answer));
-        String alarm = alarmIn(answer);
-        if (handsFreeTurn && !handsFree) return alarm;
-        String silent = JRock.automationNarrate(answer);
-        String notRead = silent == null ? null : "Not read aloud: " + silent;
-        return alarm == null ? notRead : notRead == null ? alarm : alarm + " " + notRead;
+        return answer;
+    }
+
+    // The notes that are there, in one line; null when there are none.
+    private static String join(String... notes) {
+        StringBuilder out = new StringBuilder();
+        for (String n : notes) {
+            if (n == null) continue;
+            if (out.length() > 0) out.append(' ');
+            out.append(n);
+        }
+        return out.length() == 0 ? null : out.toString();
+    }
+
+    // Asks another agent - the location agent, the weather agent - on its port: the line
+    // sent, and the line that comes back, read until the agent closes the connection.
+    // Returns { line, null }, or { null, why not }; an empty line is the agent's "don't
+    // know". what and file name the agent in that.
+    private static String[] askAgent(int port, String line, String what, String file) {
+        try (java.net.Socket agent = new java.net.Socket()) {
+            agent.connect(new java.net.InetSocketAddress(
+                    java.net.InetAddress.getLoopbackAddress(), port), AGENT_CONNECT_MS);
+            agent.setSoTimeout(AGENT_TIMEOUT_MS);
+            agent.getOutputStream().write((line.replaceAll("[\r\n]+", " ") + "\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            agent.getOutputStream().flush();
+            String reply = new String(agent.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+                    .replaceAll("\r?\n$", "");
+            return reply.isBlank()
+                    ? new String[] { null, "the " + what + " agent has no answer for \"" + line
+                            + "\" - its window says why." }
+                    : new String[] { reply, null };
+        } catch (java.net.ConnectException ex) {
+            return new String[] { null, "the " + what + " agent is not running (" + file + ")." };
+        } catch (IOException ex) {
+            return new String[] { null, "the " + what + " agent did not answer (" + ex.getMessage() + ")." };
+        }
     }
 
     // Sets the alarm an answer asks for, if it asks for one. Returns null when it does

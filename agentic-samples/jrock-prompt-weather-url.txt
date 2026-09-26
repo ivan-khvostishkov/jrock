@@ -1,0 +1,6 @@
+Tell me the web address on open-meteo.com that gives the current weather and the forecast for the next days at the coordinates below, in degrees Celsius and in the local time zone. It will be fetched as it is, by a program, so it has to work without a browser and without cross-origin (CORS) restrictions.
+
+Reply with the address alone, on one line, with nothing before or after it.
+
+Place: #place
+Lat: #lat, Lon: #lon

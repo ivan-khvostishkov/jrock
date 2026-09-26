@@ -1,0 +1,7 @@
+Below is what openstreetmap.org answered when asked which place is at some coordinates, fetched from the address above it.
+
+Tell me that place the way a person says where they are: the town or city, then its region, for example "Munich, Bavaria". One line, in English, with no street, house number or postcode, and nothing before or after it.
+
+If it named no place, reply with NOT FOUND and nothing else.
+
+#url
