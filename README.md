@@ -963,6 +963,11 @@ since is caught at the only moment that matters. What the reload *does* check is
 still there, because a path that no longer exists is the one problem you can do something about
 before sending.
 
+**An automation reloads them by itself.** An agent starts JRock afresh, and `automationBegin`
+runs Reload all includes as it takes the window. A send with History on then sends the files the
+conversation already refers to, without refusing them as unknown. In a folder where nothing
+refers to an include, it logs nothing.
+
 ### PDF conversion (Ghostscript)
 
 Selecting the PDF filter runs **Ghostscript** to convert the PDF, one page image per page, then
@@ -1624,7 +1629,7 @@ thread** — they say so rather than deadlocking if you do.
 | Method | What it does |
 |---|---|
 | `automationAwaitReady(long millis)` | Blocks until the window is up and the model list is in. Returns why not — including the missing API key. |
-| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, and a log line saying so. History is left as the checkbox has it. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. Refuses if an automation is already running. |
+| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, and a log line saying so. History is left as the checkbox has it. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. Then runs [Reload all includes](#includes-that-outlive-the-session), so the includes the log refers to are known again. Refuses if an automation is already running. |
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
