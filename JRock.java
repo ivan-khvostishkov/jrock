@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.4.0";
+    private static final String VERSION = "2.4.1";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -2525,7 +2525,7 @@ public class JRock {
         // started it: the includes are read back out of the log rather than attached
         // again one by one (see reloadAllIncludes).
         addMenuItem(promptMenu, "Reload all includes",
-                () -> reloadAllIncludes(input, log));
+                () -> reloadAllIncludes(input, log, false));
         addMenuItem(promptMenu, "Load prompt from file...",
                 () -> loadPromptInto(frame, input, log));
         addMenuItem(promptMenu, "Save prompt copy as...",
@@ -2813,6 +2813,10 @@ public class JRock {
         live.log.gray("The prompt is read-only and Send is held until it finishes"
                 + (micAlwaysOn ? ", and Mic always on is muted." : "."));
         live.log.gray("");
+        // Reload all includes, as the prompt menu does: an agent starts JRock afresh,
+        // and the includes the log already refers to - which a send with History on
+        // sends again - would otherwise be unknown to this session, and the send refused.
+        onEdt(() -> reloadAllIncludes(live.input, live.log, true));
         return null;
     }
 
@@ -7887,7 +7891,10 @@ public class JRock {
     // moments anyway. What this does check is that the file is still there, because a
     // path in the log that no longer exists is the one problem the user can do
     // something about before sending.
-    private static void reloadAllIncludes(JTextArea input, LogView log) {
+    //
+    // quiet leaves out the line saying there was nothing to reload: automationBegin
+    // runs this on every start, and in a folder with no includes that line says nothing.
+    private static void reloadAllIncludes(JTextArea input, LogView log, boolean quiet) {
         java.util.Map<String, Path> remembered = new java.util.HashMap<>();
         java.util.Map<String, String> kinds = new java.util.LinkedHashMap<>();   // hash -> img/txt
         java.util.Map<String, Path> wanted = new java.util.LinkedHashMap<>();    // hash -> path
@@ -7925,6 +7932,7 @@ public class JRock {
         }
 
         if (kinds.isEmpty()) {
+            if (quiet) return;
             log.gray("Reload all includes: nothing refers to an include - "
                     + "no @img/@txt/@audio token in the log or the prompt.");
             log.gray("");
