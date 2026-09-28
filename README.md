@@ -2272,6 +2272,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   A fourth includes a 3000 × 2000 PNG and measures the copy: at the default **Images DPI** of 150
   A4 has room for 1004 × 1518 dots, so the copy has to be `big-1004x669.png` and really be that
   size, the include has to point at it, and the original has to be left as it was.
+- **`JRockIncludeDirectoryTest`** puts a PNG, a text file, a file of an unknown type and a
+  subfolder into one folder and includes it through **Include directory...**. The PNG has to
+  come first as `@img` and the text after it as `@txt`, in name order. The other two have to be
+  named in the log as skipped, each with its own reason, followed by the count: 2 included,
+  2 skipped.
 - **`JRockReloadIncludesTest`** includes a PNG and a text file, throws the hash → path map away by
   reflection — which is the state a restart leaves, minus the restart — and invokes **Reload all
   includes** from the prompt's context menu. The map has to come back identical, each entry named
