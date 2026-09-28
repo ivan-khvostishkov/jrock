@@ -692,6 +692,13 @@ documents into either):
    and included from the copy ([why](#includes-that-outlive-the-session)) — and an image bigger
    than the page it will be read on is **downscaled as it is copied**, to the
    [**Images DPI**](#configure-dialog-top-left-button) the Configure dialog was left on.
+
+   **Include directory...** (prompt context menu) picks a folder instead and includes every
+   file in it, one by one in name order, the type decided by the extension: images as
+   **Image files**, text as **Text files as is**, wav and mp3 as **Audio files**, a PDF as
+   **page images**, and an RTF or a DOCX **as Markdown text**. Any other file, and any folder
+   inside it, is skipped, and the log says so for each. The log then gives the count of
+   files included and skipped.
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart the files have to be attached again — or their paths read
    back out of the log with **Reload all includes**

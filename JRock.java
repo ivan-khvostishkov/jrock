@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.3.0";
+    private static final String VERSION = "2.4.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -2493,6 +2493,10 @@ public class JRock {
         // except the accessory column down its right-hand side.
         addMenuItem(promptMenu, "Include with copy...",
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected(), true));
+        // Every file in a folder at once, each by its extension (see
+        // showIncludeDirectoryDialog).
+        addMenuItem(promptMenu, "Include directory...",
+                () -> showIncludeDirectoryDialog(frame, input, log, extendMode.isSelected()));
         // The same include for a file that is not on this machine: the address is
         // fetched into JRock/urls/ and included from there, as text or as a picture
         // according to what it answered with (see fetchUrl).
@@ -6946,6 +6950,101 @@ public class JRock {
                 input.requestFocusInWindow();
             }
         }.execute();
+    }
+
+    // ---- Include directory -------------------------------------------------
+    // Every file in one folder, included one by one in name order, each as the include
+    // dialog's filter for its extension would include it: images as @img, text as
+    // @txt, recordings as @audio, a PDF as page images, an RTF or a DOCX as Markdown.
+    // With no filter to pick, a file's extension decides, and RTF goes as Markdown,
+    // the way DOCX does, rather than as its markup. A file of any other type, and a
+    // folder inside it, is skipped with a line in the log saying so: the folder is
+    // taken as it is, not searched.
+    private static void showIncludeDirectoryDialog(JFrame frame, JTextArea input, LogView log,
+                                                   boolean extend) {
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(includeChooserDir.start());
+        chooser.setDialogTitle("Include directory");
+        chooser.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
+        chooser.setAcceptAllFileFilterUsed(false);
+        if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        includeChooserDir.remember(chooser);
+        java.io.File chosen = chooser.getSelectedFile();
+        if (chosen == null) return;
+        Path dir = chosen.toPath();
+
+        // Off the EDT for the same reason as the include dialog: a PDF among the
+        // files runs Ghostscript and waits for it.
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws IOException {
+                includeDirectory(frame, input, log, extend, dir);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                } catch (Exception ex) {
+                    log.gray("Include directory failed: " + ex.getMessage());
+                }
+                log.gray("");   // closes the include block, as the include dialog does
+                input.requestFocusInWindow();
+            }
+        }.execute();
+    }
+
+    // The files of dir, included as showIncludeDirectoryDialog says. Off the EDT.
+    private static void includeDirectory(JFrame frame, JTextArea input, LogView log,
+                                         boolean extend, Path dir) throws IOException {
+        java.util.List<Path> entries = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<Path> list = Files.list(dir)) {
+            list.forEach(entries::add);
+        }
+        entries.sort(java.util.Comparator.comparing(
+                (Path p) -> p.getFileName().toString(), String.CASE_INSENSITIVE_ORDER));
+        int taken = 0, skipped = 0;
+        for (Path file : entries) {
+            String kind = Files.isRegularFile(file) ? includeKindOf(file) : null;
+            if (kind == null) {
+                skipped++;
+                log.gray("Skipped " + file + ": "
+                        + (Files.isDirectory(file) ? "a folder, which is not searched."
+                                : "not a type Include file takes."));
+                continue;
+            }
+            taken++;
+            switch (kind) {
+                case "pdf":  includePdf(frame, input, log, extend, file); break;
+                case "rtf":  includeRtfAsMarkdown(input, log, extend, file); break;
+                case "docx": includeDocxAsMarkdown(input, log, extend, file); break;
+                default: {
+                    boolean image = kind.equals("img");
+                    onEdt(() -> includeOne(input, log, extend, file, kind, image, false));
+                }
+            }
+        }
+        log.gray("Include directory " + dir + ": " + taken + " file(s) included, "
+                + skipped + " skipped.");
+    }
+
+    // The include kind the include dialog would give this file by its extension -
+    // "img", "txt", "audio", "pdf", "rtf" (as Markdown) or "docx" - or null when none
+    // of its filters takes it.
+    private static String includeKindOf(Path file) {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        if (dot < 0) return null;
+        String ext = name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+        switch (ext) {
+            case "pdf": case "rtf": case "docx": return ext;
+            default:
+        }
+        if (java.util.Arrays.asList(IMAGE_EXTENSIONS).contains(ext)) return "img";
+        if (java.util.Arrays.asList(AUDIO_EXTENSIONS).contains(ext)) return "audio";
+        if (java.util.Arrays.asList(TEXT_EXTENSIONS).contains(ext)) return "txt";
+        return null;
     }
 
     // Runs body on the EDT and waits for it to finish.
