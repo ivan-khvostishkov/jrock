@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.4.1";
+    private static final String VERSION = "2.5.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -6726,9 +6726,9 @@ public class JRock {
     }
 
     // What "text file" means in the Load prompt and Include dialogs: .txt plus the
-    // plain-text formats people actually reach for. A .csv, .json, .html or .java file
-    // is text like any other, and having to rename it to .txt to load or include it was
-    // pure friction. (Any file still has to pass the looksBinary check on load.)
+    // plain-text formats people actually reach for. A .csv, .json, .xml, .html or .java
+    // file is text like any other, and having to rename it to .txt to load or include it
+    // was pure friction. (Any file still has to pass the looksBinary check on load.)
     //
     // .rtf is in the list because an RTF file is text too - its markup is ASCII, which
     // is how it carries everything else - and a model that knows RTF can read it as it
@@ -6736,9 +6736,9 @@ public class JRock {
     // dialog's other offer for the same file: "RTF as Markdown text", which converts it
     // and sends the Markdown instead.
     private static final String[] TEXT_EXTENSIONS =
-            { "txt", "csv", "json", "html", "java", "rtf" };
+            { "txt", "csv", "json", "xml", "html", "java", "rtf" };
     private static final String TEXT_FILTER_LABEL =
-            "Text files as is (*.txt, *.csv, *.json, *.html, *.java, *.rtf)";
+            "Text files as is (*.txt, *.csv, *.json, *.xml, *.html, *.java, *.rtf)";
 
     // The image formats ImageHeader can read a size out of, which is also the set the
     // DOCX export can place: named once, because two filters in the include dialog
@@ -7556,8 +7556,9 @@ public class JRock {
     // saved as ".html", which the include dialog already offers as text - so from the
     // request's point of view the model is simply reading a text file, markup and all.
     // XHTML is in the list because it is a web page by any other name; it, too, is
-    // saved and sent as HTML. Plain text and JSON are text the same way, saved as the
-    // ".txt" and ".json" the include dialog offers too, and decoded like a page.
+    // saved and sent as HTML. Plain text, JSON and XML are text the same way, saved as
+    // the ".txt", ".json" and ".xml" the include dialog offers too, and decoded like a
+    // page. XML goes by two names (RFC 7303), and both are the same file.
     private static final java.util.Map<String, String> URL_EXTENSIONS = urlExtensions();
 
     private static java.util.Map<String, String> urlExtensions() {
@@ -7566,6 +7567,8 @@ public class JRock {
         types.put("application/xhtml+xml", "html");
         types.put("text/plain", "txt");
         types.put("application/json", "json");
+        types.put("application/xml", "xml");
+        types.put("text/xml", "xml");
         types.put("image/png", "png");
         types.put("image/jpeg", "jpg");
         types.put("image/gif", "gif");
@@ -7611,7 +7614,7 @@ public class JRock {
                 "<html><body style='width:" + wrapAt + "px'>"
                 + "A web page comes in as text (@txt), a picture as a picture (@img) - "
                 + "whichever the address itself answers with. HTML, plain text, JSON, "
-                + "PNG, JPEG, GIF and WEBP are accepted, and the file is saved under "
+                + "XML, PNG, JPEG, GIF and WEBP are accepted, and the file is saved under "
                 + "JRock/urls/." + cors
                 + "</body></html>");
 
@@ -7621,6 +7624,18 @@ public class JRock {
         row.add(new javax.swing.JLabel("URL:"), BorderLayout.WEST);
         row.add(isCheerpJ() ? pasteRow(urlF, "address") : urlF, BorderLayout.CENTER);
         panel.add(row, BorderLayout.SOUTH);
+
+        // The dialog opens with the URL field focused, so Ctrl+U, paste, Enter is all a
+        // fetch takes. JOptionPane focuses its OK button by default; the field asks for
+        // the focus once it is in the dialog on screen, and once only.
+        urlF.addAncestorListener(new javax.swing.event.AncestorListener() {
+            @Override public void ancestorAdded(javax.swing.event.AncestorEvent e) {
+                urlF.removeAncestorListener(this);
+                javax.swing.SwingUtilities.invokeLater(urlF::requestFocusInWindow);
+            }
+            @Override public void ancestorRemoved(javax.swing.event.AncestorEvent e) { }
+            @Override public void ancestorMoved(javax.swing.event.AncestorEvent e) { }
+        });
 
         int result = javax.swing.JOptionPane.showConfirmDialog(
                 frame, panel, "Fetch URL",
@@ -7725,8 +7740,8 @@ public class JRock {
         if (ext == null) {
             urlRefused(frame, log, "Unsupported media type",
                     "The URL answered with " + (mime.isEmpty() ? "no media type" : mime)
-                    + ", which JRock cannot include. Only HTML pages, plain text, JSON "
-                    + "and PNG, JPEG, GIF or WEBP images can be inserted - nothing was "
+                    + ", which JRock cannot include. Only HTML pages, plain text, JSON, "
+                    + "XML and PNG, JPEG, GIF or WEBP images can be inserted - nothing was "
                     + "saved.");
             return;
         }
@@ -11311,9 +11326,10 @@ public class JRock {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(timeoutSeconds))
-                    // Named, because a server that is given no User-Agent at all is a
-                    // server that sometimes answers 403 instead of the page.
-                    .header("User-Agent", "JRock/" + VERSION)
+                    // JRock names itself the way a well-behaved client does, with a link
+                    // saying whose it is - which bot filters such as Akamai's (in front
+                    // of helpx.adobe.com, among others) accept, so those pages come in.
+                    .header("User-Agent", "JRock/" + VERSION + " (+" + GITHUB_URL + ")")
                     .GET()
                     .build();
             HttpClient client = HttpClient.newBuilder()

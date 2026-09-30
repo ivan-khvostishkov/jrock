@@ -23,12 +23,13 @@ import com.sun.net.httpserver.HttpServer;
 
 /**
  * Drives <em>Fetch URL...</em> in the prompt's context menu against a web server of
- * this test's own: a page, JSON, plain text, a picture, and something that is none of these.
+ * this test's own: a page, JSON, XML, plain text, a picture, and something that is none of
+ * these.
  * <p>
  * A real server on 127.0.0.1 rather than a stubbed transport, because what the feature
  * turns on is the response - its status, its {@code Content-Type}, its charset and its
  * bytes - and a stub that produced those would be a stub of the one thing under test.
- * It listens on a port the OS picks, serves five fixed paths, and is taken down after
+ * It listens on a port the OS picks, serves six fixed paths, and is taken down after
  * each test; nothing leaves the machine.
  * <p>
  * Offline in the sense the rest of the suite is: no API key is set, so JRock skips its
@@ -51,6 +52,10 @@ class JRockFetchUrlTest extends JRockGuiFixture {
 
     /** JSON, which is UTF-8 by RFC 8259 and served without a charset to say so. */
     private static final String JSON = "{\"title\":\"Für Elise\",\"key\":\"a minor\"}";
+
+    /** XML, served as application/xml without a charset, as a feed or a sitemap is. */
+    private static final String XML =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<piece title=\"Für Elise\"/>\n";
 
     /** Plain text in a charset that is neither the default nor Latin-1: Cyrillic. */
     private static final String PLAIN = "Привет, мир.\nЭто просто текст.\n";
@@ -79,6 +84,9 @@ class JRockFetchUrlTest extends JRockGuiFixture {
         server.createContext("/data/notes.json", exchange ->
                 respond(exchange, "application/json",
                         JSON.getBytes(StandardCharsets.UTF_8)));
+        server.createContext("/feeds/catalog", exchange ->
+                respond(exchange, "application/xml",
+                        XML.getBytes(StandardCharsets.UTF_8)));
         server.createContext("/notes/readme", exchange ->
                 respond(exchange, "text/plain; charset=windows-1251",
                         PLAIN.getBytes(java.nio.charset.Charset.forName("windows-1251"))));
@@ -186,6 +194,30 @@ class JRockFetchUrlTest extends JRockGuiFixture {
     }
 
     @Test
+    @DisplayName("an XML URL is saved as .xml and inserted as @txt")
+    void insertsXmlAsText() throws Exception {
+        awaitReadyCount(1);
+
+        String url = base + "/feeds/catalog";
+        fetchUrl(url);
+        awaitLogLine("new @txt token(s) for " + url, FETCH_TIMEOUT_SECONDS);
+
+        // No extension in the URL, so the one its media type calls for is added.
+        Path saved = urlsDirectory().resolve("catalog.xml");
+        assertThat(saved).describedAs("the saved XML").exists();
+        assertThat(new String(Files.readAllBytes(saved), StandardCharsets.UTF_8))
+                .describedAs("the saved XML, read back as UTF-8")
+                .isEqualTo(XML);
+
+        String hash = hashOf(promptArea().text(), "txt");
+        assertThat(promptArea().text()).describedAs("the prompt")
+                .startsWith("[](" + url + ")\n@txt " + hash + "\n");
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .contains("bytes of application/xml to " + saved)
+                .contains("Included @txt " + hash + " from " + saved);
+    }
+
+    @Test
     @DisplayName("a plain-text URL is saved as .txt, re-encoded as UTF-8, and inserted as @txt")
     void insertsPlainTextAsText() throws Exception {
         awaitReadyCount(1);
@@ -206,6 +238,39 @@ class JRockFetchUrlTest extends JRockGuiFixture {
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .contains("Decoded as windows-1251, saved as UTF-8.")
                 .contains("bytes of text/plain to " + saved);
+    }
+
+    @Test
+    @DisplayName("the dialog opens with the URL field focused, ready to type or paste into")
+    void opensWithTheFieldFocused() throws Exception {
+        awaitReadyCount(1);
+
+        chooseInThePromptMenu("Fetch URL...");
+        JOptionPaneFixture dialog =
+                JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot);
+        final java.awt.Component field = dialog.textBox().target();
+
+        // The dialog's own record of where its focus goes, rather than the field's
+        // isFocusOwner(): the suite injects no input and may run behind another window,
+        // where the OS gives no focus to anything - and a request made while that is so
+        // is remembered as this, and granted when the dialog is next active.
+        org.assertj.swing.timing.Pause.pause(
+                new org.assertj.swing.timing.Condition("the URL field to take the focus") {
+                    @Override
+                    public boolean test() {
+                        return org.assertj.swing.edt.GuiActionRunner.execute(
+                                new org.assertj.swing.edt.GuiQuery<Boolean>() {
+                                    @Override
+                                    protected Boolean executeInEDT() {
+                                        java.awt.Window w =
+                                                javax.swing.SwingUtilities.getWindowAncestor(field);
+                                        return w != null && w.getMostRecentFocusOwner() == field;
+                                    }
+                                });
+                    }
+                }, org.assertj.swing.timing.Timeout.timeout(DIALOG_TIMEOUT_MS));
+
+        press(dialog.cancelButton());
     }
 
     @Test
