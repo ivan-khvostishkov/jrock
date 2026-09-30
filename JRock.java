@@ -75,8 +75,9 @@
 //   which writes it there. Nothing is read from the environment: the region and
 //   the model live beside the key in JRock/jrock-config.txt (see "Settings
 //   files"), where they can be read, edited and copied like any other file.
-//   In the browser the key never reaches the JVM at all: the page's JavaScript
-//   HTTP client holds it and signs each request itself (see "HTTP transport").
+//   The browser build keeps the key in the same file, in the browser's own
+//   storage, and the page's JavaScript HTTP client sends each request with the
+//   Authorization header JRock hands it (see "HTTP transport").
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -114,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.5.0";
+    private static final String VERSION = "2.5.1";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -241,12 +242,12 @@ public class JRock {
     // Remembers where a file chooser last browsed, so the next dialog of the same
     // kind opens there. One instance PER PURPOSE, because these files live in
     // different places in practice: included documents and images wherever the
-    // source material is, exported logs somewhere else again. A single shared memory
-    // meant that exporting a log dropped the user where they last included a file - a
+    // source material is, exported logs somewhere else again. Keeping them apart means
+    // exporting a log never drops the user where they last included a file - a
     // directory away from what they wanted.
     //
     // The two prompt dialogs (Ctrl+O, Ctrl+S) deliberately have NO ChooserDir: both
-    // always open in the prompts directory. That is a setting now, and a setting that
+    // always open in the prompts directory. That is a setting, and a setting that
     // quietly drifts as you browse is not one. It also keeps the pair symmetric -
     // prompts are loaded from and saved to the same place, which is what a library
     // is. See loadPromptInto and savePromptAs.
@@ -436,8 +437,8 @@ public class JRock {
         String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
     }
 
-    // Shared traits of Anthropic Claude models on Bedrock. IMPORTANT (corrected
-    // from the model cards): Claude does NOT support Chat Completions on either
+    // Shared traits of Anthropic Claude models on Bedrock. IMPORTANT (per the
+    // model cards): Claude does NOT support Chat Completions on either
     // endpoint. On bedrock-runtime it supports Messages, Converse, Invoke; on
     // bedrock-mantle it supports Messages ONLY, served at /anthropic/v1/messages.
     // JRock only implements Chat Completions on mantle, so Claude models are NOT
@@ -674,7 +675,7 @@ public class JRock {
     // false, and absent is false.
     private static final String CONFIG_RECORD_TRANSCRIBE = "record-transcribe";
     // Whether the Clock checkbox is ticked: true or false, and absent is true - the
-    // checkbox's default, and what every file written before it was kept meant.
+    // checkbox's default.
     private static final String CONFIG_CLOCK = "clock";
     // How many earlier requests History sends, each with the answers after it: a
     // positive number, and absent (or 0) is all of them. Per folder, like the model it
@@ -685,7 +686,7 @@ public class JRock {
     private static final String HISTORY_UNLIMITED = "Unlimited";
     private static volatile boolean clockOn = true;
     // Whether the History checkbox is ticked: true or false, and absent is false - the
-    // checkbox's default before it was kept.
+    // checkbox's default.
     private static final String CONFIG_HISTORY = "history";
     private static volatile boolean historyOn = false;
 
@@ -802,7 +803,7 @@ public class JRock {
     // be loaded, shown as 72 (the dropdown cannot select what it has no item for), and
     // then written back as 72 by the next OK - a setting that changes itself. A value
     // outside the list is left alone and reported instead, and nothing is said about a
-    // setting that is simply absent, which is every file written before this existed.
+    // setting that is simply absent, which leaves the default in place.
     private static void adoptImagesDpi(String stored) {
         if (stored == null) return;
         try {
@@ -885,9 +886,8 @@ public class JRock {
 
     // ---- UI ----------------------------------------------------------------
     public static void main(String[] args) {
-        // Settle the HTTP transport before anything is shown: in the browser this
-        // also adopts the region configured by the hosting page, which the startup
-        // log and the Configure dialog then report.
+        // Settle the HTTP transport before anything is shown, so it is fixed before
+        // anything can send a request, and the session report can say which it is.
         http();
         // Command line:
         //   [--working-dir <dir>] [--prompts-dir <dir>] [<initial-prompt-file>]
@@ -1086,7 +1086,7 @@ public class JRock {
     // Resolves the initial-prompt file argument. An absolute path is used as given;
     // a relative one is resolved against --prompts-dir when that was supplied, so the
     // flag can name the directory and the argument just name a file inside it.
-    // Without the flag this is the process working directory, as it always was.
+    // Without the flag this is the process working directory.
     private static Path resolvePromptArg(String arg) {
         Path given;
         try {
@@ -1928,8 +1928,8 @@ public class JRock {
         // "History" mode: when on, each send includes the full prior dialog so the model
         // sees a continuous conversation, not a single message.
         //
-        // Called History and not "Extend conversation" because the bottom bar has to fit
-        // on a phone, and because a checkbox wants a noun: it sits beside Clock, and the
+        // Called History, one short word, because the bottom bar has to fit on a
+        // phone, and because a checkbox wants a noun: it sits beside Clock, and the
         // pair reads as the two things that can travel with a message - the time, and
         // what was said before. A verb like Continue or Append reads as a button that
         // does something now, which is the one thing a checkbox never does.
@@ -2151,7 +2151,7 @@ public class JRock {
         //
         // Shift+Enter has to be bound, not left alone: a plain JTextArea has no binding
         // for it at all (its InputMap answers null), and Windows sends no KEY_TYPED for
-        // it either, so before this it did nothing whatsoever. Verified with a Robot, both
+        // it either, so unbound it does nothing whatsoever. Verified with a Robot, both
         // ways round, rather than assumed.
         //
         // The newline is inserted here rather than delegated to the editor kit's
@@ -2304,8 +2304,8 @@ public class JRock {
             @Override public void actionPerformed(ActionEvent e) { dialogOnly.doClick(); }
         });
 
-        // Ctrl+E toggles History (E for extend, which is what this was called and what
-        // the field is still named; Ctrl+H is a text area's backspace).
+        // Ctrl+E toggles History (E for extend, which is what the field is named and
+        // what History does to a request; Ctrl+H is a text area's backspace).
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_E, InputEvent.CTRL_DOWN_MASK), "jrock-toggle-extend");
         frame.getRootPane().getActionMap().put("jrock-toggle-extend", new AbstractAction() {
@@ -2789,9 +2789,9 @@ public class JRock {
     }
 
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
-    // and Mic always on is muted - nobody types into the prompt
-    // now, so nobody speaks into it either (see automationListen). Returns null, or why
-    // it refused.
+    // and Mic always on is muted - nobody types into the prompt during an automation,
+    // so nobody speaks into it either (see automationListen). Returns null, or why it
+    // refused.
     //
     // what finishes the sentence "Automation started: ", so the transcript says which
     // automation this was - the log being the only record of it afterwards.
@@ -3319,10 +3319,9 @@ public class JRock {
         return new String[] { "1", null };
     }
 
-    // Leaves automation mode: the prompt is editable again, Send is released, History
-    // goes back to what the user had it at, and Mic always on listens again if it is
-    // set to. note finishes the
-    // sentence "Automation finished: ", or is null for the sentence on its own.
+    // Leaves automation mode: the prompt is editable again, Send is released, and Mic
+    // always on listens again if it is set to. note finishes the sentence "Automation
+    // finished: ", or is null for the sentence on its own.
     //
     // The window stays open with the whole run in its log, and the conversation can be
     // carried on by hand from where the automation left off - which is the point of
@@ -3450,10 +3449,10 @@ public class JRock {
     }
 
     // ---- Hosting page chrome (browser only) --------------------------------
-    // The page hides its header (title, checksum, credentials button) and its
-    // footer (the page's own log) a few seconds after launch, so the Swing display
-    // gets the whole tab. Sometimes you want them back - to check the checksum, or
-    // to change the API key the page holds - and then gone again.
+    // The page hides its header (title, checksum, Run button) and its footer (the
+    // page's own log) a few seconds after launch, so the Swing display gets the
+    // whole tab. Sometimes you want them back - to check the checksum, or to read
+    // the page's log - and then gone again.
     //
     // This is a proxy and nothing more: the page has one function that flips the
     // chrome and reports which way it went, so there is no second copy of the
@@ -3532,8 +3531,8 @@ public class JRock {
             // A long press is measured on release as well as by the timer, so the menu
             // still opens where a Swing Timer never fires: a modal dialog runs the event
             // queue in a nested loop, and in the browser runtime the timers queued behind
-            // it stay queued - which is exactly why Paste could not be reached in the
-            // Fetch URL and Configure dialogs, the two places it is needed most. Mouse
+            // it stay queued - and the Fetch URL and Configure dialogs, both modal, are
+            // the two places Paste is needed most. Mouse
             // events are delivered there (the field takes the tap and the keyboard comes
             // up), so the clock is read from the press instead of trusted to fire.
             @Override public void mouseReleased(java.awt.event.MouseEvent e) {
@@ -3699,8 +3698,8 @@ public class JRock {
                 + "screen, 150 documents, 203 fax/receipt, 300 print). PDF pages are "
                 + "rasterised at it, and \"Include with copy...\" downscales an image "
                 + "to it. Higher is sharper but costs more tokens.");
-        // Autobackup, on a line of its own. It used to share the DPI row, which made two
-        // unrelated settings look like one thing: how fine a picture to keep has nothing
+        // Autobackup, on a line of its own rather than beside the DPI, so two unrelated
+        // settings never look like one thing: how fine a picture to keep has nothing
         // to do with zipping the folder up. The checkbox says what it is in its own label,
         // so the left column of its row stays empty rather than repeating it.
         javax.swing.JCheckBox autoBackupF =
@@ -3766,9 +3765,9 @@ public class JRock {
         });
 
         // What JRock is, the shortcut list and the notes on these settings are all behind
-        // this button now - see showHelpDialog. This dialog is a form: someone opening it
-        // to change the model was being handed three screens of prose to scroll past
-        // first, and the prose was no easier to find for being in the way.
+        // this button - see showHelpDialog. This dialog is a form: someone opening it to
+        // change the model gets the rows straight away, with no screens of prose to
+        // scroll past first, and the prose is easier to find in a window of its own.
         JButton help = new JButton("Help");
         help.setToolTipText("What JRock is, who wrote it, every shortcut, and what "
                 + "these settings do");
@@ -3958,10 +3957,9 @@ public class JRock {
     }
 
     // ---- Help dialog (the Help button in Configure) -------------------------
-    // What JRock is, who to write to, every shortcut, and what the settings do. All of
-    // it used to be in the Configure dialog, above and below the rows it is about; it
-    // opens on top of that dialog instead, so the form is a form and nothing typed into
-    // it is lost while this is being read.
+    // What JRock is, who to write to, every shortcut, and what the settings do. It
+    // opens on top of the Configure dialog rather than being part of it, so the form is
+    // a form and nothing typed into it is lost while this is being read.
     private static final String CONTACT_EMAIL = "jrock@nosocial.net";
 
     private static void showHelpDialog(java.awt.Component parent) {
@@ -4022,8 +4020,9 @@ public class JRock {
         // Owned by the window the Help button is in - the Configure dialog - so this is
         // modal above it rather than behind it, which a dialog owned by the frame would
         // be. The window and not the button itself, since a dialog is centred on its
-        // parent component: on the button, at the top right of Configure, a Help window
-        // bigger than the room around it was pushed into the top right of the screen.
+        // parent component: centred on the button, at the top right of Configure, a Help
+        // window bigger than the room around it would be pushed into the top right of
+        // the screen.
         java.awt.Window owner = javax.swing.SwingUtilities.getWindowAncestor(parent);
         javax.swing.JOptionPane.showMessageDialog(owner != null ? owner : parent, scroll,
                 "JRock Help", javax.swing.JOptionPane.PLAIN_MESSAGE);
@@ -4401,9 +4400,9 @@ public class JRock {
     // autosaves on every keystroke and every autosave writes a jrock<digits>.tmp beside
     // the file and moves it into place (atomicWriteQuietly), which is a name that exists
     // for a matter of milliseconds. A backup that listed one of those and then read it
-    // failed outright with "NoSuchFileException: .../JRock/jrock1234....tmp" - the whole
-    // zip lost to a file that was never worth having in it. Three things keep that from
-    // happening:
+    // would fail outright with "NoSuchFileException: .../JRock/jrock1234....tmp" - the
+    // whole zip lost to a file that was never worth having in it. Three things keep that
+    // from happening:
     //
     //   - JRock's own in-flight temp files are not backed up at all (see inFlightWrite).
     //     The file one of them is about to become is in the zip anyway, either as it was
@@ -4561,8 +4560,8 @@ public class JRock {
 
         // Width-bounded HTML rather than a wrapping JTextArea. A JTextArea asked how big
         // it would like to be before it has a width answers for one unwrapped line, so
-        // the dialog came up as short as one line and the wrapped text then pushed the OK
-        // and Cancel buttons out through the bottom of the window frame. An HTML label is
+        // the dialog would come up as short as one line and the wrapped text would push
+        // the OK and Cancel buttons out through the bottom of the window frame. An HTML label is
         // asked the same question with the width already settled, so the height it gives
         // back is the height it uses. The width is the one the two path rows ask for
         // anyway, which is why this does not widen the dialog.
@@ -5236,10 +5235,8 @@ public class JRock {
     // an agent started with no document asks for one in a file chooser. Where that
     // chooser opens is the agent's business and needs no flag: Explorer starts a
     // right-click command IN the folder it was clicked in, so the process working
-    // directory already is that folder - which is what the samples open in. (An earlier
-    // attempt passed the folder as --start-dir "%V" and did not work; %V was not the
-    // folder the chooser wanted, and the command line was the wrong place to look for
-    // something the process already knows.)
+    // directory already is that folder - which is what the samples open in. The
+    // command line is the wrong place to look for something the process already knows.
     private static String buildAgentLaunch(String javaw, Path jar, Path agent,
                                            String fileArg) {
         StringBuilder cmd = new StringBuilder();
@@ -6563,9 +6560,9 @@ public class JRock {
     // which recognizer heard it ("recognizer|<name>|<culture>"). Dictation, a phrase at
     // a time until the file ends, a pause in the speech being just the end of one phrase.
     // The recognizer is named, en-GB, rather than left to Windows' default, so which
-    // one hears a recording does not change with the Speech settings. (en-US was tried
-    // and was no better: the gibberish both produced was a Bluetooth hands-free mic's
-    // 8 kHz audio, nothing above 4 kHz, which no Desktop recognizer is made for.) Only
+    // one hears a recording does not change with the Speech settings. (en-US is no
+    // better: what garbles both is a Bluetooth hands-free mic's 8 kHz audio, nothing
+    // above 4 kHz, which no Desktop recognizer is made for.) Only
     // the classic Desktop recognizers exist for System.Speech, as with the voices; one
     // that is not installed is a failure in the log.
     private static final String TRANSCRIBE_CULTURE = "en-GB";
@@ -6727,8 +6724,8 @@ public class JRock {
 
     // What "text file" means in the Load prompt and Include dialogs: .txt plus the
     // plain-text formats people actually reach for. A .csv, .json, .xml, .html or .java
-    // file is text like any other, and having to rename it to .txt to load or include it
-    // was pure friction. (Any file still has to pass the looksBinary check on load.)
+    // file is text like any other, and loads or is included as it is named, with no
+    // renaming to .txt. (Any file still has to pass the looksBinary check on load.)
     //
     // .rtf is in the list because an RTF file is text too - its markup is ASCII, which
     // is how it carries everything else - and a model that knows RTF can read it as it
@@ -6750,11 +6747,10 @@ public class JRock {
     // can read a header out of.
     //
     // Exactly the two the chat API documents for an "input_audio" part, whose format field
-    // is an enum of those two and nothing else ("Currently supports "wav" and "mp3""). m4a
-    // was offered here for one version, because it is what a phone's voice memo hands back
-    // and the endpoint is the only authority on whether it takes one - it does not, and
-    // that is now a tested answer rather than a guess, so the filter no longer offers a
-    // file the request cannot carry.
+    // is an enum of those two and nothing else ("Currently supports "wav" and "mp3""). m4a,
+    // what a phone's voice memo hands back, is not among them: the endpoint, the only
+    // authority on whether it takes one, does not - a tested answer rather than a guess -
+    // so the filter never offers a file the request cannot carry.
     private static final String[] AUDIO_EXTENSIONS = { "wav", "mp3" };
     private static final String AUDIO_FILTER_SUFFIX = " (wav, mp3)";
 
@@ -6785,7 +6781,7 @@ public class JRock {
     // Always opens in the prompts directory - it does NOT remember where it was last.
     // A prompt library is a place you go back to, so Ctrl+O landing somewhere else
     // because of where you last browsed is a small navigation chore added to every
-    // single load. Where that place is is now a setting (Configure), which is the
+    // single load. Where that place is is a setting (Configure), which is the
     // thing to change if it's wrong; Ctrl+S is the same, so the pair stays symmetric.
     private static void loadPromptInto(JFrame frame, JTextArea input, LogView log) {
         javax.swing.JFileChooser chooser =
@@ -6934,7 +6930,7 @@ public class JRock {
                         final Path included =
                                 copies ? includeCopyOf(file, log, isImage) : file;
                         // Left on the EDT: hashing and reading a plain include is
-                        // quick, and this is what it always did.
+                        // quick.
                         onEdt(() -> includeOne(input, log, extend, included,
                                 isImage ? "img" : isAudio ? "audio" : "txt",
                                 isImage, markdownRef));
@@ -7165,7 +7161,7 @@ public class JRock {
     // this file" asks for; a copy under JRock/includes/ is JRock's own file, made for
     // this purpose - and it says in its name what it is: "IMG_4002-1004x753.png".
     //
-    // The export's own 300 dpi ceiling (MarkdownExport.Image) is left exactly as it was:
+    // The export's own 300 dpi ceiling (MarkdownExport.Image) is a separate matter:
     // that one decides how big a picture is PRINTED, which is the page's business rather
     // than the token bill's, and an image already trimmed to the setting is under it.
     private static Path downscaledCopy(Path dir, Path file, LogView log) {
@@ -7285,9 +7281,9 @@ public class JRock {
     //
     // Nothing of the path below is available here. ImageIO.read on a JPEG goes looking
     // for the native colour-management library a browser JVM cannot load (ImageHeader
-    // says more), and CheerpJ's Graphics2D.drawImage does not resample - so this used to
-    // log a downscale and hand over the picture at full size, which is what the log line
-    // promising fewer pixels was measured against. Writing a decoder in Java instead
+    // says more), and CheerpJ's Graphics2D.drawImage does not resample - so the desktop's
+    // path would log a downscale and hand over the picture at full size, and the log line
+    // promising fewer pixels would not be true. Writing a decoder in Java instead
     // means writing a JPEG decoder: Huffman tables, an inverse DCT, chroma upsampling,
     // and an encoder to match. Every browser already has all of that, in native code,
     // behind two calls - so the picture goes out as base64 and comes back smaller.
@@ -7587,7 +7583,7 @@ public class JRock {
         // JTextField asks for room for its columns and an HTML label with <br> in it asks
         // for room for its longest line, so a dialog written for a desktop window comes
         // out wider than a phone screen - and a JOptionPane that does not fit is one
-        // whose OK button is off the edge of it, which is what happened here. The field
+        // whose OK button is off the edge of it. The field
         // asks for fewer columns in the browser (it is stretched by the layout anyway),
         // and the text is given a width to wrap inside, taken from the screen.
         javax.swing.JTextField urlF = new javax.swing.JTextField(isCheerpJ() ? 14 : 48);
@@ -7992,19 +7988,19 @@ public class JRock {
     // browser JVM has no way to load:
     //   java.lang.UnsatisfiedLinkError: no lcms in java.library.path
     //   ... sun.java2d.cmm.lcms.LCMS.getModule -> JPEGImageReader.setImageData
-    // That is an Error, not an IOException, so it went straight past the catch around
-    // it and out of the include - losing the file over a line of log text.
+    // That is an Error, not an IOException, so it would go straight past the catch
+    // around it and out of the include - losing the file over a line of log text.
     //
     // A header is a handful of integers in a documented place, so reading it needs no
     // native code, no image decoder and no platform: web and desktop report the same
     // numbers by running the same arithmetic. It is also strictly less work - a 40 MB
-    // photo is no longer decoded into memory in full just to log its size.
+    // photo is never decoded into memory in full just to log its size.
     //
     // A class of its own, rather than a dozen loose static helpers: byte-level format
     // parsing has nothing in common with the rest of JRock, and names as generic as
     // le16 or positive only mean anything next to the formats they decode. It also
-    // gives the format arithmetic its own line in a coverage report, where mixing it
-    // into the surrounding UI code said nothing about either.
+    // gives the format arithmetic its own line in a coverage report, where mixed into
+    // the surrounding UI code it would say nothing about either.
     //
     // The four formats the include filter accepts: PNG, JPEG, GIF, WEBP. The bytes
     // JRock sends the model are untouched by any of this - an image is uploaded as
@@ -8322,7 +8318,7 @@ public class JRock {
     // download page and does nothing else.
     //
     // Page images rather than extracted text: see the filters in showIncludeDialog for
-    // why the text half of this was taken out again.
+    // why a PDF is not read as text here.
     //
     // Runs on a background thread (see showIncludeDialog): it waits for Ghostscript,
     // which on a large PDF takes a long time. Anything touching a widget goes
@@ -8375,7 +8371,7 @@ public class JRock {
         cmd.add("-o"); cmd.add(outPattern);
         cmd.add(pdf.toAbsolutePath().toString());
 
-        // Logged before the process is started, and now actually seen: this method is
+        // Logged before the process is started, and actually seen: this method is
         // off the EDT, so the pane repaints while Ghostscript works.
         log.gray("Converting PDF with Ghostscript: " + String.join(" ", cmd));
         if (windowed) {
@@ -8621,8 +8617,8 @@ public class JRock {
 
     // The two passes in the order their names put them: the earlier name is the front.
     //
-    // NOT the order the file chooser handed them over in, which this used to trust and
-    // which is not an order at all. JFileChooser.getSelectedFiles() comes back in
+    // NOT the order the file chooser handed them over in, which is not an order at
+    // all. JFileChooser.getSelectedFiles() comes back in
     // whatever order the selection was made or the File Name box was parsed in, and it
     // differs by look-and-feel and by how the files were picked - so a box reading
     // "doc.pdf" "doc-2.pdf" could hand back doc-2.pdf first and the merge would
@@ -8796,7 +8792,8 @@ public class JRock {
         } catch (IOException ignore) { /* the line below simply says less */ }
         log.gray("Merged " + (2 * sheets) + " pages into " + out
                 + (size < 0 ? "" : " (" + fmtNum(size) + " bytes)"));
-        // Said out loud, because the shell one-liner this replaces ended in an rm.
+        // Said out loud, because until the merge has been checked the scans are the
+        // only good copy of the batch.
         log.gray("The two scans are untouched; look through the merge before deleting "
                 + "them.");
     }
@@ -11223,7 +11220,7 @@ public class JRock {
     // The clock goes out exactly as the checkbox says, for every model and every kind of
     // include. It is not moved into the user's turn, not dropped behind your back and not
     // switched off for you when a request also carries a recording: folding it into the
-    // message was tried and taken out again - it is a text model's feature, it makes no
+    // message would gain nothing - it is a text model's feature, it makes no
     // difference to a transcription, and a request that quietly disagrees with the checkbox
     // is worse than one that does what it was told to do. If some model does refuse the
     // pair, untick Clock: that is one click in the same window.
@@ -11245,8 +11242,8 @@ public class JRock {
     //                          native socket layer, so its networking
     //                          (sun.nio.ch.EPoll) is unavailable and throws
     //                          UnsatisfiedLinkError. The browser's own fetch()
-    //                          performs the request instead, and the page - not
-    //                          JRock - holds the Bedrock credentials.
+    //                          performs the request instead, with the headers
+    //                          JRock hands it, the Authorization header among them.
     //
     // The choice is made once, on first use, by probing for the bridge; see http().
 
@@ -11371,12 +11368,8 @@ public class JRock {
     // what makes it outlive a reload.
     //
     // The page configures nothing. It says what its client is called, so the startup
-    // log can name it, and that is the whole of what it is asked.
-    //
-    // Two optional fields used to override JRock's own settings - "region" pinned the
-    // region, and "credentials":"page" said the page held the Bedrock key and attached
-    // it itself. Both are gone as of 2.2.0, and the page that ships here never set
-    // either. Every setting lives in the working folder's files on every runtime, so
+    // log can name it, and that is the whole of what it is asked. Every setting lives
+    // in the working folder's files on every runtime, so
     // there is one place each one is read from and one answer to what it is - rather
     // than a file, a page that may disagree with it, and an order of precedence
     // between them to remember.
@@ -11538,8 +11531,7 @@ public class JRock {
     // Returns the transport, picking it on first call. The bridge is detected by
     // calling it: on a normal JVM the native method is unlinked and throws, so
     // "the bridge answered" is the same thing as "the bridge works" - no runtime
-    // sniffing that could disagree with reality. When the page reports a region,
-    // JRock adopts it, so the endpoints it logs and calls match the page's key.
+    // sniffing that could disagree with reality.
     private static synchronized HttpTransport http() {
         if (transport != null) return transport;
         String info;
@@ -11926,9 +11918,9 @@ public class JRock {
                     case '/': sb.append('/'); break;
                     case 'u':
                         // JSON's numeric escape, which a server may use for any
-                        // non-ASCII character - so without this, "ü" reached the
+                        // non-ASCII character - so without this, "ü" would reach the
                         // pane as the literal text u00fc, and a Cyrillic or emoji
-                        // reply became a wall of u04xx. A character outside the BMP
+                        // reply would become a wall of u04xx. A character outside the BMP
                         // arrives as a surrogate PAIR of these escapes, and appending
                         // each unit in turn is what puts it back together.
                         if (i + 4 < json.length() && isHex4(json, i + 1)) {
@@ -12061,8 +12053,8 @@ public class JRock {
     // All writes are serialized through WRITE_LOCK (all callers are on the EDT
     // today; the lock is a safeguard should that ever change).
     //
-    // Diagnosis showed the previous ATOMIC_MOVE approach failing with
-    // AccessDeniedException on Windows: the target (e.g. jrock-log.txt) is briefly
+    // On Windows a single ATOMIC_MOVE can fail with
+    // AccessDeniedException: the target (e.g. jrock-log.txt) is briefly
     // opened by an external process - Windows Defender scanning the just-written
     // file, the Search Indexer, cloud sync (OneDrive), or an editor/IDE that has
     // the file open - and the rename is refused while that handle exists. The lock

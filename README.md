@@ -163,7 +163,8 @@ as WebAssembly), so nothing runs on a server.
   header and footer after launch** checkbox says it will do — ticked by default, and there so the
   disappearance is something you were told about rather than something that happened to you. It
   sits in the main area under the text about the checksum and the Configure dialog, with the note
-  that brings them back, and not in the header: a label that long *was* the header on a phone.
+  that brings them back, and not in the header, where a label that long would be the whole
+  header on a phone.
   To check the checksum again, the top-bar context menu has **Show/hide the page header &
   footer**: it calls one function in the page, which flips the chrome and reports which way it
   went. The page owns that state, so JRock never has to guess.
@@ -323,13 +324,10 @@ provides the transport instead. Any host page can serve JRock by providing two f
   JSON either way. The `options` include the headers JRock built, `Authorization` among them: the
   key is JRock's in the browser too, so one dialog sets it and one file keeps it.
   **A page configures nothing.** Its `browserHttpInfo()` reply names its client for the startup
-  log, and that is all it is asked. Until 2.2.0 two optional fields overrode JRock's own
-  settings — `"region"` pinned the region, and `"credentials": "page"` said the page held the
-  Bedrock key and attached the header itself, so JRock sent none and never reported a missing
-  one. Both are gone, and `jrock-web/index.html` had never set either: what they bought was a
-  second way for a setting to arrive, live only in a configuration nobody ran, in exchange for
-  every read of it having to ask whose it was first. Everything is in the working folder's files
-  on every platform, so each setting has one home and the code says so once.
+  log, and that is all it is asked: it cannot pin the region, and it cannot hold the Bedrock key
+  and attach the header in JRock's place. Everything is in the working folder's files on every
+  platform, so each setting has one home, a missing key is always reported in the one place you
+  would fix it, and nothing a page does can make a setting arrive by a second way you cannot see.
 - **`fetchUrl(url, options)`** resolving to `{ status, contentType, url, bytes }` — an arbitrary
   address, for which a body of *text* would not do: Fetch URL decides between a page and a
   picture by the response's own `Content-Type`, and an image has to arrive as bytes
@@ -399,9 +397,9 @@ Built-in cards include:
   answer is "a new line, nothing else". It starts off, and stays off next time, so that answer
   never depends on a window that has already closed.
   **Shift+Enter is a new line whichever way the checkbox is set**, so one key always types one
-  and never sends — which is what makes the checkbox safe to tick. It had to be bound
+  and never sends — which is what makes the checkbox safe to tick. JRock binds it
   explicitly: a Swing text area has no binding for Shift+Enter at all and Windows sends no
-  typed character for it either, so until 2.1.0 it did nothing whatsoever. The newline is
+  typed character for it either, so without that binding the key would do nothing. The newline is
   inserted directly rather than delegated to the editor kit's action, which is a look-up that
   can come back empty — and a key that silently does nothing is the one thing this checkbox
   exists to rule out.
@@ -646,8 +644,8 @@ gswin64 -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -o C:\scans\scan0166.Merged.
 - **The page count comes first, and from the other Ghostscript.** The windowed build shows its
   progress in a window but writes nothing to a pipe, so the count is asked of the **console**
   build (`gswin64c`) instead: `runpdfbegin pdfpagecount`, a PostScript one-liner that reads the
-  page tree and looks at no page at all. Ghostscript 10 replaced that interpreter, and there it
-  fails — so the fallback is to interpret the file with no output device and read the number out
+  page tree and looks at no page at all. Ghostscript 10 and later interpret PDF differently, and
+  there it fails — so the fallback is to interpret the file with no output device and read the number out
   of `Processing pages 1 through N.`, a line every version has printed for decades. That costs one
   pass over the document; the quick answer costs nothing.
 - **The merge itself runs the windowed build** (`gswin64`, not `gswin64c`), which reports its
@@ -661,8 +659,9 @@ gswin64 -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -o C:\scans\scan0166.Merged.
   with bare file names, because every sheet names both files again and Windows stops accepting a
   command line at 32767 characters — past that the tool says so and suggests a shorter path or
   half the batch.
-- **Nothing is deleted.** The shell one-liner this replaces ended in an `rm`; this ends in a line
-  saying the two scans are untouched and to look through the merge before deleting them.
+- **Nothing is deleted.** The merge ends in a line saying the two scans are untouched and to look
+  through the merged file before deleting them, so a pass that went into the feeder the wrong way
+  costs a second try, not a rescan.
 - Not in the [browser](#jrock-web-in-the-browser): there is no subprocess to start there, so the
   item answers with the same "Ghostscript not found" note as a desktop without it installed.
 
@@ -719,9 +718,8 @@ headers all state the size in a documented place — rather than by decoding the
 rest of JRock and is worth being able to read, and measure, on its own). That is
 the same arithmetic on every platform, so the browser build reports the same numbers as the
 desktop one; `ImageIO` could not, because in CheerpJ it reaches for the JDK's *native* colour
-management (`UnsatisfiedLinkError: no lcms in java.library.path`) and an image include failed
-outright over a line of log text. It is also less work: a 40 MB photo is no longer decoded in
-full just to say how big it is. If a header can't be read, the include still happens and the
+management (`UnsatisfiedLinkError: no lcms in java.library.path`), which a browser JVM does not
+have. It is also less work: a 40 MB photo is not decoded in full just to say how big it is. If a header can't be read, the include still happens and the
 log says the dimensions were unavailable — the bytes sent to the model are the file itself
 either way, so none of this touches what the model receives.
 
@@ -760,9 +758,8 @@ does not choose.
 
 The `format` is the file's own extension, lower-cased, and **wav and mp3 are the only two there
 are**: [the API's schema](https://github.com/openai/openai-openapi) makes that field an enum of
-exactly those. `m4a` was in the filter for one version — it is what a phone's voice memo hands
-back, nothing documented it either way, and the endpoint was the only authority worth asking. It
-was asked, it refuses, and the filter no longer offers a file the request cannot carry. (`m4a`
+exactly those. `m4a`, which is what a phone's voice memo hands back, is refused by the endpoint,
+so the filter offers only files the request can carry. (`m4a`
 *is* documented for the separate *transcription* endpoint, which JRock does not call; and
 Voxtral's `input_audio` has no format field at all, decoding with libsndfile, which has no AAC.)
 
@@ -820,12 +817,10 @@ as text**, an **image as a picture**. Two lines go into the prompt, the address 
 The link says where the text or the picture came from, in a form the model reads as a
 reference belonging to the content below it; the token is what is actually sent.
 
-**The dialog is sized against the screen.** A text field asks for room for its columns and an
-HTML label asks for room for its longest line, and both of those were written for a desktop
-window — so on a phone the dialog came out wider than the screen, which puts its **OK** button
-past the edge. The explanation now wraps to a width taken from the screen and the field asks for
-fewer columns in the browser, where the layout stretches it anyway. In the browser the URL row
-also carries a **Paste** button of its own, exactly like the [Bedrock API
+**The dialog is sized against the screen**, so it fits a phone as well as a desktop window, with
+its **OK** button in reach. The explanation wraps to a width taken from the screen, and in the
+browser the field asks for fewer columns, since the layout stretches it to the room there is
+anyway. In the browser the URL row also carries a **Paste** button of its own, exactly like the [Bedrock API
 key](#configure-dialog-top-left-button) row: an address is pasted rather than typed, and a button
 is one tap that no browser gesture can take away.
 
@@ -933,11 +928,11 @@ fill it.
 
 **In the browser the page scales it.** CheerpJ's JVM has no image pipeline to do this with:
 `ImageIO.read` on a JPEG goes looking for the native colour-management library it cannot load,
-and its `Graphics2D` resamples nothing — so the log used to promise a downscale and the copy
-came out at full size. A browser, on the other hand, decodes, resamples and encodes PNG and
+and its `Graphics2D` resamples nothing, so a copy scaled there would come out at full size. A
+browser, on the other hand, decodes, resamples and encodes PNG and
 JPEG in native code as a matter of course, so JRock hands the picture to the page over the
 [bridge](#http-transport) and gets it back smaller: `canvas`, the same repeated halving, the
-same 0.92 for JPEG. A page without that function (an older `jrock-web`) means a full-size copy
+same 0.92 for JPEG. A host page without that function means a full-size copy
 and a line saying so, the same as any other scaling that could not be done.
 
 **Reload all includes** — an item in the prompt's context menu, which rebuilds the map from the
@@ -980,9 +975,9 @@ Selecting the PDF filter runs **Ghostscript** to convert the PDF, one page image
 includes each produced page. Ghostscript must be on your PATH: `gswin64` on Windows, `gs` on
 macOS and Linux.
 
-**Page images and nothing else.** There was a *PDF as text pages* filter, on Ghostscript's
-`txtwrite` device, and it is gone: `txtwrite` takes the text operators as they come and hands
-back something a model has to guess at — no headings, no tables, columns interleaved. A PDF whose
+**Page images and nothing else.** There is no text filter on Ghostscript's `txtwrite` device,
+because `txtwrite` takes the text operators as they come and hands back something a model has to
+guess at — no headings, no tables, columns interleaved. A PDF whose
 text matters is better turned into RTF or DOCX in Acrobat and included under
 [**RTF as Markdown text** or **DOCX as Markdown
 text**](#rtf-and-docx-conversion-no-external-tool), where the structure survives as structure.
@@ -1234,8 +1229,8 @@ the reply looks like a file name, the automation stops and shows you the reply, 
 renaming your documents to a sentence.
 
 "Name characters" means **letters, not ASCII**: `2026-09-22-MünchnerBank-…` stays that way. The
-prompt asks for Latin-1, which has umlauts and an eszet in it, and held to `A-Za-z0-9` the
-sanitiser turned every letter it did not know into a dash — `2026-09-22-M-nchnerBank-…`, where a
+prompt asks for Latin-1, which has umlauts and an eszet in it, and held to `A-Za-z0-9` a
+sanitiser would turn every letter it did not know into a dash — `2026-09-22-M-nchnerBank-…`, where a
 dash is exactly the character that means *the next part of the name starts*. So the test is
 Unicode's own (`\p{L}`), and the reply is normalised to NFC first, so an *ü* is one character and
 not a *u* with a combining mark trailing it — the two look identical on screen and only one is
@@ -1676,9 +1671,8 @@ that you cannot.
   to replace it. What you enter is **trimmed** and written to `JRock/bedrock-key.txt` in the
   working directory, which is where it's read from at startup — trimmed because a pasted key
   arrives with whatever the page copied around it, and no Bedrock key has a space or a newline
-  in it. The key is never displayed. The row is there on every platform — it could be left out in
-  the browser until 2.2.0, when a page was allowed to hold the key instead (see
-  [HTTP transport](#http-transport)); nothing is allowed to now.
+  in it. The key is never displayed. The row is there on every platform, since the key is always
+  JRock's to hold and no hosting page can hold it instead (see [HTTP transport](#http-transport)).
   In the browser the row is a **plain, unmasked field with its own Paste button**. The mask is
   what a phone's CheerpJ build will not raise a keyboard for — the region field beside it, same
   dialog, does come up — and a row you cannot fill in is worse than one whose text can be read
@@ -1690,8 +1684,8 @@ that you cannot.
   `JRock/jrock-config.txt` too — as is the **Images DPI** below, which is what makes one
   folder's [agent](#windows-agents-one-automation-per-folder) a different agent from the same
   automation installed from another folder.
-- **Autobackup log** — on a line of its own, right under the Model (it shared the DPI row until 2.1.0, which
-  made two unrelated settings read as one), and **on by default**: after five
+- **Autobackup log** — on a line of its own, right under the Model, so it does not read as part
+  of an unrelated setting, and **on by default**: after five
   minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
   long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
@@ -1701,7 +1695,7 @@ that you cannot.
   messages before the new prompt. **Unlimited** (the default) sends it all. The cut is always
   at a request, never between one and its answer. Pick from the list or type any number; a
   value that is no number keeps the limit there was. An `#include` already sent in a request
-  the limit leaves out is sent again, since the model no longer sees it. Kept in
+  the limit leaves out is sent again, since the model does not see that request. Kept in
   `JRock/jrock-config.txt`, per folder, like the model it usually depends on.
 - **Images DPI** — how fine a picture JRock keeps, per inch of page: 72 / 96 (screen), **150**
   (documents, the default), 203 (fax/receipt), 300 (print). The image is what the model actually
@@ -1729,10 +1723,10 @@ it. The API key row is the exception, with Paste alone.
 The long press is timed **from the press and checked again on release**, not left to the timer
 alone. A `javax.swing.Timer` fires on the event queue, and a modal dialog runs that queue in a
 nested loop of its own — in the browser runtime the timer behind it may simply never come up,
-which is why the menu did nothing in exactly the two dialogs that needed it, this one and
-[Fetch URL](#fetching-a-url). Mouse events do arrive there (the field takes the tap and the
-keyboard appears), so the clock is read from them instead of trusted to fire. On the desktop
-nothing changes: a right-click is still a right-click.
+and the two dialogs that most need the menu, this one and [Fetch URL](#fetching-a-url), are
+modal. Mouse events do arrive there (the field takes the tap and the keyboard appears), so the
+clock is read from them instead of trusted to fire, and the long press opens the menu in every
+dialog. On the desktop a right-click is simply a right-click.
 
 Applying re-runs the session init (working directory reported first, then models loaded,
 ending with `Ready.`). Changing the working directory reloads **both the log and the prompt**
@@ -1753,10 +1747,10 @@ setting does and which file keeps it. All of it in one scrolling window that ope
 Configure and centred on it, so anything already typed into the form is still there when it
 closes.
 
-It was in the Configure dialog itself until 2.1.0, above and below the rows it describes: three
-screens of prose in front of someone who opened the dialog to change the model, and no easier to
-find for being in the way. The window is sized against the screen, like the Fetch URL dialog
-below, so on a phone it is a short window that scrolls rather than a tall one with its button
+It is a window of its own rather than part of the Configure dialog, so someone who opened
+Configure to change the model sees the rows and not three screens of prose around them, and the
+prose is one button away when it is wanted. The window is sized against the screen, like the
+[Fetch URL](#fetching-a-url) dialog, so on a phone it is a short window that scrolls rather than a tall one with its button
 off the bottom.
 
 ## Window move & resize (Ctrl+M)
@@ -1939,7 +1933,7 @@ the log says so — *the text is all there, the formatting is not*. The log line
 written: the file, the block and table counts, and the byte count.
 
 A `.docx` written here reads back through **DOCX as Markdown text** as the same Markdown, give
-or take the two honest differences a round trip has: a table's header row was written bold, so
+or take the two honest differences a round trip has: a table's header row is written bold, so
 it comes back as bold markup, and column alignment is layout the import doesn't read.
 
 ### Images in the DOCX
@@ -2087,8 +2081,8 @@ model, its images DPI, its Bedrock key, all in that folder's
 Which is why the samples open their chooser in the folder they were **started** in and not in
 the working directory: the settings folder is the one folder the document is certainly not in.
 They read it once at startup, before JRock's `--working-dir` handling moves `user.dir`, and no
-flag is involved — an earlier attempt to hand the folder over as `--start-dir "%V"` did not
-work, and the command line was the wrong place to look for something the process already knew.
+flag is involved — the process already knows the folder it was started in, so the command line
+is the wrong place to carry it, and there is nothing in the registry entry to get wrong.
 
 Which is why an entry is per **(agent, folder)** pair, not per agent. Install the same
 automation from two folders and you get two entries, with two sets of settings:
