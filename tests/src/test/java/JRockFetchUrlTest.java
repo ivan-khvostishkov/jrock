@@ -309,8 +309,8 @@ class JRockFetchUrlTest extends JRockGuiFixture {
      * and approves it.
      * <p>
      * Through the menu item rather than by calling the fetch, because the item is part
-     * of what was added: a feature reachable only from code is not reachable at all. The
-     * dialog holds one text component, so it is found by that; see
+     * of the feature under test: a feature reachable only from code is not reachable at
+     * all. The dialog holds one text component, so it is found by that; see
      * {@link #enterText} for why the address is set rather than typed.
      */
     private void fetchUrl(String url) {
