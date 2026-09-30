@@ -679,7 +679,7 @@ documents into either):
      text and writes it back into its answer where the picture belongs, which is what
      [**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) then
      places
-   - **Text files as is** (txt, csv, json, html, java, rtf) — sent exactly as they are on disk,
+   - **Text files as is** (txt, csv, json, xml, html, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
    - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
@@ -809,8 +809,8 @@ remembers it.
 
 The same include, for something that isn't on this machine. **Ctrl+U**, or **right-click the
 prompt → Fetch URL...**, asks for an address, downloads it into `JRock/urls/`, and includes the saved
-file exactly as if you had picked it with Ctrl+I — a **web page, plain text or JSON as
-text**, an **image as a picture**. Two lines go into the prompt, the address above the token:
+file exactly as if you had picked it with Ctrl+I — a **web page, plain text, JSON or XML
+as text**, an **image as a picture**. Two lines go into the prompt, the address above the token:
 
 ```
 [](https://example.org/a/article)
@@ -838,6 +838,7 @@ is a web page, and saving it as a PNG would only produce an `@img` token no mode
 | `text/html`, `application/xhtml+xml` | `.html` | `@txt` — sent as text, markup and all |
 | `text/plain` | `.txt` | `@txt` |
 | `application/json` | `.json` | `@txt` |
+| `application/xml`, `text/xml` | `.xml` | `@txt` |
 | `image/png` | `.png` | `@img` — sent as a picture |
 | `image/jpeg` | `.jpg` | `@img` |
 | `image/gif` | `.gif` | `@img` |
@@ -853,7 +854,9 @@ Details:
   name is cut. The same URL fetched twice is **one file** (same bytes, same name, nothing
   rewritten); a different page that wants a taken name becomes `article-2.html`, exactly as an
   [include copy](#includes-that-outlive-the-session) does.
-- **A page — or plain text, or JSON — is saved as UTF-8**, decoded first with the charset the response declares — an
+- **The URL field has the focus** when the dialog opens, so Ctrl+U, Ctrl+V, Enter is the whole
+  of it.
+- **A page — or plain text, JSON or XML — is saved as UTF-8**, decoded first with the charset the response declares — an
   included text file is *read back* as UTF-8, so a page served as `windows-1251` would
   otherwise reach the model as mojibake. An image is saved byte for byte: those bytes are what
   gets sent.
@@ -861,6 +864,9 @@ Details:
   anything else keeps the scheme it was given, and one that is not `http` or `https` is
   refused by name. Redirects are followed (but not an `https` → `http` downgrade), and the
   address the bytes really came from is logged when it differs.
+- **JRock names itself** in the `User-Agent`, as `JRock/<version>
+  (+https://github.com/ivan-khvostishkov/jrock)` — a client that says whose it is, which bot
+  filters such as Akamai's (in front of `helpx.adobe.com`, among others) let through.
 - Because the file lands under `JRock/`, it is **already where the copies go** — a URL include
   survives a restart the same way, with **Reload all includes**.
 - **In the browser it goes through the page**, `window.myBrowserHttp.fetchUrl` — the same
