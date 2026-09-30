@@ -31,8 +31,8 @@ class JRockConfigureTest extends JRockGuiFixture {
      * A region that does not exist, so JRock's "bedrock-mantle.&lt;region&gt;.api.aws"
      * host does not resolve.
      * <p>
-     * Applying the dialog re-runs the session report, and with a key now set the
-     * model-list fetch is no longer skipped - so without this the test would send a
+     * Applying the dialog re-runs the session report, and with a key set the
+     * model-list fetch runs - so without this the test would send a
      * bogus credential to the real AWS endpoint. Instead it fails at DNS, and the
      * suite stays offline. There is no wildcard record under api.aws, so an
      * unknown region really is NXDOMAIN rather than something that resolves.

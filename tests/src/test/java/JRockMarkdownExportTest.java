@@ -215,8 +215,9 @@ class JRockMarkdownExportTest {
     @Test
     @DisplayName("an included image is packed into the DOCX, pointed at, and named in the text")
     void placesTheImagesTheSelectionRefersTo() throws Exception {
-        // What the new include filter writes into the prompt, and what the model hands
-        // back in its answer: the picture, then the token that says which file it was.
+        // What the Markdown-reference include filter writes into the prompt, and what the
+        // model hands back in its answer: the picture, then the token that says which file
+        // it was.
         Path png = png("IMG_4002.png", 1000, 500);
         String markdown = String.join("\n",
                 "Here is the photograph:",
@@ -307,8 +308,8 @@ class JRockMarkdownExportTest {
         // so it comes out half again as large as the same picture on a portrait page.
         assertThat(extentOf(4000, 2000, true)).isEqualTo("cx=\"9248000\" cy=\"4624000\"");
         assertThat(extentOf(4000, 2000, false)).isEqualTo("cx=\"6120000\" cy=\"3060000\"");
-        // A tall one on a landscape page is held to the frame's height, which is now the
-        // page's short side (6120130 / 4000 = 1530) - one page still, not two.
+        // A tall one on a landscape page is held to the frame's height, which on this page
+        // is the short side (6120130 / 4000 = 1530) - one page still, not two.
         assertThat(extentOf(500, 4000, true)).isEqualTo("cx=\"765000\" cy=\"6120000\"");
     }
 

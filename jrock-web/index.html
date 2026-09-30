@@ -179,8 +179,8 @@
       // { status, body } and `fetchUrl` to { status, contentType, url, bytes }. That
       // is all JRock needs. What a page cannot do is configure JRock: the key and the
       // region are JRock's own on every runtime, desktop and browser alike, kept in the
-      // files named above. Holding the key here, or naming the region, were both
-      // possible until 2.2.0 and are not now.
+      // files named above - so a key never sits in a page's source, and there is one
+      // place to set it whichever way JRock is run.
       window.myBrowserHttp = {
         // Performs one request. `url` is the endpoint JRock built, `options` is a
         // fetch()-style object (method, headers, body, signal) - headers included.
@@ -225,7 +225,7 @@
       // events) plus contextmenu on the canvas's PARENT element. So we dispatch
       // pointerdown/pointerup with button:2 followed by contextmenu at the finger
       // coordinates; CheerpJ turns that into a Swing popup trigger and JRock's
-      // existing right-click menus fire - no Java changes, no native bridge.
+      // own right-click menus fire - no touch-specific Java code, no native bridge.
       var LP_MS = 500, LP_SLOP = 12;   // hold threshold (ms) and move tolerance (px)
       function installTouchRightClick(container) {
         var timer = null, sx = 0, sy = 0, fired = false;
@@ -558,8 +558,8 @@
       // Image downscaling for "Include with copy...": JRock sends a picture and the size
       // it wants, this page decodes, resamples and re-encodes it on a canvas, and the
       // smaller picture goes back. The browser's JVM has no working ImageIO and its
-      // Graphics2D resamples nothing, so without this the include was copied at full
-      // size - all the pixels, all the tokens.
+      // Graphics2D resamples nothing, so this is what lets a copied include in the
+      // browser cost the pixels and tokens of the size asked for, not of the original.
       //
       // The reply is "1\n<base64>" or "0\n<reason>"; a reason means JRock copies the
       // file unchanged and says so in its log.

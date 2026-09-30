@@ -29,7 +29,7 @@
 // JRock call below is an ordinary typed static call the compiler has checked - and the
 // jar is where JRock is loaded from when it runs. Forget the flag and javac says
 // "cannot find symbol: class JRock" before anything starts, which is the whole
-// diagnosis. An older jar, without the automation API in it, fails the same way and
+// diagnosis. A jar without the automation API in it fails the same way and
 // names the method it is missing.
 //
 // There is nothing to instantiate, either: JRock's automation API is static, and has to
@@ -476,12 +476,12 @@ public final class JRockDocInventory {
     // that belong to them, and digits - and not merely A-Za-z0-9.
     //
     // The prompt asks for the title and the counterparty "in Latin1", and Latin-1 has
-    // umlauts and an eszet in it. Held to ASCII, this pass answered
+    // umlauts and an eszet in it. Held to ASCII, a bank whose letterhead says Muenchner
+    // with an u-umlaut would be filed as
     //     2026-09-22-M-nchnerBank-...
-    // for a bank whose letterhead says Muenchner with an u-umlaut: every letter the
-    // sanitiser did not know became a dash, and a dash is the one character here that
-    // means "the next part of the name starts". \p{L} rather than a list of the accented
-    // letters of the languages met so far, because such a list only ever grows - a Greek
+    // every letter outside the set becoming a dash, and a dash is the one character here
+    // that means "the next part of the name starts". \p{L} rather than a list of accented
+    // letters, because such a list is never complete - a Greek
     // or Cyrillic name is a legal file name too, and dashes in place of one help nobody.
     // \p{M} for a reply whose letters arrive decomposed (see the NFC in baseName), \p{N}
     // for digits that are not Arabic numerals.
@@ -503,13 +503,13 @@ public final class JRockDocInventory {
     // The file name, out of the second reply.
     //
     // The prompt asks for nothing but the name, and the name is normally the first line -
-    // but "normally" is not a contract, and a model that adds a sentence about the
-    // document used to win outright, because the LAST non-blank line was the one taken.
-    // A sentence reduced to name-safe characters is not a name:
+    // but "normally" is not a contract, and a model may add a sentence about the
+    // document after it. A sentence reduced to name-safe characters is not a name - a
+    // reply of
     //     2020-07-27-FTS-3NDFL-TaxReturn-2019
     //
     //     The document is Ivan Khvostishkov's personal Russian 3-NDFL income-tax ...
-    // came back as "The-document-is-Ivan-Khvostishkov-s-personal-Russian-3-NDFL-income-".
+    // must give the first line, not "The-document-is-Ivan-Khvostishkov-s-personal-...".
     // So the reply is searched for the line that LOOKS like a file name, in two passes:
     // one for a line that is a name entire, then one for a name embedded in a line. The
     // first line that answers wins, the top of a reply being where the answer was asked

@@ -57,7 +57,7 @@ jobs:
       # The automation scripts in agentic-samples/ are run as
       # `java -cp jrock.jar Script.java` against a jar the user copies in by hand, so
       # they are compiled here against the jar this job just built - which checks both
-      # that they compile and that the public automation API they call is still there.
+      # that they compile and that the public automation API they call is in the jar.
       # After the jar step for that reason, and the classes go to a directory of their
       # own, outside both the jar and the source zip.
       - name: Compile the automation samples against the JAR

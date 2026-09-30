@@ -29,7 +29,7 @@ class JRockReplyTextTest {
 
         // The same reply, every non-ASCII character escaped - including the emoji,
         // which is a surrogate PAIR of escapes. A server may legitimately do this,
-        // and before the escapes were decoded this arrived as the literal "u00fc".
+        // and a reader that left the escapes undecoded would show the literal "u00fc".
         assertThat(extractContent(reply(escapeNonAscii(MIXED)))).isEqualTo(MIXED);
 
         // Mixed in one string, since nothing says a server has to pick one.
