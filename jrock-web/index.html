@@ -630,6 +630,91 @@
         return bytes;
       }
 
+      // --- The browser PDF engine JRock calls (window.myBrowserPdf) -----------
+      // PDF.js, loaded from jsDelivr the first time a PDF is included, so a session
+      // that never opens one never downloads it. A page hosting JRock can put its own
+      // window.myBrowserPdf in place first, with the same three methods.
+      var PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/";
+      var pdfjsReady = null;
+      function pdfjs() {
+        if (!pdfjsReady) {
+          pdfjsReady = import(PDFJS + "pdf.min.mjs").then(function (lib) {
+            lib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.mjs";
+            return lib;
+          }, function (e) {
+            pdfjsReady = null;            // a network hiccup is retried next time
+            throw e;
+          });
+        }
+        return pdfjsReady;
+      }
+
+      window.myBrowserPdf = window.myBrowserPdf || {
+        documents: {},
+        next: 1,
+        // bytes -> { handle, pages }
+        open: async function (bytes) {
+          var lib = await pdfjs();
+          var doc = await lib.getDocument({ data: bytes }).promise;
+          var handle = this.next++;
+          this.documents[handle] = doc;
+          return { handle: handle, pages: doc.numPages };
+        },
+        // A page, from 1, drawn at dpi pixels per inch on white -> PNG bytes.
+        render: async function (handle, number, dpi) {
+          var doc = this.documents[handle];
+          if (!doc) throw new Error("no open PDF has handle " + handle);
+          var page = await doc.getPage(number);
+          var viewport = page.getViewport({ scale: dpi / 72 });
+          var canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          var ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+          page.cleanup();
+          var blob = await new Promise(function (resolve) {
+            canvas.toBlob(resolve, "image/png");
+          });
+          if (!blob) throw new Error("the canvas gave no PNG");
+          return new Uint8Array(await blob.arrayBuffer());
+        },
+        close: async function (handle) {
+          var doc = this.documents[handle];
+          delete this.documents[handle];
+          if (doc) await doc.destroy();
+        }
+      };
+
+      function reason(e) { return (e && e.message) ? e.message : String(e); }
+
+      async function Java_JRock_browserPdfOpen(lib, base64) {
+        try {
+          var opened = await window.myBrowserPdf.open(bytesOfBase64(base64));
+          return "1\n" + opened.handle + "\n" + opened.pages;
+        } catch (e) {
+          return "0\n" + reason(e);
+        }
+      }
+
+      async function Java_JRock_browserPdfRenderPage(lib, handle, page, dpi) {
+        try {
+          return "1\n" + base64OfBytes(await window.myBrowserPdf.render(handle, page, dpi));
+        } catch (e) {
+          return "0\n" + reason(e);
+        }
+      }
+
+      async function Java_JRock_browserPdfClose(lib, handle) {
+        try {
+          await window.myBrowserPdf.close(handle);
+          return "1\n";
+        } catch (e) {
+          return "0\n" + reason(e);
+        }
+      }
+
       // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
       runBtn.addEventListener("click", async function () {
         if (started || !jarBytes) return;
@@ -655,7 +740,10 @@
               Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
               Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
               Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome,
-              Java_JRock_browserScaleImage: Java_JRock_browserScaleImage
+              Java_JRock_browserScaleImage: Java_JRock_browserScaleImage,
+              Java_JRock_browserPdfOpen: Java_JRock_browserPdfOpen,
+              Java_JRock_browserPdfRenderPage: Java_JRock_browserPdfRenderPage,
+              Java_JRock_browserPdfClose: Java_JRock_browserPdfClose
             }
           });
 

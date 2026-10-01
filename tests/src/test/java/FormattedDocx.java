@@ -15,8 +15,9 @@ import java.util.zip.ZipOutputStream;
  * conversion has an opinion about - a heading style spelled with a space, runs split
  * mid-word the way Word splits them, a toggle switched off with {@code w:val="false"},
  * list markup that carries no bullet character at all, a {@code w:tab} inside a run, a
- * hyperlink (whose URL lives in a part this conversion does not read), a table with a
- * bold header row, a non-ASCII character, and asterisks that are text and not markup.
+ * hyperlink whose URL lives in the relationships part, the same link written as a field
+ * both ways Word writes one, a table with a bold header row, a non-ASCII character, and
+ * asterisks that are text and not markup.
  * <p>
  * {@link #MARKDOWN} is the whole expected output, not a fragment: what a conversion
  * leaves out or adds matters as much as what it gets right.
@@ -41,6 +42,15 @@ final class FormattedDocx {
             "relationships\"><Relationship Id=\"rId1\" Type=\"http://",
             "schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\"",
             " Target=\"word/document.xml\"/></Relationships>");
+
+    /** The document's own relationships: where its w:hyperlink's address is kept. */
+    private static final String DOCUMENT_RELS = String.join("",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/",
+            "relationships\"><Relationship Id=\"rId9\" Type=\"http://",
+            "schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink\"",
+            " Target=\"https://github.com/ivan-khvostishkov/jrock\" TargetMode=\"External\"/>",
+            "</Relationships>");
 
     /** The document body. Indented for reading; whitespace between elements is ignored. */
     private static final String DOCUMENT = String.join("\n",
@@ -72,6 +82,19 @@ final class FormattedDocx {
             // A hyperlink: its text is in a run, its URL in the relationships part.
             "<w:p><w:hyperlink r:id=\"rId9\"><w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/>",
             "</w:rPr><w:t>the repository</w:t></w:r></w:hyperlink></w:p>",
+            // The same thing as a field, both ways Word writes one: spelled out over
+            // runs (begin, instruction, separate, the text, end), and as a w:fldSimple -
+            // whose text and address need brackets and parentheses escaped.
+            "<w:p><w:r><w:t xml:space=\"preserve\">Read </w:t></w:r>",
+            "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>",
+            "<w:r><w:instrText xml:space=\"preserve\"> HYPERLINK </w:instrText></w:r>",
+            "<w:r><w:instrText>\"https://example.com/notes\"</w:instrText></w:r>",
+            "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>",
+            "<w:r><w:rPr><w:i/></w:rPr><w:t>the notes</w:t></w:r>",
+            "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>",
+            "<w:r><w:t xml:space=\"preserve\"> and </w:t></w:r>",
+            "<w:fldSimple w:instr=\" HYPERLINK &quot;https://example.com/draft(1)&quot; \">",
+            "<w:r><w:t>the [draft]</w:t></w:r></w:fldSimple><w:r><w:t>.</w:t></w:r></w:p>",
             // A table, header row in bold, as Word writes one.
             "<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr>",
             "<w:tblGrid><w:gridCol w:w=\"4819\"/><w:gridCol w:w=\"4819\"/></w:tblGrid>",
@@ -88,10 +111,10 @@ final class FormattedDocx {
      * The Markdown {@link #DOCUMENT} converts to, byte for byte.
      * <p>
      * Note what is <em>not</em> here: no emphasis inside the headings (the style said
-     * what they are, so saying it twice is noise), no URL for the hyperlink (it is in
-     * the relationships part, and what the reader of the document sees is the text),
-     * and no right alignment on the table (Markdown's separator row can carry it, but
-     * the alignment is the document's layout rather than its meaning). The table header
+     * what they are, so saying it twice is noise), and no right alignment on the table
+     * (Markdown's separator row can carry it, but the alignment is the document's layout
+     * rather than its meaning). Every link keeps its address, as Markdown's
+     * {@code [text](address)}, with its text formatted as its runs were. The table header
      * keeps the bold it was written in, the asterisks of the last line are escaped -
      * they were characters someone typed - and the umlaut is a character, as UTF-8.
      */
@@ -107,7 +130,10 @@ final class FormattedDocx {
             "",
             "> A quotation.",
             "",
-            "the repository",
+            "[the repository](https://github.com/ivan-khvostishkov/jrock)",
+            "",
+            "Read [*the notes*](https://example.com/notes) and "
+                    + "[the \\[draft\\]](https://example.com/draft%281%29).",
             "",
             "| **Region** | **Revenue** |",
             "| --- | --- |",
@@ -124,6 +150,7 @@ final class FormattedDocx {
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
             entry(zip, "[Content_Types].xml", CONTENT_TYPES);
             entry(zip, "_rels/.rels", RELS);
+            entry(zip, "word/_rels/document.xml.rels", DOCUMENT_RELS);
             entry(zip, "word/document.xml", DOCUMENT);
         }
         Files.write(file, bytes.toByteArray());

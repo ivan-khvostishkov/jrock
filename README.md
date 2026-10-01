@@ -28,8 +28,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   plain files under a `JRock/` folder you own and can inspect.
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text, image and audio files, plus PDF-to-page-images via Ghostscript
-  and RTF/DOCX-to-Markdown with no external tool at all) referenced by hash; multi-select
-  supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
+  on the desktop and PDF.js in the browser, and RTF/DOCX-to-Markdown, links and all, with no
+  external tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
   read on, so no tokens are spent on pixels nobody sees — and every include **reloaded from the
   log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
@@ -222,22 +222,27 @@ review, and the phone gets the same client as the desktop, with the same plain f
 
 ### Working with PDFs
 
-The PDF filter is the one thing a phone doesn't get, and so is the
-[duplex merge](#merging-duplex-scans-ghostscript). Java ships no PDF support of its own, so
-JRock converts with [Ghostscript](#pdf-conversion-ghostscript) as a subprocess — and there is no
-process to start under a browser JVM, CheerpJ having no operating system beneath it. The filter is
-still in the dropdown, and picking it there gets you the same "not found" note as a desktop without
-Ghostscript installed. Two ways round, both of which work in a browser exactly as they do on the
-desktop:
+The PDF filter works in the browser too. Java ships no PDF support of its own, and a browser JVM
+has no process to start, so where the desktop runs [Ghostscript](#pdf-conversion-ghostscript) the
+page hands the PDF to [PDF.js](https://mozilla.github.io/pdf.js/) — the renderer Firefox shows
+PDFs with — and gets each page back as a PNG, drawn at the same **Images DPI**. JRock talks to
+both through one PDF engine interface, so the include, the page files and the `@img` tokens are
+the same either way. PDF.js is loaded from jsDelivr the first time a PDF is included, so a session
+that never opens one never downloads it. Pages land in **`JRock/pdfjs-pdf/`**, named
+`<pdfname>.pdfjs.NNN.png`.
+
+The [duplex merge](#merging-duplex-scans-ghostscript) is the one PDF feature that stays on the
+desktop: it writes a PDF, and PDF.js only reads them. Other ways to work with a PDF that run
+in-process, in a tab as well as on the desktop:
 
 - **Page images.** Screenshot the pages in whatever PDF viewer the phone already has and include
-  them under **Image files**. This is what *PDF as page images* produces anyway, done by hand — and
-  image includes need nothing native, JRock reading their dimensions straight out of the file header.
+  them under **Image files** — useful for a single page out of a long document. Image includes
+  need nothing native, JRock reading their dimensions straight out of the file header.
 - **Via a word processor's format.** Export the PDF as RTF or as Word in Acrobat (which has a mobile
   app too), then include the file as [**RTF as Markdown text**](#rtf-and-docx-conversion-no-external-tool) or
   [**DOCX as Markdown text**](#rtf-and-docx-conversion-no-external-tool) — or, for an `.rtf`, under
   **Text files as is**, markup and all. All of them run in-process on the JDK's own RTF reader and
-  XML parser, so all of them work in a browser tab.
+  XML parser.
 
 Which one depends on the document: a scan or anything where the layout carries meaning goes as page
 images, while a text document is better via RTF or DOCX, where headings, bold, italic and — from a
@@ -485,8 +490,8 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   dialog-only transcript.
 - `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the region, model and
   images DPI (see [**Settings files**](#settings-files)).
-- `JRock/gs-pdf/` — per-page text/image files produced when a PDF is included via Ghostscript
-  (see Multimodal includes).
+- `JRock/gs-pdf/` — the page images produced when a PDF is included via Ghostscript, and
+  `JRock/pdfjs-pdf/` the same from PDF.js in the browser (see Multimodal includes).
 - `JRock/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
   (see Multimodal includes).
 - `JRock/docx-md/` — the same for a `.docx` included as Markdown text.
@@ -662,8 +667,8 @@ gswin64 -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -o C:\scans\scan0166.Merged.
 - **Nothing is deleted.** The merge ends in a line saying the two scans are untouched and to look
   through the merged file before deleting them, so a pass that went into the feeder the wrong way
   costs a second try, not a rescan.
-- Not in the [browser](#jrock-web-in-the-browser): there is no subprocess to start there, so the
-  item answers with the same "Ghostscript not found" note as a desktop without it installed.
+- Not in the [browser](#jrock-web-in-the-browser): the browser's PDF engine, PDF.js, reads PDFs
+  and does not write them, so there the item says so and points to the desktop build.
 
 ## Multimodal includes (Ctrl+I)
 
@@ -973,7 +978,8 @@ refers to an include, it logs nothing.
 
 Selecting the PDF filter runs **Ghostscript** to convert the PDF, one page image per page, then
 includes each produced page. Ghostscript must be on your PATH: `gswin64` on Windows, `gs` on
-macOS and Linux.
+macOS and Linux. In the [browser](#working-with-pdfs) the same filter renders with PDF.js
+instead, into `JRock/pdfjs-pdf/`.
 
 **Page images and nothing else.** There is no text filter on Ghostscript's `txtwrite` device,
 because `txtwrite` takes the text operators as they come and hands back something a model has to
@@ -1029,6 +1035,7 @@ survive as markup a model reads as structure instead of being thrown away.
   | bold, italic | `**bold**`, `*italic*`, `***both***` |
   | a font size larger than the document's body size | a heading — `#`/`##`/`###` by how much larger (6 pt, 3 pt, any), short lines only |
   | a bullet character (Word writes the bullet as text) | a `-` list item; `1.`, `2)` … are kept as they are |
+  | a `HYPERLINK` field | `[the text it shows](its address)`, the text keeping its bold and italic; a link to a bookmark in the document (`HYPERLINK \l`) stays plain text |
 
   Markdown's own characters in the text (`*`, `` ` ``, `\`, a leading `#`) are escaped, so a
   document that talks about asterisks still says so.
@@ -1044,7 +1051,8 @@ font sizes:
 
 - Output is written under **`JRock/docx-md/`**, named `<docxname>.md` — `quarterly.docx` becomes
   `quarterly.docx.md`, the same rule as for RTF.
-- Only `word/document.xml` is read, and only these parts of it:
+- Only `word/document.xml` is read, with its relationships part for link addresses, and only
+  these parts of it:
 
   | In the document | In the Markdown |
   |---|---|
@@ -1056,10 +1064,11 @@ font sizes:
   | `w:tbl` | a pipe table, with a `\| --- \|` separator after the first row; a `\|` inside a cell is escaped |
   | `w:tab`, `w:br`, `w:cr` in a run | a space; a `w:noBreakHyphen` a `-` |
   | runs Word split mid-word | one word — adjacent runs with the same bold/italic are joined back together |
-  | a `w:hyperlink` | its text, in place; the URL lives in a part this does not read |
+  | a `w:hyperlink`, a `w:fldSimple` or a field spelled out over runs with a `HYPERLINK` instruction | `[its text](its address)` — the address read from `word/_rels/document.xml.rels` for a `w:hyperlink`; a link to a bookmark (`w:anchor`) stays plain text |
 
   Markdown's own characters in the text are escaped here too, so a document about asterisks
-  still says so.
+  still says so, and a `[`, `]` in a link's text or a space or parenthesis in its address is
+  escaped so the link stays one link.
 - **Not** read: `numbering.xml` (so every list level is a `-`, and numbered lists are not
   renumbered), headers, footers and footnotes, embedded images, colours, alignment and
   underline (which has no Markdown of its own, same as on the RTF side). With track changes on,
@@ -2202,8 +2211,8 @@ java -jar jrock.jar
 Current build hashes:
 
 ```
-99577824912f5d8dd39581411466ba7d8468524563e2fd5d57d54a6760fe0b20  jrock.jar
-256bf6f883bc22739d858723046dbeae  jrock.jar
+92f8c51d3fd9f14d976315932275a99346c01b3e5253007e19b03f9e29f29040  jrock.jar
+1aaa58e3e41065ed8b5989b5e917868d  jrock.jar
 ```
 
 Or, if you want to modify the source and run it in place (no build step):

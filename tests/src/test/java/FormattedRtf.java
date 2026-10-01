@@ -11,7 +11,9 @@ import java.nio.file.Path;
  * word here is one JRock's conversion has an opinion about - a font size that makes a
  * heading, {@code \b} and {@code \i}, a Word-style bullet ({@code \listtext} with
  * {@code \'b7} in Symbol), a non-ASCII character written the way RTF writes one
- * ({@code \'fc} in code page 1252), and an asterisk that is text and not markup.
+ * ({@code \'fc} in code page 1252), an asterisk that is text and not markup, and two
+ * {@code HYPERLINK} fields: one to an address, its text partly bold, and one to a
+ * bookmark inside the document, which has no address to keep.
  * <p>
  * {@link #MARKDOWN} is the whole expected output, not a fragment: what a conversion
  * leaves out or adds matters as much as what it gets right.
@@ -34,6 +36,9 @@ final class FormattedRtf {
             "\\pard{\\listtext\\f1\\'b7\\tab}Revenue up\\par",
             "\\pard{\\listtext\\f1\\'b7\\tab}Costs flat\\par",
             "\\pard A literal * and 2*3 stay text.\\par",
+            "\\pard See {\\field{\\*\\fldinst{HYPERLINK \"https://github.com/ivan-khvostishkov/jrock\"}}"
+                    + "{\\fldrslt{\\ul the \\b repository\\b0}}} for more, or go "
+                    + "{\\field{\\*\\fldinst{HYPERLINK \\\\l \"top\"}}{\\fldrslt back to the top}}.\\par",
             "}");
 
     /**
@@ -55,6 +60,9 @@ final class FormattedRtf {
             "- Costs flat",
             "",
             "A literal \\* and 2\\*3 stay text.",
+            "",
+            "See [the **repository**](https://github.com/ivan-khvostishkov/jrock) for more, or "
+                    + "go back to the top.",
             "");
 
     private FormattedRtf() { }
