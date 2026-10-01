@@ -1134,9 +1134,12 @@ them, and doubles as a template for a prompts directory of your own:
 - **`jrock-prompt-doc-inventory.txt`** — read a document and answer with **nothing but a file
   name**, following one convention:
   `<date>-<counterparty>-<what it is>-<document number>`, e.g.
-  `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890`. Titles and counterparties are
-  normalised to English and Latin-1 and shortened to the name people actually use
-  (*Beitragsservice* → `GEZ`, *Bayerische Landesbank* → `BayernLB`).
+  `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890`. Titles are put into English, and
+  counterparties shortened to the name people actually use (*Beitragsservice* → `GEZ`,
+  *Bayerische Landesbank* → `BayernLB`). The name is in **`A-Z`, `a-z`, digits and hyphens
+  only** — no umlauts, accents or spaces, which are written out instead (*München* →
+  `Muenchen`, *ß* → `ss`) — so it opens and places everywhere: Adobe InDesign, for one, will
+  not place a `.docx` with an umlaut in its name.
 - **`jrock-prompt-translate-to-english.txt`** — translate a document into English and answer
   with **nothing but the translation**, after one `Translated from: <language>` line. All of it,
   not a summary; the original's paragraphs, headings, lists, tables and page separators kept;
@@ -1237,10 +1240,12 @@ line that answers wins, the top of a reply being where the answer was asked for.
 the reply looks like a file name, the automation stops and shows you the reply, instead of
 renaming your documents to a sentence.
 
-"Name characters" means **letters, not ASCII**: `2026-09-22-MünchnerBank-…` stays that way. The
-prompt asks for Latin-1, which has umlauts and an eszet in it, and held to `A-Za-z0-9` a
-sanitiser would turn every letter it did not know into a dash — `2026-09-22-M-nchnerBank-…`, where a
-dash is exactly the character that means *the next part of the name starts*. So the test is
+"Name characters" means **letters, not ASCII**. The prompt asks for `A-Za-z0-9` and hyphens,
+umlauts written out, and a model that does as asked gives `2026-09-22-MuenchnerBank-…`. The
+sanitiser is the safety net for one that does not, and a net held to `A-Za-z0-9` would turn every
+letter it did not know into a dash — `2026-09-22-M-nchnerBank-…`, where a dash is exactly the
+character that means *the next part of the name starts*; `MünchnerBank` at least still reads
+right, and is easy to fix by hand. So the test is
 Unicode's own (`\p{L}`), and the reply is normalised to NFC first, so an *ü* is one character and
 not a *u* with a combining mark trailing it — the two look identical on screen and only one is
 what the file system and the person searching the folder next year will agree on.
