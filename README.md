@@ -1204,7 +1204,7 @@ The eight steps above are a loop you run per document, and the third file in
 
 ```
 java -cp jrock.jar JRockDocInventory.java document.pdf   # no argument: it asks for the file
-java -cp jrock.jar JRockDocInventory.java document.rtf   # an RTF works as well as a PDF
+java -cp jrock.jar JRockDocInventory.java document.docx  # an RTF, a DOCX or a TXT works too
 java -cp jrock.jar JRockDocInventory.java --working-dir D:\HPScan   # that folder's settings
 ```
 
@@ -1212,19 +1212,23 @@ It reads the same two prompts out of its own directory, sends the document, save
 `document.txt` beside it, sends *that* with the inventory prompt, and offers to rename the files
 to the name that comes back. Then a "Finished" dialog, and the window is yours.
 
-**A PDF or an RTF**, and the difference is what the model is shown: a PDF goes in as one page
-image per page, an RTF as [Markdown](#rtf-and-docx-conversion-no-external-tool) — text, which
-is a fraction of the price of the same page photographed, and says exactly what is on it rather
-than something to be deciphered. The chooser offers both extensions; a path from the right-click
-menu is *checked* to be one of them, because that menu hands over whatever was clicked, and a
-.jpg converted, sent and charged for before anyone notices is a poor way to find out.
+**A PDF, an RTF, a DOCX or a TXT**, and the difference is what the model is shown: a PDF goes in
+as one page image per page, an RTF or a DOCX as [Markdown](#rtf-and-docx-conversion-no-external-tool)
+— text, which is a fraction of the price of the same page photographed, and says exactly what is
+on it rather than something to be deciphered. A TXT is plain text already, so it skips the first
+pass and goes straight to the inventory prompt, as its own text twin. The chooser offers these
+four extensions; a path from the right-click menu is *checked* to be one of them, because that
+menu hands over whatever was clicked, and a .jpg sent and charged for before anyone notices is a
+poor way to find out.
 
-**A PDF and an RTF of the same name are one document filed twice** — which is exactly what
-Acrobat's *Export to RTF* leaves behind. So the pair is followed in both directions: pick either
-and the other is found beside it, and picking the PDF gets an offer to read the RTF instead
-(*"Both files are renamed either way"*). The rename at the end moves **two files or three** — the
-scan, its text export and the plain text this run wrote — all to the same name, together or not
-at all. Half a document renamed is the mess this automation exists to clear up, not to make.
+**A PDF, an RTF and a DOCX of the same name are one document filed more than once** — which is
+exactly what Acrobat's *Export to RTF* and *Export to Word* leave behind. So the set is followed
+in every direction: pick any and the others are found beside it, and picking the PDF gets an offer
+to read the RTF (or else the DOCX) instead (*"All the files are renamed either way"*). A TXT
+picked on its own finds them too, being the text twin an earlier run wrote. The rename at the end
+moves **every file of the document** — the scan, its text exports and the plain text this run
+wrote — all to the same name, together or not at all. Half a document renamed is the mess this
+automation exists to clear up, not to make.
 
 File names in its dialogs each get **a line of their own**, indented, never sharing a line with
 prose: `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890.pdf` is an ordinary name here, and
