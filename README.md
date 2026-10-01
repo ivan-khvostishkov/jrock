@@ -2012,10 +2012,13 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   *Mic always on* (see [**Mic always on**](#mic-always-on)),
   *Reload all includes* (which rebuilds the hash → path map from
   the log, so a conversation survives a restart), Load prompt from file..., Save prompt copy
-  as..., then Cut / Copy / Paste / **Select all** / Undo / Redo. Those last ones are there for
-  a touch device, which has no keyboard to press Ctrl+A on: *Select all* followed by Backspace
-  is how a prompt gets cleared with no keyboard at all, and dragging a selection from the top of
-  a long prompt to the bottom of it on a phone is its own small ordeal.
+  as..., then Cut / Copy / Paste / *Insert document number* / **Select all** / Undo / Redo.
+  *Insert document number* types a random 10-digit number, never starting with 0, at the caret —
+  a fresh reference for an invoice, a ticket or a letter, which keeps all ten digits in a
+  spreadsheet cell or a numeric field. The edit items are there for a touch device, which has no
+  keyboard to press Ctrl+A on: *Select all* followed by Backspace is how a prompt gets cleared
+  with no keyboard at all, and dragging a selection from the top of a long prompt to the bottom
+  of it on a phone is its own small ordeal.
 - **The file name box of any file dialog** — Copy / Paste / Select all. Also for touch, and for
   one thing in particular: the include dialog is multi-select, but a tap selects a single file
   and there is no Shift to hold. Several names typed or pasted into that box, each in quotes —
@@ -2323,6 +2326,8 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockReplyTextTest`** feeds chat-completion JSON to the reply parser and checks non-ASCII
   text comes back intact — as characters, as `\uXXXX` escapes (a server may use either, and an
   emoji arrives as a *pair* of them), and mixed. No window.
+- **`JRockDocumentNumberTest`** draws a thousand numbers for *Insert document number* and checks
+  each is ten digits with no leading 0, and that they don't repeat. No window.
 - **`JRockNarrationTextTest`** checks what [**Narrate selected text**](#narrate-windows) would
   hand the voice: headings, emphasis, list and quote markers, table pipes and include tokens
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few

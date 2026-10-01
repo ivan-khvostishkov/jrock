@@ -2541,6 +2541,10 @@ public class JRock {
         javax.swing.JMenuItem copyItem  = addEditItem(promptMenu, "Copy",  input,
                 () -> clipboardCopy(input.getSelectedText(), log));
         addEditItem(promptMenu, "Paste", input, () -> clipboardPaste(input, log));
+        // A fresh reference to give a document - an invoice, a ticket, a letter - typed
+        // in where the caret is, in place of any selection, as Paste puts text there.
+        addEditItem(promptMenu, "Insert document number", input,
+                () -> input.replaceSelection(documentNumber()));
         // Select all, which is also how a touch device clears the prompt: select the lot,
         // then Backspace. There is no Ctrl+A to press, and dragging a selection from the
         // top of a long prompt to the bottom of it on a phone is its own small ordeal.
@@ -2616,6 +2620,14 @@ public class JRock {
         ui = new Ui(frame, input, log, send, extendMode, clockMode, sendGate);
 
         frame.setVisible(true);
+    }
+
+    // A random 10-digit number that never starts with 0, so it keeps all ten digits
+    // wherever it is pasted - a spreadsheet cell, a numeric field - and reads aloud as
+    // the number it is. Drawn from SecureRandom: one in nine billion, unpredictable.
+    static String documentNumber() {
+        return Long.toString(1_000_000_000L
+                + Math.floorMod(new java.security.SecureRandom().nextLong(), 9_000_000_000L));
     }
 
     // Adds a JMenuItem running the given action to a popup menu, and returns it for
