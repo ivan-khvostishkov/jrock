@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.5.1";
+    private static final String VERSION = "2.6.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -623,7 +623,8 @@ public class JRock {
     private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
-    private static Path gsPdfDir()         { return jrockDir().resolve("gs-pdf"); }
+    // gs-pdf/ on the desktop, pdfjs-pdf/ in the browser: one folder per engine.
+    private static Path pdfDir(PdfEngine e) { return jrockDir().resolve(e.tag() + "-pdf"); }
     private static Path rtfMdDir()         { return jrockDir().resolve("rtf-md"); }
     private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
@@ -8312,122 +8313,42 @@ public class JRock {
         }
     }
 
-    // Rasterises a PDF to one PNG per page with Ghostscript, then includes each
-    // produced page. Output files are written under JRock/gs-pdf/, named
-    // "<pdfname>.gs.NNN.png". If Ghostscript isn't on PATH, points the user to the
-    // download page and does nothing else.
+    // Renders a PDF to one PNG per page with the PDF engine (see pdf()), then includes
+    // each page. On the desktop that is Ghostscript, writing under JRock/gs-pdf/ as
+    // "<pdfname>.gs.NNN.png"; in the browser it is PDF.js, writing under
+    // JRock/pdfjs-pdf/ as "<pdfname>.pdfjs.NNN.png". When the engine can't run - no
+    // Ghostscript on PATH - it says why and what to do, and nothing else happens.
     //
     // Page images rather than extracted text: see the filters in showIncludeDialog for
     // why a PDF is not read as text here.
     //
-    // Runs on a background thread (see showIncludeDialog): it waits for Ghostscript,
+    // Runs on a background thread (see showIncludeDialog): it waits for the engine,
     // which on a large PDF takes a long time. Anything touching a widget goes
     // through onEdt().
     private static void includePdf(JFrame frame, JTextArea input, LogView log,
                                    boolean extend, Path pdf) {
-        String gs = findGhostscript();
-        if (gs == null) {
-            ghostscriptMissing(frame, log, "convert PDFs");
-            return;
-        }
+        PdfEngine engine = pdf();
+        if (!engine.ready(frame, log, "convert PDFs")) return;
 
-        // Output goes to JRock/gs-pdf/. Page files are named "<pdfname>.gs.NNN.png"
-        // (pdf name kept as a prefix so pages from different PDFs don't collide).
-        Path outDir = gsPdfDir();
+        // One folder per engine, and the PDF's whole name kept as the prefix, so pages
+        // from different PDFs - or from the two engines - don't collide.
+        Path outDir = pdfDir(engine);
         try {
             Files.createDirectories(outDir);
         } catch (IOException ex) {
             log.gray("Could not create " + outDir + ": " + ex.getMessage());
             return;
         }
-        String base = pdf.getFileName().toString();
-        String prefix = base + ".gs.";
-        String suffix = ".png";
-        // Ghostscript expands %03d in the output path to the page number.
-        String outPattern = outDir.resolve(prefix + "%03d" + suffix).toString();
-
-        java.util.List<String> cmd = new java.util.ArrayList<>();
-        cmd.add(gs);
-        // No -q: Ghostscript's own progress ("Processing pages 1 through N.", then a
-        // "Page N" as each one is finished) is the only honest answer to "is this
-        // working, and how far along is it?" on a long document.
-        cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
-        boolean windowed = isWindowedGhostscript(gs);
-        if (!windowed) {
-            // Console build: the messages are read back through the pipe and echoed
-            // into the log below. They are asked for on stderr rather than stdout
-            // because a pipe makes the C runtime buffer stdout in 4 KB blocks -
-            // progress would then arrive in bursts, or all at once at the end, which
-            // is precisely what it is there to avoid. stderr is unbuffered, and
-            // redirectErrorStream below reads both as one. Page output is unaffected:
-            // -o writes that to files, not to stdout.
-            cmd.add("-sstdout=%stderr");
-        }
-        // The windowed build gets no -sstdout at all, deliberately: it honours the
-        // redirect, and its own window - the whole reason for preferring it - would
-        // then sit there empty.
-        cmd.add("-sDEVICE=png16m");
-        cmd.add("-r" + imagesDpi);                  // page raster resolution (Configure)
-        cmd.add("-o"); cmd.add(outPattern);
-        cmd.add(pdf.toAbsolutePath().toString());
-
-        // Logged before the process is started, and actually seen: this method is
-        // off the EDT, so the pane repaints while Ghostscript works.
-        log.gray("Converting PDF with Ghostscript: " + String.join(" ", cmd));
-        if (windowed) {
-            // Said plainly, because the log falls silent for the whole conversion and
-            // the window is somewhere else on screen - possibly behind this one.
-            log.gray("Ghostscript reports its progress in its own window; it closes "
-                    + "when the conversion finishes.");
-        }
-        int code;
-        try {
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            // Drain output so the process can't block, and echo it to the log. The
-            // windowed build writes nothing here - its messages go to its window - so
-            // this reads to end-of-stream and logs nothing, which is also what keeps
-            // the wait below from starting before the process has finished.
-            try (java.io.BufferedReader r = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) {
-                    if (!line.isBlank()) log.gray("gs: " + line.trim());
-                }
-            }
-            code = p.waitFor();
-        } catch (IOException | InterruptedException ex) {
-            log.gray("Ghostscript failed to run: " + ex.getMessage());
-            return;
-        }
-        if (code != 0) {
-            log.gray("Ghostscript exited with code " + code + "; no pages included."
-                    // Nothing was echoed, so say where the reason went.
-                    + (windowed ? " It reported the reason in its own window." : ""));
-            return;
-        }
-
-        // Collect the produced page files (in JRock/gs-pdf/) in order, matching
-        // this PDF's prefix, and include each one.
-        java.util.List<Path> pages = new java.util.ArrayList<>();
-        try (java.util.stream.Stream<Path> s = Files.list(outDir)) {
-            s.filter(pp -> {
-                    String n = pp.getFileName().toString();
-                    return n.startsWith(prefix) && n.endsWith(suffix);
-                })
-                .sorted(java.util.Comparator.comparing(pp -> pp.getFileName().toString()))
-                .forEach(pages::add);
-        } catch (IOException ex) {
-            log.gray("Could not list produced pages: " + ex.getMessage());
-            return;
-        }
+        String prefix = pdf.getFileName().toString() + "." + engine.tag() + ".";
+        List<Path> pages = engine.render(pdf, imagesDpi, outDir, prefix, log);
+        if (pages == null) return;   // the engine has said why
         if (pages.isEmpty()) {
-            log.gray("Ghostscript produced no pages for " + pdf.getFileName() + ".");
+            log.gray(engine.name() + " produced no pages for " + pdf.getFileName() + ".");
             return;
         }
 
-        log.gray("Ghostscript produced " + pages.size() + " page file(s); including them.");
+        log.gray(engine.name() + " produced " + pages.size()
+                + " page file(s); including them.");
         int inserted = 0;
         for (Path page : pages) {
             final Path p = page;
@@ -8440,6 +8361,300 @@ public class JRock {
                 + pdf.getFileName() + ".");
         // No requestFocusInWindow here: the caller's done() puts focus back on the
         // prompt once the whole batch is finished, on the EDT where it belongs.
+    }
+
+    // ---- PDF engine --------------------------------------------------------
+    // Everything JRock does with a PDF goes through one PdfEngine: rendering its pages
+    // for an include, counting them, and interleaving two scans into one file. There
+    // are two, one per runtime:
+    //
+    //   GhostscriptPdf - the Ghostscript on PATH. The desktop's engine.
+    //   PdfJsPdf       - PDF.js in the hosting page, over the browser bridge. The
+    //                    browser's engine: there is no PATH there and nothing to run,
+    //                    and the page renders each PDF page on a canvas instead.
+    //                    PDF.js reads PDFs and does not write them, so the duplex
+    //                    merge is the desktop's alone.
+    //
+    // Chosen once, by the runtime: see pdf().
+    private interface PdfEngine {
+        /** What the log and the dialogs call it: "Ghostscript", "PDF.js". */
+        String name();
+
+        /** Names its output: JRock/<tag>-pdf/<pdfname>.<tag>.NNN.png. */
+        String tag();
+
+        /**
+         * Whether it can do the task now. When not, it says why - in the log and in a
+         * dialog - and returns false. "task" finishes the sentence "... is required
+         * to <task>". Safe from either thread.
+         */
+        boolean ready(JFrame frame, LogView log, String task);
+
+        /**
+         * Renders every page of pdf at dpi to PNG files in outDir, named prefix + NNN
+         * + ".png", and returns them in page order - or null once it has logged why
+         * there are none. Off the EDT: it can take minutes.
+         */
+        List<Path> render(Path pdf, int dpi, Path outDir, String prefix, LogView log);
+
+        /** How many pages pdf has, or -1 when it would not say. Off the EDT. */
+        int pageCount(Path pdf, LogView log);
+
+        /** Whether it writes PDFs, which the duplex merge needs. */
+        boolean writesPdf();
+
+        /**
+         * Writes front page 1, back page "sheets", front page 2, ... into out, and
+         * says in the log (and through duplexNote, on failure) how that went. Off the
+         * EDT.
+         */
+        void interleave(JFrame frame, LogView log, Path front, Path back, int sheets,
+                        Path out);
+    }
+
+    // The engine in use, chosen once by pdf().
+    private static PdfEngine pdfEngine;
+
+    // Returns the PDF engine, picking it on first call: PDF.js in the browser, where
+    // the page provides it, and Ghostscript everywhere else.
+    private static synchronized PdfEngine pdf() {
+        if (pdfEngine == null) {
+            pdfEngine = isCheerpJ() ? new PdfJsPdf() : new GhostscriptPdf();
+        }
+        return pdfEngine;
+    }
+
+    // Ghostscript, found on PATH each time it is used - so one installed while JRock is
+    // running is picked up by the next include, with no restart.
+    private static final class GhostscriptPdf implements PdfEngine {
+        @Override public String name() { return "Ghostscript"; }
+        @Override public String tag() { return "gs"; }
+        @Override public boolean writesPdf() { return true; }
+
+        @Override
+        public boolean ready(JFrame frame, LogView log, String task) {
+            if (findGhostscript() != null) return true;
+            ghostscriptMissing(frame, log, task);
+            return false;
+        }
+
+        @Override
+        public int pageCount(Path pdf, LogView log) {
+            // Asked of the CONSOLE build, whose answer comes back on a pipe.
+            return pdfPageCount(findGhostscript(false), pdf, log);
+        }
+
+        @Override
+        public void interleave(JFrame frame, LogView log, Path front, Path back,
+                               int sheets, Path out) {
+            String gs = findGhostscript();   // windowed where there is one
+            if (gs == null) {
+                ghostscriptMissing(frame, log, "merge duplex scans");
+                return;
+            }
+            ghostscriptInterleave(frame, log, gs, front, back, sheets, out);
+        }
+
+        @Override
+        public List<Path> render(Path pdf, int dpi, Path outDir, String prefix,
+                                 LogView log) {
+            String gs = findGhostscript();
+            if (gs == null) {
+                log.gray("Ghostscript is no longer on PATH; no pages included.");
+                return null;
+            }
+            String suffix = ".png";
+            // Ghostscript expands %03d in the output path to the page number.
+            String outPattern = outDir.resolve(prefix + "%03d" + suffix).toString();
+
+            java.util.List<String> cmd = new java.util.ArrayList<>();
+            cmd.add(gs);
+            // No -q: Ghostscript's own progress ("Processing pages 1 through N.", then a
+            // "Page N" as each one is finished) is the only honest answer to "is this
+            // working, and how far along is it?" on a long document.
+            cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
+            boolean windowed = isWindowedGhostscript(gs);
+            if (!windowed) {
+                // Console build: the messages are read back through the pipe and echoed
+                // into the log below. They are asked for on stderr rather than stdout
+                // because a pipe makes the C runtime buffer stdout in 4 KB blocks -
+                // progress would then arrive in bursts, or all at once at the end, which
+                // is precisely what it is there to avoid. stderr is unbuffered, and
+                // redirectErrorStream below reads both as one. Page output is unaffected:
+                // -o writes that to files, not to stdout.
+                cmd.add("-sstdout=%stderr");
+            }
+            // The windowed build gets no -sstdout at all, deliberately: it honours the
+            // redirect, and its own window - the whole reason for preferring it - would
+            // then sit there empty.
+            cmd.add("-sDEVICE=png16m");
+            cmd.add("-r" + dpi);                  // page raster resolution (Configure)
+            cmd.add("-o"); cmd.add(outPattern);
+            cmd.add(pdf.toAbsolutePath().toString());
+
+            // Logged before the process is started, and actually seen: this method is
+            // off the EDT, so the pane repaints while Ghostscript works.
+            log.gray("Converting PDF with Ghostscript: " + String.join(" ", cmd));
+            if (windowed) {
+                // Said plainly, because the log falls silent for the whole conversion and
+                // the window is somewhere else on screen - possibly behind this one.
+                log.gray("Ghostscript reports its progress in its own window; it closes "
+                        + "when the conversion finishes.");
+            }
+            int code;
+            try {
+                ProcessBuilder pb = new ProcessBuilder(cmd);
+                pb.redirectErrorStream(true);
+                Process p = pb.start();
+                // Drain output so the process can't block, and echo it to the log. The
+                // windowed build writes nothing here - its messages go to its window - so
+                // this reads to end-of-stream and logs nothing, which is also what keeps
+                // the wait below from starting before the process has finished.
+                try (java.io.BufferedReader r = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(p.getInputStream(),
+                                StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        if (!line.isBlank()) log.gray("gs: " + line.trim());
+                    }
+                }
+                code = p.waitFor();
+            } catch (IOException | InterruptedException ex) {
+                log.gray("Ghostscript failed to run: " + ex.getMessage());
+                return null;
+            }
+            if (code != 0) {
+                log.gray("Ghostscript exited with code " + code + "; no pages included."
+                        // Nothing was echoed, so say where the reason went.
+                        + (windowed ? " It reported the reason in its own window." : ""));
+                return null;
+            }
+
+            // The produced page files (in JRock/gs-pdf/) in order, matching this
+            // PDF's prefix; the caller includes them.
+            java.util.List<Path> pages = new java.util.ArrayList<>();
+            try (java.util.stream.Stream<Path> s = Files.list(outDir)) {
+                s.filter(pp -> {
+                        String n = pp.getFileName().toString();
+                        return n.startsWith(prefix) && n.endsWith(suffix);
+                    })
+                    .sorted(java.util.Comparator.comparing(pp -> pp.getFileName().toString()))
+                    .forEach(pages::add);
+            } catch (IOException ex) {
+                log.gray("Could not list produced pages: " + ex.getMessage());
+                return null;
+            }
+            return pages;
+        }
+    }
+
+    // PDF.js, in the hosting page (see browserPdfOpen). The PDF goes to the page once,
+    // and each page comes back as a PNG drawn on a canvas at the resolution asked for -
+    // the pixels per inch a Ghostscript page has, so an include costs the same tokens
+    // in the browser as on the desktop.
+    private static final class PdfJsPdf implements PdfEngine {
+        @Override public String name() { return "PDF.js"; }
+        @Override public String tag() { return "pdfjs"; }
+        @Override public boolean writesPdf() { return false; }
+
+        // Nothing to look for in advance: the page loads PDF.js on first use, and
+        // whatever goes wrong with that is reported by the call that needed it.
+        @Override
+        public boolean ready(JFrame frame, LogView log, String task) { return true; }
+
+        @Override
+        public int pageCount(Path pdf, LogView log) {
+            String[] opened = open(pdf, log);
+            if (opened == null) return -1;
+            close(opened[0]);
+            return leadingInt(opened[1]);
+        }
+
+        @Override
+        public void interleave(JFrame frame, LogView log, Path front, Path back,
+                               int sheets, Path out) {
+            duplexNote(frame, log, "PDF.js reads PDFs and does not write them, so the "
+                    + "merge is not available in the browser.");
+        }
+
+        @Override
+        public List<Path> render(Path pdf, int dpi, Path outDir, String prefix,
+                                 LogView log) {
+            log.gray("Rendering PDF with PDF.js at " + dpi + " dpi: " + pdf);
+            String[] opened = open(pdf, log);
+            if (opened == null) return null;
+            int count = leadingInt(opened[1]);
+            List<Path> pages = new ArrayList<>();
+            try {
+                for (int page = 1; page <= count; page++) {
+                    String[] reply;
+                    try {
+                        reply = bridgeReply(browserPdfRenderPage(
+                                Integer.parseInt(opened[0]), page, dpi));
+                    } catch (Throwable ex) {
+                        reply = new String[] { "0", ex.toString() };
+                    }
+                    byte[] png = "1".equals(reply[0]) ? base64(reply[1]) : null;
+                    if (png == null || png.length == 0) {
+                        log.gray("PDF.js could not render page " + page + " of "
+                                + pdf.getFileName() + ": " + (reply[1].isBlank()
+                                    ? "no reason given" : reply[1].trim())
+                                + "; no pages included.");
+                        return null;
+                    }
+                    Path file = outDir.resolve(prefix
+                            + String.format(java.util.Locale.ROOT, "%03d", page) + ".png");
+                    Files.write(file, png);
+                    pages.add(file);
+                    log.gray("PDF.js: Page " + page + " of " + count);
+                }
+            } catch (IOException ex) {
+                log.gray("Could not write a rendered page: " + ex.getMessage());
+                return null;
+            } finally {
+                close(opened[0]);
+            }
+            return pages;
+        }
+
+        // Hands the PDF to the page. Returns { handle, page count }, or null once the
+        // log says why it could not be opened.
+        private static String[] open(Path pdf, LogView log) {
+            String[] reply;
+            try {
+                reply = bridgeReply(browserPdfOpen(java.util.Base64.getEncoder()
+                        .encodeToString(Files.readAllBytes(pdf))));
+            } catch (IOException ex) {
+                log.gray("Could not read " + pdf.getFileName() + ": " + ex.getMessage());
+                return null;
+            } catch (Throwable ex) {
+                // No PDF engine on this page at all: an older jrock-web, or another host.
+                log.gray("This page has no PDF engine in its bridge ("
+                        + ex.getClass().getSimpleName() + "); no pages included.");
+                return null;
+            }
+            String[] lines = reply[1].split("\n", -1);
+            if (!"1".equals(reply[0]) || lines.length < 2 || leadingInt(lines[1].trim()) < 1) {
+                log.gray("PDF.js could not open " + pdf.getFileName() + ": "
+                        + (reply[1].isBlank() ? "no reason given" : reply[1].trim()));
+                return null;
+            }
+            return new String[] { lines[0].trim(), lines[1].trim() };
+        }
+
+        private static void close(String handle) {
+            try {
+                browserPdfClose(Integer.parseInt(handle));
+            } catch (Throwable ignore) { /* the page frees it with the tab regardless */ }
+        }
+
+        private static byte[] base64(String text) {
+            try {
+                return java.util.Base64.getMimeDecoder().decode(text.trim());
+            } catch (IllegalArgumentException ex) {
+                return null;
+            }
+        }
     }
 
     // Finds Ghostscript on PATH. Returns the command to run, or null if not found.
@@ -8511,7 +8726,7 @@ public class JRock {
         return name.startsWith("gswin") && !name.endsWith("c");
     }
 
-    // ---- Duplex scan merge (Ghostscript) -----------------------------------
+    // ---- Duplex scan merge ------------------------------------------------
     // Merges the two passes of a double-sided scan into one PDF.
     //
     // A sheet-feed scanner with no duplex unit takes a two-sided batch in two goes: the
@@ -8521,8 +8736,8 @@ public class JRock {
     // interleaving them by hand is a job nobody does twice.
     //
     // Which is all this is: front 1, back N, front 2, back N-1, ... written out as one
-    // document. By the Ghostscript that PDF includes already need, so there is no pdftk,
-    // no Python and nothing else to install.
+    // document. By the engine PDF includes already use (see PdfEngine) - Ghostscript on
+    // the desktop - so there is no pdftk, no Python and nothing else to install.
     //
     // Which of the two picked files is the front pass is decided by their NAMES, not by
     // the order the chooser hands them over in - see frontThenBack for why that order is
@@ -8534,11 +8749,16 @@ public class JRock {
     // Runs on the EDT as far as its two dialogs; the counting and the merge, which wait
     // for a subprocess each, go to a worker.
     private static void mergeDuplexScans(JFrame frame, LogView log) {
-        String gs = findGhostscript();              // windowed where there is one
-        if (gs == null) {
-            ghostscriptMissing(frame, log, "merge duplex scans");
+        PdfEngine engine = pdf();
+        if (!engine.writesPdf()) {
+            // Said before any file is picked, so nobody chooses two scans for nothing.
+            duplexWarn(frame, "Merging duplex scans needs a PDF writer, and this "
+                    + "browser's PDF engine (" + engine.name() + ") reads PDFs only. "
+                    + "Merge them with the desktop build of JRock, which uses "
+                    + "Ghostscript.");
             return;
         }
+        if (!engine.ready(frame, log, "merge duplex scans")) return;
 
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(scanChooserDir.start());
@@ -8595,11 +8815,10 @@ public class JRock {
 
         log.gray("Duplex merge, front pass (the earlier name): " + front);
         log.gray("Duplex merge, back pass (in reverse): " + back);
-        final String command = gs;
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
-                runDuplexMerge(frame, log, command, front, back, out);
+                runDuplexMerge(frame, log, engine, front, back, out);
                 return null;
             }
 
@@ -8676,21 +8895,17 @@ public class JRock {
         return (rest != 0) ? rest : a.compareTo(b);
     }
 
-    // Counts the pages of both passes, then interleaves them into out with Ghostscript.
+    // Counts the pages of both passes, then has the engine interleave them into out.
     //
-    // Runs off the EDT: it waits for two or three subprocesses, and on a long document
-    // the merge is minutes. Everything it says goes into the log, which is why it can;
-    // a refusal also gets a dialog, through duplexNote.
-    private static void runDuplexMerge(JFrame frame, LogView log, String gs,
+    // Runs off the EDT: with Ghostscript it waits for two or three subprocesses, and on
+    // a long document the merge is minutes. Everything it says goes into the log, which
+    // is why it can; a refusal also gets a dialog, through duplexNote.
+    private static void runDuplexMerge(JFrame frame, LogView log, PdfEngine engine,
                                        Path front, Path back, Path out) {
-        // The page count is asked of the CONSOLE build, whose answer comes back on a
-        // pipe; the merge itself runs the windowed one where there is one, for the
-        // progress window. One installation, two executables.
-        String gsConsole = findGhostscript(false);
-        int sheets = pdfPageCount(gsConsole, front, log);
-        int backs  = pdfPageCount(gsConsole, back, log);
+        int sheets = engine.pageCount(front, log);
+        int backs  = engine.pageCount(back, log);
         if (sheets < 1 || backs < 1) {
-            duplexNote(frame, log, "Ghostscript would not say how many pages "
+            duplexNote(frame, log, engine.name() + " would not say how many pages "
                     + (sheets < 1 ? front : back).getFileName() + " has, so its pages "
                     + "cannot be paired with the other pass's.");
             return;
@@ -8703,7 +8918,14 @@ public class JRock {
                     + "the wrong back on every front.");
             return;
         }
+        engine.interleave(frame, log, front, back, sheets, out);
+    }
 
+    // The interleave itself, with Ghostscript's pdfwrite: front 1, back N, front 2, ...
+    // into out. gs is the windowed build where there is one, for its progress window.
+    private static void ghostscriptInterleave(JFrame frame, LogView log, String gs,
+                                              Path front, Path back, int sheets,
+                                              Path out) {
         // Both passes named relative to the folder they share, where they share one.
         // Length is the whole reason: every sheet names both files again, and Windows
         // stops accepting a command line at 32767 characters - which a few hundred
@@ -8969,6 +9191,10 @@ public class JRock {
     //   bold / italic      -> **bold**, *italic*, ***both***
     //   a larger font size -> a heading, #/##/### by how much larger (short lines only)
     //   a bullet character -> a "-" list item ("1." etc. are kept as they are)
+    //   a HYPERLINK field  -> [the text it shows](its address)
+    //
+    // The fields are read before the reader sees the file (see fields): the reader
+    // itself skips a field group whole, text and all.
     //
     // A line break (RTF's \line) is a paragraph of its own to the reader, and comes
     // out as one here: a blank line, which in Markdown reads the same way.
@@ -9007,15 +9233,153 @@ public class JRock {
 
         private RtfMarkdown() { }
 
+        // Where a hyperlink's text starts, where its address number ends, and where the
+        // text ends, in the text the reader hands back (see fields). Control characters,
+        // which no document's own text contains: text() drops every other one.
+        private static final char LINK_OPEN = '\u0001';
+        private static final char LINK_ADDRESS_END = '\u0002';
+        private static final char LINK_CLOSE = '\u0003';
+
+        // A HYPERLINK field's instruction: the address quoted, or as one word. A "\l"
+        // in front of it names a bookmark inside the document, which is no address
+        // outside it, and the link text is kept as plain text.
+        private static final java.util.regex.Pattern HYPERLINK = java.util.regex.Pattern
+                .compile("(?is)^\\s*HYPERLINK\\s+(\\\\l\\s+)?(?:\"([^\"]*)\"|(\\S+))");
+
         /** The Markdown for one RTF file. Never null; empty when the RTF has no text. */
         static String of(Path rtf) throws IOException, BadLocationException {
             javax.swing.text.rtf.RTFEditorKit kit = new javax.swing.text.rtf.RTFEditorKit();
             javax.swing.text.DefaultStyledDocument doc =
                     new javax.swing.text.DefaultStyledDocument();
-            try (java.io.InputStream in = Files.newInputStream(rtf)) {
-                kit.read(in, doc, 0);
+            // ISO-8859-1 both ways maps every byte to itself, so the RTF reaches the
+            // reader exactly as it is on disk apart from its fields.
+            List<String> links = new ArrayList<>();
+            String source = new String(Files.readAllBytes(rtf), StandardCharsets.ISO_8859_1);
+            byte[] prepared = fields(source, links).getBytes(StandardCharsets.ISO_8859_1);
+            kit.read(new java.io.ByteArrayInputStream(prepared), doc, 0);
+            return markdown(paragraphs(doc, links));
+        }
+
+        // The RTF with every field group replaced by the text it shows, which the JDK's
+        // reader would otherwise drop along with the field. A HYPERLINK field's text is
+        // also marked: LINK_OPEN, the address's index in links, LINK_ADDRESS_END, the
+        // text, and LINK_CLOSE - written as \'01, \'02 and \'03, which the reader
+        // passes through as those characters.
+        //
+        //   {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt the text}}
+        //
+        // A field nested in the text it shows is replaced the same way.
+        private static String fields(String rtf, List<String> links) {
+            StringBuilder out = new StringBuilder(rtf.length());
+            int i = 0;
+            while (i < rtf.length()) {
+                char c = rtf.charAt(i);
+                if (c == '\\' && i + 1 < rtf.length()) {
+                    out.append(c).append(rtf.charAt(i + 1));   // \{ \} \\ and control words
+                    i += 2;
+                    continue;
+                }
+                int end = (c == '{' && startsGroup(rtf, i, "field")) ? groupEnd(rtf, i) : -1;
+                if (end < 0) {
+                    out.append(c);
+                    i++;
+                    continue;
+                }
+                String instruction = null;
+                String result = null;
+                for (int at = i + 1; at < end; at++) {
+                    char d = rtf.charAt(at);
+                    if (d == '\\') {
+                        at++;
+                        continue;
+                    }
+                    if (d != '{') continue;
+                    int close = groupEnd(rtf, at);
+                    if (close < 0) break;
+                    if (startsGroup(rtf, at, "fldinst")) {
+                        instruction = plainText(rtf.substring(at + 1, close));
+                    } else if (startsGroup(rtf, at, "fldrslt")) {
+                        result = fields(afterKeyword(rtf.substring(at + 1, close),
+                                "fldrslt"), links);
+                    }
+                    at = close;
+                }
+                java.util.regex.Matcher m = (instruction == null) ? null
+                        : HYPERLINK.matcher(instruction);
+                String address = (m != null && m.find() && m.group(1) == null)
+                        ? (m.group(2) != null ? m.group(2) : m.group(3)).trim() : "";
+                if (result != null && !address.isEmpty()) {
+                    links.add(address);
+                    out.append("\\'01").append(links.size() - 1).append("\\'02{")
+                            .append(result).append("}\\'03");
+                } else if (result != null) {
+                    out.append('{').append(result).append('}');
+                }
+                i = end + 1;
             }
-            return markdown(paragraphs(doc));
+            return out.toString();
+        }
+
+        // Whether the group opening at "at" starts with that control word, allowing
+        // the "\*" an optional destination is written with.
+        private static boolean startsGroup(String rtf, int at, String word) {
+            return java.util.regex.Pattern
+                    .compile("\\{\\s*(?:\\\\\\*\\s*)?\\\\" + word + "(?![a-zA-Z])")
+                    .matcher(rtf).region(at, rtf.length()).lookingAt();
+        }
+
+        // The index of the brace closing the group that opens at "at", or -1 when the
+        // file ends first. Escaped braces are text, not groups.
+        private static int groupEnd(String rtf, int at) {
+            int depth = 0;
+            for (int i = at; i < rtf.length(); i++) {
+                char c = rtf.charAt(i);
+                if (c == '\\') {
+                    i++;
+                } else if (c == '{') {
+                    depth++;
+                } else if (c == '}' && --depth == 0) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        // A group's content after its leading control word and the space ending it.
+        private static String afterKeyword(String group, String word) {
+            int at = group.indexOf("\\" + word) + word.length() + 1;
+            while (at < group.length() && Character.isDigit(group.charAt(at))) at++;
+            if (at < group.length() && group.charAt(at) == ' ') at++;
+            return group.substring(at);
+        }
+
+        // An instruction's text with the RTF taken out: control words and braces go,
+        // "\\", "\{" and "\}" are the characters they escape, "\'hh" is that byte.
+        private static String plainText(String rtf) {
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < rtf.length(); i++) {
+                char c = rtf.charAt(i);
+                if (c == '{' || c == '}' || c == '\r' || c == '\n') continue;
+                if (c != '\\' || i + 1 >= rtf.length()) {
+                    out.append(c);
+                    continue;
+                }
+                char next = rtf.charAt(++i);
+                if (next == '\\' || next == '{' || next == '}') {
+                    out.append(next);
+                } else if (next == '\'' && i + 2 < rtf.length()) {
+                    try {
+                        out.append((char) Integer.parseInt(rtf.substring(i + 1, i + 3), 16));
+                    } catch (NumberFormatException ignore) { /* not a byte: dropped */ }
+                    i += 2;
+                } else if (Character.isLetter(next)) {
+                    while (i + 1 < rtf.length() && Character.isLetter(rtf.charAt(i + 1))) i++;
+                    if (i + 1 < rtf.length() && rtf.charAt(i + 1) == '-') i++;
+                    while (i + 1 < rtf.length() && Character.isDigit(rtf.charAt(i + 1))) i++;
+                    if (i + 1 < rtf.length() && rtf.charAt(i + 1) == ' ') i++;
+                }
+            }
+            return out.toString();
         }
 
         /** One styled stretch of text: what the RTF said about it, reduced to this. */
@@ -9024,16 +9388,24 @@ public class JRock {
             final boolean bold;
             final boolean italic;
             final int size;
+            /** The address the run links to, or null when it is not part of a link. */
+            final String link;
 
             Run(String text, boolean bold, boolean italic, int size) {
+                this(text, bold, italic, size, null);
+            }
+
+            Run(String text, boolean bold, boolean italic, int size, String link) {
                 this.text = text;
                 this.bold = bold;
                 this.italic = italic;
                 this.size = size;
+                this.link = link;
             }
 
             boolean sameStyleAs(Run other) {
-                return bold == other.bold && italic == other.italic && size == other.size;
+                return bold == other.bold && italic == other.italic && size == other.size
+                        && java.util.Objects.equals(link, other.link);
             }
         }
 
@@ -9042,7 +9414,8 @@ public class JRock {
         // Walked by offset rather than by element tree: getParagraphElement is the
         // document's own answer to "which paragraph is this character in", so it holds
         // whatever the reader nested the content in.
-        private static List<List<Run>> paragraphs(javax.swing.text.DefaultStyledDocument doc)
+        private static List<List<Run>> paragraphs(javax.swing.text.DefaultStyledDocument doc,
+                                                  List<String> links)
                 throws BadLocationException {
             List<List<Run>> paragraphs = new ArrayList<>();
             int length = doc.getLength();
@@ -9051,7 +9424,7 @@ public class JRock {
                 javax.swing.text.Element paragraph = doc.getParagraphElement(at);
                 List<Run> runs = new ArrayList<>();
                 collect(doc, paragraph, runs);
-                paragraphs.add(runs);
+                paragraphs.add(linked(runs, links));
                 int end = paragraph.getEndOffset();
                 if (end <= at) break;   // a zero-length paragraph would loop for ever
                 at = end;
@@ -9091,16 +9464,60 @@ public class JRock {
 
         // The characters of a run that are text rather than structure. A tab becomes a
         // space (a leading tab in Markdown is a code block), and the control characters
-        // an RTF can carry - a form feed, say - are dropped. The newline ending every
-        // paragraph is left to be trimmed off with the rest of its whitespace below.
+        // an RTF can carry - a form feed, say - are dropped, all but the three that mark
+        // a hyperlink (see fields). The newline ending every paragraph is left to be
+        // trimmed off with the rest of its whitespace below.
         private static String text(String raw) {
             StringBuilder out = new StringBuilder(raw.length());
             for (int i = 0; i < raw.length(); i++) {
                 char c = raw.charAt(i);
                 if (c == '\t') out.append(' ');
-                else if (c == '\n' || c >= ' ') out.append(c);
+                else if (c == '\n' || c >= ' ' || c == LINK_OPEN || c == LINK_ADDRESS_END
+                        || c == LINK_CLOSE) out.append(c);
             }
             return out.toString();
+        }
+
+        // A paragraph's runs with the hyperlink marks (see fields) taken out of the text
+        // and put on the runs between them, as the address they link to.
+        private static List<Run> linked(List<Run> runs, List<String> links) {
+            List<Run> out = new ArrayList<>();
+            String link = null;
+            StringBuilder number = null;   // the address's index, while it is being read
+            for (Run run : runs) {
+                StringBuilder text = new StringBuilder();
+                for (int i = 0; i < run.text.length(); i++) {
+                    char c = run.text.charAt(i);
+                    if (c == LINK_OPEN || c == LINK_CLOSE) {
+                        add(out, new Run(text.toString(), run.bold, run.italic, run.size, link));
+                        text.setLength(0);
+                        link = null;
+                        number = (c == LINK_OPEN) ? new StringBuilder() : null;
+                    } else if (c == LINK_ADDRESS_END) {
+                        int index = leadingInt(number == null ? "" : number.toString());
+                        link = (index >= 0 && index < links.size()) ? links.get(index) : null;
+                        number = null;
+                    } else if (number != null) {
+                        number.append(c);
+                    } else {
+                        text.append(c);
+                    }
+                }
+                add(out, new Run(text.toString(), run.bold, run.italic, run.size, link));
+            }
+            return out;
+        }
+
+        // Appends a run, merged into the last one when the two are styled alike.
+        private static void add(List<Run> runs, Run run) {
+            if (run.text.isEmpty()) return;
+            int last = runs.size() - 1;
+            if (last >= 0 && runs.get(last).sameStyleAs(run)) {
+                runs.set(last, new Run(runs.get(last).text + run.text,
+                        run.bold, run.italic, run.size, run.link));
+            } else {
+                runs.add(run);
+            }
         }
 
         private static String markdown(List<List<Run>> paragraphs) {
@@ -9170,7 +9587,7 @@ public class JRock {
                 if (heading > 0) {
                     // No emphasis inside a heading: the bold a heading is set in is
                     // what identified it, and "# **Title**" says the same thing twice.
-                    String title = escape(plain).trim();
+                    String title = inline(paragraph, 0, false).trim();
                     if (title.isEmpty()) return "";
                     StringBuilder hashes = new StringBuilder();
                     for (int i = 0; i < heading; i++) hashes.append('#');
@@ -9196,9 +9613,19 @@ public class JRock {
         }
 
         // The paragraph as Markdown text, skipping the first "skip" characters (the
-        // list marker, when there was one).
+        // list marker, when there was one). Neighbouring runs that link to the same
+        // address become one [text](address), so a link whose words are partly bold is
+        // still one link.
         private static String inline(List<Run> paragraph, int skip) {
+            return inline(paragraph, skip, true);
+        }
+
+        // The same, with emphasis or without: a heading carries none (see block), but
+        // its links are kept all the same.
+        private static String inline(List<Run> paragraph, int skip, boolean emphasis) {
             StringBuilder out = new StringBuilder();
+            StringBuilder label = new StringBuilder();
+            String link = null;
             int left = skip;
             for (Run run : paragraph) {
                 String text = run.text;
@@ -9210,9 +9637,32 @@ public class JRock {
                     text = text.substring(left);
                     left = 0;
                 }
-                out.append(emphasised(text, run.bold, run.italic));
+                if (!java.util.Objects.equals(link, run.link)) {
+                    out.append(linked(label.toString(), link));
+                    label.setLength(0);
+                    link = run.link;
+                }
+                label.append(emphasis ? emphasised(text, run.bold, run.italic) : escape(text));
             }
-            return out.toString();
+            return out.append(linked(label.toString(), link)).toString();
+        }
+
+        // Markdown text as a link to address, or as it stands when there is no address.
+        // Surrounding whitespace stays outside the brackets, as it does outside emphasis,
+        // and the brackets and parentheses that would end the link early are escaped.
+        private static String linked(String markdown, String address) {
+            if (address == null) return markdown;
+            int start = 0;
+            int end = markdown.length();
+            while (start < end && Character.isWhitespace(markdown.charAt(start))) start++;
+            while (end > start && Character.isWhitespace(markdown.charAt(end - 1))) end--;
+            if (start == end) return markdown;
+            String label = markdown.substring(start, end)
+                    .replace("[", "\\[").replace("]", "\\]");
+            String target = address.trim().replace(" ", "%20")
+                    .replace("(", "%28").replace(")", "%29");
+            return markdown.substring(0, start) + "[" + label + "](" + target + ")"
+                    + markdown.substring(end);
         }
 
         // 1/2/3 for a heading, 0 for an ordinary paragraph. Decided on the font size
@@ -9327,12 +9777,14 @@ public class JRock {
 
     // DOCX -> Markdown.
     //
-    // What is read is word/document.xml and nothing else: the body's paragraphs and
-    // tables, each paragraph's style name, and each run's bold and italic. That is
-    // where a Word document keeps its meaning, and it maps onto Markdown directly:
+    // What is read is word/document.xml - the body's paragraphs and tables, each
+    // paragraph's style name, each run's bold and italic and the link it is part of -
+    // and word/_rels/document.xml.rels, where a link's address is kept. That is where a
+    // Word document keeps its meaning, and it maps onto Markdown directly:
     //
     //   Heading 1..6 / Title      -> #, ##, ### ...
     //   bold / italic runs        -> **bold**, *italic*, ***both***
+    //   a hyperlink               -> [its text](its address)
     //   a Code-like style         -> an indented code block
     //   a Quote-like style        -> "> "
     //   a numbered/bulleted list  -> a "-" list item
@@ -9353,6 +9805,10 @@ public class JRock {
         private static final String W =
                 "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
         private static final String DOCUMENT_PART = "word/document.xml";
+        private static final String RELATIONSHIPS_PART = "word/_rels/document.xml.rels";
+        /** The namespace of r:id, which names a relationship. */
+        private static final String R =
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
         // Style names, matched loosely because they are not standardised: "Heading1"
         // and "heading 1" are the same style, and a monospace paragraph is called
@@ -9373,9 +9829,28 @@ public class JRock {
                 throw new IOException("no " + DOCUMENT_PART + " inside it"
                         + " - is it really a Word .docx?");
             }
-            org.w3c.dom.Element body = child(document(part).getDocumentElement(), "body");
+            org.w3c.dom.Element body =
+                    child(document(part, DOCUMENT_PART).getDocumentElement(), "body");
             if (body == null) throw new IOException("its " + DOCUMENT_PART + " has no body");
-            return markdown(body);
+            return markdown(body, relationships(docx));
+        }
+
+        // The addresses the document's relationships part names, by relationship id:
+        // where a w:hyperlink's r:id points. Empty when the part is missing, which is a
+        // document without links.
+        private static java.util.Map<String, String> relationships(Path docx)
+                throws IOException {
+            java.util.Map<String, String> targets = new java.util.HashMap<>();
+            byte[] part = part(docx, RELATIONSHIPS_PART);
+            if (part == null) return targets;
+            org.w3c.dom.NodeList found = document(part, RELATIONSHIPS_PART)
+                    .getElementsByTagNameNS("*", "Relationship");
+            for (int i = 0; i < found.getLength(); i++) {
+                org.w3c.dom.Element relationship = (org.w3c.dom.Element) found.item(i);
+                targets.put(relationship.getAttribute("Id"),
+                        relationship.getAttribute("Target"));
+            }
+            return targets;
         }
 
         // One named entry of the ZIP, or null when it isn't there.
@@ -9408,7 +9883,7 @@ public class JRock {
         // Parsed with the external world switched off: this XML comes from a file
         // somebody sent, and a DOCTYPE in it must not be able to make the parser fetch
         // anything or expand an entity into a gigabyte of text.
-        private static org.w3c.dom.Document document(byte[] xml) throws IOException {
+        private static org.w3c.dom.Document document(byte[] xml, String name) throws IOException {
             try {
                 javax.xml.parsers.DocumentBuilderFactory factory =
                         javax.xml.parsers.DocumentBuilderFactory.newInstance();
@@ -9420,14 +9895,15 @@ public class JRock {
                         .parse(new java.io.ByteArrayInputStream(xml));
             } catch (javax.xml.parsers.ParserConfigurationException
                      | org.xml.sax.SAXException ex) {
-                throw new IOException("its " + DOCUMENT_PART + " is not readable XML: "
+                throw new IOException("its " + name + " is not readable XML: "
                         + ex.getMessage());
             }
         }
 
         // The body as Markdown: one block per paragraph or table, blank line between
         // them - except between consecutive list items, which are one list.
-        private static String markdown(org.w3c.dom.Element body) {
+        private static String markdown(org.w3c.dom.Element body,
+                                       java.util.Map<String, String> links) {
             StringBuilder md = new StringBuilder();
             boolean previousWasListItem = false;
             for (org.w3c.dom.Element element : children(body)) {
@@ -9435,11 +9911,11 @@ public class JRock {
                 String block;
                 boolean listItem = false;
                 if ("p".equals(name)) {
-                    block = paragraph(element);
+                    block = paragraph(element, links);
                     listItem = block.startsWith("- ")
                             || RtfMarkdown.NUMBERED.matcher(block).find();
                 } else if ("tbl".equals(name)) {
-                    block = table(element);
+                    block = table(element, links);
                 } else {
                     continue;   // sectPr and anything else structural
                 }
@@ -9452,8 +9928,9 @@ public class JRock {
         }
 
         // One w:p as a Markdown block, or "" when it holds no text.
-        private static String paragraph(org.w3c.dom.Element p) {
-            List<RtfMarkdown.Run> runs = runs(p);
+        private static String paragraph(org.w3c.dom.Element p,
+                                        java.util.Map<String, String> links) {
+            List<RtfMarkdown.Run> runs = runs(p, links);
             String plain = RtfMarkdown.plain(runs);
             if (plain.trim().isEmpty()) return "";
             String style = style(p);
@@ -9463,7 +9940,7 @@ public class JRock {
                     : ("Title".equalsIgnoreCase(style) ? 1 : 0);
             if (level > 0) {
                 // No emphasis inside a heading: the style already said what this is.
-                String title = RtfMarkdown.escape(plain).trim();
+                String title = RtfMarkdown.inline(runs, 0, false).trim();
                 if (title.isEmpty()) return "";
                 StringBuilder hashes = new StringBuilder();
                 for (int i = 0; i < level; i++) hashes.append('#');
@@ -9507,12 +9984,13 @@ public class JRock {
         // One w:tbl as a Markdown pipe table, with the first row as the header -
         // Markdown has no other kind - and every row padded to the widest one, since a
         // ragged pipe table is not a table to a reader.
-        private static String table(org.w3c.dom.Element tbl) {
+        private static String table(org.w3c.dom.Element tbl,
+                                    java.util.Map<String, String> links) {
             List<List<String>> rows = new ArrayList<>();
             int columns = 0;
             for (org.w3c.dom.Element tr : children(tbl, "tr")) {
                 List<String> row = new ArrayList<>();
-                for (org.w3c.dom.Element tc : children(tr, "tc")) row.add(cell(tc));
+                for (org.w3c.dom.Element tc : children(tr, "tc")) row.add(cell(tc, links));
                 if (row.isEmpty()) continue;
                 columns = Math.max(columns, row.size());
                 rows.add(row);
@@ -9544,10 +10022,11 @@ public class JRock {
         // One w:tc: its paragraphs, joined with a space. A cell holding several
         // paragraphs is not something a Markdown table row can reproduce, and keeping
         // the words on one line loses less than dropping all but the first.
-        private static String cell(org.w3c.dom.Element tc) {
+        private static String cell(org.w3c.dom.Element tc,
+                                   java.util.Map<String, String> links) {
             StringBuilder text = new StringBuilder();
             for (org.w3c.dom.Element p : children(tc, "p")) {
-                String part = RtfMarkdown.inline(runs(p), 0).trim();
+                String part = RtfMarkdown.inline(runs(p, links), 0).trim();
                 if (part.isEmpty()) continue;
                 if (text.length() > 0) text.append(' ');
                 text.append(part);
@@ -9563,24 +10042,85 @@ public class JRock {
         // a spell-check boundary is enough - and "**a****b**" is not the bold "ab" to
         // any Markdown reader. getElementsByTagNameNS is in document order and finds
         // runs nested in a w:hyperlink too, which is where a link's text lives.
-        private static List<RtfMarkdown.Run> runs(org.w3c.dom.Element p) {
+        //
+        // Each run also gets the address it links to. Word writes a link one of three
+        // ways, and all three are read: a w:hyperlink naming a relationship, a
+        // w:fldSimple whose instruction is HYPERLINK, and the same field spelled out
+        // over runs - a w:fldChar "begin", the instruction in w:instrText, a
+        // "separate", the runs the link shows, and an "end".
+        private static List<RtfMarkdown.Run> runs(org.w3c.dom.Element p,
+                                                  java.util.Map<String, String> links) {
             List<RtfMarkdown.Run> runs = new ArrayList<>();
+            // The fields open at this point, innermost first: each one's instruction,
+            // and once it is showing its text, the address it links to ("" for none).
+            java.util.Deque<String[]> fields = new java.util.ArrayDeque<>();
             org.w3c.dom.NodeList found = p.getElementsByTagNameNS(W, "r");
             for (int i = 0; i < found.getLength(); i++) {
                 org.w3c.dom.Element r = (org.w3c.dom.Element) found.item(i);
+                for (org.w3c.dom.Element child : children(r)) {
+                    String name = child.getLocalName();
+                    String type = child.getAttributeNS(W, "fldCharType");
+                    String[] field = fields.peek();   // { instruction, address }
+                    if ("fldChar".equals(name) && "begin".equals(type)) {
+                        fields.push(new String[] { "", null });
+                    } else if (field == null) {
+                        continue;
+                    } else if ("instrText".equals(name) && field[1] == null) {
+                        field[0] += child.getTextContent();
+                    } else if ("fldChar".equals(name) && "separate".equals(type)) {
+                        field[1] = hyperlink(field[0]);
+                    } else if ("fldChar".equals(name) && "end".equals(type)) {
+                        fields.pop();
+                    }
+                }
                 String text = text(r);
                 if (text.isEmpty()) continue;
+                String link = link(r, p, links);
+                for (String[] field : fields) {
+                    if (link != null) break;
+                    if (field[1] != null && !field[1].isEmpty()) link = field[1];
+                }
                 RtfMarkdown.Run run =
-                        new RtfMarkdown.Run(text, on(r, "b"), on(r, "i"), 0);
+                        new RtfMarkdown.Run(text, on(r, "b"), on(r, "i"), 0, link);
                 int last = runs.size() - 1;
                 if (last >= 0 && runs.get(last).sameStyleAs(run)) {
                     runs.set(last, new RtfMarkdown.Run(
-                            runs.get(last).text + text, run.bold, run.italic, 0));
+                            runs.get(last).text + text, run.bold, run.italic, 0, link));
                 } else {
                     runs.add(run);
                 }
             }
             return runs;
+        }
+
+        // The address a run is linked to by the elements around it inside the paragraph
+        // - the innermost w:hyperlink or w:fldSimple - or null. A w:hyperlink with a
+        // w:anchor instead of an r:id goes to a bookmark inside the document, which is
+        // no address outside it.
+        private static String link(org.w3c.dom.Element r, org.w3c.dom.Element p,
+                                   java.util.Map<String, String> links) {
+            for (org.w3c.dom.Node n = r.getParentNode(); n != null && n != p;
+                 n = n.getParentNode()) {
+                if (n.getNodeType() != org.w3c.dom.Node.ELEMENT_NODE) continue;
+                org.w3c.dom.Element e = (org.w3c.dom.Element) n;
+                if ("hyperlink".equals(e.getLocalName())) {
+                    String target = links.get(e.getAttributeNS(R, "id"));
+                    return (target == null || target.trim().isEmpty()) ? null : target;
+                }
+                if ("fldSimple".equals(e.getLocalName())) {
+                    String address = hyperlink(e.getAttributeNS(W, "instr"));
+                    if (!address.isEmpty()) return address;
+                }
+            }
+            return null;
+        }
+
+        // The address a field instruction links to, or "" when it is not a HYPERLINK
+        // field - or is one to a bookmark ("\l"). The same instruction RTF writes.
+        private static String hyperlink(String instruction) {
+            java.util.regex.Matcher m = RtfMarkdown.HYPERLINK.matcher(instruction);
+            if (!m.find() || m.group(1) != null) return "";
+            return (m.group(2) != null ? m.group(2) : m.group(3)).trim();
         }
 
         // One run's text. w:t is the text itself; a tab and a line break become a
@@ -11417,6 +11957,18 @@ public class JRock {
     // Java Strings, and a JPEG put through one is a JPEG no longer.
     static native String browserScaleImage(String base64, int width, int height,
                                            String mime);
+
+    // The browser's PDF engine (PdfJsPdf), over the same bridge and the same format.
+    // The page's window.myBrowserPdf does the work - PDF.js unless the page says
+    // otherwise - and the PDF crosses the bridge once, as base64, to be referred to by
+    // a handle after that.
+    //   browserPdfOpen("<base64 pdf>")             -> "1\n<handle>\n<page count>"
+    //   browserPdfRenderPage(handle, page, dpi)    -> "1\n<base64 png>"
+    //   browserPdfClose(handle)                    -> "1\n"
+    // and any of them "0\n<reason>". Pages count from 1, as a PDF viewer counts them.
+    static native String browserPdfOpen(String base64);
+    static native String browserPdfRenderPage(int handle, int page, int dpi);
+    static native String browserPdfClose(int handle);
 
     // The browser transport: hands each request to the page's JavaScript client.
     private static final class BrowserHttpTransport implements HttpTransport {
