@@ -1933,7 +1933,7 @@ What the Markdown becomes, in both:
 | a fenced block (three backticks or tildes) | a Code paragraph, verbatim |
 | `---`, `***`, `___` | a horizontal rule |
 | `\| a \| table \|` with a `\| --- \|` row | a real table: bordered cells, columns shared across the page width, first row repeated as a header, and `:---:` / `---:` honoured as cell alignment |
-| `[text](url)` | the text, with the URL after it unless the two say the same thing — paper cannot be clicked |
+| `[text](url)` | in the DOCX, a real hyperlink: the text, underlined and clickable, in Word's *Hyperlink* character style; in the RTF, the text with the URL after it unless the two say the same thing |
 | `\*` and the rest of Markdown's escapes | the character itself |
 
 An export **does not fail**. The parser's answer to anything it doesn't recognise is "a
@@ -2308,7 +2308,9 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   and umlaut intact, and must contain the table that reader cannot see. The DOCX must be exactly
   five parts, each **well-formed XML**, with its styles *named* (`w:val="heading 1"`) and its
   header row marked as one. Then a **round trip**: exported as DOCX, read back by the importer,
-  and equal to the Markdown it started as. Then the pictures: a real PNG handed to the export as
+  and equal to the Markdown it started as. Links must be `<w:hyperlink>`s in the *Hyperlink*
+  style, one external relationship per address however often it is used, read back by the
+  importer as `[text](url)` — and in the RTF the text with the URL after it. Then the pictures: a real PNG handed to the export as
   an include must come out **byte-identical** in `word/media/image1.png`, declared in the content
   types, related as `rId2`, placed as a `<w:drawing>` — and the `@img` token must have become
   `IMG_4002.png`, with the hash nowhere in the document. The **sizes** are asserted in EMU against

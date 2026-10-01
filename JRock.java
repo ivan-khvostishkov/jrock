@@ -3799,9 +3799,11 @@ public class JRock {
         int creditsRoom = java.awt.Toolkit.getDefaultToolkit().getScreenSize().width - 80;
         javax.swing.JLabel credits = new javax.swing.JLabel(creditsW <= creditsRoom
                 ? creditsText
-                : "<html><body style='width:" + Math.max(160, creditsRoom) + "px'>"
+                : "<html><body style='width:" + (Math.max(160, creditsRoom)
+                      - browserTextSlack(creditsRoom)) + "px'>"
                   + creditsText + "</body></html>");
         credits.setFont(plainFont);
+        addTextSlack(credits, creditsRoom);
 
         javax.swing.JPanel aboutBox = new javax.swing.JPanel(new BorderLayout(0, 4));
         aboutBox.add(titleLine, BorderLayout.NORTH);
@@ -4004,7 +4006,8 @@ public class JRock {
                 GITHUB_URL, plainFont, contentW);
 
         javax.swing.JTextArea notes = wrapped(configNotes(), plainFont, contentW);
-        notes.setBorder(javax.swing.BorderFactory.createTitledBorder("Notes"));
+        notes.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createTitledBorder("Notes"), notes.getBorder()));
 
         javax.swing.JPanel content = new javax.swing.JPanel();
         content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
@@ -4046,9 +4049,10 @@ public class JRock {
     private static javax.swing.JLabel linkLabel(String caption, String text, String url,
                                                 java.awt.Font font, int width) {
         javax.swing.JLabel label = new javax.swing.JLabel(
-                "<html><body style='width:" + width + "px'>" + caption + " <a href=\""
-                + url + "\">" + text + "</a></body></html>");
+                "<html><body style='width:" + (width - browserTextSlack(width)) + "px'>"
+                + caption + " <a href=\"" + url + "\">" + text + "</a></body></html>");
         label.setFont(font);
+        addTextSlack(label, width);
         label.setToolTipText(url);
         label.setAlignmentX(0f);
         label.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
@@ -4082,8 +4086,28 @@ public class JRock {
         area.setWrapStyleWord(true);
         area.setFont(font);
         int em = Math.max(1, area.getFontMetrics(font).charWidth('m'));
-        area.setColumns(Math.max(20, width / em));
+        area.setColumns(Math.max(20, (width - browserTextSlack(width)) / em));
+        addTextSlack(area, width);
         return area;
+    }
+
+    // Room on the right of wrapped text for the browser build to draw into. CheerpJ
+    // on a phone draws text wider than its font metrics say, so a line Swing wraps to
+    // fit exactly runs on past the edge of its component and its last word is cut off.
+    // Wrapping about a seventh short of the width, with that seventh left as an empty
+    // right border, keeps the whole line in sight. Nothing changes on the desktop,
+    // where what is measured is what is drawn.
+    private static int browserTextSlack(int width) {
+        return isCheerpJ() ? width / 7 : 0;
+    }
+
+    private static void addTextSlack(javax.swing.JComponent c, int width) {
+        int slack = browserTextSlack(width);
+        if (slack == 0) return;
+        javax.swing.border.Border room =
+                javax.swing.BorderFactory.createEmptyBorder(0, 0, 0, slack);
+        c.setBorder(c.getBorder() == null ? room
+                : javax.swing.BorderFactory.createCompoundBorder(c.getBorder(), room));
     }
 
     // What the Configure dialog's rows mean, and where what they set is kept. One text
@@ -4188,9 +4212,10 @@ public class JRock {
             javax.swing.JLabel keyLbl = new javax.swing.JLabel(keys[r][0]);
             keyLbl.setFont(plainFont);
             javax.swing.JLabel descLbl = new javax.swing.JLabel(
-                    "<html><body style='width:" + descWidth + "px'>" + keys[r][1]
-                    + "</body></html>");
+                    "<html><body style='width:" + (descWidth - browserTextSlack(descWidth))
+                    + "px'>" + keys[r][1] + "</body></html>");
             descLbl.setFont(plainFont);
+            addTextSlack(descLbl, descWidth);
             // Golden-ratio-ish column weights: key column narrow (~38%), desc wide.
             sc.gridx = 0; sc.gridy = r; sc.weightx = 0.38;
             shortcuts.add(keyLbl, sc);
@@ -7620,12 +7645,13 @@ public class JRock {
         int wrapAt = Math.max(220, Math.min(440,
                 java.awt.Toolkit.getDefaultToolkit().getScreenSize().width - 120));
         javax.swing.JLabel what = new javax.swing.JLabel(
-                "<html><body style='width:" + wrapAt + "px'>"
+                "<html><body style='width:" + (wrapAt - browserTextSlack(wrapAt)) + "px'>"
                 + "A web page comes in as text (@txt), a picture as a picture (@img) - "
                 + "whichever the address itself answers with. HTML, plain text, JSON, "
                 + "XML, PNG, JPEG, GIF and WEBP are accepted, and the file is saved under "
                 + "JRock/urls/." + cors
                 + "</body></html>");
+        addTextSlack(what, wrapAt);
 
         javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
         panel.add(what, BorderLayout.NORTH);
@@ -10320,8 +10346,9 @@ public class JRock {
     //
     // Parsed once into a small block model, then written out twice, because the two
     // formats differ only in spelling: heading, paragraph, list item, quote, code,
-    // rule and table, with bold, italic, `code` and links inside them. Links keep both
-    // the text and the URL - a printed page cannot be clicked.
+    // rule and table, with bold, italic, `code` and links inside them. In the DOCX a
+    // link is a real hyperlink: its text, underlined and clickable. The RTF writes the
+    // text and then the URL in brackets, so a printout still shows where it points.
     //
     // Forgiving by design. Every rule reads "if the line looks like this...", and the
     // answer when none of them match is a paragraph of body text, so input that is
@@ -10403,6 +10430,9 @@ public class JRock {
         private final java.util.Map<String, Image> resolved = new java.util.HashMap<>();
         private final java.util.Map<String, Image> media = new java.util.LinkedHashMap<>();
         private final List<String> warnings = new ArrayList<>();
+        // Every link address in the document, numbered in the order first met: the DOCX
+        // gives each one an external relationship, "rLink<n>", that its w:hyperlink names.
+        private final java.util.Map<String, Integer> links = new java.util.LinkedHashMap<>();
         private int drawings;              // one id per placement, which a .docx wants unique
 
         // The page this document is laid out on. Landscape turns A4 on its side, and that
@@ -10460,6 +10490,7 @@ public class JRock {
                 document.blocks.clear();
                 document.pending = null;
                 document.media.clear();    // nothing is placed any more, so nothing is packed
+                document.links.clear();    // and nothing links anywhere
                 document.simplified = true;
                 for (String line : text.split("\n", -1)) {
                     if (line.trim().isEmpty()) continue;
@@ -10497,17 +10528,25 @@ public class JRock {
             // then the Markdown it came from, so a format that cannot place one - RTF -
             // still says what was meant to be here.
             final Image image;
+            // The address this run links to, when it is a link's text; otherwise null.
+            final String link;
 
             Run(String text, boolean bold, boolean italic, boolean mono) {
-                this(text, bold, italic, mono, null);
+                this(text, bold, italic, mono, null, null);
             }
 
             Run(String text, boolean bold, boolean italic, boolean mono, Image image) {
+                this(text, bold, italic, mono, image, null);
+            }
+
+            Run(String text, boolean bold, boolean italic, boolean mono, Image image,
+                String link) {
                 this.text = text;
                 this.bold = bold;
                 this.italic = italic;
                 this.mono = mono;
                 this.image = image;
+                this.link = link;
             }
         }
 
@@ -10876,10 +10915,13 @@ public class JRock {
                 } else if (!mono && images != null && c == '!' && next == '['
                         && (afterImage = picture(text, i, runs, current, bold, italic)) > 0) {
                     i = afterImage;
-                } else if (!mono && (c == '[' || (c == '!' && next == '['))
-                        // Any other image is written as its alt text and its URL, same as
-                        // a link: there is no picture to place, only what it was called.
-                        && (afterLink = link(text, c == '!' ? i + 1 : i, current)) > 0) {
+                } else if (!mono && c == '['
+                        && (afterLink = link(text, i, runs, current, bold, italic)) > 0) {
+                    i = afterLink;
+                } else if (!mono && c == '!' && next == '['
+                        // Any other image is written as its alt text and its URL: there is
+                        // no picture to place, only what it was called and where it was.
+                        && (afterLink = linkAsText(text, i + 1, current)) > 0) {
                     i = afterLink;
                 } else {
                     current.append(c);
@@ -10913,18 +10955,44 @@ public class JRock {
             return m.end();
         }
 
-        // Appends the "[label](url)" at `at` as text the reader of a document can use:
-        // the label, and the URL after it unless the two say the same thing - a page
-        // cannot be clicked, so the address has to be readable. Returns the index just
+        // The "[label](url)" at `at`, as a run of the label that links to the url - which
+        // the DOCX writes as a hyperlink, and the RTF as the label with the url after it.
+        // A link missing its label or its address is just text. Returns the index just
         // past the link, or -1 when what is there is a bracket in prose rather than a
-        // link, in which case nothing is appended.
-        private static int link(String text, int at, StringBuilder out) {
+        // link, in which case nothing is added.
+        private int link(String text, int at, List<Run> runs, StringBuilder current,
+                         boolean bold, boolean italic) {
+            int end = linkEnd(text, at);
+            if (end < 0) return -1;
+            int close = text.indexOf(']', at);
+            String label = text.substring(at + 1, close);
+            String url = text.substring(close + 2, end).trim();
+            if (url.isEmpty() || label.isEmpty()) {
+                current.append(label.isEmpty() ? url : label);
+                return end + 1;
+            }
+            flush(runs, current, bold, italic, false);
+            links.putIfAbsent(url, links.size() + 1);
+            runs.add(new Run(label, bold, italic, false, null, url));
+            return end + 1;
+        }
+
+        // Where the "[label](url)" at `at` ends - the index of its ")" - or -1 when what
+        // is there is not one.
+        private static int linkEnd(String text, int at) {
             int close = text.indexOf(']', at);
             if (close < 0 || close + 1 >= text.length() || text.charAt(close + 1) != '(') {
                 return -1;
             }
-            int end = text.indexOf(')', close + 2);
+            return text.indexOf(')', close + 2);
+        }
+
+        // Appends the "[label](url)" at `at` as plain text: the label, and the URL after
+        // it unless the two say the same thing. Returns what link() does.
+        private static int linkAsText(String text, int at, StringBuilder out) {
+            int end = linkEnd(text, at);
             if (end < 0) return -1;
+            int close = text.indexOf(']', at);
             String label = text.substring(at + 1, close);
             String url = text.substring(close + 2, end).trim();
             out.append(label);
@@ -11067,8 +11135,11 @@ public class JRock {
             for (Run run : runs) {
                 boolean bold = run.bold || allBold;
                 boolean italic = run.italic || allItalic;
+                // A link is its text and then where it points, unless the two are the same.
+                String text = run.link == null || run.link.equals(run.text) ? run.text
+                        : run.text + " (" + run.link + ")";
                 if (!bold && !italic && !run.mono) {
-                    rtf.append(rtfText(run.text));
+                    rtf.append(rtfText(text));
                     continue;
                 }
                 // A group, so the switches turn themselves off again at its end.
@@ -11076,7 +11147,7 @@ public class JRock {
                 if (bold) rtf.append("\\b ");
                 if (italic) rtf.append("\\i ");
                 if (run.mono) rtf.append("\\f1 ");
-                rtf.append(rtfText(run.text)).append('}');
+                rtf.append(rtfText(text)).append('}');
             }
         }
 
@@ -11110,9 +11181,9 @@ public class JRock {
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
         private static final String RELS_NS =
                 "http://schemas.openxmlformats.org/package/2006/relationships";
-        // Declared on w:document only when there is a picture in it: r for the
-        // relationship a drawing points at, and the three DrawingML namespaces the
-        // drawing itself is written in.
+        // Declared on w:document only when there is a picture or a link in it: r for the
+        // relationship a drawing or a w:hyperlink points at, and the three DrawingML
+        // namespaces a drawing itself is written in.
         private static final String DRAWING_NS = " xmlns:r=\"" + R_NS + "\""
                 + " xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/"
                 + "wordprocessingDrawing\""
@@ -11184,8 +11255,9 @@ public class JRock {
             return xml.append(CONTENT_TYPES_TAIL).toString();
         }
 
-        // What word/document.xml is allowed to point at: the styles, and one image part
-        // per placed picture under the id the drawing names (see docxDrawing).
+        // What word/document.xml is allowed to point at: the styles, one image part per
+        // placed picture under the id the drawing names (see docxDrawing), and one
+        // external address per link under the id its w:hyperlink names (see docxRuns).
         private String documentRels() {
             StringBuilder xml = new StringBuilder(XML_HEAD);
             xml.append("<Relationships xmlns=\"").append(RELS_NS).append("\">")
@@ -11195,6 +11267,11 @@ public class JRock {
                 xml.append("<Relationship Id=\"rId").append(image.relId).append("\" Type=\"")
                    .append(R_NS).append("/image\" Target=\"media/").append(image.part())
                    .append("\"/>");
+            }
+            for (java.util.Map.Entry<String, Integer> link : links.entrySet()) {
+                xml.append("<Relationship Id=\"rLink").append(link.getValue())
+                   .append("\" Type=\"").append(R_NS).append("/hyperlink\" Target=\"")
+                   .append(attr(link.getKey())).append("\" TargetMode=\"External\"/>");
             }
             return xml.append("</Relationships>").toString();
         }
@@ -11234,6 +11311,11 @@ public class JRock {
                .append("<w:name w:val=\"Quote\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
                .append("<w:pPr><w:ind w:left=\"").append(INDENT).append("\"/></w:pPr>")
                .append("<w:rPr><w:i/></w:rPr></w:style>")
+               // Word's own name for the look of a link, which a layout application maps.
+               .append("<w:style w:type=\"character\" w:styleId=\"Hyperlink\">")
+               .append("<w:name w:val=\"Hyperlink\"/>")
+               .append("<w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr>")
+               .append("</w:style>")
                .append("</w:styles>");
             return xml.toString();
         }
@@ -11241,7 +11323,7 @@ public class JRock {
         private String documentXml() {
             StringBuilder xml = new StringBuilder(XML_HEAD);
             xml.append("<w:document xmlns:w=\"").append(W_NS).append('"');
-            if (!media.isEmpty()) xml.append(DRAWING_NS);
+            if (!media.isEmpty() || !links.isEmpty()) xml.append(DRAWING_NS);
             xml.append("><w:body>");
             for (Block block : blocks) docx(xml, block);
             // An empty paragraph to end on: a body whose last element is a table is
@@ -11355,9 +11437,14 @@ public class JRock {
                 }
                 boolean bold = run.bold || allBold;
                 boolean italic = run.italic || allItalic;
+                if (run.link != null) {
+                    xml.append("<w:hyperlink r:id=\"rLink").append(links.get(run.link))
+                       .append("\">");
+                }
                 xml.append("<w:r>");
-                if (bold || italic || run.mono) {
+                if (bold || italic || run.mono || run.link != null) {
                     xml.append("<w:rPr>");
+                    if (run.link != null) xml.append("<w:rStyle w:val=\"Hyperlink\"/>");
                     if (run.mono) {
                         xml.append("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>");
                     }
@@ -11369,6 +11456,7 @@ public class JRock {
                 // two differently formatted words.
                 xml.append("<w:t xml:space=\"preserve\">").append(xml(run.text))
                    .append("</w:t></w:r>");
+                if (run.link != null) xml.append("</w:hyperlink>");
             }
         }
 

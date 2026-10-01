@@ -162,6 +162,52 @@ class JRockMarkdownExportTest {
     }
 
     @Test
+    @DisplayName("a link is a hyperlink in the DOCX, and its text and address in the RTF")
+    void writesLinksAsHyperlinks() throws Exception {
+        String markdown = "See the [Main page](https://example.com/main) and "
+                + "**[the docs](https://example.com/docs)**, then [Main page](https://example.com/main) again.";
+        Object document = export(markdown);
+
+        Map<String, byte[]> parts = unzip(docx(document));
+        for (Map.Entry<String, byte[]> part : parts.entrySet()) {
+            assertThatCode(() -> parse(part.getValue()))
+                    .describedAs(part.getKey() + " parses as XML").doesNotThrowAnyException();
+        }
+        String body = text(parts.get("word/document.xml"));
+        assertThat(body).describedAs("word/document.xml")
+                .contains("<w:hyperlink r:id=\"rLink1\">")
+                .contains("<w:hyperlink r:id=\"rLink2\">")
+                .contains("<w:rStyle w:val=\"Hyperlink\"/>")
+                .contains(">Main page</w:t>")
+                .doesNotContain("(https://");
+        String rels = text(parts.get("word/_rels/document.xml.rels"));
+        assertThat(rels).describedAs("one external relationship per address")
+                .contains("Id=\"rLink1\"").contains("Target=\"https://example.com/main\"")
+                .contains("Id=\"rLink2\"").contains("Target=\"https://example.com/docs\"")
+                .doesNotContain("rLink3")
+                .contains("TargetMode=\"External\"");
+        assertThat(text(parts.get("word/styles.xml"))).contains("w:styleId=\"Hyperlink\"");
+
+        // Read back by the import side, the links are Markdown links again.
+        Path file = Files.createTempFile("jrock-links", ".docx");
+        try {
+            Files.write(file, docx(document));
+            assertThat(docxAsMarkdown(file)).describedAs("the Markdown read back out")
+                    .contains("[Main page](https://example.com/main)")
+                    .contains("[**the docs**](https://example.com/docs)");
+        } finally {
+            Files.deleteIfExists(file);
+        }
+
+        // A printed RTF cannot be clicked, so it keeps the address readable.
+        DefaultStyledDocument read = new DefaultStyledDocument();
+        new RTFEditorKit().read(new ByteArrayInputStream(rtf(document)), read, 0);
+        assertThat(read.getText(0, read.getLength()))
+                .contains("Main page (https://example.com/main)")
+                .contains("the docs (https://example.com/docs)");
+    }
+
+    @Test
     @DisplayName("markup that is wrong, or not markup at all, still exports")
     void convertsAnythingIntoSomething() throws Exception {
         // Every line here is something the rules do NOT cover, which is the point: the
