@@ -475,9 +475,12 @@ public final class JRockDocInventory {
     // The characters a name is made of, as the body of a regex class: letters, the marks
     // that belong to them, and digits - and not merely A-Za-z0-9.
     //
-    // The prompt asks for the title and the counterparty "in Latin1", and Latin-1 has
-    // umlauts and an eszet in it. Held to ASCII, a bank whose letterhead says Muenchner
-    // with an u-umlaut would be filed as
+    // The prompt asks for the name in A-Z, a-z, digits and hyphens only, an umlaut
+    // written out (u-umlaut -> ue, eszet -> ss): a name with an umlaut in it does not
+    // travel well - Adobe InDesign, for one, will not place a .docx called that. This
+    // set is wider on purpose, as the safety net for a reply that ignores the rule:
+    // held to ASCII, a bank whose letterhead says Muenchner with an u-umlaut would be
+    // filed as
     //     2026-09-22-M-nchnerBank-...
     // every letter outside the set becoming a dash, and a dash is the one character here
     // that means "the next part of the name starts". \p{L} rather than a list of accented
