@@ -6761,7 +6761,7 @@ public class JRock {
     }
 
     // What "text file" means in the Load prompt and Include dialogs: .txt plus the
-    // plain-text formats people actually reach for. A .csv, .json, .xml, .html or .java
+    // plain-text formats people actually reach for. A .md, .csv, .json, .xml, .html or .java
     // file is text like any other, and loads or is included as it is named, with no
     // renaming to .txt. (Any file still has to pass the looksBinary check on load.)
     //
@@ -6771,9 +6771,9 @@ public class JRock {
     // dialog's other offer for the same file: "RTF as Markdown text", which converts it
     // and sends the Markdown instead.
     private static final String[] TEXT_EXTENSIONS =
-            { "txt", "csv", "json", "xml", "html", "java", "rtf" };
+            { "txt", "md", "csv", "json", "xml", "html", "java", "rtf" };
     private static final String TEXT_FILTER_LABEL =
-            "Text files as is (*.txt, *.csv, *.json, *.xml, *.html, *.java, *.rtf)";
+            "Text files as is (*.txt, *.md, *.csv, *.json, *.xml, *.html, *.java, *.rtf)";
 
     // The image formats ImageHeader can read a size out of, which is also the set the
     // DOCX export can place: named once, because two filters in the include dialog
