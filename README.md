@@ -28,8 +28,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   plain files under a `JRock/` folder you own and can inspect.
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text, image and audio files, plus PDF-to-page-images via Ghostscript
-  on the desktop and PDF.js in the browser, and RTF/DOCX-to-Markdown, links and all, with no
-  external tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
+  on the desktop and PDF.js in the browser, PDF-to-HTML or -text via xpdf on the desktop, and
+  RTF/DOCX-to-Markdown, links and all, with no external tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
   read on, so no tokens are spent on pixels nobody sees — and every include **reloaded from the
   log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
@@ -676,7 +676,7 @@ Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs*
 documents into either):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers seven kinds:
+   once, and the dropdown offers nine kinds (seven in the browser, which has no xpdf):
    - **Image files** (png, jpg, jpeg, gif, webp)
    - **Image with a Markdown reference** (the same files) — one line more in the prompt: a
      Markdown `![](<hash>)` above the token. The model reads it as a picture belonging to the
@@ -688,6 +688,9 @@ documents into either):
    - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
    - **PDF as page images** — converts the PDF to one PNG per page
+   - **PDF as HTML folder, with xpdf** — `pdftohtml -nofonts` into a folder beside the PDF, which
+     is then included as **Include directory...** would ([details](#pdf-as-html-or-text-xpdf))
+   - **PDF as text, with xpdf** — `pdftotext -enc UTF-8` into a `.txt` beside the PDF, included as is
    - **RTF as Markdown text** — converts the RTF to one Markdown file
    - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
 
@@ -981,13 +984,11 @@ includes each produced page. Ghostscript must be on your PATH: `gswin64` on Wind
 macOS and Linux. In the [browser](#working-with-pdfs) the same filter renders with PDF.js
 instead, into `JRock/pdfjs-pdf/`.
 
-**Page images and nothing else.** There is no text filter on Ghostscript's `txtwrite` device,
-because `txtwrite` takes the text operators as they come and hands back something a model has to
-guess at — no headings, no tables, columns interleaved. A PDF whose
-text matters is better turned into RTF or DOCX in Acrobat and included under
-[**RTF as Markdown text** or **DOCX as Markdown
-text**](#rtf-and-docx-conversion-no-external-tool), where the structure survives as structure.
-A scan has no text layer to extract in the first place, and goes as page images.
+**Page images, not Ghostscript text.** There is no text filter on Ghostscript's `txtwrite`
+device, because `txtwrite` takes the text operators as they come and hands back something a model
+has to guess at — no headings, no tables, columns interleaved. A PDF's text goes through
+[xpdf](#pdf-as-html-or-text-xpdf) instead. A scan has no text layer to extract in the first
+place, and goes as page images.
 
 A long conversion says so while it runs, rather than after. The command line is logged before
 Ghostscript is started, and the conversion happens off the UI thread so the window stays
@@ -1009,6 +1010,24 @@ Everywhere else the console `gs` is run with `-q` omitted, and its progress — 
 Ghostscript command, both pages with their dimensions and byte counts, and the `@img` hash tokens
 still sitting in the prompt. The model then reads its own transcript and answers from the image
 alone. Below it, the masked raw request and response, and the token stats.*
+
+### PDF as HTML or text (xpdf)
+
+Two more PDF filters, desktop only, use the **Xpdf command line tools** by Derek Noonburg, from
+https://www.xpdfreader.com/ — `pdftohtml` and `pdftotext` must be on your PATH. They hand a model
+the PDF's text, in reading order, rather than pictures of it.
+
+- **PDF as HTML folder, with xpdf** runs `pdftohtml -nofonts <pdf> <folder>`, then includes the
+  folder as [**Include directory...**](#multimodal-includes-ctrli) does: each `pageN.html` (and
+  `index.html`) as `@txt`, each page's background `pageN.png` as `@img`.
+- **PDF as text, with xpdf** runs `pdftotext -enc UTF-8 <pdf> <name>.txt` and includes that file
+  as `@txt`, as it is.
+
+The output goes **beside the PDF, named after it**: `report.pdf` gives the folder `report` or the
+file `report.txt`. JRock asks before creating it. If it is already there, JRock asks whether to
+include it as it is instead — so a conversion done once, and perhaps edited since, is reused, and
+nothing you have is overwritten. The command and the tool's own output are echoed to the log. If a
+tool isn't found on your PATH, JRock logs a note, shows a dialog, and opens xpdf's download page.
 
 ### RTF and DOCX conversion (no external tool)
 
@@ -2257,6 +2276,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   prompt gained **two `@img` tokens**, and that both PNGs really are **2480 × 3508 px**. The
   PDF is written by hand (`A4Pdf`) so its page box is exactly A4: `gs -sPAPERSIZE=a4` is the
   rounded 595 × 842 pt, which would rasterise one pixel narrower.
+- **`JRockXpdfIncludeTest`** includes the same two-page PDF with *PDF as text, with xpdf* and
+  *PDF as HTML folder, with xpdf*, answering **Yes** to the create question, and checks the
+  `.txt` or the folder appeared beside the PDF with both pages' text in it, and that the prompt
+  gained the `@txt` tokens. A third test puts a hand-edited `.txt` there first and checks it is
+  included as it is, with no conversion run and nothing overwritten.
 - **`JRockRtfIncludeTest`** includes an RTF through the real include dialog with the *RTF as
   Markdown text* filter, and compares the file under `JRock/rtf-md/` against the **whole
   expected Markdown** — headings from the font sizes, bold and italic as markup, Word's bullets
@@ -2360,10 +2384,11 @@ startup model-list fetch is skipped for want of a key. Your own key cannot be pi
 test, because nothing is read from the environment. No test contacts AWS — the one case that
 does set a key points the region at a host that doesn't resolve, so the fetch fails at DNS.
 
-One external program is needed: **Ghostscript on `PATH`** (`gs`, or `gswin64`/`gswin64c` on
-Windows),
-for the PDF test — which converts a real PDF rather than pretending to. CI installs it; the
-test fails with that as its message if it's missing.
+Two external programs are needed: **Ghostscript on `PATH`** (`gs`, or `gswin64`/`gswin64c` on
+Windows) for the PDF test, and **xpdf's `pdftohtml` and `pdftotext`** (from
+https://www.xpdfreader.com/ — not poppler's, whose `pdftohtml` takes other options) for the
+xpdf test. Both convert a real PDF rather than pretending to. CI installs them; each test fails
+with that as its message if its program is missing.
 
 `JRock.java` is compiled **in place** from the repository root — the root keeps its single
 Java file, and nothing is copied. Maven writes everything to `tests/target/`, which is

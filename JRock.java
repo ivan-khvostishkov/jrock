@@ -6858,8 +6858,8 @@ public class JRock {
     }
 
     // ---- Include file (Ctrl+I) ---------------------------------------------
-    // Lets the user pick a text, image or audio file, a PDF to convert (via Ghostscript)
-    // into per-page text or per-page images, or an RTF or DOCX to convert into
+    // Lets the user pick a text, image or audio file, a PDF to convert into per-page
+    // images (via Ghostscript) or into HTML or text (via xpdf), or an RTF or DOCX to convert into
     // Markdown (with the JDK's own RTF reader and XML parser). Each included file is hashed, remembered as
     // hash -> path in the non-persistent INCLUDES map, logged (with image dimensions or
     // a recording's own header where applicable), and gets an "@txt <hash>" /
@@ -6891,13 +6891,18 @@ public class JRock {
         javax.swing.filechooser.FileNameExtensionFilter textFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         TEXT_FILTER_LABEL, TEXT_EXTENSIONS);
-        // Page images and nothing else, for a PDF: Ghostscript's txtwrite is a poor
-        // reader of a real document - it takes the text operators as they come and
-        // hands back something a model has to guess at. A PDF whose text matters is
-        // better turned into RTF or DOCX in Acrobat and included under one of those
-        // filters, where the headings and tables survive as structure.
+        // Page images, for a PDF, by the PDF engine (see pdf()). Its text goes through
+        // xpdf instead (see includePdfWithXpdf): Ghostscript's txtwrite takes the text
+        // operators as they come and hands back something a model has to guess at,
+        // where xpdf's pdftotext and pdftohtml put the text back in reading order.
         javax.swing.filechooser.FileNameExtensionFilter pdfImageFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter("PDF as page images (*.pdf)", "pdf");
+        javax.swing.filechooser.FileNameExtensionFilter pdfHtmlFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "PDF as HTML folder, with xpdf (*.pdf)", "pdf");
+        javax.swing.filechooser.FileNameExtensionFilter pdfTextFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "PDF as text, with xpdf (*.pdf)", "pdf");
         javax.swing.filechooser.FileNameExtensionFilter rtfMarkdownFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         "RTF as Markdown text (*.rtf)", "rtf");
@@ -6916,6 +6921,11 @@ public class JRock {
         chooser.addChoosableFileFilter(textFilter);
         chooser.addChoosableFileFilter(audioFilter);
         chooser.addChoosableFileFilter(pdfImageFilter);
+        // Desktop only: xpdf is a program on PATH, and the browser has neither.
+        if (!isCheerpJ()) {
+            chooser.addChoosableFileFilter(pdfHtmlFilter);
+            chooser.addChoosableFileFilter(pdfTextFilter);
+        }
         chooser.addChoosableFileFilter(rtfMarkdownFilter);
         chooser.addChoosableFileFilter(docxMarkdownFilter);
         chooser.setFileFilter(imageFilter);            // default selection = image
@@ -6933,6 +6943,8 @@ public class JRock {
         if (selected == null || selected.length == 0) return;
         javax.swing.filechooser.FileFilter chosen = chooser.getFileFilter();
         boolean pdf = chosen == pdfImageFilter;
+        boolean pdfHtml = chosen == pdfHtmlFilter;
+        boolean pdfText = chosen == pdfTextFilter;
         boolean rtf = chosen == rtfMarkdownFilter;
         boolean docx = chosen == docxMarkdownFilter;
         boolean isImage = chosen == imageFilter || chosen == imageRefFilter;
@@ -6956,6 +6968,8 @@ public class JRock {
                     Path file = f.toPath();
                     if (pdf) {
                         includePdf(frame, input, log, extend, file);
+                    } else if (pdfHtml || pdfText) {
+                        includePdfWithXpdf(frame, input, log, extend, file, pdfHtml);
                     } else if (rtf) {
                         includeRtfAsMarkdown(input, log, extend, file);
                     } else if (docx) {
@@ -8401,6 +8415,127 @@ public class JRock {
         // prompt once the whole batch is finished, on the EDT where it belongs.
     }
 
+    // ---- PDF as HTML or text (xpdf) ------------------------------------------
+    // Converts a PDF with xpdf (https://www.xpdfreader.com/), found on PATH, and
+    // includes what comes out:
+    //
+    //   html  pdftohtml -nofonts <pdf> <dir>     then the folder, as Include directory
+    //                                            takes it: each page's .html as @txt,
+    //                                            its background .png as @img
+    //   text  pdftotext -enc UTF-8 <pdf> <txt>   then that one file, as @txt
+    //
+    // The output sits beside the PDF and is named after it: "report.pdf" gives the
+    // folder "report" or the file "report.txt". It is written only once the user has
+    // said yes to creating it. When it is there already, the user is asked whether to
+    // include it as it is - so a conversion done once (and perhaps edited since) is
+    // reused, and nothing the user has is ever overwritten.
+    //
+    // Runs on a background thread (see showIncludeDialog); dialogs and the include
+    // itself go through onEdt().
+    private static void includePdfWithXpdf(JFrame frame, JTextArea input, LogView log,
+                                           boolean extend, Path pdf, boolean html) {
+        String tool = html ? "pdftohtml" : "pdftotext";
+        String exe = findOnPath(tool);
+        if (exe == null) {
+            xpdfMissing(frame, log, tool);
+            return;
+        }
+
+        String name = pdf.getFileName().toString();
+        String stem = name.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")
+                ? name.substring(0, name.length() - 4) : name;
+        Path out = pdf.toAbsolutePath().resolveSibling(html ? stem : stem + ".txt");
+        String what = html ? "folder" : "file";
+
+        if (Files.exists(out)) {
+            if (html != Files.isDirectory(out)) {
+                log.gray("Not converting " + name + ": " + out + " is already there, and "
+                        + "is not a " + what + ". Rename or move it, then try again.");
+                return;
+            }
+            if (!confirmOnEdt(frame, "The " + what + " " + out + " already exists.\n\n"
+                    + "Include it as it is?", "Include existing " + what)) {
+                log.gray("Not included: " + name + " (" + out + " already exists).");
+                return;
+            }
+            log.gray("Including the existing " + what + " " + out);
+        } else {
+            if (!confirmOnEdt(frame, "Convert " + name + " with " + tool + " into a new "
+                    + what + " beside it?\n\n" + out, "Create " + what)) {
+                log.gray("Not converted: " + name + " (" + out + " not created).");
+                return;
+            }
+            java.util.List<String> cmd = html
+                    ? java.util.Arrays.asList(exe, "-nofonts", pdf.toAbsolutePath().toString(),
+                            out.toString())
+                    : java.util.Arrays.asList(exe, "-enc", "UTF-8",
+                            pdf.toAbsolutePath().toString(), out.toString());
+            log.gray("Converting PDF with xpdf: " + String.join(" ", cmd));
+            int code;
+            try {
+                Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+                // Drained so the process can't block, and echoed to the log.
+                try (java.io.BufferedReader r = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(p.getInputStream(),
+                                StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        if (!line.isBlank()) log.gray(tool + ": " + line.trim());
+                    }
+                }
+                code = p.waitFor();
+            } catch (IOException | InterruptedException ex) {
+                log.gray(tool + " failed to run: " + ex.getMessage());
+                return;
+            }
+            if (code != 0 || !Files.exists(out)) {
+                log.gray(tool + " exited with code " + code + "; nothing included.");
+                return;
+            }
+            log.gray(tool + " wrote " + out);
+        }
+
+        if (html) {
+            try {
+                includeDirectory(frame, input, log, extend, out);
+            } catch (IOException ex) {
+                log.gray("Could not list " + out + ": " + ex.getMessage());
+            }
+        } else {
+            boolean[] added = new boolean[1];
+            onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+            log.gray("Inserted " + (added[0] ? 1 : 0) + " new @txt token(s) for "
+                    + name + ".");
+        }
+    }
+
+    // A Yes/No question, asked on the EDT from whichever thread; true for Yes.
+    private static boolean confirmOnEdt(JFrame frame, String message, String title) {
+        boolean[] yes = new boolean[1];
+        onEdt(() -> yes[0] = javax.swing.JOptionPane.showConfirmDialog(frame, message,
+                title, javax.swing.JOptionPane.YES_NO_OPTION,
+                javax.swing.JOptionPane.QUESTION_MESSAGE)
+                == javax.swing.JOptionPane.YES_OPTION);
+        return yes[0];
+    }
+
+    // Says an xpdf tool is missing - in the log, in a dialog, and by opening xpdf's
+    // download page - as ghostscriptMissing does for Ghostscript.
+    private static void xpdfMissing(JFrame frame, LogView log, String tool) {
+        String url = "https://www.xpdfreader.com/download.html";
+        log.gray(tool + " was not found on PATH. Install the Xpdf command line tools "
+                + "from " + url + ", then try again.");
+        onEdt(() -> {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    tool + " is required to convert this PDF but was not found on your "
+                        + "PATH.\n\nInstall the Xpdf command line tools (by Derek "
+                        + "Noonburg) from\n" + url + "\nand restart JRock (or your shell) "
+                        + "so " + tool + " is on PATH.",
+                    "xpdf not found", javax.swing.JOptionPane.WARNING_MESSAGE);
+            openUrl(url);
+        });
+    }
+
     // ---- PDF engine --------------------------------------------------------
     // Everything JRock does with a PDF goes through one PdfEngine: rendering its pages
     // for an include, counting them, and interleaving two scans into one file. There
@@ -8715,6 +8850,12 @@ public class JRock {
                     ? new String[] { "gswin64", "gswin32", "gswin64c", "gswin32c", "gs" }
                     : new String[] { "gswin64c", "gswin32c", "gswin64", "gswin32", "gs" })
                 : new String[] { "gs" };
+        return findOnPath(names);
+    }
+
+    // The first of names (without ".exe", which is added on Windows) found in a PATH
+    // directory, as an absolute path - or null when none is.
+    private static String findOnPath(String... names) {
         String path = System.getenv("PATH");
         String[] dirs = path == null ? new String[0] : path.split(java.io.File.pathSeparator);
         for (String name : names) {
