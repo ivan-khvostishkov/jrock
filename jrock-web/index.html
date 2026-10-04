@@ -427,6 +427,23 @@
         }
       }
 
+      // A new tab, for the log's "Open URL in new tab". JRock has already cut the
+      // address out of the selection; the page only opens it. window.open gives null
+      // when a popup blocker stops it, which is the reason worth reporting.
+      async function Java_JRock_browserOpenTab(lib, url) {
+        try {
+          // No "noopener" feature: with it window.open always returns null, and a
+          // blocked tab could not be told from an opened one. The opener is cut
+          // by hand instead, so the new page cannot reach back into this one.
+          var w = window.open(String(url), "_blank");
+          if (!w) return "0\nthe browser blocked the new tab (allow pop-ups for this page)";
+          w.opener = null;
+          return "1\n";
+        } catch (e) {
+          return "0\n" + ((e && e.message) ? e.message : e);
+        }
+      }
+
       // Page chrome, over the same wire format. JRock's window menu calls this to
       // bring the header and footer back after the automatic hide, and to put them
       // away again; the reply says which of the two just happened.
@@ -740,6 +757,7 @@
               Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
               Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
               Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome,
+              Java_JRock_browserOpenTab: Java_JRock_browserOpenTab,
               Java_JRock_browserScaleImage: Java_JRock_browserScaleImage,
               Java_JRock_browserPdfOpen: Java_JRock_browserPdfOpen,
               Java_JRock_browserPdfRenderPage: Java_JRock_browserPdfRenderPage,

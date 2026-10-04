@@ -825,6 +825,12 @@ as text**, an **image as a picture**. Two lines go into the prompt, the address 
 The link says where the text or the picture came from, in a form the model reads as a
 reference belonging to the content below it; the token is what is actually sent.
 
+**What is pasted around the address is dropped**, so it can be copied carelessly out of a list or a
+sentence: ` - https://example.com/ ,` is fetched as `https://example.com/`. Anything before the
+first letter or digit goes, and so do trailing spaces, dashes, sentence punctuation and a closing
+bracket the address never opened — `https://en.wikipedia.org/wiki/Java_(language)` keeps its own.
+The log says how the field was read when that is not what was typed.
+
 **The dialog is sized against the screen**, so it fits a phone as well as a desktop window, with
 its **OK** button in reach. The explanation wraps to a width taken from the screen, and in the
 browser the field asks for fewer columns, since the layout stretches it to the room there is
@@ -2029,7 +2035,11 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)). On
   **Windows**, *Narrate selected text* reads the selection aloud, and is *Stop narrating* while
-  it does (see [**Narrate**](#narrate-windows)).
+  it does (see [**Narrate**](#narrate-windows)). *Open URL in new tab* opens the address the
+  selection holds or sits inside, so selecting ` - https://example.com/ ;` or just `xample.co`
+  out of it opens `https://example.com/` — in the default browser on the desktop, in a new tab of
+  the page in the browser. It is greyed out when the selection points at no address, and the log
+  says what was opened, or why it could not be.
 - **Prompt area** — Include text, image, audio, PDF, RTF or DOCX file... (multi-select), *Include
   with copy...* (the same dialog, keeping a copy of each file under `JRock/includes/` — see
   [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
@@ -2368,6 +2378,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
   English words in it, none for the reverse, `ja` rather than `zh` once there is kana. No
   window, and no speech.
+- **`JRockUrlTextTest`** checks the address cut out of pasted text — dashes, commas and an
+  unopened bracket dropped, a bracket the address opened kept — and the address a selection
+  points at: one it holds, one it sits inside, none for text that only overlaps one. A third test
+  writes an address into the real log and checks *Open URL in new tab* is enabled for part of it
+  and greyed out for plain words, without pressing it.
 - **`JRockImageSizeTest`** checks the image-header reader: PNG, GIF and JPEG against what the
   JDK's own encoder wrote, a JPEG whose size sits behind a 60 KB metadata segment, all three
   WEBP encodings from hand-built headers, and junk or truncated files, which must report
