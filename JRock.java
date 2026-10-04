@@ -1407,6 +1407,19 @@ public class JRock {
             return (sel == null || sel.isEmpty()) ? null : sel;
         }
 
+        // The address the selection points at (see urlAtSelection), or null - read
+        // against the text around the selection, so part of an address will do.
+        String selectedUrl() {
+            int start = pane.getSelectionStart(), end = pane.getSelectionEnd();
+            if (start >= end) return null;
+            try {
+                javax.swing.text.Document doc = pane.getDocument();
+                return urlAtSelection(doc.getText(0, doc.getLength()), start, end);
+            } catch (BadLocationException ex) {
+                return null;
+            }
+        }
+
         // Serializes the FULL log (all entries, regardless of "Dialog only" view)
         // to plain text for export: each dialog entry as its "[role]<suffix>"
         // header line followed by its body, gray entries as their line. This is
@@ -2460,6 +2473,12 @@ public class JRock {
         javax.swing.JMenuItem narrateItem = narrateAvailable()
                 ? addMenuItem(logMenu, NARRATE_LABEL, () -> narrateSelection(frame, log))
                 : null;
+        // Greyed out unless the selection holds an address or is part of one; the
+        // address is worked out again on the click, from the selection as it is then.
+        javax.swing.JMenuItem openUrlItem = addMenuItem(logMenu, "Open URL in new tab", () -> {
+            String url = log.selectedUrl();
+            if (url != null) openUrlInNewTab(url, log);
+        });
         // The log pane is read-only, so Copy is the only clipboard verb it needs.
         logMenu.addSeparator();
         javax.swing.JMenuItem copyLogItem = addEditItem(logMenu, "Copy", output,
@@ -2471,6 +2490,7 @@ public class JRock {
                 printLogItem.setText(selected ? "Print selected text..."  : "Print...");
                 exportRtfItem.setEnabled(selected);
                 exportDocxItem.setEnabled(selected);
+                openUrlItem.setEnabled(selected && log.selectedUrl() != null);
                 if (narrateItem != null) {
                     boolean speaking = narration != null;
                     narrateItem.setText(speaking ? "Stop narrating" : NARRATE_LABEL);
@@ -4933,20 +4953,40 @@ public class JRock {
         return img;
     }
 
-    // Opens a URL in the user's default browser, if the platform supports it.
-    // Best-effort: failures are ignored (the tooltip still shows the address).
-    private static void openUrl(String url) {
+    // Opens a URL in the user's default browser (a mailto: in the mail program), which
+    // opens it in a new tab or window by its own settings. java.awt.Desktop first;
+    // where that is missing or refuses - some Linux desktops have no BROWSE - the
+    // platform's own opener: rundll32 url.dll on Windows, open on macOS, xdg-open
+    // elsewhere. Returns null once one of them has taken it, or why neither could -
+    // which the About and Configure links leave unsaid (the tooltip still shows the
+    // address) and the log's "Open URL in new tab" reports.
+    private static String openUrl(String url) {
+        String why;
         try {
             if (java.awt.Desktop.isDesktopSupported()) {
                 java.awt.Desktop d = java.awt.Desktop.getDesktop();
                 if (url.startsWith("mailto:") && d.isSupported(java.awt.Desktop.Action.MAIL)) {
                     d.mail(java.net.URI.create(url));
+                    return null;
                 } else if (d.isSupported(java.awt.Desktop.Action.BROWSE)) {
                     d.browse(java.net.URI.create(url));
+                    return null;
                 }
             }
-        } catch (Exception ignore) {
-            // No browser available (e.g. headless/sandboxed); nothing to do.
+            why = "this desktop has no default-browser hook";
+        } catch (Exception ex) {
+            why = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+        }
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        String[] cmd = isWindows() ? new String[] { "rundll32", "url.dll,FileProtocolHandler", url }
+                : os.contains("mac") ? new String[] { "open", url }
+                : new String[] { "xdg-open", url };
+        try {
+            new ProcessBuilder(cmd).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            return null;
+        } catch (IOException ex) {
+            return why + "; " + cmd[0] + " failed too: " + ex.getMessage();
         }
     }
 
@@ -7628,6 +7668,100 @@ public class JRock {
     // path can be hundreds of characters, and Windows still has MAX_PATH to answer to.
     private static final int URL_NAME_MAX = 80;
 
+    // ---- URLs in pasted and selected text ----------------------------------
+    // An address copied out of a document seldom comes alone: a list dash in front, a
+    // comma or a full stop behind, a closing bracket from the sentence it sat in. These
+    // cut the address out of that, for Fetch URL and for "Open URL in new tab" in the
+    // log, so the user can copy or select carelessly and still get the address.
+
+    // An address as written in running text: http(s):// or www., up to the first
+    // character no URL in a sentence carries. What trails it is then trimmed by
+    // urlEnd, because a URL may hold a "." or a ")" and a sentence may end in one.
+    private static final java.util.regex.Pattern URL_IN_TEXT = java.util.regex.Pattern.compile(
+            "(?i)\\b(?:https?://|www\\.)[^\\s<>\"'`]+");
+
+    // s with the garbage around the address cut off: from the front, anything up to
+    // the first letter or digit; from the back, see urlEnd. "" when nothing is left.
+    static String cleanUrl(String s) {
+        if (s == null) return "";
+        int[] span = urlSpan(s, 0, s.length());
+        return s.substring(span[0], span[1]);
+    }
+
+    // [start, end) of text narrowed the way cleanUrl narrows a whole string.
+    private static int[] urlSpan(String text, int start, int end) {
+        while (start < end && !Character.isLetterOrDigit(text.charAt(start))) start++;
+        return new int[] { start, urlEnd(text, start, end) };
+    }
+
+    // Where an address starting at start really ends, at end at the latest: before
+    // trailing spaces, dashes and sentence punctuation, and before a closing bracket
+    // the address never opened - so "(see https://x.org/a_(b))." keeps "a_(b)" and
+    // drops the "))." that belongs to the sentence.
+    private static int urlEnd(String text, int start, int end) {
+        while (end > start) {
+            char c = text.charAt(end - 1);
+            char open = c == ')' ? '(' : c == ']' ? '[' : c == '}' ? '{' : c == '>' ? '<' : 0;
+            if (open != 0) {
+                String inside = text.substring(start, end - 1);
+                if (count(inside, open) > count(inside, c)) break;   // balanced: keep
+            } else if (!Character.isWhitespace(c) && "-\u2013\u2014,;:.!?'\"*`".indexOf(c) < 0) {
+                break;
+            }
+            end--;
+        }
+        return end;
+    }
+
+    private static int count(String s, char c) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++;
+        return n;
+    }
+
+    // The address a selection of text points at, or null when it points at none: the
+    // one the selection (garbage trimmed, as cleanUrl trims it) holds whole, or the one
+    // it sits inside. So in "see https://example.com/ ;" selecting all of it, just
+    // "https://example.com/ ;" or only "xample.co" gives https://example.com/. A
+    // "www." address is given its https://.
+    static String urlAtSelection(String text, int selStart, int selEnd) {
+        if (text == null || selStart < 0 || selEnd > text.length() || selStart >= selEnd) {
+            return null;
+        }
+        int[] sel = urlSpan(text, selStart, selEnd);
+        if (sel[0] >= sel[1]) return null;
+        java.util.regex.Matcher m = URL_IN_TEXT.matcher(text);
+        while (m.find()) {
+            int start = m.start(), end = urlEnd(text, start, m.end());
+            boolean holds = sel[0] <= start && end <= sel[1];
+            boolean inside = start <= sel[0] && sel[1] <= end;
+            if (holds || inside) {
+                String url = text.substring(start, end);
+                return url.regionMatches(true, 0, "www.", 0, 4) ? "https://" + url : url;
+            }
+            if (start >= sel[1]) break;   // the rest are after the selection
+        }
+        return null;
+    }
+
+    // Opens url in a new browser tab: the hosting page's, in the browser, and the
+    // default browser's on the desktop. Says in the log what it did.
+    private static void openUrlInNewTab(String url, LogView log) {
+        if (isCheerpJ()) {
+            try {
+                String[] r = bridgeReply(browserOpenTab(url));
+                log.gray("1".equals(r[0]) ? "Opened " + url + " in a new tab."
+                        : "Could not open " + url + ": " + r[1]);
+            } catch (Throwable ex) {
+                log.gray("This page provides no bridge to open a tab (" + ex + ").");
+            }
+            return;
+        }
+        String failure = openUrl(url);
+        log.gray(failure == null ? "Opened " + url + " in the browser."
+                : "Could not open " + url + ": " + failure);
+    }
+
     // Asks for a URL and, if one is given, fetches and includes it.
     private static void showFetchUrlDialog(JFrame frame, JTextArea input, LogView log,
                                            boolean extend) {
@@ -7692,8 +7826,9 @@ public class JRock {
                 javax.swing.JOptionPane.PLAIN_MESSAGE);
         if (result != javax.swing.JOptionPane.OK_OPTION) return;
 
-        final String typed = urlF.getText().trim();
-        if (typed.isEmpty()) return;   // OK on an empty field: nothing was asked for
+        final String typed = urlF.getText();
+        // OK on an empty field - or one holding only punctuation: nothing was asked for
+        if (cleanUrl(typed).isEmpty()) return;
 
         // Off the EDT, for the reason the include dialog goes the same way: this waits
         // for someone else's web server, and on the EDT the window would not repaint -
@@ -7725,7 +7860,10 @@ public class JRock {
         // A bare "example.org/page" is what a paste from an address bar often looks
         // like, and it has an obvious reading. Anything else keeps the scheme it was
         // given, so a mistyped one is reported rather than papered over.
-        String address = typed.contains("://") ? typed : "https://" + typed;
+        // Before that, the address is cut out of whatever came with it in the paste - see
+        // cleanUrl - so " - https://example.com/ ," is https://example.com/.
+        String cleaned = cleanUrl(typed);
+        String address = cleaned.contains("://") ? cleaned : "https://" + cleaned;
         if (!address.equals(typed)) log.gray("Reading \"" + typed + "\" as " + address);
 
         URI uri;
@@ -12186,6 +12324,10 @@ public class JRock {
     // One call FLIPS the state, so JRock never has to track it: the page owns the
     // chrome, including whether it is currently there.
     static native String browserToggleChrome();
+
+    // A new tab, for "Open URL in new tab" in the log, over the same wire format.
+    //   browserOpenTab("<url>") -> "1\n", or "0\n<reason>" (a popup blocker, say).
+    static native String browserOpenTab(String url);
 
     // Downscaling an image, over the same bridge and the same "<ok>\n<rest>" format.
     // The browser JVM has no image pipeline to speak of - ImageIO.read wants a native
