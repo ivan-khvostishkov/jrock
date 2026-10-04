@@ -29,7 +29,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text, image and audio files, plus PDF-to-page-images via Ghostscript
   on the desktop and PDF.js in the browser, PDF-to-HTML or -text via xpdf on the desktop, and
-  RTF/DOCX-to-Markdown, links and all, with no external tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
+  RTF/DOCX-to-Markdown, links and all, and XLSX-to-CSV, one file per sheet, with no external
+  tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
   read on, so no tokens are spent on pixels nobody sees — and every include **reloaded from the
   log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
@@ -495,6 +496,7 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
 - `JRock/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
   (see Multimodal includes).
 - `JRock/docx-md/` — the same for a `.docx` included as Markdown text.
+- `JRock/xlsx-csv/` — the CSV files produced when an `.xlsx` is included, one per sheet.
 
 The main log is a bit-perfect copy of the pane, except that each role header is followed by an
 `@<datetime>` include-style reference to the message's own file under `JRock/messages/`.
@@ -676,7 +678,7 @@ Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs*
 documents into either):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers nine kinds (seven in the browser, which has no xpdf):
+   once, and the dropdown offers ten kinds (eight in the browser, which has no xpdf):
    - **Image files** (png, jpg, jpeg, gif, webp)
    - **Image with a Markdown reference** (the same files) — one line more in the prompt: a
      Markdown `![](<hash>)` above the token. The model reads it as a picture belonging to the
@@ -693,6 +695,8 @@ documents into either):
    - **PDF as text, with xpdf** — `pdftotext -enc UTF-8` into a `.txt` beside the PDF, included as is
    - **RTF as Markdown text** — converts the RTF to one Markdown file
    - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
+   - **XLSX as CSV text, one file per sheet** — each sheet of an Excel `.xlsx` as its own CSV
+     ([details](#xlsx-conversion-no-external-tool))
 
    **Ctrl+Shift+I** (**Include with copy...** in the prompt's context menu) opens the very
    same dialog, with one difference: each chosen file is copied under `JRock/includes/` first
@@ -703,7 +707,7 @@ documents into either):
    **Include directory...** (prompt context menu) picks a folder instead and includes every
    file in it, one by one in name order, the type decided by the extension: images as
    **Image files**, text as **Text files as is**, wav and mp3 as **Audio files**, a PDF as
-   **page images**, and an RTF or a DOCX **as Markdown text**. Any other file, and any folder
+   **page images**, an RTF or a DOCX **as Markdown text**, and an XLSX **as CSV**. Any other file, and any folder
    inside it, is skipped, and the log says so for each. The log then gives the count of
    files included and skipped.
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
@@ -1103,6 +1107,36 @@ font sizes:
   `word/document.xml`, and the log says exactly that: *Could not read DOCX renamed.docx: no
   word/document.xml inside it - is it really a Word .docx?* Nothing is included and no
   `JRock/docx-md/` is created.
+
+### XLSX conversion (no external tool)
+
+Selecting **XLSX as CSV text, one file per sheet** writes every sheet of the workbook, in tab
+order, as its own CSV and includes each as an `@txt` token, so a workbook of three sheets is
+three tokens. Like a `.docx`, an `.xlsx` is a ZIP of XML, read with `java.util.zip` and the JDK's
+XML parser, so this works with nothing installed and in the browser too.
+
+- Output is written under **`JRock/xlsx-csv/`**, named `<xlsxname>.<sheet>.csv`, so
+  `stock.xlsx` with a sheet *Sales Q1* gives `stock.xlsx.Sales Q1.csv`. A character Windows
+  forbids in a file name becomes `_`.
+- What a cell becomes:
+
+  | In the sheet | In the CSV |
+  |---|---|
+  | text, shared or inline | the text; rich-text runs joined, phonetic guides left out |
+  | a number | the number as the file stores it, not rounded to the places shown |
+  | a number in a date or time format | **ISO**: `2026-10-04`, `2026-10-04 18:00:00`, or `18:00:00` for a time alone, whatever the sheet's own format says (the 1904 date system too) |
+  | `TRUE` / `FALSE`, an error | `TRUE` / `FALSE`, the error as shown (`#N/A`, `#DIV/0!`, …) |
+  | a formula | its last calculated value, as above |
+
+  Dates are ISO so the CSV reads the same on any machine: Excel's short date follows the
+  reader's locale, and the file does not record it.
+- Rows and columns keep their places: an empty cell is an empty field and an empty row an empty
+  line, so *row 7, column C* is the same cell in both, and every line has the same number of
+  fields. A field with a comma, a quote or a line break in it is quoted (RFC 4180).
+- **Not** read: number formats other than dates, merged cells (the value stays in the first
+  cell, where Excel keeps it), charts, images, comments.
+- A file that isn't really an `.xlsx` has no `xl/workbook.xml`, and the log says so; nothing is
+  included.
 
 On send, every referenced include is verified (known hash **and** the file still hashes the
 same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid
@@ -1677,7 +1711,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
-| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`. Fails when nothing was included. |
+| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`, `"xlsx"`. Fails when nothing was included. |
 | `automationFetchUrl(String url)` | [Fetch URL](#fetching-a-url) (Ctrl+U), for a URL given: the page goes in at the cursor, as a link and an include. A refused URL is a returned reason, not a dialog. Fails when nothing was inserted. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
 | `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
@@ -2040,7 +2074,7 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   out of it opens `https://example.com/` — in the default browser on the desktop, in a new tab of
   the page in the browser. It is greyed out when the selection points at no address, and the log
   says what was opened, or why it could not be.
-- **Prompt area** — Include text, image, audio, PDF, RTF or DOCX file... (multi-select), *Include
+- **Prompt area** — Include text, image, audio, PDF, RTF, DOCX or XLSX file... (multi-select), *Include
   with copy...* (the same dialog, keeping a copy of each file under `JRock/includes/` — see
   [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
   URL...* (which downloads an address into `JRock/urls/` and includes it as text or as a
@@ -2309,6 +2343,14 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   The document is written by hand (`FormattedDocx`), zip entries and all. A second test renames
   a text file to `.docx` and checks the log says there is no `word/document.xml` in it and that
   no `JRock/docx-md/` is created.
+- **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
+  sheet* and compares both CSVs under `JRock/xlsx-csv/` **whole**: shared, rich and inline
+  strings, a comma and quotes quoted, a line break kept inside its field, dates in a built-in and
+  a custom format as ISO, a time alone, a number whose format has a `d` only in quoted text left a
+  number, a boolean, an error, formula values, and a skipped column and row kept in place. The
+  sheets come out in tab order, which is not the order of their parts in the ZIP. The workbook is
+  written by hand (`FormattedXlsx`). A second test renames a text file to `.xlsx` and checks it
+  is refused.
 - **`JRockImageRefIncludeTest`** includes one PNG twice through the real dialog, under each of the
   two filters that offer images, and checks the one line that is the whole difference: *Image with
   a Markdown reference* leaves `![](<hash>)` above the `@img` token and says so in the log, *Image

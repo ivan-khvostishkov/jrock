@@ -627,6 +627,7 @@ public class JRock {
     private static Path pdfDir(PdfEngine e) { return jrockDir().resolve(e.tag() + "-pdf"); }
     private static Path rtfMdDir()         { return jrockDir().resolve("rtf-md"); }
     private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
+    private static Path xlsxCsvDir()       { return jrockDir().resolve("xlsx-csv"); }
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
     private static Path urlsDir()          { return jrockDir().resolve("urls"); }
     // The last narration and the last recording, one file each, overwritten every time
@@ -2505,7 +2506,7 @@ public class JRock {
 
         // Prompt area: Include... / Load prompt... / Save prompt copy...
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
-        addMenuItem(promptMenu, "Include text, image, audio, PDF, RTF or DOCX file...",
+        addMenuItem(promptMenu, "Include text, image, audio, PDF, RTF, DOCX or XLSX file...",
                 () -> showIncludeDialog(frame, input, log, extendMode.isSelected(), false));
         // The same dialog, the same filters, one thing more: the chosen file is copied
         // into JRock/includes/ and included from the copy, which is the include that
@@ -2942,6 +2943,7 @@ public class JRock {
     //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
     //   "rtf"    an RTF, converted to Markdown text
     //   "docx"   a DOCX, converted to Markdown text
+    //   "xlsx"   an XLSX, converted to one CSV per sheet
     //
     // Blocks for as long as the conversion takes, which for a long PDF is minutes.
     //
@@ -2965,6 +2967,9 @@ public class JRock {
                     break;
                 case "docx":
                     includeDocxAsMarkdown(live.input, live.log, false, path);
+                    break;
+                case "xlsx":
+                    includeXlsxAsCsv(live.input, live.log, false, path);
                     break;
                 case "img":
                 case "imgref":
@@ -4202,7 +4207,7 @@ public class JRock {
 
     // The shortcut list, for the Help dialog. descWidth is how much room the second
     // column has in pixels: the descriptions are wrapped to it, because on a phone the
-    // widest of them ("Include a text, image, audio, PDF, RTF or DOCX file") is wider
+    // widest of them ("Include a text, image, audio, PDF, RTF, DOCX or XLSX file") is wider
     // than the whole screen, and a grid in a window that does not scroll sideways would
     // simply have its right-hand end cut off.
     private static javax.swing.JPanel shortcutsPanel(java.awt.Font plainFont, int descWidth) {
@@ -4210,7 +4215,7 @@ public class JRock {
         // space-padding). The "Shortcuts" border title keeps the default bold.
         String[][] keys = {
             {"Ctrl+Enter", "Send message (call a Bedrock model)"},
-            {"Ctrl+I", "Include a text, image, audio, PDF, RTF or DOCX file"},
+            {"Ctrl+I", "Include a text, image, audio, PDF, RTF, DOCX or XLSX file"},
             {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
             {"Ctrl+U", "Fetch a URL and include what it answers with"},
             {"Ctrl+Space", "Start recording from the microphone; again to stop and include "
@@ -6899,8 +6904,9 @@ public class JRock {
 
     // ---- Include file (Ctrl+I) ---------------------------------------------
     // Lets the user pick a text, image or audio file, a PDF to convert into per-page
-    // images (via Ghostscript) or into HTML or text (via xpdf), or an RTF or DOCX to convert into
-    // Markdown (with the JDK's own RTF reader and XML parser). Each included file is hashed, remembered as
+    // images (via Ghostscript) or into HTML or text (via xpdf), an RTF or DOCX to convert into
+    // Markdown (with the JDK's own RTF reader and XML parser), or an XLSX to convert
+    // into one CSV per sheet (with the same XML parser). Each included file is hashed, remembered as
     // hash -> path in the non-persistent INCLUDES map, logged (with image dimensions or
     // a recording's own header where applicable), and gets an "@txt <hash>" /
     // "@img <hash>" / "@audio <hash>"
@@ -6949,6 +6955,9 @@ public class JRock {
         javax.swing.filechooser.FileNameExtensionFilter docxMarkdownFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
                         "DOCX as Markdown text (*.docx)", "docx");
+        javax.swing.filechooser.FileNameExtensionFilter xlsxCsvFilter =
+                new javax.swing.filechooser.FileNameExtensionFilter(
+                        "XLSX as CSV text, one file per sheet (*.xlsx)", "xlsx");
         // A recording, sent as itself: the model is given the audio, not a transcript of
         // it made here. There is nothing to convert and nothing to rasterise - the file
         // goes out base64 in an "input_audio" part, the way an image goes out in an
@@ -6968,6 +6977,7 @@ public class JRock {
         }
         chooser.addChoosableFileFilter(rtfMarkdownFilter);
         chooser.addChoosableFileFilter(docxMarkdownFilter);
+        chooser.addChoosableFileFilter(xlsxCsvFilter);
         chooser.setFileFilter(imageFilter);            // default selection = image
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
@@ -6987,6 +6997,7 @@ public class JRock {
         boolean pdfText = chosen == pdfTextFilter;
         boolean rtf = chosen == rtfMarkdownFilter;
         boolean docx = chosen == docxMarkdownFilter;
+        boolean xlsx = chosen == xlsxCsvFilter;
         boolean isImage = chosen == imageFilter || chosen == imageRefFilter;
         boolean isAudio = chosen == audioFilter;
         boolean markdownRef = chosen == imageRefFilter;
@@ -7014,6 +7025,8 @@ public class JRock {
                         includeRtfAsMarkdown(input, log, extend, file);
                     } else if (docx) {
                         includeDocxAsMarkdown(input, log, extend, file);
+                    } else if (xlsx) {
+                        includeXlsxAsCsv(input, log, extend, file);
                     } else {
                         // The copy, if one was asked for, happens here and not inside
                         // includeOne: what the three conversions above include is
@@ -7047,7 +7060,8 @@ public class JRock {
     // ---- Include directory -------------------------------------------------
     // Every file in one folder, included one by one in name order, each as the include
     // dialog's filter for its extension would include it: images as @img, text as
-    // @txt, recordings as @audio, a PDF as page images, an RTF or a DOCX as Markdown.
+    // @txt, recordings as @audio, a PDF as page images, an RTF or a DOCX as Markdown,
+    // an XLSX as one CSV per sheet.
     // With no filter to pick, a file's extension decides, and RTF goes as Markdown,
     // the way DOCX does, rather than as its markup. A file of any other type, and a
     // folder inside it, is skipped with a line in the log saying so: the folder is
@@ -7111,6 +7125,7 @@ public class JRock {
                 case "pdf":  includePdf(frame, input, log, extend, file); break;
                 case "rtf":  includeRtfAsMarkdown(input, log, extend, file); break;
                 case "docx": includeDocxAsMarkdown(input, log, extend, file); break;
+                case "xlsx": includeXlsxAsCsv(input, log, extend, file); break;
                 default: {
                     boolean image = kind.equals("img");
                     onEdt(() -> includeOne(input, log, extend, file, kind, image, false));
@@ -7122,7 +7137,7 @@ public class JRock {
     }
 
     // The include kind the include dialog would give this file by its extension -
-    // "img", "txt", "audio", "pdf", "rtf" (as Markdown) or "docx" - or null when none
+    // "img", "txt", "audio", "pdf", "rtf" (as Markdown), "docx" or "xlsx" (as CSV) - or null when none
     // of its filters takes it.
     private static String includeKindOf(Path file) {
         String name = file.getFileName().toString();
@@ -7130,7 +7145,7 @@ public class JRock {
         if (dot < 0) return null;
         String ext = name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
         switch (ext) {
-            case "pdf": case "rtf": case "docx": return ext;
+            case "pdf": case "rtf": case "docx": case "xlsx": return ext;
             default:
         }
         if (java.util.Arrays.asList(IMAGE_EXTENSIONS).contains(ext)) return "img";
@@ -10507,6 +10522,364 @@ public class JRock {
             int end = text.length();
             while (end > 0 && Character.isWhitespace(text.charAt(end - 1))) end--;
             return text.substring(0, end);
+        }
+    }
+
+    // ---- XLSX as CSV -------------------------------------------------------
+    // A spreadsheet, the way includeDocxAsMarkdown takes a document: unzips the .xlsx,
+    // writes each sheet under JRock/xlsx-csv/ as "<xlsxname>.<sheet>.csv", and
+    // includes every one of them as an ordinary @txt token - a sheet per file, because
+    // a CSV has no way to say where one table ends and the next begins.
+    //
+    // Nothing installed here either: java.util.zip and the JDK's XML parser, as for
+    // DOCX, so this works in the browser too.
+    //
+    // Runs on a background thread (see showIncludeDialog); the includes themselves,
+    // which touch the prompt's document, go through onEdt().
+    private static void includeXlsxAsCsv(JTextArea input, LogView log,
+                                         boolean extend, Path xlsx) {
+        log.gray("Converting XLSX to CSV, one file per sheet: " + xlsx);
+
+        java.util.LinkedHashMap<String, String> sheets;
+        try {
+            sheets = XlsxCsv.of(xlsx);
+        } catch (IOException | RuntimeException ex) {
+            log.gray("Could not read XLSX " + xlsx.getFileName() + ": " + ex.getMessage());
+            return;
+        }
+        if (sheets.isEmpty()) {
+            log.gray("No sheets found in " + xlsx.getFileName() + "; nothing included.");
+            return;
+        }
+
+        // The workbook's whole name kept as the prefix, as in docx-md/, and the sheet's
+        // name after it - made safe for a file name, with a number added should two
+        // sheets come out the same that way.
+        Path outDir = xlsxCsvDir();
+        java.util.Set<String> used = new java.util.HashSet<>();
+        int inserted = 0;
+        for (java.util.Map.Entry<String, String> sheet : sheets.entrySet()) {
+            String base = xlsx.getFileName().toString() + "." + XlsxCsv.fileSafe(sheet.getKey());
+            String name = base;
+            for (int n = 2; !used.add(name.toLowerCase(java.util.Locale.ROOT)); n++) {
+                name = base + "-" + n;
+            }
+            Path out = outDir.resolve(name + ".csv");
+            try {
+                Files.createDirectories(outDir);
+                Files.write(out, sheet.getValue().getBytes(StandardCharsets.UTF_8));
+            } catch (IOException ex) {
+                log.gray("Could not write " + out + ": " + ex.getMessage());
+                continue;
+            }
+            log.gray("Sheet \"" + sheet.getKey() + "\" written to " + out);
+            boolean[] added = new boolean[1];
+            onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+            if (added[0]) inserted++;
+        }
+        log.gray("Inserted " + inserted + " new @txt token(s) for " + xlsx.getFileName() + ".");
+    }
+
+    // XLSX -> CSV, sheet by sheet.
+    //
+    // What is read: xl/workbook.xml for the sheets in their tab order, with its
+    // _rels for the part each one lives in; xl/sharedStrings.xml, where the text of
+    // most cells is kept; xl/styles.xml, for which cells are dates; and each sheet's
+    // sheetData. A cell comes out as:
+    //
+    //   text (shared or inline)        its text
+    //   a number                       the number as the file stores it
+    //   a number in a date format      yyyy-mm-dd, yyyy-mm-dd hh:mm:ss or hh:mm:ss
+    //   TRUE / FALSE, an error         TRUE / FALSE, the error (#N/A, #DIV/0!, ...)
+    //   a formula                      its last calculated value, as above
+    //
+    // Dates are ISO whatever the sheet's own format says, so the CSV reads the same on
+    // any machine - Excel's short-date format is the reader's locale, which the file
+    // does not record. Rows and columns keep their places: a gap in the sheet is an
+    // empty line or field in the CSV, so "row 7, column C" means the same in both.
+    //
+    // Not read: formatting other than dates (a number is not rounded to the places
+    // shown), merged cells (the value sits in the first cell, as Excel keeps it),
+    // charts, images, comments.
+    private static final class XlsxCsv {
+
+        private static final String WORKBOOK = "xl/workbook.xml";
+        private static final String WORKBOOK_RELS = "xl/_rels/workbook.xml.rels";
+        private static final String SHARED_STRINGS = "xl/sharedStrings.xml";
+        private static final String STYLES = "xl/styles.xml";
+        private static final String R =
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+        private XlsxCsv() { }
+
+        /** Sheet name -> CSV, in tab order. Empty when the workbook names no sheet. */
+        static java.util.LinkedHashMap<String, String> of(Path xlsx) throws IOException {
+            byte[] workbookPart = DocxMarkdown.part(xlsx, WORKBOOK);
+            if (workbookPart == null) {
+                throw new IOException("no " + WORKBOOK + " inside it"
+                        + " - is it really an Excel .xlsx?");
+            }
+            org.w3c.dom.Document workbook = DocxMarkdown.document(workbookPart, WORKBOOK);
+            boolean date1904 = false;
+            org.w3c.dom.NodeList pr = workbook.getElementsByTagNameNS("*", "workbookPr");
+            if (pr.getLength() > 0) {
+                String v = ((org.w3c.dom.Element) pr.item(0)).getAttribute("date1904");
+                date1904 = "1".equals(v) || "true".equalsIgnoreCase(v);
+            }
+
+            java.util.Map<String, String> targets = new java.util.HashMap<>();
+            byte[] relsPart = DocxMarkdown.part(xlsx, WORKBOOK_RELS);
+            if (relsPart != null) {
+                org.w3c.dom.NodeList rels = DocxMarkdown.document(relsPart, WORKBOOK_RELS)
+                        .getElementsByTagNameNS("*", "Relationship");
+                for (int i = 0; i < rels.getLength(); i++) {
+                    org.w3c.dom.Element rel = (org.w3c.dom.Element) rels.item(i);
+                    targets.put(rel.getAttribute("Id"), rel.getAttribute("Target"));
+                }
+            }
+            List<String> strings = sharedStrings(xlsx);
+            java.util.Set<Integer> dateStyles = dateStyles(xlsx);
+
+            java.util.LinkedHashMap<String, String> csv = new java.util.LinkedHashMap<>();
+            org.w3c.dom.NodeList sheets = workbook.getElementsByTagNameNS("*", "sheet");
+            for (int i = 0; i < sheets.getLength(); i++) {
+                org.w3c.dom.Element sheet = (org.w3c.dom.Element) sheets.item(i);
+                String target = targets.get(sheet.getAttributeNS(R, "id"));
+                if (target == null || target.isEmpty()) continue;   // a chart sheet, say
+                // Relative to xl/, or absolute from the package root.
+                String partName = target.startsWith("/") ? target.substring(1) : "xl/" + target;
+                byte[] sheetPart = DocxMarkdown.part(xlsx, partName);
+                if (sheetPart == null) continue;
+                csv.put(sheet.getAttribute("name"),
+                        sheet(DocxMarkdown.document(sheetPart, partName), strings,
+                                dateStyles, date1904));
+            }
+            return csv;
+        }
+
+        // The shared string table, by index: each si's text, without the phonetic
+        // guides (rPh) East Asian text carries along with it.
+        private static List<String> sharedStrings(Path xlsx) throws IOException {
+            List<String> strings = new ArrayList<>();
+            byte[] part = DocxMarkdown.part(xlsx, SHARED_STRINGS);
+            if (part == null) return strings;
+            org.w3c.dom.NodeList items = DocxMarkdown.document(part, SHARED_STRINGS)
+                    .getElementsByTagNameNS("*", "si");
+            for (int i = 0; i < items.getLength(); i++) {
+                strings.add(text((org.w3c.dom.Element) items.item(i)));
+            }
+            return strings;
+        }
+
+        // The text of an si or an inline is: every t in it, rPh's left out.
+        private static String text(org.w3c.dom.Element holder) {
+            StringBuilder sb = new StringBuilder();
+            org.w3c.dom.NodeList ts = holder.getElementsByTagNameNS("*", "t");
+            for (int i = 0; i < ts.getLength(); i++) {
+                org.w3c.dom.Node t = ts.item(i);
+                if ("rPh".equals(t.getParentNode().getLocalName())) continue;
+                sb.append(t.getTextContent());
+            }
+            return sb.toString();
+        }
+
+        // The cell styles (indexes into cellXfs, which is what a cell's s names) whose
+        // number format is a date or a time.
+        private static java.util.Set<Integer> dateStyles(Path xlsx) throws IOException {
+            java.util.Set<Integer> dates = new java.util.HashSet<>();
+            byte[] part = DocxMarkdown.part(xlsx, STYLES);
+            if (part == null) return dates;
+            org.w3c.dom.Document styles = DocxMarkdown.document(part, STYLES);
+            java.util.Map<Integer, String> custom = new java.util.HashMap<>();
+            org.w3c.dom.NodeList fmts = styles.getElementsByTagNameNS("*", "numFmt");
+            for (int i = 0; i < fmts.getLength(); i++) {
+                org.w3c.dom.Element f = (org.w3c.dom.Element) fmts.item(i);
+                Integer id = intOrNull(f.getAttribute("numFmtId"));
+                if (id != null) custom.put(id, f.getAttribute("formatCode"));
+            }
+            org.w3c.dom.NodeList xfsList = styles.getElementsByTagNameNS("*", "cellXfs");
+            if (xfsList.getLength() == 0) return dates;
+            List<org.w3c.dom.Element> xfs =
+                    DocxMarkdown.children((org.w3c.dom.Element) xfsList.item(0), "xf");
+            for (int i = 0; i < xfs.size(); i++) {
+                Integer id = intOrNull(xfs.get(i).getAttribute("numFmtId"));
+                if (id != null && isDateFormat(id, custom.get(id))) dates.add(i);
+            }
+            return dates;
+        }
+
+        // Whether a number format shows a date or a time: one of Excel's built-in date
+        // and time formats, or a custom code with y, m, d, h or s outside its quoted
+        // text, escapes and [brackets] (where "[Red]" and the like live).
+        static boolean isDateFormat(int id, String code) {
+            if ((id >= 14 && id <= 22) || (id >= 45 && id <= 47)) return true;
+            if (code == null) return false;
+            return DATE_TOKEN.matcher(formatLetters(code)).find();
+        }
+
+        private static final java.util.regex.Pattern DATE_TOKEN =
+                java.util.regex.Pattern.compile("[ymdhs]");
+
+        // A format code with what is not a format token taken out and lower-cased:
+        // "quoted text", \x escapes, _x spacing, *x fill and [bracketed] parts. Only the
+        // part for positive numbers, before the first ';', counts.
+        private static String formatLetters(String code) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < code.length(); i++) {
+                char c = code.charAt(i);
+                if (c == ';') break;
+                if (c == '"') {
+                    int close = code.indexOf('"', i + 1);
+                    i = close < 0 ? code.length() : close;
+                } else if (c == '[') {
+                    int close = code.indexOf(']', i + 1);
+                    i = close < 0 ? code.length() : close;
+                } else if (c == '\\' || c == '_' || c == '*') {
+                    i++;
+                } else {
+                    sb.append(Character.toLowerCase(c));
+                }
+            }
+            return sb.toString();
+        }
+
+        // One worksheet as CSV text, one line per row up to the last row with anything
+        // in it, every line as wide as the widest.
+        private static String sheet(org.w3c.dom.Document doc, List<String> strings,
+                                    java.util.Set<Integer> dateStyles, boolean date1904) {
+            java.util.TreeMap<Integer, java.util.TreeMap<Integer, String>> rows =
+                    new java.util.TreeMap<>();
+            int width = 0;
+            org.w3c.dom.NodeList rowNodes = doc.getElementsByTagNameNS("*", "row");
+            int nextRow = 1;
+            for (int i = 0; i < rowNodes.getLength(); i++) {
+                org.w3c.dom.Element row = (org.w3c.dom.Element) rowNodes.item(i);
+                Integer r = intOrNull(row.getAttribute("r"));
+                int rowNo = r != null ? r : nextRow;
+                nextRow = rowNo + 1;
+                java.util.TreeMap<Integer, String> cells = new java.util.TreeMap<>();
+                int nextCol = 1;
+                for (org.w3c.dom.Element c : DocxMarkdown.children(row, "c")) {
+                    int col = column(c.getAttribute("r"));
+                    if (col <= 0) col = nextCol;
+                    nextCol = col + 1;
+                    String value = value(c, strings, dateStyles, date1904);
+                    if (value.isEmpty()) continue;
+                    cells.put(col, value);
+                    width = Math.max(width, col);
+                }
+                if (!cells.isEmpty()) rows.put(rowNo, cells);
+            }
+            StringBuilder csv = new StringBuilder();
+            if (rows.isEmpty()) return "";
+            for (int r = 1; r <= rows.lastKey(); r++) {
+                java.util.TreeMap<Integer, String> cells = rows.get(r);
+                for (int col = 1; col <= width; col++) {
+                    if (col > 1) csv.append(',');
+                    String v = cells == null ? null : cells.get(col);
+                    if (v != null) csv.append(csvField(v));
+                }
+                csv.append('\n');
+            }
+            return csv.toString();
+        }
+
+        // One c as the text the CSV gets - see the table above XlsxCsv.
+        private static String value(org.w3c.dom.Element c, List<String> strings,
+                                    java.util.Set<Integer> dateStyles, boolean date1904) {
+            String type = c.getAttribute("t");
+            if ("inlineStr".equals(type)) {
+                org.w3c.dom.Element is = DocxMarkdown.child(c, "is");
+                return is == null ? "" : text(is);
+            }
+            org.w3c.dom.Element v = DocxMarkdown.child(c, "v");
+            if (v == null) return "";
+            String raw = v.getTextContent().trim();
+            switch (type) {
+                case "s": {
+                    Integer index = intOrNull(raw);
+                    return index != null && index >= 0 && index < strings.size()
+                            ? strings.get(index) : "";
+                }
+                case "b":   return "1".equals(raw) ? "TRUE" : "FALSE";
+                case "str": case "e": case "d": return raw;
+                default:
+            }
+            Integer style = intOrNull(c.getAttribute("s"));
+            if (style != null && dateStyles.contains(style)) {
+                try {
+                    return isoDate(Double.parseDouble(raw), date1904);
+                } catch (NumberFormatException ex) {
+                    return raw;
+                }
+            }
+            return raw;
+        }
+
+        // An Excel serial date as ISO: yyyy-mm-dd, with " hh:mm:ss" when it has a time
+        // of day, and the time alone when there is no day (a serial under 1).
+        //
+        // Day 1 is 1900-01-01 - and day 60 is 1900-02-29, a day that never was, which
+        // Excel keeps for Lotus 1-2-3's sake; so from day 61 on, the count runs from
+        // 1899-12-30. The 1904 system counts from 1904-01-01 as day 0.
+        static String isoDate(double serial, boolean date1904) {
+            long seconds = Math.round(serial * 86400);
+            long days = Math.floorDiv(seconds, 86400);
+            long secondOfDay = Math.floorMod(seconds, 86400);
+            String time = String.format(java.util.Locale.ROOT, "%02d:%02d:%02d",
+                    secondOfDay / 3600, secondOfDay / 60 % 60, secondOfDay % 60);
+            if (days == 0 && !date1904) return time;
+            String date;
+            if (date1904) {
+                date = java.time.LocalDate.of(1904, 1, 1).plusDays(days).toString();
+            } else if (days == 60) {
+                date = "1900-02-29";
+            } else {
+                date = java.time.LocalDate.of(1899, 12, days < 60 ? 31 : 30)
+                        .plusDays(days).toString();
+            }
+            return secondOfDay == 0 ? date : date + " " + time;
+        }
+
+        // "C12" -> 3; 0 when there is no column in it.
+        private static int column(String ref) {
+            int col = 0;
+            for (int i = 0; i < ref.length(); i++) {
+                char ch = Character.toUpperCase(ref.charAt(i));
+                if (ch < 'A' || ch > 'Z') break;
+                col = col * 26 + (ch - 'A' + 1);
+            }
+            return col;
+        }
+
+        // RFC 4180: a field with a comma, a quote or a line break in it is quoted, and
+        // its quotes doubled.
+        static String csvField(String v) {
+            if (v.indexOf(',') < 0 && v.indexOf('"') < 0
+                    && v.indexOf('\n') < 0 && v.indexOf('\r') < 0) {
+                return v;
+            }
+            return '"' + v.replace("\"", "\"\"") + '"';
+        }
+
+        // A sheet name as part of a file name: what Windows forbids, and control
+        // characters, become "_". Excel already forbids most of them in sheet names.
+        static String fileSafe(String sheetName) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < sheetName.length(); i++) {
+                char c = sheetName.charAt(i);
+                sb.append(c < 32 || "\\/:*?\"<>|".indexOf(c) >= 0 ? '_' : c);
+            }
+            String s = sb.toString().trim();
+            return s.isEmpty() ? "sheet" : s;
+        }
+
+        private static Integer intOrNull(String s) {
+            try {
+                return s == null || s.isEmpty() ? null : Integer.valueOf(s.trim());
+            } catch (NumberFormatException ex) {
+                return null;
+            }
         }
     }
 
