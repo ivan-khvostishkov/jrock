@@ -694,7 +694,7 @@ documents into either):
      text and writes it back into its answer where the picture belongs, which is what
      [**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) then
      places
-   - **Text files as is** (txt, md, csv, json, xml, html, java, rtf) — sent exactly as they are on disk,
+   - **Text files as is** (txt, md, csv, json, xml, html, svg, java, rtf) — sent exactly as they are on disk,
      RTF markup and all, for a model that reads (and writes) the format itself
    - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
