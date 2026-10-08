@@ -1,0 +1,12 @@
+Produce me the Markdown version of the document, keeping its structure: headings as #, ## and ###, tables as Markdown pipe tables, lists as - or 1. lists, bold and italic where the document has them, and every number, date, amount, name and reference exactly as written. Keep the document's own language; do not translate and do not summarise. Separate pages with a --- line.
+
+Keep the pictures too, with IMAGE REFERENCES. Each attached image comes with its reference on the line above it, of the form ![](<12 hex digits>). Put that reference, copied exactly, on a line of its own where the image belongs in the document: a logo where the logo is, a photo, a chart, a stamp or a signature where it sits on the page. An image that is a whole scanned page goes after the text you transcribed from that page. Use only the references attached below, each one once; never invent one, and never reference an image that is blank.
+
+Answer with the Markdown alone - no explanation before or after it, and no ``` fence around it.
+
+The text and/or image version of the document, one file per page, is attached below.
+
+@txt
+@txt
+@img
+@img

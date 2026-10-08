@@ -1,15 +1,15 @@
-// A JRock automation: one scanned PDF, an RTF, a DOCX or a TXT in, a text twin of it and
-// a file name out.
+// A JRock automation: one PDF, image, DOCX, RTF or TXT in; a DOCX with the pictures, a
+// plain-text twin and a file name out.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
 //     java -cp jrock.jar JRockDocInventory.java [--working-dir <dir>] [--prompts-dir <dir>]
-//                                               [document.pdf|.rtf|.docx|.txt]
+//                                               [document.pdf|.png|.jpg|.docx|.rtf|.txt]
 //
 // Without the document it asks for one in a file chooser, opened in the
 // folder this was started in - which, from the right-click menu, is the folder that was
-// clicked. The two prompts it needs it finds beside itself, in this directory.
+// clicked. The three prompts it needs it finds beside itself, in this directory.
 //
 // The flags are JRock's and are passed straight through (see parseArgs): --working-dir
 // names the folder whose settings it is to use - that folder's model, its images DPI,
@@ -41,20 +41,25 @@
 // What this one does is the chain the README describes under "Prompt library and
 // chaining", with nobody pressing the keys:
 //
-//   1. jrock-prompt-doc-to-ascii.txt  + the document           -> the document as plain
-//      text, saved as <document name>.txt beside it. A PDF goes in as one page image
-//      per page; an RTF or a DOCX goes in as Markdown, which is text. A TXT is plain
-//      text already, so it skips this pass and is its own twin.
-//   2. jrock-prompt-doc-inventory.txt + that text file          -> one file name.
-//   3. Every file of that document renamed to it, if you say so.
+//   1. jrock-prompt-doc-to-markdown.txt + the document         -> the document as
+//      Markdown with image references, exported as <document name>.docx beside it -
+//      by the same writer as "Export selected Markdown with images as DOCX...", so
+//      the pictures the answer refers to are in the DOCX. A PDF goes in as HTML, by
+//      xpdf's pdftohtml into the folder <document name> beside it (with JRock's own
+//      dialogs: create the folder, or include the one already there); an image is a
+//      one-page document and goes in as itself.
+//   2. jrock-prompt-doc-to-ascii.txt    + that DOCX, as Markdown -> the document as
+//      plain text, saved as <document name>.txt beside it.
+//   3. jrock-prompt-doc-inventory.txt   + that text file          -> one file name.
+//   4. Every file of that document renamed to it, if you say so - and the HTML folder
+//      kept and renamed with them, or deleted, as you say.
 //
-// A PDF, an RTF and a DOCX of the same name are one document filed more than once -
-// which is what Acrobat's "Export to RTF" and "Export to Word" leave behind - so all of
-// them are renamed: pick any and the others are found beside it (see companionsOf). A
-// TXT picked on its own finds them too, being the twin an earlier run wrote. Handed a
-// PDF with an RTF or a DOCX next to it, this automation offers to read that instead,
-// because a page of Markdown costs a fraction of the same page photographed and says
-// more exactly what is on it.
+// Each pass starts from what the one before it left, so a run can start part of the
+// way down: a DOCX (or an RTF) starts at pass 2, a TXT at pass 3. And files of the same
+// name beside the document are the same document, so a PDF whose .txt or .docx is
+// already there - an earlier run's, or Acrobat's "Export to Word" - is offered the one
+// furthest down the chain instead (see laterStep): every pass skipped is a send not
+// paid for. Whichever way it goes, all of them are renamed at the end (see siblingsOf).
 //
 // The JRock window is the real one, and it is in front of you the whole way: the prompt
 // fills with include tokens as the pages are converted, the log reports every step, and
@@ -63,7 +68,7 @@
 // by hand, which is the point of driving the real window rather than a headless copy of
 // it. Copy this file and rewrite it for chains of your own - and read
 // JRockTranslateToEnglish.java beside it, which is this same plumbing around a single
-// pass, and takes a document of any type rather than these four.
+// pass, and takes a document of any type rather than these.
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -73,25 +78,32 @@ import java.nio.file.Paths;
 
 public final class JRockDocInventory {
 
-    // The two prompts, expected beside this file.
+    // The three prompts, expected beside this file.
+    private static final String PROMPT_MARKDOWN = "jrock-prompt-doc-to-markdown.txt";
     private static final String PROMPT_ASCII = "jrock-prompt-doc-to-ascii.txt";
     private static final String PROMPT_NAME = "jrock-prompt-doc-inventory.txt";
 
-    // The kinds of file this automation files, and the only ones: a scanned document,
-    // the two word-processor exports of one, and plain text. Constants because every step
-    // asks the extension the same questions - which include kind the file goes in under,
-    // which files are its twins, and whether a path handed over by the right-click menu
-    // is one this agent reads at all. The extension is also the include kind JRock's
-    // automationInclude takes for the first three.
+    // The kinds of file this automation files, and the only ones: a scan (a PDF, or a
+    // picture of a single page), the word-processor documents one becomes, and plain
+    // text. Constants because every step asks the extension the same questions - which
+    // pass the file starts at, which files are its twins, and whether a path handed
+    // over by the right-click menu is one this agent reads at all. "docx" and "rtf" are
+    // also the include kinds JRock's automationInclude takes for them.
     private static final String EXT_PDF = "pdf";
     private static final String EXT_RTF = "rtf";
     private static final String EXT_DOCX = "docx";
     private static final String EXT_TXT = "txt";
+    private static final java.util.List<String> EXT_IMAGES =
+            java.util.List.of("png", "jpg", "jpeg", "gif", "webp");
 
-    // The formats one document can be filed in more than once, in the order a copy of
-    // it is preferred for reading: text before page images.
-    private static final java.util.List<String> FILED_AS =
-            java.util.List.of(EXT_RTF, EXT_DOCX, EXT_PDF);
+    // The passes, by where a file of each kind starts: a scan at the Markdown pass, a
+    // DOCX or an RTF at the plain-text one, a TXT at the naming one.
+    private static final int PASS_MARKDOWN = 1, PASS_TEXT = 2, PASS_NAME = 3;
+
+    // The copies of one document worth starting from instead, best first: the further
+    // down the chain, the fewer sends are left to pay for.
+    private static final java.util.List<String> LATER_FIRST =
+            java.util.List.of(EXT_TXT, EXT_DOCX, EXT_RTF);
 
     // JRock's own flags, spelled out here because this automation both reads them and
     // passes them on (see parseArgs).
@@ -181,6 +193,7 @@ public final class JRockDocInventory {
         System.out.println("Working directory:    " + told.workingDir);
         System.out.println("Chooser opens in:     " + told.chooserStart());
         System.out.println("Driving JRock from:   " + jrockCame());
+        Path markdownPrompt = mustExist(here.resolve(PROMPT_MARKDOWN));
         Path ascii = mustExist(here.resolve(PROMPT_ASCII));
         Path inventory = mustExist(here.resolve(PROMPT_NAME));
 
@@ -198,28 +211,21 @@ public final class JRockDocInventory {
         // extensions, but the right-click menu hands over whatever was clicked, and a
         // .jpg arriving that way would otherwise be sent and paid for before anything
         // noticed it is not a document this agent files.
-        String ext = extension(chosen);
-        if (!FILED_AS.contains(ext) && !ext.equals(EXT_TXT)) {
-            throw new Stop("this files a PDF, an RTF, a DOCX or a TXT, and that is none of "
-                    + "them:\n\n    " + chosen.getFileName() + "\n\nA scan goes in as page "
-                    + "images, an RTF or a DOCX as Markdown text, a TXT as it is; nothing "
-                    + "else is read here.");
+        if (passOf(chosen) == 0) {
+            throw new Stop("this files a PDF, an image, a DOCX, an RTF or a TXT, and that "
+                    + "is none of them:\n\n    " + chosen.getFileName() + "\n\nA PDF goes "
+                    + "in as HTML, an image as itself, a DOCX or an RTF as Markdown text, a "
+                    + "TXT as it is; nothing else is read here.");
         }
 
         // The same document in the other formats, when they are there - and the offer to
-        // read a cheaper copy of it (see companionsOf and askTextInstead). Whichever is
+        // start from the one furthest down the chain (see laterStep). Whichever is
         // worked on, all of them are renamed at the end: they are one document.
         Path document = chosen;
-        java.util.List<Path> companions = companionsOf(chosen);
-        if (ext.equals(EXT_PDF) && !companions.isEmpty()
-                && !extension(companions.get(0)).equals(EXT_PDF)
-                && askTextInstead(chosen, companions.get(0))) {
-            document = companions.remove(0);
-            companions.add(0, chosen);
-        }
-        String kind = extension(document);
-        System.out.println("Document: " + document + " (as " + kind + ")");
-        for (Path companion : companions) System.out.println("Companion: " + companion);
+        Path later = laterStep(chosen);
+        if (later != null && askStartFrom(chosen, later)) document = later;
+        int pass = passOf(document);
+        System.out.println("Document: " + document + " (from pass " + pass + ")");
 
         // ---- Start JRock and wait for it to be usable ----------------------
         // The real entry point, which shows the window on the event dispatch thread and
@@ -229,27 +235,70 @@ public final class JRockDocInventory {
         check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
         check(JRock.automationBegin("doc inventory of " + document.getFileName()));
 
-        // ---- Pass one: the document as plain text --------------------------
-        // Not for a TXT, which is that text already: it is its own twin, and the second
-        // pass reads it as it stands.
-        Path twin = null;
-        if (!kind.equals(EXT_TXT)) {
-            System.out.println("Pass 1: " + PROMPT_ASCII);
+        // Everything written here goes beside the document and is named after it, which
+        // is what makes the set findable before it is renamed - and what each pass reads
+        // back from the one before.
+        Path dir = document.getParent();
+        java.util.List<Path> written = new java.util.ArrayList<>();
+
+        // ---- An image's A4 PDF, to print from -------------------------------
+        // Before any send, being free: see writeA4Pdf. Not when a PDF of the same name
+        // is there already - that is this document's PDF, and is renamed with the rest.
+        if (EXT_IMAGES.contains(extension(document))
+                && !Files.exists(dir.resolve(stem(document) + "." + EXT_PDF))) {
+            Path printable = dir.resolve(stem(document) + "." + EXT_PDF);
+            boolean made;
+            try {
+                made = writeA4Pdf(document, printable);
+            } catch (IOException ex) {
+                made = false;
+                System.out.println("No PDF copy: " + ex.getMessage());
+            }
+            if (made) {
+                written.add(printable);
+                System.out.println("Wrote " + printable);
+            } else {
+                System.out.println("No PDF copy: " + document.getFileName()
+                        + " is not an image ImageIO reads.");
+            }
+        }
+
+        // ---- Pass one: the document as Markdown, then as a DOCX -------------
+        // A PDF as HTML: its text as the pages' own, its pictures as the page images,
+        // each with the "![](<hash>)" the answer is to copy. JRock asks before creating
+        // the folder, and offers the one already there instead.
+        Path wordFile = document;
+        if (pass == PASS_MARKDOWN) {
+            System.out.println("Pass 1: " + PROMPT_MARKDOWN);
+            check(JRock.automationLoadPrompt(markdownPrompt.toString()));
+            dropPlaceholders();
+            check(JRock.automationInclude(document.toString(),
+                    extension(document).equals(EXT_PDF) ? "pdfhtml" : "imgref"));
+            String markdown = unfenced(reply(JRock.automationSend(REPLY_TIMEOUT_MS)));
+            wordFile = free(dir, stem(document), "." + EXT_DOCX);
+            check(JRock.automationExportDocx(markdown, wordFile.toString()));
+            written.add(wordFile);
+            System.out.println("Wrote " + wordFile);
+        }
+
+        // ---- Pass two: the DOCX as plain text -------------------------------
+        // The DOCX goes in as Markdown - which is how a DOCX becomes plain text here: the
+        // model lays that Markdown out for a fixed-width page.
+        Path textFile = document;
+        if (pass <= PASS_TEXT) {
+            System.out.println("Pass 2: " + PROMPT_ASCII);
             check(JRock.automationLoadPrompt(ascii.toString()));
             dropPlaceholders();
-            check(JRock.automationInclude(document.toString(), kind));
+            check(JRock.automationInclude(wordFile.toString(), extension(wordFile)));
             String text = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
-
-            // Beside the document and named after it, which is what makes the set
-            // findable before they are renamed - and what the second pass reads back.
-            twin = free(document.getParent(), stem(document), ".txt");
-            Files.write(twin, text.getBytes(StandardCharsets.UTF_8));
-            System.out.println("Wrote " + twin);
+            textFile = free(dir, stem(document), "." + EXT_TXT);
+            Files.write(textFile, text.getBytes(StandardCharsets.UTF_8));
+            written.add(textFile);
+            System.out.println("Wrote " + textFile);
         }
-        Path textFile = twin != null ? twin : document;
 
-        // ---- Pass two: a name for it --------------------------------------
-        System.out.println("Pass 2: " + PROMPT_NAME);
+        // ---- Pass three: a name for it --------------------------------------
+        System.out.println("Pass 3: " + PROMPT_NAME);
         check(JRock.automationLoadPrompt(inventory.toString()));
         dropPlaceholders();
         check(JRock.automationInclude(textFile.toString(), EXT_TXT));
@@ -265,28 +314,53 @@ public final class JRockDocInventory {
         // Asked rather than assumed: this is the one step that changes files the user
         // owns, and the name is a model's suggestion, not a fact about the document.
         //
-        // Every file of the document goes at once, or none does - the document, its text
-        // twin, and every other copy of it on the disk. A scan renamed without its export
-        // beside it leaves one document under two names, which is the mess this
+        // Every file of the document goes at once, or none does - the document, what this
+        // run wrote, and every other copy of it on the disk. A scan renamed without its
+        // export beside it leaves one document under two names, which is the mess this
         // automation exists to clear up rather than to make.
         java.util.List<Path> files = new java.util.ArrayList<>();
-        files.add(document);
-        files.addAll(companions);
-        if (twin != null) files.add(twin);
+        files.add(chosen);
+        for (Path sibling : siblingsOf(chosen)) if (!files.contains(sibling)) files.add(sibling);
+        for (Path file : written) if (!files.contains(file)) files.add(file);
         String howMany = files.size() == 1 ? "the file"
                 : files.size() == 2 ? "both files" : "all " + files.size() + " files";
-        if (!ask("Rename " + howMany + " to\n\n    " + base + "\n\nfrom\n\n"
-                + listed(files) + "\nin " + document.getParent() + " ?",
-                "Rename the files?")) {
-            return new Result("kept " + named(files) + "; the suggested name was " + base,
+        boolean rename = ask("Rename " + howMany + " to\n\n    " + base + "\n\nfrom\n\n"
+                + listed(files) + "\nin " + dir + " ?", "Rename the files?");
+
+        // The HTML folder, pass one's working material: the pages for the model to read,
+        // not for anybody to open. Whether it stays is asked once it is clear which name
+        // it would stay under - and a folder kept is renamed with the rest.
+        Path html = dir.resolve(stem(chosen));
+        String folderNote = "";
+        if (Files.isDirectory(html)) {
+            if (askKeepFolder(html, rename ? base : null)) {
+                if (rename) {
+                    Path moved = free(dir, base, "");
+                    Files.move(html, moved);
+                    folderNote = "the folder " + moved.getFileName() + " kept";
+                } else {
+                    folderNote = "the folder " + html.getFileName() + " kept";
+                }
+            } else {
+                deleteTree(html);
+                folderNote = "the folder " + html.getFileName() + " deleted";
+            }
+            System.out.println(folderNote);
+        }
+        String folderLine = folderNote.isEmpty() ? "" : "\n" + capitalised(folderNote) + ".";
+        String folderPart = folderNote.isEmpty() ? "" : "; " + folderNote;
+
+        if (!rename) {
+            return new Result("kept " + named(files) + "; the suggested name was " + base
+                    + folderPart,
                     "Nothing was renamed:\n\n" + listed(files)
-                            + "\nThe suggested name was\n\n    " + base);
+                            + "\nThe suggested name was\n\n    " + base + "\n" + folderLine);
         }
         java.util.List<Path> renamed = new java.util.ArrayList<>();
         for (Path file : files) renamed.add(renameTo(file, base));
         System.out.println("Renamed to " + named(renamed));
-        return new Result("renamed to " + named(renamed),
-                "Renamed to\n\n" + listed(renamed) + "\nin " + document.getParent() + ".");
+        return new Result("renamed to " + named(renamed) + folderPart,
+                "Renamed to\n\n" + listed(renamed) + "\nin " + dir + "." + "\n" + folderLine);
     }
 
     // ---- The command line --------------------------------------------------
@@ -568,7 +642,7 @@ public final class JRockDocInventory {
                 }
             }
         }
-        String name = found.replaceAll("(?i)\\.(pdf|rtf|docx|txt)$", "");
+        String name = found.replaceAll("(?i)\\.(pdf|rtf|docx|txt|png|jpe?g|gif|webp)$", "");
         name = name.replaceAll("[^" + NAME_CHARS + "._-]+", "-")
                 .replaceAll("-{2,}", "-");
         if (name.length() > 120) {
@@ -618,25 +692,194 @@ public final class JRockDocInventory {
         return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
     }
 
+    // The pass a file starts at (see PASS_MARKDOWN), or 0 for a kind this does not file.
+    private static int passOf(Path file) {
+        String ext = extension(file);
+        if (ext.equals(EXT_PDF) || EXT_IMAGES.contains(ext)) return PASS_MARKDOWN;
+        if (ext.equals(EXT_DOCX) || ext.equals(EXT_RTF)) return PASS_TEXT;
+        if (ext.equals(EXT_TXT)) return PASS_NAME;
+        return 0;
+    }
+
     // The same document in the other formats, beside it and under the same name: the
-    // .rtf and .docx of a .pdf, the .pdf and .docx of a .rtf, and so on - and for a .txt,
-    // whichever of the three it is the text of. In FILED_AS order, so a copy that is text
-    // comes before one that is page images. Empty when there is none.
+    // .docx and .txt of a .pdf, the .pdf of a .txt, a .png scanned of the same page, and
+    // so on. Empty when there is none. The HTML folder is not among them: see run for
+    // what becomes of it.
     //
-    // Worth looking for, because such a set is what Acrobat's "Export to RTF" and
-    // "Export to Word" leave behind: one document on the disk more than once, the
-    // exports carrying text somebody has already paid to extract. All the copies are the
-    // same document, so all get the name the inventory settles on - and a text one is
-    // the cheaper one to read.
-    private static java.util.List<Path> companionsOf(Path file) {
+    // Worth looking for, because such a set is what an earlier run - or Acrobat's
+    // "Export to Word" - leaves behind: one document on the disk more than once. All the
+    // copies are the same document, so all get the name the inventory settles on.
+    private static java.util.List<Path> siblingsOf(Path file) {
         java.util.List<Path> found = new java.util.ArrayList<>();
+        java.util.List<String> kinds = new java.util.ArrayList<>(
+                java.util.List.of(EXT_PDF, EXT_DOCX, EXT_RTF, EXT_TXT));
+        kinds.addAll(EXT_IMAGES);
         String own = extension(file);
-        for (String other : FILED_AS) {
+        for (String other : kinds) {
             if (other.equals(own)) continue;
             Path beside = file.getParent().resolve(stem(file) + "." + other);
             if (Files.isRegularFile(beside)) found.add(beside);
         }
         return found;
+    }
+
+    // The sibling furthest down the chain from file, when one is further down than file
+    // itself: a .txt before a .docx before an .rtf. Null when there is none - and for a
+    // TXT, which starts at the last pass already.
+    //
+    // The HTML folder is not offered here: asking about it is JRock's own include's
+    // business, which offers the folder already there in place of a new conversion.
+    private static Path laterStep(Path file) {
+        int from = passOf(file);
+        for (String ext : LATER_FIRST) {
+            Path beside = file.getParent().resolve(stem(file) + "." + ext);
+            if (!beside.equals(file) && Files.isRegularFile(beside) && passOf(beside) > from) {
+                return beside;
+            }
+        }
+        return null;
+    }
+
+    // A reply with the ``` fence a model put around it anyway taken off: the DOCX is to
+    // hold the Markdown, not a code block of it.
+    private static String unfenced(String reply) {
+        String trimmed = reply.trim();
+        if (!trimmed.startsWith("```") || !trimmed.endsWith("```") || trimmed.length() < 6) {
+            return reply;
+        }
+        int firstLine = trimmed.indexOf('\n');
+        if (firstLine < 0) return reply;
+        return trimmed.substring(firstLine + 1, trimmed.length() - 3).trim() + "\n";
+    }
+
+    // ---- An image as an A4 PDF ---------------------------------------------
+    // A picture of a page is filed as a document, and a document is printed - which from
+    // a PNG means a viewer's own idea of page size and margins. So an image gets a PDF
+    // copy beside it: one A4 page, the image centred on it, ready to print as it is.
+    //
+    // The sizes, in PDF points (1/72 in): A4 is 595.28 x 841.89, and 30 mm of margin on
+    // every side leaves a frame of 150 x 237 mm (1771 x 2799 pixels at 300 dpi). The
+    // image is placed at 300 dpi - 0.24 pt a pixel - when it fits the frame at that, and
+    // shrunk to the frame, aspect kept, when it does not; never enlarged. So 300 dpi is
+    // the least it prints at, and a small image stays small, in the middle of the page.
+    //
+    // Written here rather than by Ghostscript, which reads JPEG (through its viewjpeg.ps)
+    // and not PNG or GIF. A JPEG goes in as the bytes it is (DCTDecode), so nothing is
+    // recompressed; anything else ImageIO reads goes in as its pixels, deflated. A WEBP,
+    // which ImageIO does not read, gets no PDF - said on the console, nothing more.
+    private static final double MM = 72 / 25.4;
+    private static final double A4_WIDTH = 210 * MM, A4_HEIGHT = 297 * MM;
+    private static final double MARGIN = 30 * MM;
+    private static final double POINTS_PER_PIXEL_AT_300_DPI = 72.0 / 300;
+
+    // The PDF copy of image, at pdf. Returns false when the image could not be read.
+    private static boolean writeA4Pdf(Path image, Path pdf) throws IOException {
+        byte[] bytes = Files.readAllBytes(image);
+        java.awt.image.BufferedImage picture =
+                javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+        if (picture == null) return false;
+        int w = picture.getWidth(), h = picture.getHeight();
+        boolean gray = picture.getColorModel().getNumColorComponents() == 1;
+        String ext = extension(image);
+        boolean jpeg = ext.equals("jpg") || ext.equals("jpeg");
+
+        // The pixels, for anything that is not a JPEG: over white, so a transparent PNG
+        // prints as it looks on screen; one byte a pixel for gray, three for colour.
+        byte[] stream;
+        String filter;
+        if (jpeg) {
+            stream = bytes;
+            filter = "/DCTDecode";
+        } else {
+            java.io.ByteArrayOutputStream raw = new java.io.ByteArrayOutputStream();
+            try (java.util.zip.DeflaterOutputStream z = new java.util.zip.DeflaterOutputStream(raw)) {
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int argb = picture.getRGB(x, y);
+                        int a = argb >>> 24;
+                        int r = over(argb >> 16 & 0xff, a), g = over(argb >> 8 & 0xff, a),
+                            b = over(argb & 0xff, a);
+                        if (gray) {
+                            z.write(r);
+                        } else {
+                            z.write(r); z.write(g); z.write(b);
+                        }
+                    }
+                }
+            }
+            stream = raw.toByteArray();
+            filter = "/FlateDecode";
+        }
+
+        double scale = Math.min(1, Math.min(
+                (A4_WIDTH - 2 * MARGIN) / (w * POINTS_PER_PIXEL_AT_300_DPI),
+                (A4_HEIGHT - 2 * MARGIN) / (h * POINTS_PER_PIXEL_AT_300_DPI)));
+        double dw = w * POINTS_PER_PIXEL_AT_300_DPI * scale;
+        double dh = h * POINTS_PER_PIXEL_AT_300_DPI * scale;
+        String place = String.format(java.util.Locale.ROOT, "q %.3f 0 0 %.3f %.3f %.3f cm /Im0 Do Q",
+                dw, dh, (A4_WIDTH - dw) / 2, (A4_HEIGHT - dh) / 2);
+        String box = String.format(java.util.Locale.ROOT, "[0 0 %.3f %.3f]", A4_WIDTH, A4_HEIGHT);
+
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        java.util.List<Integer> offsets = new java.util.ArrayList<>();
+        ascii(out, "%PDF-1.4\n%âãÏÓ\n");
+        object(out, offsets, "<< /Type /Catalog /Pages 2 0 R >>", null);
+        object(out, offsets, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", null);
+        object(out, offsets, "<< /Type /Page /Parent 2 0 R /MediaBox " + box
+                + " /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>", null);
+        object(out, offsets, "<< /Type /XObject /Subtype /Image /Width " + w + " /Height " + h
+                + " /ColorSpace " + (gray ? "/DeviceGray" : "/DeviceRGB")
+                + " /BitsPerComponent 8 /Filter " + filter + " /Length " + stream.length + " >>",
+                stream);
+        byte[] content = place.getBytes(StandardCharsets.US_ASCII);
+        object(out, offsets, "<< /Length " + content.length + " >>", content);
+        int xref = out.size();
+        StringBuilder table = new StringBuilder("xref\n0 " + (offsets.size() + 1)
+                + "\n0000000000 65535 f \n");
+        for (int offset : offsets) table.append(String.format("%010d 00000 n \n", offset));
+        table.append("trailer\n<< /Size ").append(offsets.size() + 1)
+                .append(" /Root 1 0 R >>\nstartxref\n").append(xref).append("\n%%EOF\n");
+        ascii(out, table.toString());
+        Files.write(pdf, out.toByteArray());
+        return true;
+    }
+
+    // A colour channel over white, at alpha a (0-255).
+    private static int over(int c, int a) {
+        return (c * a + 255 * (255 - a)) / 255;
+    }
+
+    // One numbered PDF object: its dictionary, and its stream when it has one.
+    private static void object(java.io.ByteArrayOutputStream out, java.util.List<Integer> offsets,
+                               String dict, byte[] stream) throws IOException {
+        offsets.add(out.size());
+        ascii(out, offsets.size() + " 0 obj\n" + dict + "\n");
+        if (stream != null) {
+            ascii(out, "stream\n");
+            out.write(stream);
+            ascii(out, "\nendstream\n");
+        }
+        ascii(out, "endobj\n");
+    }
+
+    // PDF structure is bytes, one per character: ISO-8859-1 keeps the binary-marker
+    // comment's four high bytes as they are.
+    private static void ascii(java.io.ByteArrayOutputStream out, String s) throws IOException {
+        out.write(s.getBytes(StandardCharsets.ISO_8859_1));
+    }
+
+    // Deletes a folder and everything in it, deepest first.
+    private static void deleteTree(Path root) throws IOException {
+        java.util.List<Path> all = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
+            walk.forEach(all::add);
+        }
+        java.util.Collections.reverse(all);
+        for (Path p : all) Files.delete(p);
+    }
+
+    private static String capitalised(String s) {
+        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
     // File names for a dialog: one per line, indented, nothing else on the line. See
@@ -693,11 +936,14 @@ public final class JRockDocInventory {
         onEdt(() -> {
             javax.swing.JFileChooser chooser =
                     new javax.swing.JFileChooser(startIn.toFile());
-            chooser.setDialogTitle("Choose the PDF, RTF, DOCX or TXT to inventory");
+            chooser.setDialogTitle("Choose the PDF, image, DOCX, RTF or TXT to inventory");
             chooser.setAcceptAllFileFilterUsed(false);
+            java.util.List<String> kinds = new java.util.ArrayList<>(
+                    java.util.List.of(EXT_PDF, EXT_DOCX, EXT_RTF, EXT_TXT));
+            kinds.addAll(EXT_IMAGES);
             chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                    "PDF, RTF, DOCX and TXT files (*.pdf, *.rtf, *.docx, *.txt)",
-                    EXT_PDF, EXT_RTF, EXT_DOCX, EXT_TXT));
+                    "Documents (*.pdf, *.docx, *.rtf, *.txt, *.png, *.jpg, *.jpeg, *.gif, "
+                            + "*.webp)", kinds.toArray(new String[0])));
             if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
                 chosen[0] = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
             }
@@ -705,24 +951,41 @@ public final class JRockDocInventory {
         return chosen[0];
     }
 
-    // The offer a PDF with an RTF or a DOCX beside it gets: read the text instead of the
-    // pictures.
+    // The offer a document with a copy further down the chain beside it gets: start from
+    // that copy, and skip the passes that made it.
     //
     // Offered rather than taken, because which copy is the good one is not something this
-    // automation knows - a badly converted export is worse than the scan it came from.
-    // But the question is worth asking out loud: twenty scanned pages are twenty images
-    // to rasterise, upload and be charged for, and the export of the same document is a
-    // few kilobytes of Markdown saying what is on them - cheaper, and read rather than
-    // deciphered. All the files are renamed at the end whichever way this goes.
-    private static boolean askTextInstead(Path pdf, Path export) {
-        String what = extension(export).toUpperCase(java.util.Locale.ROOT);
+    // automation knows - a .txt from a run that went wrong is worse than the scan it came
+    // from. But the question is worth asking out loud: every pass skipped is a send not
+    // paid for, and pass one is the dear one, pages of a document read by a model. All the
+    // files are renamed at the end whichever way this goes.
+    private static boolean askStartFrom(Path document, Path later) {
+        String what = extension(later).toUpperCase(java.util.Locale.ROOT);
         String an = what.equals("RTF") ? "an " : "a ";
-        return ask("There is " + an + what + " beside this PDF, under the same name:\n\n"
-                + "    " + pdf.getFileName() + "\n    " + export.getFileName()
-                + "\n\nWork on the " + what + " instead? Its text goes to the model as "
-                + "Markdown, which is cheaper and more exact than the PDF's pages as "
-                + "images.\n\nAll the files are renamed either way.",
-                "Use the " + what + " instead?");
+        int skipped = passOf(later) - passOf(document);
+        String skips = later.getFileName() + " is "
+                + (passOf(later) == PASS_NAME ? "the text the file name is made from"
+                                              : "what the plain-text pass reads")
+                + ", so " + (skipped == 1 ? "one pass" : skipped + " passes")
+                + " - and " + (skipped == 1 ? "its send" : "their sends") + " - are skipped.";
+        return ask("There is " + an + what + " beside this document, under the same name:\n\n"
+                + "    " + document.getFileName() + "\n    " + later.getFileName()
+                + "\n\nStart from the " + what + " instead? " + skips
+                + "\n\nAll the files are renamed either way.",
+                "Start from the " + what + "?");
+    }
+
+    // Whether to keep the HTML folder pass one read the PDF from. Its pages are for the
+    // model, not for people - the DOCX and the TXT are the readable copies - so whether
+    // it stays is the user's call; a folder kept is renamed with the files.
+    private static boolean askKeepFolder(Path folder, String newName) {
+        return ask("The folder\n\n    " + folder.getFileName() + "\n\nholds the HTML pages "
+                + "xpdf made of the PDF: working material for the model, not for people "
+                + "- the DOCX and the TXT are the copies to read.\n\nKeep it? "
+                + (newName != null ? "Yes keeps it, renamed to\n\n    " + newName + "\n\n"
+                                   : "Yes keeps it as it is. ")
+                + "No deletes it and everything in it.",
+                "Keep the HTML folder?");
     }
 
     // Every dialog below belongs to JRock's own window, so none of them can be lost

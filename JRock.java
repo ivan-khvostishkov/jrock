@@ -1408,6 +1408,23 @@ public class JRock {
             return (sel == null || sel.isEmpty()) ? null : sel;
         }
 
+        // Selects the last place text appears in the pane, and scrolls it into view;
+        // false when it is not there as it stands (in "Dialog only" mode, say). On the EDT.
+        boolean selectLast(String text) {
+            try {
+                javax.swing.text.Document doc = pane.getDocument();
+                int at = doc.getText(0, doc.getLength()).lastIndexOf(text);
+                if (at < 0) return false;
+                pane.requestFocusInWindow();
+                pane.select(at, at + text.length());
+                java.awt.geom.Rectangle2D start = pane.modelToView2D(at);
+                if (start != null) pane.scrollRectToVisible(start.getBounds());
+                return true;
+            } catch (BadLocationException ex) {
+                return false;
+            }
+        }
+
         // The address the selection points at (see urlAtSelection), or null - read
         // against the text around the selection, so part of an address will do.
         String selectedUrl() {
@@ -2941,6 +2958,10 @@ public class JRock {
     //   "txt"    a text file, as it is
     //   "audio"  a recording (wav, mp3), as an input_audio part
     //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
+    //   "pdfhtml" a PDF, converted by xpdf's pdftohtml into a folder beside it, then
+    //            the folder - with the same dialogs as the "PDF as HTML folder"
+    //            filter, and each page image with a "![](<hash>)" reference
+    //   "pdftext" a PDF, converted by xpdf's pdftotext into a .txt beside it
     //   "rtf"    an RTF, converted to Markdown text
     //   "docx"   a DOCX, converted to Markdown text
     //   "xlsx"   an XLSX, converted to one CSV per sheet
@@ -2961,6 +2982,11 @@ public class JRock {
             switch (kind) {
                 case "pdf":
                     includePdf(live.frame, live.input, live.log, false, path);
+                    break;
+                case "pdfhtml":
+                case "pdftext":
+                    includePdfWithXpdf(live.frame, live.input, live.log, false, path,
+                            kind.equals("pdfhtml"), true);
                     break;
                 case "rtf":
                     includeRtfAsMarkdown(live.input, live.log, false, path);
@@ -3121,6 +3147,24 @@ public class JRock {
         } catch (DateTimeParseException ex) {
             return null;
         }
+    }
+
+    // Writes markdown - normally a reply the automation has just read back - to file as a
+    // DOCX with its pictures, as "Export selected Markdown with images as DOCX..." does
+    // with the same text selected: A4 portrait, every "![](<hash>)" placed as the image
+    // that include names. The text is selected in the log first, where it can be found,
+    // so the window shows what was exported. Returns null, or why nothing was written.
+    // file is written as given; the automation picks a name that is free.
+    public static String automationExportDocx(String markdown, String file) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        if (markdown == null || markdown.isBlank()) return "there is no Markdown to export.";
+        Ui live = ui;
+        Path target = Paths.get(file).toAbsolutePath().normalize();
+        onEdt(() -> live.log.selectLast(markdown.trim()));
+        String failure = writeMarkdownExport(live.log, markdown, true, false,
+                "DOCX (A4 portrait)", target);
+        return failure == null ? null : "could not export " + target + ": " + failure;
     }
 
     // Empties the prompt, as selecting it all and deleting would. Returns null, or why not.
@@ -7020,7 +7064,7 @@ public class JRock {
                     if (pdf) {
                         includePdf(frame, input, log, extend, file);
                     } else if (pdfHtml || pdfText) {
-                        includePdfWithXpdf(frame, input, log, extend, file, pdfHtml);
+                        includePdfWithXpdf(frame, input, log, extend, file, pdfHtml, false);
                     } else if (rtf) {
                         includeRtfAsMarkdown(input, log, extend, file);
                     } else if (docx) {
@@ -7084,7 +7128,7 @@ public class JRock {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws IOException {
-                includeDirectory(frame, input, log, extend, dir);
+                includeDirectory(frame, input, log, extend, dir, false);
                 return null;
             }
 
@@ -7102,8 +7146,11 @@ public class JRock {
     }
 
     // The files of dir, included as showIncludeDirectoryDialog says. Off the EDT.
+    // imageRefs gives each image a Markdown "![](<hash>)" reference above its token,
+    // as the "Image with a Markdown reference" filter does.
     private static void includeDirectory(JFrame frame, JTextArea input, LogView log,
-                                         boolean extend, Path dir) throws IOException {
+                                         boolean extend, Path dir, boolean imageRefs)
+            throws IOException {
         java.util.List<Path> entries = new java.util.ArrayList<>();
         try (java.util.stream.Stream<Path> list = Files.list(dir)) {
             list.forEach(entries::add);
@@ -7128,7 +7175,8 @@ public class JRock {
                 case "xlsx": includeXlsxAsCsv(input, log, extend, file); break;
                 default: {
                     boolean image = kind.equals("img");
-                    onEdt(() -> includeOne(input, log, extend, file, kind, image, false));
+                    onEdt(() -> includeOne(input, log, extend, file, kind, image,
+                            image && imageRefs));
                 }
             }
         }
@@ -8583,10 +8631,15 @@ public class JRock {
     // include it as it is - so a conversion done once (and perhaps edited since) is
     // reused, and nothing the user has is ever overwritten.
     //
+    // imageRefs, for the HTML folder, gives each page image a Markdown "![](<hash>)"
+    // reference (see includeDirectory) - which is what an automation asks for when the
+    // answer is to become a DOCX with the pictures in it.
+    //
     // Runs on a background thread (see showIncludeDialog); dialogs and the include
     // itself go through onEdt().
     private static void includePdfWithXpdf(JFrame frame, JTextArea input, LogView log,
-                                           boolean extend, Path pdf, boolean html) {
+                                           boolean extend, Path pdf, boolean html,
+                                           boolean imageRefs) {
         String tool = html ? "pdftohtml" : "pdftotext";
         String exe = findOnPath(tool);
         if (exe == null) {
@@ -8650,7 +8703,7 @@ public class JRock {
 
         if (html) {
             try {
-                includeDirectory(frame, input, log, extend, out);
+                includeDirectory(frame, input, log, extend, out, imageRefs);
             } catch (IOException ex) {
                 log.gray("Could not list " + out + ": " + ex.getMessage());
             }
@@ -10959,9 +11012,22 @@ public class JRock {
         // The extension belongs to the format, not to the typist: "notes" or
         // "notes.txt" holding a DOCX is a file nothing will open by double-click.
         Path target = withExtension(chooser.getSelectedFile().toPath(), ext);
+        String failure = writeMarkdownExport(log, selection, asDocx, landscape, kind, target);
+        if (failure != null) {
+            javax.swing.JOptionPane.showMessageDialog(frame,
+                    "Could not export to " + target + ":\n" + failure,
+                    "Export failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    // Writes markdown to target as an RTF or a DOCX (with the session's includes, so its
+    // pictures are placed) and logs what went in. Returns null, or why it could not be
+    // written - which is also logged. kind is what the log calls the format.
+    private static String writeMarkdownExport(LogView log, String markdown, boolean asDocx,
+                                              boolean landscape, String kind, Path target) {
         MarkdownExport document = asDocx
-                ? MarkdownExport.of(selection, INCLUDES, landscape)
-                : MarkdownExport.of(selection);
+                ? MarkdownExport.of(markdown, INCLUDES, landscape)
+                : MarkdownExport.of(markdown);
         // Anything the selection referred to and this could not place: said here, before
         // the result line, because the export goes ahead either way and the reference is
         // left in the text as it stands.
@@ -10979,11 +11045,10 @@ public class JRock {
                         + "in as plain paragraphs - the text is all there, the "
                         + "formatting is not.");
             }
+            return null;
         } catch (IOException | RuntimeException ex) {
             log.gray("Could not export " + kind + " to " + target + ": " + ex);
-            javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Could not export to " + target + ":\n" + ex.getMessage(),
-                    "Export failed", javax.swing.JOptionPane.WARNING_MESSAGE);
+            return ex.getMessage() == null ? ex.toString() : ex.getMessage();
         }
     }
 
