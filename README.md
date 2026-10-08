@@ -1189,7 +1189,13 @@ them, and doubles as a template for a prompts directory of your own:
 - **`jrock-prompt-doc-to-ascii.txt`** — turn a document into plain text that keeps its layout:
   ASCII rules for tables, right-aligned text kept right-aligned to a fixed column, centred text
   centred, one separator line per page. Written for a scanned or printed PDF, included as page
-  images.
+  images — and read by [the automation](#automating-the-chain-jrockdocinventoryjava) on the
+  DOCX it made, included as Markdown.
+- **`jrock-prompt-doc-to-markdown.txt`** — the same document as **Markdown with image
+  references**: headings, pipe tables, lists, bold and italic, and each attached picture's
+  `![](<hash>)` copied to where that picture sits on the page, so
+  [**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) turns the
+  answer into a Word document with the logos, photos and stamps in place.
 - **`jrock-prompt-doc-inventory.txt`** — read a document and answer with **nothing but a file
   name**, following one convention:
   `<date>-<counterparty>-<what it is>-<document number>`, e.g.
@@ -1263,31 +1269,44 @@ The eight steps above are a loop you run per document, and the third file in
 
 ```
 java -cp jrock.jar JRockDocInventory.java document.pdf   # no argument: it asks for the file
-java -cp jrock.jar JRockDocInventory.java document.docx  # an RTF, a DOCX or a TXT works too
+java -cp jrock.jar JRockDocInventory.java scan.jpg       # an image, a DOCX, an RTF or a TXT too
 java -cp jrock.jar JRockDocInventory.java --working-dir D:\HPScan   # that folder's settings
 ```
 
-It reads the same two prompts out of its own directory, sends the document, saves the reply as
-`document.txt` beside it, sends *that* with the inventory prompt, and offers to rename the files
-to the name that comes back. Then a "Finished" dialog, and the window is yours.
+It reads three prompts out of its own directory and runs them as a chain, each pass reading what
+the one before it wrote beside the document, under the document's own name:
 
-**A PDF, an RTF, a DOCX or a TXT**, and the difference is what the model is shown: a PDF goes in
-as one page image per page, an RTF or a DOCX as [Markdown](#rtf-and-docx-conversion-no-external-tool)
-— text, which is a fraction of the price of the same page photographed, and says exactly what is
-on it rather than something to be deciphered. A TXT is plain text already, so it skips the first
-pass and goes straight to the inventory prompt, as its own text twin. The chooser offers these
-four extensions; a path from the right-click menu is *checked* to be one of them, because that
-menu hands over whatever was clicked, and a .jpg sent and charged for before anyone notices is a
-poor way to find out.
+1. **Markdown, then a DOCX.** A PDF is converted to HTML by xpdf's `pdftohtml`, into the folder
+   `document/` — with the [same dialogs as the include filter](#pdf-as-html-or-text-xpdf): create
+   the folder, or include the one already there — and each page image goes in with its
+   `![](<hash>)` reference. An image is a one-page document and goes in as itself, with its
+   reference; it also gets a **PDF copy to print from**, `document.pdf`: one A4 page, the image
+   centred at 300 dpi, or shrunk to fit inside 30 mm margins when it is bigger than that, never
+   enlarged. `jrock-prompt-doc-to-markdown.txt` answers with Markdown, which is selected in the
+   log and exported as **`document.docx`**, pictures and all.
+2. **Plain text.** That DOCX goes in [as Markdown](#rtf-and-docx-conversion-no-external-tool)
+   with `jrock-prompt-doc-to-ascii.txt`, and the answer is saved as **`document.txt`**.
+3. **A name.** The text goes in with `jrock-prompt-doc-inventory.txt`, and you are offered to
+   rename the files to the name that comes back.
 
-**A PDF, an RTF and a DOCX of the same name are one document filed more than once** — which is
-exactly what Acrobat's *Export to RTF* and *Export to Word* leave behind. So the set is followed
-in every direction: pick any and the others are found beside it, and picking the PDF gets an offer
-to read the RTF (or else the DOCX) instead (*"All the files are renamed either way"*). A TXT
-picked on its own finds them too, being the text twin an earlier run wrote. The rename at the end
-moves **every file of the document** — the scan, its text exports and the plain text this run
-wrote — all to the same name, together or not at all. Half a document renamed is the mess this
-automation exists to clear up, not to make.
+Then a "Finished" dialog, and the window is yours.
+
+**It starts where the document already is.** A DOCX (or an RTF) starts at pass 2, a TXT at pass
+3. The chooser offers these extensions; a path from the right-click menu is *checked* to be one
+of them, because that menu hands over whatever was clicked, and a file sent and charged for
+before anyone notices is a poor way to find out. And a PDF or an image whose `.txt` or `.docx` is
+already beside it — an earlier run's, or Acrobat's *Export to Word* — gets an offer to **start
+from the one furthest down the chain** instead: the `.txt` before the `.docx`, since every pass
+skipped is a send not paid for (*"All the files are renamed either way"*). The HTML folder is not
+offered there: the include asks about that one itself.
+
+**Files of the same name are one document filed more than once.** So the set is followed in
+every direction: pick any and the others are found beside it. The rename at the end moves
+**every file of the document** — the PDF or the image, the DOCX, the TXT, any RTF — all to the
+same name, together or not at all. Half a document renamed is the mess this automation exists to
+clear up, not to make. **The HTML folder** is asked about on its own: its pages are working
+material for the model, and the DOCX and the TXT are the copies people read, so you choose to
+**delete it**, or keep it and have it renamed with the files.
 
 File names in its dialogs each get **a line of their own**, indented, never sharing a line with
 prose: `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890.pdf` is an ordinary name here, and
@@ -1711,7 +1730,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
-| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`, `"xlsx"`. Fails when nothing was included. |
+| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`, `"xlsx"`, and `"pdfhtml"` / `"pdftext"` (xpdf, beside the PDF, with the include filter's own dialogs; `"pdfhtml"` gives each page image a `![](<hash>)` reference). Fails when nothing was included. |
 | `automationFetchUrl(String url)` | [Fetch URL](#fetching-a-url) (Ctrl+U), for a URL given: the page goes in at the cursor, as a link and an include. A refused URL is a returned reason, not a dialog. Fails when nothing was inserted. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
 | `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
@@ -1722,6 +1741,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
+| `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![](<hash>)` placed as the image that include names. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationNarrateDevice()` | The **Narrate on** speaker's name, or `""` when none is set — for an agent that plays sounds of its own on it. Needs no `automationBegin`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
@@ -2343,6 +2363,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   The document is written by hand (`FormattedDocx`), zip entries and all. A second test renames
   a text file to `.docx` and checks the log says there is no `word/document.xml` in it and that
   no `JRock/docx-md/` is created.
+- **`JRockAutomationDocTest`** drives the two calls the doc inventory's first pass is made of,
+  from a thread of its own as an automation would: `automationInclude(pdf, "pdfhtml")`, answering
+  **Yes** to the create question and checking every page image arrived with its `![](<hash>)`
+  reference, and `automationExportDocx`, checking the DOCX carries the very PNG the reference
+  named. Nothing is sent.
 - **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
   sheet* and compares both CSVs under `JRock/xlsx-csv/` **whole**: shared, rich and inline
   strings, a comma and quotes quoted, a line break kept inside its field, dates in a built-in and
