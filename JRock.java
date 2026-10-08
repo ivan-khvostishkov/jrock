@@ -354,6 +354,12 @@ public class JRock {
         // when an exact model-id match isn't found.
         String vendorPrefix() { return ""; }
 
+        // The Standard-tier, In-Region price per 1M tokens as { input, output }, as the
+        // card states it for this region and a request of inputTokens input tokens (-1
+        // when unknown) - or null when it states none, which is the default: JRock logs
+        // a price only where a card gives one (see priceLines).
+        double[] pricePer1M(String region, long inputTokens) { return null; }
+
         // Whether this model exposes Chat Completions on mantle (i.e. usable by
         // JRock's current single-API implementation).
         boolean supportsMantleChatCompletions() {
@@ -379,6 +385,13 @@ public class JRock {
         String[] apisOnMantle()       { return new String[] { "Chat Completions", "Responses" }; }
         // Card: served under the OpenAI-compatible base /openai/v1 on mantle.
         @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
+        // Card, Pricing (Standard tier, In-Region only, per 1M tokens): $1.25 input and
+        // $2.50 output; in AWS GovCloud (US-West) $1.50 and $3.00. Cache reads, at
+        // $0.20 ($0.24), are counted at the input price here.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            return "us-gov-west-1".equals(region) ? new double[] { 1.50, 3.00 }
+                                                  : new double[] { 1.25, 2.50 };
+        }
     }
 
     // Moonshot AI Kimi K2.5.
@@ -435,6 +448,52 @@ public class JRock {
         String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
         String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse" }; }
         String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        // Card, Pricing (Standard, Commercial Regions, In-Region, per 1M tokens): $11.00
+        // input and $55.00 output for 272K input tokens or fewer; $22.00 and $82.50
+        // above that, for the whole request. Mantle serves it In-Region in us-east-1
+        // and us-west-2 only, and mantle is all JRock calls. Ultrafast (six times these)
+        // is not asked for: JRock sends no service_tier.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            if (!"us-east-1".equals(region) && !"us-west-2".equals(region)) return null;
+            return inputTokens > 272_000 ? new double[] { 22.00, 82.50 }
+                                         : new double[] { 11.00, 55.00 };
+        }
+    }
+
+    // Mistral AI Voxtral Small 24B 2507: speech-to-text and voice understanding, 32K
+    // context. Card: Speech and Text in (not "Audio"), Text out; both endpoints, mantle
+    // base /v1, Chat Completions, Invoke and Converse (no Responses).
+    //
+    // Its card states no price and points to the Bedrock pricing page; these are that
+    // page's On-Demand rows for "Voxtral Small 1.0", per 1M tokens, by region. A region
+    // the page gives no Voxtral row for (Jakarta, Frankfurt, Stockholm, Melbourne) has
+    // no price here.
+    private static final class VoxtralSmall24bCard extends BedrockModelCard {
+        String modelId()              { return "mistral.voxtral-small-24b-2507"; }
+        String displayName()          { return "Voxtral Small 24B 2507"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-mistral-ai-voxtral-small-24b-2507.html"; }
+        String[] inputModalities()    { return new String[] { "Speech", "Text" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
+        String[] apisOnMantle()       { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
+        // Uses the mantle default /v1/chat/completions (inherited).
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            switch (region == null ? "" : region) {
+                case "us-east-1": case "us-east-2": case "us-west-2":
+                    return new double[] { 0.10, 0.30 };
+                case "ap-south-1": case "eu-west-1": case "eu-south-1":
+                    return new double[] { 0.12, 0.35 };
+                case "sa-east-1": case "ap-northeast-1":
+                    return new double[] { 0.12, 0.36 };
+                case "eu-west-2":
+                    return new double[] { 0.16, 0.47 };
+                case "ap-southeast-2":
+                    return new double[] { 0.1030, 0.3090 };
+                default:
+                    return null;
+            }
+        }
     }
 
     // Shared traits of Anthropic Claude models on Bedrock. IMPORTANT (per the
@@ -564,7 +623,7 @@ public class JRock {
     // Registry of known model cards, and a lookup by model id.
     private static final BedrockModelCard[] MODEL_CARDS = {
         new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(), new Qwen332bCard(),
-        new Gpt54Card(), new Gpt6AstraCard(),
+        new Gpt54Card(), new Gpt6AstraCard(), new VoxtralSmall24bCard(),
         new Gemma426bA4bCard(), new Gemma4E2bCard(),
         new ClaudeOpus5Card(), new ClaudeFable51Card(),
     };
@@ -1688,6 +1747,8 @@ public class JRock {
         // for this session, otherwise those lines would be wiped.
         boolean hadLog = Files.exists(logFile());
         int restored = log.loadFromDisk();
+        // What the log already holds in costs, read before this session adds a line.
+        double[] pastCosts = loggedCosts(hadLog ? readFileQuietly(logFile()) : null);
 
         // The settings of this folder, before anything reports what they are. After
         // loadFromDisk for the same reason the report lines are: it replaces the entry
@@ -1721,6 +1782,15 @@ public class JRock {
         } else {
             log.gray("New log file created: JRock/jrock-log.txt");
         }
+        // The running total of every cost line in the log (see priceLines): all the
+        // sessions since it was last cleared, at the prices their model cards state.
+        // Requests to a model whose card has no price are not in it, and the line says
+        // how many requests it does cover.
+        int priced = (int) pastCosts[1];
+        log.gray("Past costs in this log: $"
+                + (priced == 0 ? "0" : usd(pastCosts[0], shapeFor(pastCosts[0])))
+                + " over " + priced + " priced request" + (priced == 1 ? "" : "s")
+                + " (model-card prices; Clear log starts it again from $0)");
         log.gray("Messages also stored in JRock/messages/ directory.");
 
         log.gray("HTTP transport: " + http().describe()
@@ -13107,54 +13177,65 @@ public class JRock {
         return v < 0 ? "(not reported)" : Long.toString(v);
     }
 
-    // What a request like this one costs, in the roughest terms that are still useful:
-    // dollars per million tokens, low and high, across the frontier text models as a
-    // group. Output is the expensive half by a factor of about five, which is the one
-    // thing about pricing worth carrying in your head.
+    // The price lines of the stats block: the configured model's price in this region,
+    // as its model card states it (see BedrockModelCard.pricePer1M), and this exchange
+    // costed at it. Nothing at all when the card states no price for it - an unknown
+    // model, a region the card has no row for, a model whose card points elsewhere for
+    // its prices - because a figure in dollars is read as a bill, and a guess is not one.
     //
-    // A band and not a number, on purpose. JRock talks to whatever endpoint it is pointed
-    // at - Bedrock, an OpenAI-compatible gateway, something local and free - and looking
-    // up the real rate behind that URL is not this window's job. The band answers the
-    // question actually being asked after a long reply, which is not "what do I owe" but
-    // "was that cents or dollars".
-    private static final double PRICE_IN_LOW = 2.0;
-    private static final double PRICE_IN_HIGH = 5.0;
-    private static final double PRICE_OUT_LOW = 10.0;
-    private static final double PRICE_OUT_HIGH = 25.0;
-
-    // The two price lines of the stats block: the rule of thumb, then this exchange
-    // costed by it. Both say they are a guide - a figure in dollars invites being read as
-    // a bill, and this one never is.
-    //
-    // No counts from the API means nothing to multiply. The guide line still goes out:
-    // the rates are worth seeing either way, and a silent stats block would look like the
-    // estimate had been dropped.
+    // No counts from the API means nothing to multiply: the price line still goes out,
+    // the cost line does not.
     private static String priceLines(long inputTokens, long outputTokens) {
-        String guide = "\nRough price guide: $" + rate(PRICE_IN_LOW) + "-"
-                + rate(PRICE_IN_HIGH) + " per 1M input tokens, $" + rate(PRICE_OUT_LOW)
-                + "-" + rate(PRICE_OUT_HIGH) + " per 1M output (frontier average)";
-        if (inputTokens < 0 || outputTokens < 0) {
-            return guide + "\nRough cost here:   (no token counts came back to price)";
-        }
-        double inLow = inputTokens * PRICE_IN_LOW / 1000000.0;
-        double inHigh = inputTokens * PRICE_IN_HIGH / 1000000.0;
-        double outLow = outputTokens * PRICE_OUT_LOW / 1000000.0;
-        double outHigh = outputTokens * PRICE_OUT_HIGH / 1000000.0;
-        // One shape for all six figures, chosen from the largest: "$0.0057-0.014" reads
-        // as a typo, and a range whose two ends are written to different precisions is
-        // harder to compare than one that is simply too precise at the low end.
-        String shape = shapeFor(inHigh + outHigh);
-        return guide + "\nRough cost here:   in $" + usd(inLow, shape) + "-"
-                + usd(inHigh, shape) + " + out $" + usd(outLow, shape) + "-"
-                + usd(outHigh, shape) + " = $" + usd(inLow + outLow, shape) + "-"
-                + usd(inHigh + outHigh, shape) + ", not this model's real price";
+        BedrockModelCard card = exactCard(MODEL_ID);   // a vendor's generic card has none
+        double[] price = card == null ? null : card.pricePer1M(REGION, inputTokens);
+        if (price == null) return "";
+        String lines = "\nPrice (model card, " + REGION + "): $" + rate(price[0])
+                + " per 1M input tokens, $" + rate(price[1]) + " per 1M output";
+        if (inputTokens < 0 || outputTokens < 0) return lines;
+        double in = inputTokens * price[0] / 1000000.0;
+        double out = outputTokens * price[1] / 1000000.0;
+        // One shape for all three figures, chosen from the total: a sum whose parts are
+        // written to different precisions is harder to check than one that is simply
+        // too precise at the low end.
+        String shape = shapeFor(in + out);
+        return lines + "\n" + COST_PREFIX + "in $" + usd(in, shape) + " + out $"
+                + usd(out, shape) + " = $" + usd(in + out, shape);
     }
 
-    // A rate per million, without the ".0" that makes a round number look measured.
+    // How a cost line starts, and how the startup report finds them again in the log
+    // (see loggedCosts): the total is the last thing on the line.
+    private static final String COST_PREFIX = "Cost (model card): ";
+    private static final java.util.regex.Pattern COST_LINE = java.util.regex.Pattern.compile(
+            "^" + java.util.regex.Pattern.quote(COST_PREFIX) + ".*= \\$([0-9]+(?:\\.[0-9]+)?)\\s*$",
+            java.util.regex.Pattern.MULTILINE);
+
+    // The cost lines in a log's text: { the sum of their totals, how many there were }.
+    //
+    // Read from jrock-log.txt, where a message's body is its "@<stamp>" line and not its
+    // text - so a reply that happens to contain such a line is not counted, only the
+    // stats blocks JRock wrote itself. Clearing the log clears them, and the count
+    // starts again from nothing.
+    static double[] loggedCosts(String logText) {
+        double sum = 0;
+        int count = 0;
+        if (logText != null) {
+            java.util.regex.Matcher m = COST_LINE.matcher(logText);
+            while (m.find()) {
+                try {
+                    sum += Double.parseDouble(m.group(1));
+                    count++;
+                } catch (NumberFormatException ignored) {
+                    // not a number after all; not a cost
+                }
+            }
+        }
+        return new double[] { sum, count };
+    }
+
+    // A rate per million as the card writes it, without the trailing zeros that make
+    // a round number look measured: 2.5, 1.25, 0.103.
     private static String rate(double perMillion) {
-        return (perMillion == Math.floor(perMillion))
-                ? Long.toString((long) perMillion)
-                : String.format(java.util.Locale.ROOT, "%.1f", perMillion);
+        return java.math.BigDecimal.valueOf(perMillion).stripTrailingZeros().toPlainString();
     }
 
     // How many digits an amount of this size deserves: cents at a dollar, hundredths of

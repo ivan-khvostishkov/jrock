@@ -358,18 +358,25 @@ at startup and after reconfiguration.
 
 Built-in cards include:
 
-| Model | Model ID | Chat Completions on mantle |
-|---|---|---|
-| Grok 4.3 | `xai.grok-4.3` | yes (`/openai/v1`) |
-| Kimi K2.5 | `moonshotai.kimi-k2.5` | yes (`/v1`) |
-| DeepSeek-V3.1 | `deepseek.v3.1` | yes (`/v1`) |
-| Qwen3 32B | `qwen.qwen3-32b` | yes (`/v1`) |
-| GPT-5.4 | `openai.gpt-5.4` | yes (`/openai/v1`) |
-| GPT-6 Astra | `openai.gpt-6-astra` | yes (`/openai/v1`) |
-| Gemma 4 26B-A4B | `google.gemma-4-26b-a4b` | yes (`/openai/v1`) |
-| Gemma 4 E2B | `google.gemma-4-e2b` | yes (`/openai/v1`) |
-| Claude Opus 5 | `anthropic.claude-opus-5` | no (Messages API only) |
-| Claude Fable 5.1 | `anthropic.claude-fable-5-1` | no (Messages API only) |
+| Model | Model ID | Chat Completions on mantle | Price per 1M tokens (in / out) |
+|---|---|---|---|
+| Grok 4.3 | `xai.grok-4.3` | yes (`/openai/v1`) | $1.25 / $2.50; GovCloud $1.50 / $3.00 |
+| Kimi K2.5 | `moonshotai.kimi-k2.5` | yes (`/v1`) | — |
+| DeepSeek-V3.1 | `deepseek.v3.1` | yes (`/v1`) | — |
+| Qwen3 32B | `qwen.qwen3-32b` | yes (`/v1`) | — |
+| GPT-5.4 | `openai.gpt-5.4` | yes (`/openai/v1`) | — |
+| GPT-6 Astra | `openai.gpt-6-astra` | yes (`/openai/v1`) | $11 / $55; past 272K input tokens $22 / $82.50 (us-east-1, us-west-2) |
+| Voxtral Small 24B 2507 | `mistral.voxtral-small-24b-2507` | yes (`/v1`) | $0.10 / $0.30 in the US; by region elsewhere |
+| Gemma 4 26B-A4B | `google.gemma-4-26b-a4b` | yes (`/openai/v1`) | — |
+| Gemma 4 E2B | `google.gemma-4-e2b` | yes (`/openai/v1`) | — |
+| Claude Opus 5 | `anthropic.claude-opus-5` | no (Messages API only) | — |
+| Claude Fable 5.1 | `anthropic.claude-fable-5-1` | no (Messages API only) | — |
+
+The prices are the Standard-tier, In-Region rates the model cards state — Voxtral's card points
+to the Bedrock pricing page, whose regional rows are copied instead — and they are what the
+[stats block](#conversation-log) costs a request at. A card without a price, a region it has no
+row for, or a model with no card at all gets **no price line**: a figure in dollars reads as a
+bill, and a guess is not one.
 
 > Anthropic Claude models are served on mantle via the Anthropic **Messages API**
 > (`/anthropic/v1/messages`), not Chat Completions. JRock doesn't implement Messages yet,
@@ -410,18 +417,20 @@ Built-in cards include:
   can come back empty — and a key that silently does nothing is the one thing this checkbox
   exists to rule out.
 - **Stats** per response: input/output text symbols, and input/output tokens (from the API's
-  `usage`), followed by two lines of **rough cost** — a rule of thumb and this exchange priced
-  by it:
+  `usage`) — and, when the model's [card](#models) states a price for the region, that
+  price and this exchange costed at it:
 
   ```
-  Rough price guide: $2-5 per 1M input tokens, $10-25 per 1M output (frontier average)
-  Rough cost here:   in $0.002-0.006 + out $0.006-0.014 = $0.008-0.020, not this model's real price
+  Price (model card, us-west-2): $1.25 per 1M input tokens, $2.5 per 1M output
+  Cost (model card): in $0.0031 + out $0.0018 = $0.0049
   ```
 
-  A band across the frontier models as a group, not the rate of whatever endpoint this build
-  points at, and not a bill. It answers the question a long reply actually raises — cents or
-  dollars — and it says out loud that it is a guide. Without `usage` counts the second line
-  says so instead.
+  Nothing about price otherwise. Without `usage` counts the cost line is left out.
+- **Past costs at startup.** The session report adds up every cost line already in
+  `JRock/jrock-log.txt` and says so in one line — `Past costs in this log: $1.2345 over 87
+  priced requests` — which is every session since the log was last cleared. **Clear log**
+  clears the lines it counts, so the total starts again from $0; requests to a model with no
+  card price are not in it.
 - The **raw request and raw response** are shown for debugging, but prompt/reply/attachment
   content is **masked** (shown by hash/placeholder) so the transcript isn't a noisy duplicate
   and included files stay referenced only by hash. The response `id` is elided after its
@@ -2440,6 +2449,12 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   emoji arrives as a *pair* of them), and mixed. No window.
 - **`JRockDocumentNumberTest`** draws a thousand numbers for *Insert document number* and checks
   each is ten digits with no leading 0, and that they don't repeat. No window.
+- **`JRockPricingTest`** checks the stats block's price lines against the cards: Grok 4.3 at
+  $1.25 / $2.50 (and GovCloud's own rate), GPT-6 Astra doubling past 272K input tokens and
+  unpriced outside its two mantle regions, Voxtral Small by region and unpriced where the
+  pricing page has no row, and **no line at all** for a model whose card states no price. Then
+  the startup total: every cost line in a log added up, and a line that only looks like one
+  left out. No window.
 - **`JRockNarrationTextTest`** checks what [**Narrate selected text**](#narrate-windows) would
   hand the voice: headings, emphasis, list and quote markers, table pipes and include tokens
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
