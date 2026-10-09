@@ -158,6 +158,27 @@
       var jarBytes = null;          // Uint8Array of jrock.jar
       var started  = false;
 
+      // A folder named in the address starts JRock in it straight away: ?fl or ?fl/foo
+      // runs it in /files/fl or /files/fl/foo, as pressing Run JRock and choosing that
+      // folder in the Configure dialog would - so a bookmark opens one project's
+      // settings, key and log without a click. The folder is created if it is new. A
+      // query with "=" in it is a parameter rather than a folder, and so is ignored,
+      // and so are "." and ".." segments, which could only lead out of /files.
+      var autostartDir = (function () {
+        var query = location.search.replace(/^\?/, "");
+        if (!query || query.indexOf("=") >= 0) return null;
+        var segments;
+        try {
+          segments = decodeURIComponent(query).split(/[\/\\]+/);
+        } catch (e) {
+          return null;                      // malformed %-escape: not a folder name
+        }
+        segments = segments.filter(function (s) { return s.trim() !== ""; });
+        if (!segments.length) return null;
+        if (segments.some(function (s) { return s === "." || s === ".."; })) return null;
+        return "/files/" + segments.join("/");
+      })();
+
       // --- The browser HTTP client JRock calls (window.myBrowserHttp) ---------
       //
       // In the browser there is no socket layer, so java.net.http.HttpClient
@@ -355,6 +376,7 @@
           sizeEl.textContent = "(" + jarBytes.length.toLocaleString() + " bytes)";
           shaEl.textContent = hex(await crypto.subtle.digest("SHA-256", buf));  // Web Crypto
           runBtn.disabled = false;
+          if (autostartDir) run();
         })
         .catch(function (e) {
           shaEl.textContent = "-";
@@ -733,7 +755,11 @@
       }
 
       // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
-      runBtn.addEventListener("click", async function () {
+      // From the button, or on its own once the jar is loaded when the address names
+      // a folder (see autostartDir).
+      runBtn.addEventListener("click", run);
+
+      async function run() {
         if (started || !jarBytes) return;
         started = true;
         runBtn.disabled = true;
@@ -771,7 +797,8 @@
           installKeyboardResize();               // shrink display when keyboard opens
           cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
 
-          log("Running JRock ... (first run downloads the Java runtime; please wait)");
+          log("Running JRock" + (autostartDir ? " in " + autostartDir : "")
+              + " ... (first run downloads the Java runtime; please wait)");
           // Once the app is up, hide the chrome after 5s to give the Swing display all
           // the space - unless the checkbox was unticked, which is the answer to "where
           // did the page go?" being decided before it happens rather than afterwards.
@@ -781,12 +808,14 @@
           if (hideChrome) {
             setTimeout(function () { setChromeHidden(true); }, 5000);
           }
-          var code = await cheerpjRunJar(JAR_PATH);
+          var code = autostartDir
+              ? await cheerpjRunJar(JAR_PATH, "--working-dir", autostartDir)
+              : await cheerpjRunJar(JAR_PATH);
           log("JRock exited with code " + code + ".");
         } catch (e) {
           log("Error running JRock: " + e);
         }
-      });
+      }
     })();
   </script>
 </body>

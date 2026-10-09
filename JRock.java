@@ -1122,6 +1122,18 @@ public class JRock {
                     + " is not a path this system can read - ignored" + UTF8_HINT + ")";
             return;
         }
+        // In the browser the flag comes from the page's address - ?fl starts JRock in
+        // /files/fl - which is typed just now, as deliberately as a folder in the
+        // Configure dialog, so a folder under CheerpJ's mount is created the same way.
+        if (!Files.isDirectory(candidate) && isCheerpJ() && candidate.startsWith(CHEERPJ_HOME)) {
+            try {
+                Files.createDirectories(candidate);
+            } catch (IOException ex) {
+                workingDirNote = "(" + WORKING_DIR_FLAG + " " + candidate
+                        + " could not be created - ignored: " + ex.getMessage() + ")";
+                return;
+            }
+        }
         if (!Files.isDirectory(candidate)) {
             workingDirNote = "(" + WORKING_DIR_FLAG + " " + candidate
                     + " is not a directory - ignored)";

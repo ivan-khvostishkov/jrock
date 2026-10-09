@@ -139,7 +139,9 @@ it about as often as never: the working directory *is* where you launched from. 
 an **agent**, because Explorer starts a right-click command in the folder that was clicked, and
 an agent's whole point is to use one particular folder's settings on a file that may be anywhere
 else. Reported in the startup log when it was given; a path that isn't a directory is reported
-and ignored.
+and ignored. The one exception is the browser, where the flag comes from the page's address
+(see [JRock Web](#jrock-web-in-the-browser)). A missing folder under `/files` is created there,
+as the Configure dialog would create it.
 
 ## JRock Web (in the browser)
 
@@ -158,6 +160,13 @@ as WebAssembly), so nothing runs on a server.
   for it again. The page shows the jar's SHA-256 so you can confirm it matches the reproducible
   build before typing anything, and the key never goes anywhere but the Bedrock endpoint. The
   region and model live beside it in `JRock/jrock-config.txt`, the same as everywhere else.
+- **A folder in the address starts JRock in it.** `https://jrock.nosocial.net/?fl` starts JRock
+  as soon as the jar has loaded, without waiting for **Run JRock**, with `/files/fl` as its working
+  directory; `?fl/foo` gives `/files/fl/foo`. That is the same as pressing **Run JRock** and
+  choosing that folder in the Configure dialog, new folders included, which are created. So a
+  bookmark per project opens straight into that project's settings, key and log. A query
+  containing `=` is a parameter rather than a folder and is ignored, and so is one with a `.` or
+  `..` segment.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
 - **The page gets out of the way — and comes back.** A few seconds after launch the page hides
   its own header and footer, giving the Swing display the whole tab. That is what the **Hide
