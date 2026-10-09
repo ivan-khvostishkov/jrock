@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.9.0";
+    private static final String VERSION = "2.9.1";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -1600,7 +1600,7 @@ public class JRock {
         // and needs them interleaved, because an include line is what says where a
         // file was, and the message under it is what says the file was used - and a
         // second include of the same hash later moves it (see reloadIncludes).
-        java.util.List<String[]> timeline() {
+        private static java.util.List<String[]> timeline(java.util.List<Entry> entries) {
             java.util.List<String[]> out = new ArrayList<>();
             for (Entry e : entries) out.add(new String[] { e.dialog ? e.role : null, e.text });
             return out;
@@ -1621,9 +1621,10 @@ public class JRock {
         }
 
         // Loads and renders entries parsed from the main log file. Does NOT
-        // rewrite the file (loading shouldn't trigger a save). Returns the number
-        // of entries loaded.
-        int loadFromDisk() {
+        // rewrite the file (loading shouldn't trigger a save). Returns what was loaded,
+        // as a timeline: the entries themselves are only replaced later, on the EDT, so
+        // a caller that reads the log straight away has to read it from this.
+        java.util.List<String[]> loadFromDisk() {
             java.util.List<Entry> loaded = parseMainLog();
             SwingUtilities.invokeLater(() -> {
                 entries.clear();
@@ -1631,7 +1632,7 @@ public class JRock {
                 logCopySaved = true;   // just loaded from disk; no unsaved changes
                 rebuild();
             });
-            return loaded.size();
+            return timeline(loaded);
         }
 
         // Parses the main log. The file is a bit-perfect copy of the pane text,
@@ -1816,7 +1817,7 @@ public class JRock {
         // entry list (rebuild -> setText), so it must run before we log anything
         // for this session, otherwise those lines would be wiped.
         boolean hadLog = Files.exists(logFile());
-        int restored = log.loadFromDisk();
+        java.util.List<String[]> restored = log.loadFromDisk();
         // What the log already holds in costs, read before this session adds a line.
         double[] pastCosts = loggedCosts(hadLog ? readFileQuietly(logFile()) : null);
 
@@ -1916,7 +1917,7 @@ public class JRock {
         log.gray("Autosaving prompt to JRock/jrock-prompt.txt");
         // The includes the log and the prompt refer to, known again, so a conversation
         // goes on after a restart without attaching every file again.
-        reloadIncludes(input, log);
+        reloadIncludes(input, log, restored);
         log.gray("Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
@@ -8554,12 +8555,16 @@ public class JRock {
     // what verifyIncludes checks on send, one hash per token. One summary line in the
     // session report, and none when nothing refers to an include; which files are
     // missing is said where it matters, by the send that would have sent them.
-    private static void reloadIncludes(JTextArea input, LogView log) {
+    //
+    // timeline is the log just loaded from disk (see loadFromDisk): the log pane's own
+    // entries are still the previous ones at this point - at startup, none at all.
+    private static void reloadIncludes(JTextArea input, LogView log,
+                                       java.util.List<String[]> timeline) {
         java.util.Map<String, Path> remembered = new java.util.HashMap<>();
         java.util.Map<String, String> kinds = new java.util.LinkedHashMap<>();   // hash -> img/txt
         java.util.Map<String, Path> wanted = new java.util.LinkedHashMap<>();    // hash -> path
 
-        java.util.List<String[]> steps = new ArrayList<>(log.timeline());
+        java.util.List<String[]> steps = new ArrayList<>(timeline);
         steps.add(new String[] { ROLE_HUMAN, input.getText() });
         String lastIncluded = null;   // the hash of the include line just read
         for (String[] step : steps) {

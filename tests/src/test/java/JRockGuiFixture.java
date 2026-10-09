@@ -122,8 +122,28 @@ abstract class JRockGuiFixture {
         // The real entry point. main() shows the window on the EDT itself, so there
         // is nothing to arrange here - we just wait for the window to turn up.
         JRock.main(new String[0]);
+        window = awaitTheWindow();
+    }
 
-        window = WindowFinder.findFrame(new GenericTypeMatcher<JFrame>(JFrame.class) {
+    /**
+     * Closes the window and starts JRock again in the same working directory: a restart,
+     * minus a new JVM. The log and the prompt come back from disk, exactly as they do
+     * after a real one; what a restart loses (the includes) the caller clears itself.
+     */
+    protected void restartTheApplication() {
+        final java.awt.Frame old = window.target();
+        GuiActionRunner.execute(new GuiTask() {
+            @Override
+            protected void executeInEDT() {
+                old.dispose();
+            }
+        });
+        JRock.main(new String[0]);
+        window = awaitTheWindow();
+    }
+
+    private FrameFixture awaitTheWindow() {
+        return WindowFinder.findFrame(new GenericTypeMatcher<JFrame>(JFrame.class) {
             @Override
             protected boolean isMatching(JFrame frame) {
                 // The title is "<working directory> - JRock", so match on the suffix
