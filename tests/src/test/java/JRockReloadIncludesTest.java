@@ -4,8 +4,13 @@ import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.imageio.ImageIO;
 
@@ -13,8 +18,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Includes files, throws away the hash -&gt; path map the way a restart does, and reloads
- * it from the log with the prompt menu's <em>Reload all includes</em>.
+ * Includes files, throws away the hash -&gt; path map the way a restart does, and has it
+ * reloaded from the log the way every session start reloads it - here, the session
+ * report that applying the Configure dialog runs again.
  * <p>
  * That map is the one thing JRock deliberately does not persist, while the prompt and the
  * whole transcript are recovered from disk - so after a restart the tokens are all still
@@ -23,9 +29,8 @@ import org.junit.jupiter.api.Test;
  * is the same broken state a restart leaves, minus the restart.
  * <p>
  * Offline, like the rest: no API key is set, so JRock skips its model-list fetch, and
- * nothing here sends a message. Nothing is hashed by the reload either, which is why a
- * file that has changed is not part of what is checked here - that is
- * {@code verifyIncludes} on send.
+ * nothing here sends a message. What a send does with a token whose file is missing is
+ * checked on {@code verifyIncludes} and {@code buildParts} directly.
  *
  * @see JRockGuiFixture for how the application is started and stopped
  * @see JRockIncludeCopyTest for keeping the files themselves within reach
@@ -35,7 +40,6 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
     private static final String IMAGE_FILTER = "Image files (png, jpg, jpeg, gif, webp)";
     private static final String TEXT_FILTER =
             "Text files as is (*.txt, *.md, *.csv, *.json, *.xml, *.html, *.svg, *.java)";
-    private static final String RELOAD_ITEM = "Reload all includes";
 
     /** Reading a log and a handful of paths; a slow CI runner needs the rest. */
     private static final long RELOAD_TIMEOUT_SECONDS = 30;
@@ -58,16 +62,10 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
         reload();
 
-        // Reloaded, and each one named with the path the log recorded for it.
         assertThat(includes()).describedAs("the includes after reloading them")
                 .isEqualTo(before);
-        for (Map.Entry<String, Path> e : before.entrySet()) {
-            String kind = e.getValue().equals(png) ? "img" : "txt";
-            assertThat(logPane().text()).describedAs("the log pane's text")
-                    .contains("Reloaded @" + kind + " " + e.getKey() + " from " + e.getValue());
-        }
-        assertThat(logPane().text()).describedAs("the log pane's text")
-                .contains("Reload all includes: 2 reloaded (of 2 referred to).");
+        assertThat(logLines()).describedAs("the log's lines")
+                .contains("Includes reloaded from the log: 2 of 2 referred to");
     }
 
     @Test
@@ -108,10 +106,9 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
         reload();
 
         assertThat(logPane().text()).describedAs("the log pane's text")
-                .contains("No include recorded for @img 0123456789ab - attach the file "
-                        + "again with Ctrl+I (the log may have been cleared since).")
-                .contains("Reload all includes: 0 reloaded, 1 not recorded in the log "
-                        + "(of 1 referred to).");
+                .contains("Includes reloaded from the log: 0 of 1 referred to, 1 not "
+                        + "recorded in the log - a send warns about each one and sends its "
+                        + "token as text");
         assertThat(includes()).describedAs("the includes, which gained nothing").isEmpty();
     }
 
@@ -129,10 +126,9 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
         reload();
 
         assertThat(logPane().text()).describedAs("the log pane's text")
-                .contains("Reloaded @img " + hash + " from " + png
-                        + " - but that file is not there any more.")
-                .contains("Reload all includes: 0 reloaded, 1 with a missing file "
-                        + "(of 1 referred to).");
+                .contains("Includes reloaded from the log: 0 of 1 referred to, 1 with a "
+                        + "missing file - a send warns about each one and sends its token "
+                        + "as text");
         // Registered all the same: the mapping is what the log recorded, and the send
         // will say the file is missing rather than that the hash is unknown.
         assertThat(includes()).describedAs("the includes after reloading them")
@@ -162,6 +158,42 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
                 .containsExactly(second);
     }
 
+    @Test
+    @DisplayName("a send warns about a missing file and sends its token as text")
+    void sendsTheTokenOfAMissingFileAsText() throws Exception {
+        awaitReadyCount(1);
+
+        Path png = png("one", "IMG_4002.png", 120, 80);
+        include(IMAGE_FILTER, png, "Image: 120 x 80");
+        String hash = includes().keySet().iterator().next();
+        Files.delete(png);
+        String prompt = "Before @img " + hash + " and @txt 0123456789ab after.";
+
+        Set<String> warnings = new LinkedHashSet<>();
+        Method verify = method("verifyIncludes", String.class, Set.class);
+        assertThat(verify.invoke(null, prompt, warnings))
+                .describedAs("the error that would stop the send").isNull();
+        assertThat(warnings).describedAs("the warnings for the log").containsExactly(
+                "Warning: included file is missing: " + png + " (@img " + hash
+                        + "); sent as text.",
+                "Warning: @txt 0123456789ab is not known - no include of it is recorded in "
+                        + "the log; sent as text. Re-include the file with Ctrl+I to send "
+                        + "the file itself.");
+
+        // Neither token is expanded: the prompt goes as the one text it is.
+        List<?> parts = (List<?>) method("buildParts", String.class).invoke(null, prompt);
+        assertThat(parts).describedAs("the content parts").hasSize(1);
+        Field text = parts.get(0).getClass().getDeclaredField("text");
+        text.setAccessible(true);
+        assertThat(text.get(parts.get(0))).isEqualTo(prompt);
+    }
+
+    private static Method method(String name, Class<?>... types) throws Exception {
+        Method m = JRock.class.getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m;
+    }
+
     /** Includes one file through the real dialog, and waits for it to be over. */
     private void include(String filter, Path file, String until) {
         // Where it lies, not from a processed copy: where each file was is the point.
@@ -169,10 +201,14 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
         awaitLogLine(until, RELOAD_TIMEOUT_SECONDS);
     }
 
-    /** Invokes Reload all includes from the prompt's context menu, and waits for it. */
+    /**
+     * Applies the Configure dialog unchanged, which runs the session report again - and
+     * the reload of the includes with it, as a start does - and waits for it to finish.
+     */
     private void reload() {
-        chooseInThePromptMenu(RELOAD_ITEM);
-        awaitLogLine("Reload all includes: ", RELOAD_TIMEOUT_SECONDS);
+        int ready = readyCount();
+        press(openConfigure().okButton());
+        awaitReadyCount(ready + 1);
     }
 
     /** The hash -&gt; path map JRock keeps its includes in. */

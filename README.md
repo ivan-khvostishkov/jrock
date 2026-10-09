@@ -735,8 +735,7 @@ Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs*
    to a folder. A file of any other type is skipped, and the log says so for each. The log
    then gives the count of files included and skipped.
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
-   (not persisted), so after a restart the files have to be attached again — or their paths read
-   back out of the log with **Reload all includes**
+   (not persisted); every start reads the paths back out of the log
    ([below](#includes-that-outlive-the-session)).
 3. A token `@img <hash>`, `@txt <hash>` or `@audio <hash>` is inserted at the cursor (one per
    file / per PDF page). Duplicate tokens for the same file are not added again (also checked
@@ -845,7 +844,7 @@ JRock. An `ftyp` box is recognised for one reason only — to stop the MP3 frame
 box for a frame sync and inventing a line about a file it cannot read.
 
 Everything else is the machinery the other kinds already use: the same hash, the same
-deduplication, the same re-check of every file on send, the same **Reload all includes**. One
+deduplication, the same re-check of every file on send, the same reload from the log at startup. One
 place differs: the [masked request dump](#conversation-log) prints `<audio masked <hash>>` where
 the base64 would be, for the same reason images are masked — a minute of audio is about a
 megabyte of it.
@@ -924,7 +923,7 @@ Details:
   (+https://github.com/ivan-khvostishkov/jrock)` — a client that says whose it is, which bot
   filters such as Akamai's (in front of `helpx.adobe.com`, among others) let through.
 - Because the file lands under `JRock/`, it is **already where the copies go** — a URL include
-  survives a restart the same way, with **Reload all includes**.
+  survives a restart the same way, reloaded from the log at startup.
 - **In the browser it goes through the page**, `window.myBrowserHttp.fetchUrl` — the same
   arrangement as the model calls, one more method on the same object, so both builds run the
   identical code above this line. The reply carries the status, the `Content-Type`, the address
@@ -936,9 +935,9 @@ Details:
 ### Includes that outlive the session
 
 The hash → path map is not persisted, and a restart therefore loses it — while the prompt and
-the whole transcript *are* restored from disk. So the tokens come back and nothing knows what
-they stand for: sending says `Included @img <hash> is not known`, and the conversation is stuck
-until every file is attached again. Two things fix that, and they are meant to be used together.
+the whole transcript *are* restored from disk. So the tokens come back, and two things make sure
+they still stand for their files: the files are kept where JRock can find them again, and the log
+that says where they are is read back at every start.
 
 **Include from processed copies in JRock/** — a checkbox in
 [Configure](#configure-dialog-top-left-button), **on** by default. A chosen file is **copied
@@ -995,9 +994,10 @@ JPEG in native code as a matter of course, so JRock hands the picture to the pag
 same 0.92 for JPEG. A host page without that function means a full-size copy
 and a line saying so, the same as any other scaling that could not be done.
 
-**Reload all includes** — an item in the prompt's context menu, which rebuilds the map from the
-log. The log recorded every include ever made, which is the same information the map held, so it
-is read top to bottom as the history it is:
+**The includes are reloaded from the log at every start** — at startup, after the Configure
+dialog, and after a restore from backup, as part of the session report. The log recorded every
+include ever made, which is the same information the map held, so it is read top to bottom as the
+history it is:
 
 | In the log | What it means |
 |---|---|
@@ -1010,26 +1010,29 @@ Both spellings of a reference count: the `@img`/`@txt`/`@audio` token, and the
 back with it — an answer carrying one needs
 the file to export as a DOCX with the picture in it. The current prompt is read last, being the
 newest thing there is, and after a restart its recovered tokens are usually the whole reason for
-doing this. Each hash is then reported on its own line:
+doing this. The session report gets one line for it, and none when nothing refers to an include:
 
 ```
-Reloaded @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
-Reloaded @txt 8b52e0ad91cc from C:\demo\JRock\rtf-md\quarterly.rtf.md - but that file is not there any more.
-No include recorded for @img 4d0c1a77e6b3 - attach the file again with Ctrl+I (the log may have been cleared since).
-Reload all includes: 1 reloaded, 1 with a missing file, 1 not recorded in the log (of 3 referred to). Each file is checked again, by its hash, on send.
+Includes reloaded from the log: 1 of 3 referred to, 1 with a missing file, 1 not recorded in the log - a send warns about each one and sends its token as text
 ```
 
 **Nothing is hashed here**, deliberately. Whether each file is still the file it was is exactly
 what the send checks, one hash per token, and the answer can change between the two moments
-anyway — so a reload is cheap on a folder of large attachments, and a file that has been edited
-since is caught at the only moment that matters. What the reload *does* check is that the file is
-still there, because a path that no longer exists is the one problem you can do something about
-before sending.
+anyway — so starting is cheap on a folder of large attachments, and a file that has been edited
+since is caught at the only moment that matters.
 
-**An automation reloads them by itself.** An agent starts JRock afresh, and `automationBegin`
-runs Reload all includes as it takes the window. A send with History on then sends the files the
-conversation already refers to, without refusing them as unknown. In a folder where nothing
-refers to an include, it logs nothing.
+**A file that is still missing does not stop the send.** A token whose file is gone, cannot be
+read, or has no include line in the log is a `Warning:` in the log, one per file, right after your
+message, and goes to the model as the text it is — `@img 1f3a9c0b7e42` rather than the picture —
+while everything else is sent as usual:
+
+```
+Warning: included file is missing: C:\demo\JRock\rtf-md\quarterly.rtf.md (@txt 8b52e0ad91cc); sent as text.
+Warning: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the log; sent as text. Re-include the file with Ctrl+I to send the file itself.
+```
+
+A file that is there but has **changed** since it was included still stops the send: it is a
+different file now, and including it again is the fix.
 
 ### PDF conversion (Ghostscript)
 
@@ -1183,8 +1186,9 @@ XML parser, so this works with nothing installed and in the browser too.
   included.
 
 On send, every referenced include is verified (known hash **and** the file still hashes the
-same, i.e. unchanged); on any problem the message is not sent and the reason is logged. Valid
-includes are expanded into a **multi-part message**: text segments become text parts, `@img`
+same, i.e. unchanged). A file that has changed stops the send, with the reason logged; one that is
+missing or unknown is a warning, and its token is sent as text
+([details](#includes-that-outlive-the-session)). Valid includes are expanded into a **multi-part message**: text segments become text parts, `@img`
 becomes a base64 image part, `@txt` becomes a text part with the file's contents, `@audio`
 becomes a base64 [`input_audio` part](#what-an-audio-include-is-sent-as). In Extend mode,
 includes in prior turns are expanded too.
@@ -1770,7 +1774,7 @@ thread** — they say so rather than deadlocking if you do.
 | Method | What it does |
 |---|---|
 | `automationAwaitReady(long millis)` | Blocks until the window is up and the model list is in. Returns why not — including the missing API key. |
-| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, and a log line saying so. History is left as the checkbox has it. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. Then runs [Reload all includes](#includes-that-outlive-the-session), so the includes the log refers to are known again. Refuses if an automation is already running. |
+| `automationBegin(String what)` | Takes the window: prompt read-only, Send held, and a log line saying so. History is left as the checkbox has it. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. The includes the log refers to are already known: every start [reloads them](#includes-that-outlive-the-session). Refuses if an automation is already running. |
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
@@ -2206,8 +2210,7 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   URL**](#fetching-a-url)), *Start recording* / *Stop recording* (the
   [**Ctrl+Space**](#recording-from-the-microphone-ctrlspace) toggle; not in the browser),
   *Mic always on* (see [**Mic always on**](#mic-always-on)),
-  *Reload all includes* (which rebuilds the hash → path map from
-  the log, so a conversation survives a restart), Load prompt from file..., Save prompt copy
+  Load prompt from file..., Save prompt copy
   as..., then Cut / Copy / Paste / *Insert document number* / **Select all** / Undo / Redo.
   *Insert document number* types a random 10-digit number, never starting with 0, at the caret —
   a fresh reference for an invoice, a ticket or a letter, which keeps all ten digits in a
@@ -2510,13 +2513,13 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   file before the folder inside it — each named by its path from the working directory. The
   unknown file is named in the log as skipped, followed by the count: 5 included, 1 skipped.
 - **`JRockReloadIncludesTest`** includes a PNG and a text file, throws the hash → path map away by
-  reflection — which is the state a restart leaves, minus the restart — and invokes **Reload all
-  includes** from the prompt's context menu. The map has to come back identical, each entry named
-  in the log with the path it was recorded at. Three more tests cover what a log can say instead:
-  a token no include line accounts for is named rather than dropped, a file deleted since is
-  reloaded *and* reported as gone, and a file included twice from two folders is reloaded from
-  where it was included **last**. The menu is opened by dispatching a popup-trigger event to the
-  prompt, so the item is reached through the listener a right-click reaches — with no mouse.
+  reflection — which is the state a restart leaves, minus the restart — and applies the Configure
+  dialog unchanged, which runs the session report, and the reload with it, as a start does. The
+  map has to come back identical, and the report has to count both. Three more tests cover what a
+  log can say instead: a token no include line accounts for is counted rather than dropped, a file
+  deleted since is reloaded *and* counted as missing, and a file included twice from two folders
+  is reloaded from where it was included **last**. One more checks the send: a missing file and
+  an unknown hash are each a warning, and the prompt goes as the one text part it is.
 - **`JRockMarkdownExportTest`** takes the other direction, without a window: it exports a
   Markdown selection and checks each format against something other than itself. The RTF must be
   all ASCII, must read back through the JDK's **own `RTFEditorKit`** with its bold run, bullet

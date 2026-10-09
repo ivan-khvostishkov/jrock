@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.8.0";
+    private static final String VERSION = "2.9.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -1329,8 +1329,8 @@ public class JRock {
 
     // The include's own log line, read back: "Included @img <hash> from <path>", as
     // written by includeOne. The log is the only record of where an included file was
-    // - INCLUDES itself is not persisted - so "Reload all includes" recovers the
-    // mapping by reading the transcript it kept (see reloadAllIncludes). The two must
+    // - INCLUDES itself is not persisted - so every session start recovers the
+    // mapping by reading the transcript it kept (see reloadIncludes). The two must
     // stay in step; the line is written in exactly one place for that reason.
     private static final java.util.regex.Pattern INCLUDE_LOG_LINE =
             java.util.regex.Pattern.compile(
@@ -1594,10 +1594,10 @@ public class JRock {
         }
 
         // Every entry in order, as {role, text} pairs with role null for a gray line:
-        // dialogHistory() without the filter. "Reload all includes" needs both kinds
+        // dialogHistory() without the filter. Reloading the includes needs both kinds
         // and needs them interleaved, because an include line is what says where a
         // file was, and the message under it is what says the file was used - and a
-        // second include of the same hash later moves it (see reloadAllIncludes).
+        // second include of the same hash later moves it (see reloadIncludes).
         java.util.List<String[]> timeline() {
             java.util.List<String[]> out = new ArrayList<>();
             for (Entry e : entries) out.add(new String[] { e.dialog ? e.role : null, e.text });
@@ -1799,7 +1799,7 @@ public class JRock {
     // Configure dialog. The FIRST line is always the current working directory.
     // promptSourceNote is logged only when non-null (startup); on reconfigure the
     // prompt is untouched so it's omitted.
-    private static void initSession(LogView log, String promptSourceNote) {
+    private static void initSession(LogView log, JTextArea input, String promptSourceNote) {
         // Not ready while the report is being written, and ready again when it ends.
         // The Configure dialog runs this a second time, so an automation that arrives
         // mid-reconfiguration waits for the new session rather than the old one (see
@@ -1912,6 +1912,9 @@ public class JRock {
             log.gray("Prompt source: " + promptSourceNote);
         }
         log.gray("Autosaving prompt to JRock/jrock-prompt.txt");
+        // The includes the log and the prompt refer to, known again, so a conversation
+        // goes on after a restart without attaching every file again.
+        reloadIncludes(input, log);
         log.gray("Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
@@ -2094,7 +2097,7 @@ public class JRock {
 
         // Emit the startup session report (CWD, log recovery, region/model, model
         // list, Ready). Reused verbatim after reconfiguration.
-        initSession(log, promptSource);
+        initSession(log, input, promptSource);
 
         // "History" mode: when on, each send includes the full prior dialog so the model
         // sees a continuous conversation, not a single message.
@@ -2179,18 +2182,24 @@ public class JRock {
             log.human(prompt, extend);
             log.gray("");                        // closes the input message block
 
-            // Verify all @img/@txt includes are known and unchanged - in the new
-            // prompt AND in prior human turns (extend mode re-sends those, expanding
-            // their tokens too). On any problem, report it right after the
-            // [HUMAN OPERATOR] message and do not send.
-            String includeError = verifyIncludes(prompt);
+            // Verify all @img/@txt includes - in the new prompt AND in prior human
+            // turns (extend mode re-sends those, expanding their tokens too). A file
+            // that cannot be had is a warning, right after the [HUMAN OPERATOR]
+            // message, and its token goes as text; a file that has changed stops the
+            // send.
+            java.util.Set<String> includeWarnings = new java.util.LinkedHashSet<>();
+            String includeError = verifyIncludes(prompt, includeWarnings);
             if (includeError == null) {
                 for (String[] turn : history) {
                     if (ROLE_HUMAN.equals(turn[0])) {
-                        includeError = verifyIncludes(turn[1]);
+                        includeError = verifyIncludes(turn[1], includeWarnings);
                         if (includeError != null) break;
                     }
                 }
+            }
+            if (includeError == null && !includeWarnings.isEmpty()) {
+                for (String warning : includeWarnings) log.gray(warning);
+                log.gray("");
             }
             if (includeError != null) {
                 log.gray(includeError);
@@ -2604,7 +2613,7 @@ public class JRock {
                 boolean movedDir = !workingDir.equals(dirBefore);
                 // The title and the icon name the folder, so they move with it too.
                 if (movedDir) applyWindowIdentity(frame);
-                initSession(log, movedDir ? adoptPromptOfWorkingDir(input) : null);
+                initSession(log, input, movedDir ? adoptPromptOfWorkingDir(input) : null);
             }
         });
 
@@ -2697,11 +2706,6 @@ public class JRock {
             alwaysOnItem = item;
         }
         javax.swing.JCheckBoxMenuItem alwaysOnShown = alwaysOnItem;
-        // Next to it, the repair for a conversation that outlived the session that
-        // started it: the includes are read back out of the log rather than attached
-        // again one by one (see reloadAllIncludes).
-        addMenuItem(promptMenu, "Reload all includes",
-                () -> reloadAllIncludes(input, log, false));
         addMenuItem(promptMenu, "Load prompt from file...",
                 () -> loadPromptInto(frame, input, log));
         addMenuItem(promptMenu, "Save prompt copy as...",
@@ -3001,10 +3005,6 @@ public class JRock {
         live.log.gray("The prompt is read-only and Send is held until it finishes"
                 + (micAlwaysOn ? ", and Mic always on is muted." : "."));
         live.log.gray("");
-        // Reload all includes, as the prompt menu does: an agent starts JRock afresh,
-        // and the includes the log already refers to - which a send with History on
-        // sends again - would otherwise be unknown to this session, and the send refused.
-        onEdt(() -> reloadAllIncludes(live.input, live.log, true));
         return null;
     }
 
@@ -4999,7 +4999,7 @@ public class JRock {
                 workingDir = target;
                 System.setProperty("user.dir", target.toString());
                 applyWindowIdentity(frame);
-                initSession(log, adoptPromptOfWorkingDir(input));
+                initSession(log, input, adoptPromptOfWorkingDir(input));
                 log.gray("Restored " + files + " file(s) from " + zip);
                 sendGate.accept(true);
             }
@@ -7513,7 +7513,7 @@ public class JRock {
     // Why anyone would want that: the file JRock remembers is not always a file that
     // stays. In the browser build an uploaded file lands in CheerpJ's /uploads, and
     // that is gone after a reload - taking the path INCLUDES remembers with it, so
-    // "Reload all includes" would find a file that no longer exists. A copy under
+    // the includes reloaded at the next start would name a file that no longer exists. A copy under
     // JRock/ is in the folder the user owns, next to the log that names it.
     //
     // A failed copy is reported and the original included anyway: the point of
@@ -7945,7 +7945,7 @@ public class JRock {
     }
 
     // How the reference line is introduced in the log - and found there again when the
-    // includes are reloaded (see reloadAllIncludes), so its wording is part of the format.
+    // includes are reloaded (see reloadIncludes), so its wording is part of the format.
     private static final String REF_LOG_PREFIX = "With a Markdown reference above it: ";
 
     // The target of the reference in such a line: what is between the last "](" and the
@@ -7961,8 +7961,8 @@ public class JRock {
     // What each reference names, in the session: the target as written in the prompt
     // ("photo.png", "scans/page-2.png") -> the hash of the file included under it. This
     // is how the DOCX export finds the picture a "![...](photo.png)" in an answer means
-    // (see refTargetHash). Not persisted, like INCLUDES: Reload all includes rebuilds it
-    // from the log. The same name included twice names the later file.
+    // (see refTargetHash). Not persisted, like INCLUDES: every session start rebuilds
+    // it from the log. The same name included twice names the later file.
     private static final java.util.Map<String, String> REF_TARGETS =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -8498,15 +8498,16 @@ public class JRock {
         return target;
     }
 
-    // ---- Reload all includes (prompt menu) ---------------------------------
-    // Rebuilds INCLUDES out of the log, so a conversation can be carried on after a
-    // restart without attaching every file again.
+    // ---- Reloading the includes (every session start) ----------------------
+    // Rebuilds INCLUDES out of the log, so a conversation is carried on after a restart
+    // without attaching every file again. Run by initSession, so at startup, after the
+    // Configure dialog and after a restore from backup alike.
     //
     // The map of hash -> path is deliberately not persisted, and a restart therefore
     // loses it - while the prompt and the whole transcript are recovered from disk, so
-    // the tokens that need the map are all still there. That is the broken state this
-    // repairs: the log says "Included @img <hash> from <path>" for every include ever
-    // made, which is the same information the map held.
+    // the tokens that need the map are all still there. The log says "Included @img
+    // <hash> from <path>" for every include ever made, which is the same information
+    // the map held.
     //
     // It is read top to bottom, treating the log as the history it is:
     //
@@ -8521,15 +8522,10 @@ public class JRock {
     // its recovered tokens are usually the whole reason for doing this.
     //
     // Nothing is hashed here. Whether each file is still the file it was is exactly
-    // what verifyIncludes checks on send, one hash per token, and repeating it now
-    // would only be slower and no more certain - the answer can change between the two
-    // moments anyway. What this does check is that the file is still there, because a
-    // path in the log that no longer exists is the one problem the user can do
-    // something about before sending.
-    //
-    // quiet leaves out the line saying there was nothing to reload: automationBegin
-    // runs this on every start, and in a folder with no includes that line says nothing.
-    private static void reloadAllIncludes(JTextArea input, LogView log, boolean quiet) {
+    // what verifyIncludes checks on send, one hash per token. One summary line in the
+    // session report, and none when nothing refers to an include; which files are
+    // missing is said where it matters, by the send that would have sent them.
+    private static void reloadIncludes(JTextArea input, LogView log) {
         java.util.Map<String, Path> remembered = new java.util.HashMap<>();
         java.util.Map<String, String> kinds = new java.util.LinkedHashMap<>();   // hash -> img/txt
         java.util.Map<String, Path> wanted = new java.util.LinkedHashMap<>();    // hash -> path
@@ -8578,43 +8574,28 @@ public class JRock {
             }
         }
 
-        if (kinds.isEmpty()) {
-            if (quiet) return;
-            log.gray("Reload all includes: nothing refers to an include - "
-                    + "no @img/@txt/@audio token in the log or the prompt.");
-            log.gray("");
-            return;
-        }
+        if (kinds.isEmpty()) return;
 
         int reloaded = 0, missing = 0, unknown = 0;
         for (java.util.Map.Entry<String, String> e : kinds.entrySet()) {
-            String hash = e.getKey(), token = "@" + e.getValue() + " " + hash;
-            Path path = wanted.get(hash);
+            Path path = wanted.get(e.getKey());
             if (path == null) {
                 // No include line for it anywhere above: the log was cleared, or the
-                // hash came from somewhere other than an include of this session.
-                log.gray("No include recorded for " + token + " - attach the file again "
-                        + "with Ctrl+I (the log may have been cleared since).");
+                // hash came from somewhere other than an include in this folder.
                 unknown++;
-            } else if (!Files.exists(path)) {
-                // Still registered: the mapping is what the log recorded, and saying so
-                // now is more use than dropping it and repeating "is not known" later.
-                INCLUDES.put(hash, path);
-                log.gray("Reloaded " + token + " from " + path
-                        + " - but that file is not there any more.");
-                missing++;
-            } else {
-                INCLUDES.put(hash, path);
-                log.gray("Reloaded " + token + " from " + path);
-                reloaded++;
+                continue;
             }
+            // Registered even when the file is gone: the mapping is what the log
+            // recorded, and the send's warning can then name the path it was at.
+            INCLUDES.put(e.getKey(), path);
+            if (Files.exists(path)) reloaded++; else missing++;
         }
-        log.gray("Reload all includes: " + fmtNum(reloaded) + " reloaded"
+        log.gray("Includes reloaded from the log: " + fmtNum(reloaded)
+                + " of " + fmtNum(kinds.size()) + " referred to"
                 + (missing > 0 ? ", " + fmtNum(missing) + " with a missing file" : "")
                 + (unknown > 0 ? ", " + fmtNum(unknown) + " not recorded in the log" : "")
-                + " (of " + fmtNum(kinds.size()) + " referred to). "
-                + "Each file is checked again, by its hash, on send.");
-        log.gray("");
+                + (missing + unknown > 0
+                   ? " - a send warns about each one and sends its token as text" : ""));
     }
 
     // An image's dimensions, read straight out of its header.
@@ -12952,25 +12933,36 @@ public class JRock {
     }
 
     // ---- Multimodal include verification & content assembly ----------------
-    // Checks every @img/@txt token in the prompt: the hash must be known (in
-    // INCLUDES) AND the file must still hash to the same value (unchanged). Returns
-    // null if all good, else a human-readable error describing the first problem.
-    private static String verifyIncludes(String prompt) {
+    // Checks every @img/@txt token in the prompt. One whose file cannot be had - a hash
+    // no include in the log names, a file that is gone or cannot be read - adds a
+    // warning to warnings, and buildParts sends that token as the text it is: the rest
+    // of the conversation still goes, and the model is told no less than the prompt
+    // says. A file that is there but no longer hashes to its token is an error, the
+    // first one found returned, and the send stops: it is a different file now, and
+    // re-including it is the fix. Null when the send can go ahead.
+    private static String verifyIncludes(String prompt, java.util.Set<String> warnings) {
         java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(prompt);
         while (m.find()) {
             String kind = m.group(1);
             String hash = m.group(2);
+            String token = "@" + kind + " " + hash;
             Path path = INCLUDES.get(hash);
             if (path == null) {
-                return "Included @" + kind + " " + hash + " is not known (re-include the "
-                        + "file with Ctrl+I; includes are not kept across restarts).";
+                warnings.add("Warning: " + token + " is not known - no include of it is "
+                        + "recorded in the log; sent as text. Re-include the file with Ctrl+I "
+                        + "to send the file itself.");
+                continue;
             }
-            if (!Files.exists(path)) {
-                return "Included file is missing: " + path + " (@" + kind + " " + hash + ").";
+            if (!includeAvailable(hash)) {
+                warnings.add("Warning: included file is missing: " + path + " (" + token
+                        + "); sent as text.");
+                continue;
             }
             String current = hashFile(path);
             if (current == null) {
-                return "Could not read included file: " + path + " (@" + kind + " " + hash + ").";
+                warnings.add("Warning: could not read included file: " + path + " ("
+                        + token + "); sent as text.");
+                continue;
             }
             if (!current.equals(hash)) {
                 return "Included file has changed since it was added: " + path
@@ -12978,6 +12970,12 @@ public class JRock {
             }
         }
         return null;
+    }
+
+    // Whether the file behind a hash can be sent: known, and there to be read.
+    private static boolean includeAvailable(String hash) {
+        Path path = INCLUDES.get(hash);
+        return path != null && Files.isRegularFile(path) && Files.isReadable(path);
     }
 
     // A content part destined for the OpenAI multimodal "content" array.
@@ -13013,19 +13011,21 @@ public class JRock {
 
     // Splits the prompt into ordered content parts, expanding @img/@txt tokens.
     // Plain text between tokens becomes text parts (empty segments skipped, so a
-    // token at the very start/end yields no empty neighbour). Assumes verifyIncludes
-    // already passed. May throw on file read.
+    // token at the very start/end yields no empty neighbour). A token whose file cannot
+    // be had stays in the text as it is, which verifyIncludes has already warned about.
+    // May throw on file read.
     private static java.util.List<Part> buildParts(String prompt) throws IOException {
         java.util.List<Part> parts = new ArrayList<>();
         java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(prompt);
         int last = 0;
         while (m.find()) {
+            String kind = m.group(1);
+            String hash = m.group(2);
+            if (!includeAvailable(hash)) continue;    // left in the text around it
             if (m.start() > last) {
                 String seg = prompt.substring(last, m.start());
                 if (!seg.isEmpty()) parts.add(Part.text(seg));
             }
-            String kind = m.group(1);
-            String hash = m.group(2);
             Path path = INCLUDES.get(hash);
             if (kind.equals("img")) {
                 byte[] bytes = Files.readAllBytes(path);
