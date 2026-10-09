@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Test;
 /**
  * The price lines of the stats block, and the running total read back out of a log.
  * <p>
- * A price is logged only where a model card states one: Grok 4.3 and GPT-6 Astra from
- * their cards, Voxtral Small from the pricing page its card points to - and nothing at
+ * A price is logged only where a model card states one: Grok 4.3, GPT-5.4 and GPT-6 Astra
+ * from their cards, Voxtral Small from the pricing page its card points to - and nothing at
  * all for a model or a region with none. No GUI.
  */
 class JRockPricingTest {
@@ -44,6 +44,19 @@ class JRockPricingTest {
         assertThat(priceLines("openai.gpt-6-astra", "us-east-1", 272_001, 0))
                 .contains("$22 per 1M input tokens, $82.5 per 1M output");
         assertThat(priceLines("openai.gpt-6-astra", "eu-west-1", 1000, 1000)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("GPT-5.4 costs more past 272K input tokens, GovCloud only up to it")
+    void pricesGpt54ByContextLength() throws Exception {
+        assertThat(priceLines("openai.gpt-5.4", "us-east-2", 272_000, 0))
+                .contains("$2.75 per 1M input tokens, $16.5 per 1M output");
+        assertThat(priceLines("openai.gpt-5.4", "us-east-2", 272_001, 0))
+                .contains("$5.5 per 1M input tokens, $24.75 per 1M output");
+        assertThat(priceLines("openai.gpt-5.4", "us-gov-west-1", 1000, 1000))
+                .contains("$3.375 per 1M input tokens, $20.25 per 1M output");
+        assertThat(priceLines("openai.gpt-5.4", "us-gov-west-1", 272_001, 0)).isEmpty();
+        assertThat(priceLines("openai.gpt-5.4", "eu-west-1", 1000, 1000)).isEmpty();
     }
 
     @Test
