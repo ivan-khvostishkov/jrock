@@ -1806,6 +1806,13 @@ that you cannot.
 
 ## Configure dialog (top-left button)
 
+Three tabs, so no one of them is a wall of rows: **General** for what every send depends on,
+**File types** for the settings that matter to one kind of file only, and **Audio & speech** for
+the speaker and the microphone — a tab that is left out where neither can be had, as in the
+browser.
+
+**General**
+
 - **Working directory** (with a Browse button) — reroutes JRock's own files to the chosen
   folder. The OS-level process working directory is unchanged.
 - **Prompts & agents** (with a Browse button) — where Ctrl+O, Ctrl+S and **Install agent** open,
@@ -1828,11 +1835,10 @@ that you cannot.
   come back out.
 - **Region** — free text. Kept in `JRock/jrock-config.txt`, so it survives a restart.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
-  `JRock/jrock-config.txt` too — as is the **Images DPI** below, which is what makes one
+  `JRock/jrock-config.txt` too — as is the **Images DPI** on the File types tab, which is what makes one
   folder's [agent](#windows-agents-one-automation-per-folder) a different agent from the same
   automation installed from another folder.
-- **Autobackup log** — on a line of its own, right under the Model, so it does not read as part
-  of an unrelated setting, and **on by default**: after five
+- **Autobackup log** — on a line of its own, right under the Model, and **on by default**: after five
   minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
   long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
@@ -1844,6 +1850,19 @@ that you cannot.
   value that is no number keeps the limit there was. An `#include` already sent in a request
   the limit leaves out is sent again, since the model does not see that request. Kept in
   `JRock/jrock-config.txt`, per folder, like the model it usually depends on.
+- **Markdown reference above each include** — off by default: every include gets a line above
+  its token naming the file, with what the log says of it as its text (see
+  [Multimodal includes](#multimodal-includes-ctrli)).
+- **Include from processed copies in JRock/includes/** — on by default: each picked file is included
+  from a copy under `JRock/includes/`, an image downscaled to **Images DPI** on the way; off, a
+  conversion that has to write under `JRock/includes/` is refused (see
+  [Includes that outlive the session](#includes-that-outlive-the-session)).
+- **Local prompt cache** — on by default: a prompt identical to one answered before is
+  answered from that answer, and Bedrock is not called (see
+  [**Local prompt cache**](#local-prompt-cache)).
+
+**File types**
+
 - **Images DPI** — how fine a picture JRock keeps, per inch of page: 72 / 96 (screen), **150**
   (documents, the default), 203 (fax/receipt), 300 (print). The image is what the model actually
   sees, so this is a real trade-off — too low and small print is unreadable, too high and you pay
@@ -1859,26 +1878,21 @@ that you cannot.
   the include dialog, **Include directory...** and `"auto"` automation includes read a PDF (see
   [Multimodal includes](#multimodal-includes-ctrli)). The browser offers page images only.
 - **Include RTF as** — *Markdown (converted)*, the default, or *Text as is (RTF markup)*.
-- **Markdown reference above each include** — off by default: every include gets a line above
-  its token naming the file, with what the log says of it as its text (see
-  [Multimodal includes](#multimodal-includes-ctrli)).
-- **Include from processed copies in JRock/includes/** — on by default: each picked file is included
-  from a copy under `JRock/includes/`, an image downscaled to **Images DPI** on the way; off, a
-  conversion that has to write under `JRock/includes/` is refused (see
-  [Includes that outlive the session](#includes-that-outlive-the-session)).
-- **Local prompt cache** — on by default: a prompt identical to one answered before is
-  answered from that answer, and Bedrock is not called (see
-  [**Local prompt cache**](#local-prompt-cache)).
 
-All five are kept in `JRock/jrock-config.txt`, per folder, as `include-pdf-as$`,
-`include-rtf-as$`, `include-markdown-references$`, `include-processed-copies$` and
-`local-prompt-cache$`.
+These two and the three on General above them are kept in `JRock/jrock-config.txt`, per folder,
+as `include-pdf-as$`, `include-rtf-as$`, `include-markdown-references$`,
+`include-processed-copies$` and `local-prompt-cache$`.
+
+**Audio & speech**
+
 - **Narrate on** and **Record from** (Windows / desktop) — the one speaker
   [Narrate](#narrate-windows) plays on and the one microphone
   [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a
   dropdown, empty until the feature lists the devices, and never fall back to the default.
 - **Transcribe recordings into the prompt** (Windows) — under Record from: a recording is typed
   into the prompt by Windows speech recognition instead of being included as `@audio`.
+- **Mic always on: record when speech is heard** — under both (see
+  [**Mic always on**](#mic-always-on)).
 
 Every row above has a **right-click — or, on a touch screen, a long-press — menu** with Copy,
 Paste and Select all (the model's is on the combo's editor, which is what a tap lands on). On a

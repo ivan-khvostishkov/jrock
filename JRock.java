@@ -3795,8 +3795,10 @@ public class JRock {
     }
 
     // ---- Configure dialog --------------------------------------------------
-    // Shows working directory, prompts & agents directory, API key (write-only
-    // override), region and model.
+    // Three tabs: General (working directory, prompts & agents directory, API key -
+    // a write-only override - region, model and what applies to every send), File types
+    // (Images DPI, how a PDF and an RTF are read) and Audio & speech (the speaker and
+    // the microphone, where there are any).
     // Returns true if the user applied changes (so the caller re-inits the session).
     private static boolean showConfigureDialog(JFrame frame) {
         // Named, because these two rows are otherwise indistinguishable from each
@@ -3989,10 +3991,8 @@ public class JRock {
                 + "not always byte for byte - and conversions keep their results in its "
                 + "subfolders. Off: files are included where they are, and a PDF, RTF, DOCX "
                 + "or XLSX that needs converting into JRock/includes/ is refused.");
-        // Autobackup, on a line of its own rather than beside the DPI, so two unrelated
-        // settings never look like one thing: how fine a picture to keep has nothing
-        // to do with zipping the folder up. The checkbox says what it is in its own label,
-        // so the left column of its row stays empty rather than repeating it.
+        // Autobackup, on a line of its own. The checkbox says what it is in its own
+        // label, so the left column of its row stays empty rather than repeating it.
         javax.swing.JCheckBox autoBackupF =
                 new javax.swing.JCheckBox("Autobackup log", autoBackupLog);
         autoBackupF.setFont(autoBackupF.getFont().deriveFont(java.awt.Font.PLAIN));
@@ -4019,31 +4019,48 @@ public class JRock {
         javax.swing.JPanel historyRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         historyRow.add(historyF, BorderLayout.WEST);
 
-        javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        // Three tabs, so no one of them is a wall of rows: General for what every send
+        // depends on, File types for the settings that only matter to one kind of file,
+        // and Audio & speech for the speaker and the microphone - a tab that is left
+        // out where neither can be had, as in the browser.
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
         c.insets = new java.awt.Insets(4, 4, 4, 4);
         c.anchor = java.awt.GridBagConstraints.WEST;
         c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+
+        javax.swing.JPanel general = new javax.swing.JPanel(new java.awt.GridBagLayout());
         int row = 0;
-        addRow(fields, c, row++, "Working directory:", cwdRow);
-        addRow(fields, c, row++, "Prompts & agents:", promptsRow);
+        addRow(general, c, row++, "Working directory:", cwdRow);
+        addRow(general, c, row++, "Prompts & agents:", promptsRow);
         // In the browser the row carries a Paste button of its own - see pasteRow.
-        addRow(fields, c, row++, "Bedrock API key:",
+        addRow(general, c, row++, "Bedrock API key:",
                 isCheerpJ() ? pasteRow(keyF, "key") : keyF);
-        addRow(fields, c, row++, "AWS region:", regionF);
-        addRow(fields, c, row++, "Model:", modelF);
-        addRow(fields, c, row++, "", autoBackupF);
-        addRow(fields, c, row++, "History limit:", historyRow);
-        addRow(fields, c, row++, "Images DPI:", dpiRow);
-        addRow(fields, c, row++, "Include PDF as:", pdfModeRow);
-        addRow(fields, c, row++, "Include RTF as:", rtfModeRow);
-        addRow(fields, c, row++, "", refsF);
-        addRow(fields, c, row++, "", copiesF);
-        addRow(fields, c, row++, "", cacheF);
-        if (deviceF != null) addRow(fields, c, row++, "Narrate on:", deviceF);
-        if (micF != null) addRow(fields, c, row++, "Record from:", micF);
-        if (transcribeF != null) addRow(fields, c, row++, "", transcribeF);
-        if (alwaysOnF != null) addRow(fields, c, row++, "", alwaysOnF);
+        addRow(general, c, row++, "AWS region:", regionF);
+        addRow(general, c, row++, "Model:", modelF);
+        addRow(general, c, row++, "", autoBackupF);
+        addRow(general, c, row++, "History limit:", historyRow);
+        addRow(general, c, row++, "", refsF);
+        addRow(general, c, row++, "", copiesF);
+        addRow(general, c, row++, "", cacheF);
+
+        javax.swing.JPanel fileTypes = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        row = 0;
+        addRow(fileTypes, c, row++, "Images DPI:", dpiRow);
+        addRow(fileTypes, c, row++, "Include PDF as:", pdfModeRow);
+        addRow(fileTypes, c, row++, "Include RTF as:", rtfModeRow);
+
+        javax.swing.JPanel audio = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        row = 0;
+        if (deviceF != null) addRow(audio, c, row++, "Narrate on:", deviceF);
+        if (micF != null) addRow(audio, c, row++, "Record from:", micF);
+        if (transcribeF != null) addRow(audio, c, row++, "", transcribeF);
+        if (alwaysOnF != null) addRow(audio, c, row++, "", alwaysOnF);
+
+        javax.swing.JTabbedPane fields = new javax.swing.JTabbedPane();
+        fields.setName("configureTabs");
+        fields.addTab("General", topAligned(general));
+        fields.addTab("File types", topAligned(fileTypes));
+        if (row > 0) fields.addTab("Audio & speech", topAligned(audio));
 
         java.awt.Font plainFont = plainLabelFont();
 
@@ -4256,6 +4273,15 @@ public class JRock {
     }
 
     // Adds a "label: field" row to a GridBagLayout panel.
+    // A tab's rows at the top of it, rather than spread down to the height of the
+    // tallest tab, which is what a GridBagLayout does with room to spare.
+    private static javax.swing.JPanel topAligned(javax.swing.JPanel rows) {
+        javax.swing.JPanel tab = new javax.swing.JPanel(new BorderLayout());
+        tab.add(rows, BorderLayout.NORTH);
+        tab.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 4, 4, 4));
+        return tab;
+    }
+
     private static void addRow(javax.swing.JPanel p, java.awt.GridBagConstraints c,
                                int row, String label, javax.swing.JComponent field) {
         c.gridx = 0; c.gridy = row; c.weightx = 0;
