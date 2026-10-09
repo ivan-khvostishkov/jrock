@@ -34,7 +34,7 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
     private static final String IMAGE_FILTER = "Image files (png, jpg, jpeg, gif, webp)";
     private static final String TEXT_FILTER =
-            "Text files as is (*.txt, *.md, *.csv, *.json, *.xml, *.html, *.svg, *.java, *.rtf)";
+            "Text files as is (*.txt, *.md, *.csv, *.json, *.xml, *.html, *.svg, *.java)";
     private static final String RELOAD_ITEM = "Reload all includes";
 
     /** Reading a log and a handful of paths; a slow CI runner needs the rest. */
@@ -68,6 +68,31 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
         }
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .contains("Reload all includes: 2 reloaded (of 2 referred to).");
+    }
+
+    @Test
+    @DisplayName("a reference that names its file finds it again after a restart")
+    void reloadsWhatAReferenceNamed() throws Exception {
+        awaitReadyCount(1);
+        field("includeMarkdownRefs").set(null, true);
+
+        Path png = png("one", "IMG_4002.png", 120, 80);
+        include(IMAGE_FILTER, png, "Image: 120 x 80");
+        String hash = includes().keySet().iterator().next();
+        assertThat(refTargets()).describedAs("what the reference names")
+                .containsEntry("IMG_4002.png", hash);
+
+        // A restart: both maps gone, the prompt's "![...](IMG_4002.png)" still there.
+        includes().clear();
+        refTargets().clear();
+
+        reload();
+
+        // The log's reference line says what the name stands for, so the DOCX export
+        // can place the picture an answer refers to by that name again.
+        assertThat(refTargets()).describedAs("what the reference names, reloaded")
+                .containsEntry("IMG_4002.png", hash);
+        assertThat(includes()).containsEntry(hash, png);
     }
 
     @Test
@@ -139,7 +164,8 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
     /** Includes one file through the real dialog, and waits for it to be over. */
     private void include(String filter, Path file, String until) {
-        chooseInTheIncludeDialog(filter, file);
+        // Where it lies, not from a processed copy: where each file was is the point.
+        chooseInTheIncludeDialog(filter, false, file);
         awaitLogLine(until, RELOAD_TIMEOUT_SECONDS);
     }
 
@@ -153,6 +179,12 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
     @SuppressWarnings("unchecked")
     private static Map<String, Path> includes() throws Exception {
         return (Map<String, Path>) field("INCLUDES").get(null);
+    }
+
+    /** The reference name -&gt; hash map the DOCX export finds pictures by. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> refTargets() throws Exception {
+        return (Map<String, String>) field("REF_TARGETS").get(null);
     }
 
     /** A real PNG in a subfolder of the working directory. */

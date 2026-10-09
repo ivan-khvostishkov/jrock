@@ -176,7 +176,7 @@ as WebAssembly), so nothing runs on a server.
   outright — paste then falls back to whatever was last copied inside JRock, and says so.
 - **Image includes work too.** A browser JVM has no native libraries, so nothing here may
   depend on one — JRock reads an image's dimensions from its header rather than decoding it, and
-  the downscale **Include with copy...** does is handed to the page, whose `canvas` decodes and
+  the downscale a processed copy gets is handed to the page, whose `canvas` decodes and
   re-encodes pictures in native code where CheerpJ's `ImageIO` and `Graphics2D` cannot (see
   [Multimodal includes](#multimodal-includes-ctrli)).
 - **Fetch URL works too**, through the same page client as the Bedrock calls — one more method on
@@ -398,11 +398,15 @@ bill, and a guess is not one.
   system/status output in gray.
 - **Dialog only** mode (Ctrl+D) hides the gray system lines, leaving a clean, copy-pastable
   transcript.
-- **History** mode (Ctrl+E): each send includes the full prior dialog so the model sees a
+- **History** mode (Ctrl+E): each send includes the prior dialog so the model sees a
   continuous conversation (stateless multi-turn) — or only its last requests, each with its
   answer, when a [**History limit**](#configure-dialog-top-left-button) is set. In this mode role headers are
   timestamped (e.g. `[OPERATOR'S ASSISTANT] · Monday, 14 September 2026, 10:01:34`) so the
-  time order of stateless turns is visible.
+  time order of stateless turns is visible — and that timestamp is also what History goes by:
+  it sends **only the messages that were sent with History ticked**, and their answers. Untick
+  it to ask a **side question**, and the question and its answer stay out of the conversation:
+  tick it again and the dialog goes on as if they had never been asked. The headers are kept in
+  `jrock-log.txt`, so this holds after a restart too.
 - **Enter** — the checkbox beside the Send button, **off when JRock starts and never
   remembered**: when it is on, plain Enter sends as well as Ctrl+Enter. It earns its place
   twice over. Ticked, it is the fast way to talk; unticked, it answers in the one place you are
@@ -683,55 +687,76 @@ gswin64 -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -o C:\scans\scan0166.Merged.
 
 ## Multimodal includes (Ctrl+I)
 
-Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs** or **DOCX**
-documents into either):
+Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs**, **DOCX** or
+**XLSX** documents into text or pictures):
 
 1. **Ctrl+I** opens a file picker. It's **multi-select**, so you can attach several files at
-   once, and the dropdown offers ten kinds (eight in the browser, which has no xpdf):
+   once. It opens on **All supported files**, and the dropdown narrows that to one type at a
+   time — no type is in two filters, so the filter only decides what you see, never how a file
+   is read:
    - **Image files** (png, jpg, jpeg, gif, webp)
-   - **Image with a Markdown reference** (the same files) — one line more in the prompt: a
-     Markdown `![](<hash>)` above the token. The model reads it as a picture belonging to the
-     text and writes it back into its answer where the picture belongs, which is what
-     [**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) then
-     places
-   - **Text files as is** (txt, md, csv, json, xml, html, svg, java, rtf) — sent exactly as they are on disk,
-     RTF markup and all, for a model that reads (and writes) the format itself
+   - **Text files as is** (txt, md, csv, json, xml, html, svg, java) — sent exactly as they are on disk
    - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
-   - **PDF as page images** — converts the PDF to one PNG per page
-   - **PDF as HTML folder, with xpdf** — `pdftohtml -nofonts` into a folder beside the PDF, which
-     is then included as **Include directory...** would ([details](#pdf-as-html-or-text-xpdf))
-   - **PDF as text, with xpdf** — `pdftotext -enc UTF-8` into a `.txt` beside the PDF, included as is
-   - **RTF as Markdown text** — converts the RTF to one Markdown file
-   - **DOCX as Markdown text** — the same for a Word `.docx`, tables included
-   - **XLSX as CSV text, one file per sheet** — each sheet of an Excel `.xlsx` as its own CSV
+   - **PDF files** — as page images (one PNG per page), as an **HTML folder** (xpdf's
+     `pdftohtml -nofonts` into a folder beside the PDF, then included as **Include directory...**
+     would) or as **text** (`pdftotext -enc UTF-8` into a `.txt` beside it) — whichever
+     **Include PDF as** in [Configure](#configure-dialog-top-left-button) says, and the filter
+     names it ([details](#pdf-as-html-or-text-xpdf)). The browser has no xpdf and always reads
+     page images.
+   - **RTF files** — converted to Markdown, or sent as is, markup and all, for a model that
+     reads (and writes) the format itself: **Include RTF as** in Configure
+   - **DOCX files, as Markdown text** — tables included
+   - **XLSX files, as CSV text, one file per sheet** —
      ([details](#xlsx-conversion-no-external-tool))
 
-   **Ctrl+Shift+I** (**Include with copy...** in the prompt's context menu) opens the very
-   same dialog, with one difference: each chosen file is copied under `JRock/includes/` first
-   and included from the copy ([why](#includes-that-outlive-the-session)) — and an image bigger
-   than the page it will be read on is **downscaled as it is copied**, to the
-   [**Images DPI**](#configure-dialog-top-left-button) the Configure dialog was left on.
+   **Include from processed copies in JRock/** (Configure, **on** by default): each picked file
+   is copied under `JRock/includes/` first and included from the copy
+   ([why](#includes-that-outlive-the-session)) — and an image bigger than the page it will be
+   read on is **downscaled as it is copied**, to the **Images DPI** Configure is set to, so the
+   copy is not always byte for byte. The conversions keep their results under `JRock/` too.
+   Turned **off**, files are included where they lie, and a PDF as page images, an RTF as
+   Markdown, a DOCX or an XLSX — each of which has to write its result under `JRock/` — is
+   refused, with a line in the log and a dialog naming the setting to turn back on.
 
    **Include directory...** (prompt context menu) picks a folder instead and includes every
-   file in it, one by one in name order, the type decided by the extension: images as
-   **Image files**, text as **Text files as is**, wav and mp3 as **Audio files**, a PDF as
-   **page images**, an RTF or a DOCX **as Markdown text**, and an XLSX **as CSV**. Any other file, and any folder
-   inside it, is skipped, and the log says so for each. The log then gives the count of
-   files included and skipped.
+   file in it the same way, by its type: first the folder's own files in name order, then each
+   folder inside it in name order, the same way down — so the order is the same every time and
+   a folder's files sit together in the prompt. `JRock/` itself is never gone into, nor a link
+   to a folder. A file of any other type is skipped, and the log says so for each. The log
+   then gives the count of files included and skipped.
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
    (not persisted), so after a restart the files have to be attached again — or their paths read
    back out of the log with **Reload all includes**
    ([below](#includes-that-outlive-the-session)).
 3. A token `@img <hash>`, `@txt <hash>` or `@audio <hash>` is inserted at the cursor (one per
-   file / per PDF page), preceded by a `![](<hash>)` line under the Markdown-reference filter.
-   Duplicate tokens for the same file are not added again (also checked across prior turns in
-   Extend mode).
+   file / per PDF page). Duplicate tokens for the same file are not added again (also checked
+   across prior turns in Extend mode).
 4. The log records each include with stats (locale-formatted numbers):
-   - **Images**: dimensions, total pixel count, and file size in bytes.
+   - **Images**: dimensions, the size on paper at **Images DPI**, total pixel count, and file
+     size in bytes — `Image: 514 x 529, 4.4 cm x 4.5 cm @ 300 DPI, 271,906 pixels, 58,280 bytes`.
    - **Text**: symbol count (Unicode code points) and file size in bytes.
    - **Audio**: what the header says — format, sample rate, channels, bitrate, playing time —
      and file size in bytes.
+
+**Markdown reference above each include** (Configure, off by default) puts one line more above
+every token, naming the file and saying what it is — that same stats line as its text:
+
+```
+![Image: 514 x 529, 4.4 cm x 4.5 cm @ 300 DPI, 271,906 pixels, 58,280 bytes](IMG_4002.png)
+@img 1f3a9c0b7e42
+[Text: 1,204 symbols, 1,210 bytes](<meeting notes.txt>)
+@txt 8b52e0ad91cc
+```
+
+A picture's reference is an image (`![...]`), anything else's a link (`[...]`); a name with a
+space in it goes in angle brackets. The name is the file's name — the one picked, even when a
+processed copy is what is sent — and for **Include directory...** its path from the working
+directory, or its absolute path when the folder is outside it, since a folder's files can share
+names. The model reads the line as the file's place in the text, and writes a picture's
+reference back into its answer where the picture belongs — which
+[**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) then
+places, by that name.
 
 Image dimensions are read **straight out of the file header** — the PNG, GIF, WEBP and JPEG
 headers all state the size in a documented place — rather than by decoding the image (an
@@ -906,28 +931,27 @@ the whole transcript *are* restored from disk. So the tokens come back and nothi
 they stand for: sending says `Included @img <hash> is not known`, and the conversation is stuck
 until every file is attached again. Two things fix that, and they are meant to be used together.
 
-**Include with copy...** — a second item in the prompt's context menu, **Ctrl+Shift+I**, right
-under the plain include. It opens the same dialog, with the same six filters and the same
-multi-select, and does one thing more: a chosen file is **copied into `JRock/includes/` first and
-included from the copy**, so the log's line points inside the folder you own:
+**Include from processed copies in JRock/** — a checkbox in
+[Configure](#configure-dialog-top-left-button), **on** by default. A chosen file is **copied
+into `JRock/includes/` first and included from the copy**, so the log's line points inside the
+folder you own:
 
 ```
 Copied for the include: C:\photos\IMG_4002.jpg -> C:\demo\JRock\includes\IMG_4002.jpg
 Included @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
 ```
 
-A menu item rather than a checkbox in the chooser, because a chooser has nowhere of its own to
-put one: the only slot it offers is the accessory, a column down the right-hand side that takes
-its width off the file list — on a narrow dialog about a third of it, for one checkbox, with the
-rest of the column empty. Two different files of the same name both survive, the second as
-`IMG_4002-2.jpg`; the same file twice is not copied twice. A file already under
-`JRock/includes/` is included where it is, and so is anything the conversions wrote (they write
-under `JRock/` themselves). A copy that fails is reported and the original included anyway —
-the item is there to keep a file within reach, not to refuse the include. It matters most in
-the [browser](#jrock-web-in-the-browser), where an uploaded file lands in CheerpJ's `/uploads`
-and is gone after a reload, taking the only path the log recorded with it.
+Two different files of the same name both survive, the second as `IMG_4002-2.jpg`; the same
+file twice is not copied twice. A file already under `JRock/includes/` is included where it is,
+and so is anything the conversions wrote (they write under `JRock/` themselves). A copy that
+fails is reported and the original included anyway — the setting is there to keep a file within
+reach, not to refuse the include. It matters most in the [browser](#jrock-web-in-the-browser),
+where an uploaded file lands in CheerpJ's `/uploads` and is gone after a reload, taking the only
+path the log recorded with it. Turned off, every file is included where it lies — and a type
+whose conversion has to write under `JRock/` is refused instead (see
+[Multimodal includes](#multimodal-includes-ctrli)).
 
-**And a copy is JRock's own file, so an oversized image is downscaled into it.** The page a
+**And a copy is JRock's own file, so an oversized image is downscaled into it** — which is why it is a *processed* copy, not always a byte-for-byte one. The page a
 picture is read on is A4 less 2 cm margins — the [DOCX export's](#images-in-the-docx) text
 frame — which at the [**Images DPI**](#configure-dialog-top-left-button) in Configure has room
 for a definite number of dots each way: 1004 × 1518 at the default 150. A phone photograph or a
@@ -971,8 +995,10 @@ is read top to bottom as the history it is:
 | `Included @img <hash> from <path>` (or `@txt`, or `@audio`) | remember `<hash>` → `<path>`, replacing an earlier path for that hash — the file was included again, perhaps from somewhere else |
 | a message (yours or the model's) referring to a hash | that hash is wanted, at the path remembered for it **at that point**, so a later include cannot rewrite what an earlier message meant |
 
-Both spellings of a reference count: the `@img`/`@txt`/`@audio` token, and the `![](<hash>)` a
-[Markdown-reference include](#multimodal-includes-ctrli) leaves — an answer carrying one needs
+Both spellings of a reference count: the `@img`/`@txt`/`@audio` token, and the
+`![...](<name>)` a [Markdown reference](#multimodal-includes-ctrli) leaves — the log's
+`With a Markdown reference above it:` line says which include that name stands for, and is read
+back with it — an answer carrying one needs
 the file to export as a DOCX with the picture in it. The current prompt is read last, being the
 newest thing there is, and after a restart its recovered tokens are usually the whole reason for
 doing this. Each hash is then reported on its own line:
@@ -1202,7 +1228,7 @@ them, and doubles as a template for a prompts directory of your own:
   DOCX it made, included as Markdown.
 - **`jrock-prompt-doc-to-markdown.txt`** — the same document as **Markdown with image
   references**: headings, pipe tables, lists, bold and italic, and each attached picture's
-  `![](<hash>)` copied to where that picture sits on the page, so
+  `![...](<file name>)` copied to where that picture sits on the page, so
   [**Export selected Markdown with images as DOCX...**](#markdown-export-rtf-and-docx) turns the
   answer into a Word document with the logos, photos and stamps in place.
 - **`jrock-prompt-doc-inventory.txt`** — read a document and answer with **nothing but a file
@@ -1288,7 +1314,7 @@ the one before it wrote beside the document, under the document's own name:
 1. **Markdown, then a DOCX.** A PDF is converted to HTML by xpdf's `pdftohtml`, into the folder
    `document/` — with the [same dialogs as the include filter](#pdf-as-html-or-text-xpdf): create
    the folder, or include the one already there — and each page image goes in with its
-   `![](<hash>)` reference. An image is a one-page document and goes in as itself, with its
+   `![...](<file name>)` reference. An image is a one-page document and goes in as itself, with its
    reference; it also gets a **PDF copy to print from**, `document.pdf`: one A4 page, the image
    centred at 300 dpi, or shrunk to fit inside 30 mm margins when it is bigger than that, never
    enlarged. `jrock-prompt-doc-to-markdown.txt` answers with Markdown, which is selected in the
@@ -1739,7 +1765,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
-| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`, `"xlsx"`, and `"pdfhtml"` / `"pdftext"` (xpdf, beside the PDF, with the include filter's own dialogs; `"pdfhtml"` gives each page image a `![](<hash>)` reference). Fails when nothing was included. |
+| `automationInclude(String file, String kind)` | Ctrl+I, from a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`, `"xlsx"`, and `"pdfhtml"` / `"pdftext"` (xpdf, beside the PDF, with the include dialog's own dialogs), whatever Configure says for the type — or `"auto"`, as the include dialog would. `"imgref"` and `"pdfhtml"` always write [Markdown references](#multimodal-includes-ctrli); otherwise they, and processed copies, follow Configure. Fails when nothing was included. |
 | `automationFetchUrl(String url)` | [Fetch URL](#fetching-a-url) (Ctrl+U), for a URL given: the page goes in at the cursor, as a link and an include. A refused URL is a returned reason, not a dialog. Fails when nothing was inserted. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
 | `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
@@ -1750,7 +1776,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
-| `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![](<hash>)` placed as the image that include names. |
+| `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![...](<name>)` (or `![](<hash>)`) placed as the image that include names. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationNarrateDevice()` | The **Narrate on** speaker's name, or `""` when none is set — for an agent that plays sounds of its own on it. Needs no `automationBegin`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
@@ -1797,7 +1823,7 @@ that you cannot.
   long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
   only when it is **off**, so nobody counts on a backup that isn't being taken.
 - **History limit** — how much of the conversation [**History**](#conversation-log) sends with each
-  message: the last *N* requests, each with the answer after it, so **4** is at most 8 earlier
+  message — which is only ever the messages that were sent with History ticked: the last *N* requests, each with the answer after it, so **4** is at most 8 earlier
   messages before the new prompt. **Unlimited** (the default) sends it all. The cut is always
   at a request, never between one and its answer. Pick from the list or type any number; a
   value that is no number keeps the limit there was. An `#include` already sent in a request
@@ -1808,11 +1834,30 @@ that you cannot.
   sees, so this is a real trade-off — too low and small print is unreadable, too high and you pay
   tokens for detail no model needs. One number for two jobs, because it is the same question asked
   twice: a PDF included as page images is rasterised at it (Ghostscript's `-r`, the page's
-  physical size being the PDF's own business), and an image included with
-  [**Include with copy...**](#includes-that-outlive-the-session) is downscaled to it, measured
+  physical size being the PDF's own business), an image's
+  [processed copy](#includes-that-outlive-the-session) is downscaled to it, and an image's size
+  in cm is reckoned at it in the log and in its Markdown reference — the copy measured
   against A4 less 2 cm margins. Only reported at startup when it isn't the default; every PDF
   conversion logs its full Ghostscript command line regardless, and every downscale says what it
   did.
+- **Include PDF as** — *Page images* (the default), *HTML folder (xpdf)* or *Text (xpdf)*: how
+  the include dialog, **Include directory...** and `"auto"` automation includes read a PDF (see
+  [Multimodal includes](#multimodal-includes-ctrli)). The browser offers page images only.
+- **Include RTF as** — *Markdown (converted)*, the default, or *Text as is (RTF markup)*.
+- **Markdown reference above each include** — off by default: every include gets a line above
+  its token naming the file, with what the log says of it as its text (see
+  [Multimodal includes](#multimodal-includes-ctrli)).
+- **Include from processed copies in JRock/** — on by default: each picked file is included
+  from a copy under `JRock/includes/`, an image downscaled to **Images DPI** on the way; off, a
+  conversion that has to write under `JRock/` is refused (see
+  [Includes that outlive the session](#includes-that-outlive-the-session)).
+- **Local prompt cache** — on by default: a prompt identical to one answered before is
+  answered from that answer, and Bedrock is not called (see
+  [**Local prompt cache**](#local-prompt-cache)).
+
+All five are kept in `JRock/jrock-config.txt`, per folder, as `include-pdf-as$`,
+`include-rtf-as$`, `include-markdown-references$`, `include-processed-copies$` and
+`local-prompt-cache$`.
 - **Narrate on** and **Record from** (Windows / desktop) — the one speaker
   [Narrate](#narrate-windows) plays on and the one microphone
   [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a
@@ -2049,7 +2094,7 @@ It works on the two things an include leaves in the text, and the model repeats 
 
 | In the Markdown | In the DOCX |
 |---|---|
-| `![](<hash>)` of an **included** image | the picture itself, zipped into the package as a `word/media/` part and placed as an inline drawing |
+| `![...](<name>)` or `![](<hash>)` of an **included** image | the picture itself, zipped into the package as a `word/media/` part and placed as an inline drawing |
 | `@img <hash>` of an **included** image | the file's **base name**, `IMG_4002.jpg`, as text — the token named a file, and the document says which |
 | either one, for a hash **not included** in this session | the line exactly as it stands, plus a warning in the log |
 
@@ -2082,10 +2127,39 @@ extension and content type are decided by **sniffing the file's magic bytes**, n
 name: a `.png` that is really a JPEG would otherwise produce a package whose content types lie,
 and Word answers that with a repair dialog rather than a document.
 
-**The RTF export keeps the simplified logic**: no pictures, and `![](<hash>)` and `@img <hash>`
+**The RTF export keeps the simplified logic**: no pictures, and `![...](...)` and `@img <hash>`
 are written out as the text they are. An RTF has no package to put a picture in — the bytes would
 have to be hex-dumped into the file itself — and the format is there for anything that opens an
 RTF, not for typesetting.
+
+## Local prompt cache
+
+With **Local prompt cache** on in Configure — the default — a prompt that was answered before
+is **answered again from that answer, with no call to Bedrock**:
+
+```
+Local prompt cache: this prompt was answered before - reusing JRock/messages/20261009-101500-120-assistant.txt, with no call to Bedrock.
+```
+
+in place of the `Calling /openai/v1/chat/completions ...` line, and the reply is logged as a
+reply like any other. "Answered before" means **any** message in `JRock/messages/` — not only
+the ones the log still shows: every `-operator.txt` there, by the SHA-256 of its text, paired
+with the `-assistant.txt` written after it. A request that failed has no answer after it and is
+not in the cache. The same text names the same files: its `@img`/`@txt` tokens are hashes, and
+a send checks that each include's file still hashes to its token *before* the cache is asked —
+so a changed file is a different prompt.
+
+The table is built from the folder **once**, when a session begins with the setting on (the
+session report says how many answered prompts it found), and kept up to date as each message
+is written, so the folder is never read again and a hit reads only the one answer it reuses.
+Turning the setting **off** empties the table; turning it back **on** builds it afresh from
+the folder — which is also the moment to clean `JRock/messages/` up by hand, if old answers
+should not be reused.
+
+Only for a prompt that goes **without** [History](#conversation-log)'s earlier messages: a
+message file holds the one message, and nothing on disk says what conversation an answer was
+given in. Nor does it say which model gave it, or what [Clock](#clock) told it the time was —
+an answer is reused exactly as it was given.
 
 ## Context menus (right-click / long tap)
 
@@ -2272,7 +2346,6 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+L | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
 | Ctrl+I | Include text/image/audio files, a PDF, an RTF or a DOCX (multi-select) |
-| Ctrl+Shift+I | The same, keeping a copy of each file under `JRock/includes/` |
 | Ctrl+U | Fetch a URL and include what it answers with |
 | Ctrl+Space | Start recording from the microphone; again to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
 | Ctrl+D | Toggle Dialog only |
@@ -2360,9 +2433,9 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   as a list, asterisks escaped, an umlaut intact as UTF-8 — plus the single `@txt` token in the
   prompt. The document is written by hand (`FormattedRtf`), one control word per mapping. A
   second test renames a plain text file to `.rtf` and checks JRock says it found no text and
-  includes nothing. A third includes the same RTF under *Text files as is* and checks the
+  includes nothing. A third sets **Include RTF as** to *Text as is* and checks the
   include is the `.rtf` itself, with nothing converted and no `JRock/rtf-md/` written — the
-  filter is the whole difference. No external program: the reader is the JDK's.
+  setting is the whole difference. No external program: the reader is the JDK's.
 - **`JRockDocxIncludeTest`** is the symmetric twin of that, for `.docx`: it includes a document
   through the real dialog with the *DOCX as Markdown text* filter and compares
   `JRock/docx-md/quarterly.docx.md` against the **whole expected Markdown** — headings from the
@@ -2374,7 +2447,7 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   no `JRock/docx-md/` is created.
 - **`JRockAutomationDocTest`** drives the two calls the doc inventory's first pass is made of,
   from a thread of its own as an automation would: `automationInclude(pdf, "pdfhtml")`, answering
-  **Yes** to the create question and checking every page image arrived with its `![](<hash>)`
+  **Yes** to the create question and checking every page image arrived with its `![...](<path>)`
   reference, and `automationExportDocx`, checking the DOCX carries the very PNG the reference
   named. Nothing is sent.
 - **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
@@ -2385,10 +2458,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   sheets come out in tab order, which is not the order of their parts in the ZIP. The workbook is
   written by hand (`FormattedXlsx`). A second test renames a text file to `.xlsx` and checks it
   is refused.
-- **`JRockImageRefIncludeTest`** includes one PNG twice through the real dialog, under each of the
-  two filters that offer images, and checks the one line that is the whole difference: *Image with
-  a Markdown reference* leaves `![](<hash>)` above the `@img` token and says so in the log, *Image
-  files* leaves the token alone.
+- **`JRockImageRefIncludeTest`** turns Configure's **Markdown reference above each include** on
+  and includes a PNG: the line above its `@img` token has to be
+  `![Image: 120 x 80, 2.0 cm x 1.4 cm @ 150 DPI, ...](IMG_4002.png)`. A text file called
+  `my notes.txt` gets `[Text: 5 symbols, 5 bytes](<my notes.txt>)`, in angle brackets for its
+  space; and with the setting off the token goes in alone.
 - **`JRockFetchUrlTest`** starts a **web server of its own** on loopback — a real one, since
   what the feature turns on is the response — and drives **Fetch URL...** from the prompt's
   context menu against five of its paths. A page served as `ISO-8859-1` has to land in
@@ -2398,21 +2472,22 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   with an `@img` token and its 120 × 80 read out of the saved file's header; and
   `application/pdf` has to be **refused by name**, in the log and in a dialog, leaving no
   `JRock/urls/` at all and the prompt untouched.
-- **`JRockIncludeCopyTest`** includes a file through **Include with copy...** and checks
+- **`JRockIncludeCopyTest`** includes a file with **Include from processed copies in JRock/** on and checks
   where the include then points: the copy line comes *before* the include it was made for, the
   copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what
-  the hash is registered against. Through plain **Include** it checks the other half: nothing is
+  the hash is registered against. With the setting off it checks the other half: nothing is
   copied and no `JRock/includes/` is created.
   A third test includes two *different* files both called `photo.png` and checks that neither is
   lost (the second becomes `photo-2.png`), and that the same file again is not copied a third time.
   A fourth includes a 3000 × 2000 PNG and measures the copy: at the default **Images DPI** of 150
   A4 has room for 1004 × 1518 dots, so the copy has to be `big-1004x669.png` and really be that
   size, the include has to point at it, and the original has to be left as it was.
-- **`JRockIncludeDirectoryTest`** puts a PNG, a text file, a file of an unknown type and a
-  subfolder into one folder and includes it through **Include directory...**. The PNG has to
-  come first as `@img` and the text after it as `@txt`, in name order. The other two have to be
-  named in the log as skipped, each with its own reason, followed by the count: 2 included,
-  2 skipped.
+- **`JRockIncludeDirectoryTest`** builds a folder with a PNG, a text file, a file of an unknown
+  type and two subfolders, one with a folder of its own inside, and includes it through
+  **Include directory...** with Markdown references on. The references give the order: the
+  folder's two files first, then `A-sub/`'s although "A" sorts before them, then `d-inner/`'s own
+  file before the folder inside it — each named by its path from the working directory. The
+  unknown file is named in the log as skipped, followed by the count: 5 included, 1 skipped.
 - **`JRockReloadIncludesTest`** includes a PNG and a text file, throws the hash → path map away by
   reflection — which is the state a restart leaves, minus the restart — and invokes **Reload all
   includes** from the prompt's context menu. The map has to come back identical, each entry named
@@ -2449,6 +2524,12 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   emoji arrives as a *pair* of them), and mixed. No window.
 - **`JRockDocumentNumberTest`** draws a thousand numbers for *Insert document number* and checks
   each is ten digits with no leading 0, and that they don't repeat. No window.
+- **`JRockPromptCacheTest`** puts answered and unanswered prompts into `JRock/messages/` by
+  hand and sends through the real Send button: the answered one comes back from its file with
+  the log saying so and no `Calling` line, and the unanswered one goes out (and fails, there
+  being no key). An answer written during the session is reused without the folder being read
+  again; with the setting off nothing is reused and the table is gone. And History: of six
+  messages, the two sent with History off are the ones it leaves out.
 - **`JRockPricingTest`** checks the stats block's price lines against the cards: Grok 4.3 at
   $1.25 / $2.50 (and GovCloud's own rate), GPT-6 Astra doubling past 272K input tokens and
   unpriced outside its two mantle regions, Voxtral Small by region and unpriced where the

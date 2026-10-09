@@ -21,8 +21,8 @@ import org.junit.jupiter.api.Test;
  */
 class JRockXpdfIncludeTest extends JRockGuiFixture {
 
-    private static final String PDF_TEXT_FILTER = "PDF as text, with xpdf (*.pdf)";
-    private static final String PDF_HTML_FILTER = "PDF as HTML folder, with xpdf (*.pdf)";
+    private static final String PDF_TEXT_FILTER = "PDF files, as text, with xpdf (*.pdf)";
+    private static final String PDF_HTML_FILTER = "PDF files, as an HTML folder, with xpdf (*.pdf)";
 
     private static final long CONVERSION_TIMEOUT_SECONDS = 60;
 
@@ -33,6 +33,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
         assertThat(onPath("pdftotext")).describedAs("pdftotext on PATH").isNotNull();
 
         Path pdf = A4Pdf.writeTwoPages(workingDirectory().resolve("two-page-a4.pdf"));
+        field("pdfIncludeMode").set(null, "text");
         chooseInTheIncludeDialog(PDF_TEXT_FILTER, pdf);
         answerYes();
         awaitLogLine("token(s) for " + pdf.getFileName(), CONVERSION_TIMEOUT_SECONDS);
@@ -57,6 +58,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
         assertThat(onPath("pdftohtml")).describedAs("pdftohtml on PATH").isNotNull();
 
         Path pdf = A4Pdf.writeTwoPages(workingDirectory().resolve("two-page-a4.pdf"));
+        field("pdfIncludeMode").set(null, "html");
         chooseInTheIncludeDialog(PDF_HTML_FILTER, pdf);
         answerYes();
         awaitLogLine("Include directory ", CONVERSION_TIMEOUT_SECONDS);
@@ -83,6 +85,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
         Path pdf = A4Pdf.writeTwoPages(workingDirectory().resolve("two-page-a4.pdf"));
         Path txt = workingDirectory().resolve("two-page-a4.txt");
         Files.write(txt, "edited by hand".getBytes(StandardCharsets.UTF_8));
+        field("pdfIncludeMode").set(null, "text");
         chooseInTheIncludeDialog(PDF_TEXT_FILTER, pdf);
         answerYes();
         awaitLogLine("token(s) for " + pdf.getFileName(), CONVERSION_TIMEOUT_SECONDS);

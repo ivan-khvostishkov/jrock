@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 class JRockPdfIncludeTest extends JRockGuiFixture {
 
     /** The include chooser's filter that means "convert with Ghostscript to PNGs". */
-    private static final String PDF_IMAGE_FILTER = "PDF as page images (*.pdf)";
+    private static final String PDF_IMAGE_FILTER = "PDF files, as page images (*.pdf)";
 
     /**
      * The resolution to pick in Configure, as an {@code int} because that is what the
@@ -139,12 +139,12 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
     /** Opens Configure, picks the DPI from the dropdown, and applies it. */
     private void chooseDpiInConfigureDialog() {
         JOptionPaneFixture dialog = openConfigure();
-        // The Configure dialog's one non-editable combo: the model combo is
-        // editable, which separates them without depending on their order.
+        // Found by its name: the dialog has several dropdowns, and their order is
+        // the layout's business.
         select(dialog.comboBox(new GenericTypeMatcher<JComboBox>(JComboBox.class) {
             @Override
             protected boolean isMatching(JComboBox box) {
-                return !box.isEditable();
+                return "imagesDpi".equals(box.getName());
             }
         }), DPI);
         press(dialog.okButton());

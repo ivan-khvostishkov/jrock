@@ -91,7 +91,9 @@ abstract class JRockGuiFixture {
      */
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
             "workingDir", "promptsDir", "promptsDirNote", "apiKey", "REGION",
-            "regionSource", "MODEL_ID", "availableModels", "imagesDpi", "autoBackupLog");
+            "regionSource", "MODEL_ID", "availableModels", "imagesDpi", "autoBackupLog",
+            "pdfIncludeMode", "rtfIncludeMode", "includeMarkdownRefs", "includeProcessedCopies",
+            "promptCacheOn");
 
     private final Map<String, Object> savedConfig = new LinkedHashMap<>();
 
@@ -188,6 +190,7 @@ abstract class JRockGuiFixture {
     @SuppressWarnings("unchecked")
     private void forgetIncludes() throws Exception {
         ((Map<String, Path>) field("INCLUDES").get(null)).clear();
+        ((Map<String, String>) field("REF_TARGETS").get(null)).clear();
     }
 
     /** Removes only the directory this fixture created itself, contents and all. */
@@ -407,21 +410,27 @@ abstract class JRockGuiFixture {
      * conversion is expected to refuse, where the line to wait for is the refusal.
      */
     protected void chooseInTheIncludeDialog(String filterDescription, Path... files) {
-        chooseInTheIncludeDialog(filterDescription, false, files);
+        chooseInTheIncludeDialogAsConfigured(filterDescription, files);
     }
 
     /**
-     * The same, through <em>Include with copy...</em> (Ctrl+Shift+I) when {@code copies}
-     * is set: the identical dialog, differing only in that each chosen file is copied
-     * into {@code JRock/includes/} and included from there.
+     * The same, with Configure's <em>Include from processed copies in JRock/</em> set to
+     * {@code copies} first: on, each chosen file is copied into {@code JRock/includes/}
+     * and included from there; off, it is included where it lies.
      */
     protected void chooseInTheIncludeDialog(String filterDescription, boolean copies,
                                             Path... files) {
-        if (copies) {
-            pressCtrlShift(KeyEvent.VK_I);
-        } else {
-            pressCtrl(KeyEvent.VK_I);
+        try {
+            field("includeProcessedCopies").set(null, copies);
+        } catch (Exception ex) {
+            throw new AssertionError("could not set includeProcessedCopies", ex);
         }
+        chooseInTheIncludeDialogAsConfigured(filterDescription, files);
+    }
+
+    /** The dialog under whatever the Configure settings are now. */
+    protected void chooseInTheIncludeDialogAsConfigured(String filterDescription, Path... files) {
+        pressCtrl(KeyEvent.VK_I);
 
         JFileChooserFixture chooser =
                 JFileChooserFinder.findFileChooser().withTimeout(DIALOG_TIMEOUT_MS).using(robot);

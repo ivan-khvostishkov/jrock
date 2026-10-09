@@ -312,6 +312,29 @@ class JRockMarkdownExportTest {
     }
 
     @Test
+    @DisplayName("a picture referred to by the name its include's reference gave it is placed too")
+    @SuppressWarnings("unchecked")
+    void placesAnImageReferredToByName() throws Exception {
+        // What an include writes with Markdown references on, and the model writes back:
+        // "![<what it is>](<file name>)" - a name, not a hash, with a space in it here.
+        Path png = png("IMG 4002.png", 400, 200);
+        java.lang.reflect.Field refTargets = JRock.class.getDeclaredField("REF_TARGETS");
+        refTargets.setAccessible(true);
+        Map<String, String> names = (Map<String, String>) refTargets.get(null);
+        names.put("scans/IMG 4002.png", HASH);
+        try {
+            Object document = export("A logo:\n\n![Image: 400 x 200](<scans/IMG 4002.png>)\n",
+                    Collections.singletonMap(HASH, png));
+            assertThat(warnings(document)).describedAs("nothing to complain about").isEmpty();
+            assertThat(images(document)).describedAs("pictures placed").isEqualTo(1);
+            assertThat(unzip(docx(document)).get("word/media/image1.png"))
+                    .isEqualTo(Files.readAllBytes(png));
+        } finally {
+            names.remove("scans/IMG 4002.png");
+        }
+    }
+
+    @Test
     @DisplayName("the page decides the size: text frame, or 300 dpi, whichever is smaller")
     void sizesEveryImageForTheA4PageAtNoLessThan300Dpi() throws Exception {
         // The text frame of A4 with 2 cm margins: 9638 x 14570 twips, which is 635 EMU

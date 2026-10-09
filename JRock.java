@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.6.0";
+    private static final String VERSION = "2.7.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -751,6 +751,36 @@ public class JRock {
     private static final String CONFIG_HISTORY = "history";
     private static volatile boolean historyOn = false;
 
+    // How the include dialog, Include directory and the automations take the file types
+    // that have more than one reading, so the dialog offers each type exactly once (see
+    // showIncludeDialog). A PDF as "images" (one page image per page, by the PDF
+    // engine), "html" (an xpdf HTML folder beside it) or "text" (an xpdf .txt beside
+    // it); absent is "images", and the browser, which has no xpdf, always reads images.
+    // An RTF as "markdown" (converted) or "text" (its markup, as it is); absent is
+    // "markdown".
+    private static final String CONFIG_PDF_MODE = "include-pdf-as";
+    private static final String PDF_AS_IMAGES = "images", PDF_AS_HTML = "html",
+                                PDF_AS_TEXT = "text";
+    private static volatile String pdfIncludeMode = PDF_AS_IMAGES;
+    private static final String CONFIG_RTF_MODE = "include-rtf-as";
+    private static final String RTF_AS_MARKDOWN = "markdown", RTF_AS_TEXT = "text";
+    private static volatile String rtfIncludeMode = RTF_AS_MARKDOWN;
+    // Whether every include gets a Markdown reference above its token - an image's
+    // "![...](name)", any other file's "[...](name)" - naming the file and saying what
+    // it is: true or false, and absent is false (see includeOne).
+    private static final String CONFIG_MARKDOWN_REFS = "include-markdown-references";
+    private static volatile boolean includeMarkdownRefs = false;
+    // Whether an include is made from a processed copy under JRock/ - a picked file
+    // copied into JRock/includes/, an image downscaled to Images DPI on the way - and
+    // whether a conversion may keep its result under JRock/ at all: true or false, and
+    // absent is true (see includeFile).
+    private static final String CONFIG_PROCESSED_COPIES = "include-processed-copies";
+    private static volatile boolean includeProcessedCopies = true;
+    // Whether a prompt answered before is answered again from JRock/messages/ rather
+    // than by Bedrock: true or false, and absent is true (see the Local prompt cache).
+    private static final String CONFIG_PROMPT_CACHE = "local-prompt-cache";
+    private static volatile boolean promptCacheOn = true;
+
     // Written above the settings, and the only documentation the format needs. The
     // format itself exists for one reason: a value is a whole line of its own, so it
     // can be cut and pasted as a line - no quoting, no escaping, and no "everything
@@ -798,6 +828,13 @@ public class JRock {
             clockOn = !"false".equalsIgnoreCase(settings.get(CONFIG_CLOCK));
             historyLimit = parseHistoryLimit(settings.get(CONFIG_HISTORY_LIMIT), 0);
             historyOn = "true".equalsIgnoreCase(settings.get(CONFIG_HISTORY));
+            pdfIncludeMode = pdfModeOf(settings.get(CONFIG_PDF_MODE));
+            rtfIncludeMode = RTF_AS_TEXT.equalsIgnoreCase(trimmed(settings.get(CONFIG_RTF_MODE)))
+                    ? RTF_AS_TEXT : RTF_AS_MARKDOWN;
+            includeMarkdownRefs = "true".equalsIgnoreCase(trimmed(settings.get(CONFIG_MARKDOWN_REFS)));
+            includeProcessedCopies =
+                    !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROCESSED_COPIES)));
+            promptCacheOn = !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROMPT_CACHE)));
             settingsSource = "JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
@@ -854,8 +891,23 @@ public class JRock {
         if (historyLimit > 0) {   // unlimited: left out, which reads back as unlimited
             appendSetting(text, CONFIG_HISTORY_LIMIT, String.valueOf(historyLimit));
         }
+        appendSetting(text, CONFIG_PDF_MODE, pdfIncludeMode);
+        appendSetting(text, CONFIG_RTF_MODE, rtfIncludeMode);
+        appendSetting(text, CONFIG_MARKDOWN_REFS, String.valueOf(includeMarkdownRefs));
+        appendSetting(text, CONFIG_PROCESSED_COPIES, String.valueOf(includeProcessedCopies));
+        appendSetting(text, CONFIG_PROMPT_CACHE, String.valueOf(promptCacheOn));
         atomicWriteQuietly(configFile(), text.toString());
     }
+
+    // A stored PDF include mode, or "images" for anything else - absent, misspelt, or
+    // an xpdf mode in the browser, where there is no xpdf to run.
+    private static String pdfModeOf(String stored) {
+        String mode = trimmed(stored).toLowerCase(java.util.Locale.ROOT);
+        if (isCheerpJ()) return PDF_AS_IMAGES;
+        return mode.equals(PDF_AS_HTML) || mode.equals(PDF_AS_TEXT) ? mode : PDF_AS_IMAGES;
+    }
+
+    private static String trimmed(String s) { return s == null ? "" : s.trim(); }
 
     // The stored images DPI, taken only when it is one of the values the Configure
     // dialog offers.
@@ -1514,13 +1566,17 @@ public class JRock {
             return sb.toString();
         }
 
-        // Returns the dialog turns so far, in order, as {role, text} pairs
-        // (role is ROLE_HUMAN or ROLE_ASSISTANT). Used to build a multi-turn
-        // request in "extend" mode. Gray entries are excluded.
+        // Returns the dialog turns History sends, in order, as {role, text} pairs
+        // (role is ROLE_HUMAN or ROLE_ASSISTANT): the messages that were themselves
+        // sent - or answered - with History ticked, which are the ones whose header
+        // carries the time (see dialog), in this session or restored from the log.
+        // A question asked with History off is a side question: it and its answer are
+        // left out, so the conversation History carries goes on as if it was never
+        // asked. Gray entries are excluded.
         java.util.List<String[]> dialogHistory() {
             java.util.List<String[]> out = new ArrayList<>();
             for (Entry e : entries) {
-                if (e.dialog) out.add(new String[] { e.role, e.text });
+                if (e.dialog && !e.headerSuffix.isEmpty()) out.add(new String[] { e.role, e.text });
             }
             return out;
         }
@@ -1792,6 +1848,7 @@ public class JRock {
                 + " over " + priced + " priced request" + (priced == 1 ? "" : "s")
                 + " (model-card prices; Clear log starts it again from $0)");
         log.gray("Messages also stored in JRock/messages/ directory.");
+        syncPromptCache(log);
 
         log.gray("HTTP transport: " + http().describe()
                 + (isCheerpJ() ? " (CheerpJ browser runtime)" : ""));
@@ -2131,6 +2188,25 @@ public class JRock {
                 return;
             }
 
+            // The Local prompt cache: the same prompt answered before is answered again
+            // from that earlier answer, and Bedrock is not called. Only now, with every
+            // include checked above - and only with no earlier messages going along,
+            // which no message file records (see the Local prompt cache).
+            Path[] cachedFrom = new Path[1];
+            String cached = promptCacheOn && history.isEmpty()
+                    ? cachedAnswer(prompt, cachedFrom) : null;
+            if (cached != null) {
+                log.gray("Local prompt cache: this prompt was answered before - reusing "
+                        + "JRock/messages/" + cachedFrom[0].getFileName()
+                        + ", with no call to Bedrock.");
+                log.gray("");
+                log.assistant(cached, extend);
+                log.gray("");
+                sendGate.accept(true);
+                sendFinished(null);
+                return;
+            }
+
             // If the model isn't served via Chat Completions on mantle, don't even
             // log "Calling ..." - report why and stop, without any HTTP request.
             BedrockModelCard card = cardFor(MODEL_ID);
@@ -2429,21 +2505,7 @@ public class JRock {
                 KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "jrock-include");
         frame.getRootPane().getActionMap().put("jrock-include", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
-                showIncludeDialog(frame, input, log, extendMode.isSelected(), false);
-            }
-        });
-
-        // Ctrl+Shift+I is the same include, keeping a copy: the file is copied into
-        // JRock/includes/ first and included from there, so the include outlives
-        // whatever happens to the original (see includeCopyOf). Shift because it is
-        // Ctrl+I with something added, not a different thing.
-        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_I,
-                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
-                "jrock-include-copy");
-        frame.getRootPane().getActionMap().put("jrock-include-copy", new AbstractAction() {
-            @Override public void actionPerformed(ActionEvent e) {
-                showIncludeDialog(frame, input, log, extendMode.isSelected(), true);
+                showIncludeDialog(frame, input, log, extendMode.isSelected());
             }
         });
 
@@ -2594,14 +2656,7 @@ public class JRock {
         // Prompt area: Include... / Load prompt... / Save prompt copy...
         javax.swing.JPopupMenu promptMenu = new javax.swing.JPopupMenu();
         addMenuItem(promptMenu, "Include text, image, audio, PDF, RTF, DOCX or XLSX file...",
-                () -> showIncludeDialog(frame, input, log, extendMode.isSelected(), false));
-        // The same dialog, the same filters, one thing more: the chosen file is copied
-        // into JRock/includes/ and included from the copy, which is the include that
-        // still works after a restart (see includeCopyOf). A second menu item rather
-        // than a checkbox in the chooser, because a chooser has nowhere to put one
-        // except the accessory column down its right-hand side.
-        addMenuItem(promptMenu, "Include with copy...",
-                () -> showIncludeDialog(frame, input, log, extendMode.isSelected(), true));
+                () -> showIncludeDialog(frame, input, log, extendMode.isSelected()));
         // Every file in a folder at once, each by its extension (see
         // showIncludeDirectoryDialog).
         addMenuItem(promptMenu, "Include directory...",
@@ -3020,21 +3075,25 @@ public class JRock {
         return null;
     }
 
-    // Includes one file in the prompt under the kind the include dialog's filters stand
-    // for, and returns null - or why nothing was included:
+    // Includes one file in the prompt, and returns null - or why nothing was included.
+    // kind says how to read it, whatever the Configure dialog says for its type:
     //
+    //   "auto"   as the include dialog would (see includeFile)
     //   "img"    an image file, as a picture
-    //   "imgref" the same, with a Markdown "![](<hash>)" reference above the token
+    //   "imgref" the same, always with a Markdown reference above the token
     //   "txt"    a text file, as it is
     //   "audio"  a recording (wav, mp3), as an input_audio part
     //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
     //   "pdfhtml" a PDF, converted by xpdf's pdftohtml into a folder beside it, then
-    //            the folder - with the same dialogs as the "PDF as HTML folder"
-    //            filter, and each page image with a "![](<hash>)" reference
+    //            the folder - with the same dialogs as the include dialog's - and
+    //            always with a Markdown reference above each token
     //   "pdftext" a PDF, converted by xpdf's pdftotext into a .txt beside it
     //   "rtf"    an RTF, converted to Markdown text
     //   "docx"   a DOCX, converted to Markdown text
     //   "xlsx"   an XLSX, converted to one CSV per sheet
+    //
+    // Markdown references and processed copies follow the Configure dialog, as they do
+    // for an include by hand: with copies off, a conversion into JRock/ is refused.
     //
     // Blocks for as long as the conversion takes, which for a long PDF is minutes.
     //
@@ -3048,33 +3107,48 @@ public class JRock {
         Path path = Paths.get(file).toAbsolutePath().normalize();
         if (!Files.isRegularFile(path)) return "not a file: " + path;
         int before = promptTokenCount(live);
+        boolean forced = kind.equals("imgref") || kind.equals("pdfhtml");
+        IncludeAction act = new IncludeAction(live.frame, live.input, live.log, false,
+                forced, false);
+        boolean toJRock = kind.equals("pdf") || kind.equals("rtf") || kind.equals("docx")
+                || kind.equals("xlsx");
+        if (toJRock && !includeProcessedCopies) {
+            return "a \"" + kind + "\" include converts the file into JRock/, and "
+                    + "\"Include from processed copies in JRock/\" is off in Configure.";
+        }
         try {
             switch (kind) {
+                case "auto":
+                    includeFile(act, path);
+                    break;
                 case "pdf":
-                    includePdf(live.frame, live.input, live.log, false, path);
+                    includePdf(live.frame, live.input, live.log, false, path, act.namer());
                     break;
                 case "pdfhtml":
                 case "pdftext":
                     includePdfWithXpdf(live.frame, live.input, live.log, false, path,
-                            kind.equals("pdfhtml"), true);
+                            kind.equals("pdfhtml"), act.refs);
                     break;
                 case "rtf":
-                    includeRtfAsMarkdown(live.input, live.log, false, path);
+                    includeRtfAsMarkdown(live.input, live.log, false, path, act.namer());
                     break;
                 case "docx":
-                    includeDocxAsMarkdown(live.input, live.log, false, path);
+                    includeDocxAsMarkdown(live.input, live.log, false, path, act.namer());
                     break;
                 case "xlsx":
-                    includeXlsxAsCsv(live.input, live.log, false, path);
+                    includeXlsxAsCsv(live.input, live.log, false, path, act.namer());
                     break;
                 case "img":
                 case "imgref":
                 case "audio":
                 case "txt": {
                     boolean image = kind.equals("img") || kind.equals("imgref");
-                    onEdt(() -> includeOne(live.input, live.log, false, path,
+                    Path included = includeProcessedCopies
+                            ? includeCopyOf(path, live.log, image) : path;
+                    String target = act.target(path);
+                    onEdt(() -> includeOne(live.input, live.log, false, included,
                             image ? "img" : kind.equals("audio") ? "audio" : "txt",
-                            image, kind.equals("imgref")));
+                            image, null, target));
                     break;
                 }
                 default:
@@ -3221,8 +3295,8 @@ public class JRock {
 
     // Writes markdown - normally a reply the automation has just read back - to file as a
     // DOCX with its pictures, as "Export selected Markdown with images as DOCX..." does
-    // with the same text selected: A4 portrait, every "![](<hash>)" placed as the image
-    // that include names. The text is selected in the log first, where it can be found,
+    // with the same text selected: A4 portrait, every "![...](<name>)" placed as the
+    // image that include's reference names. The text is selected in the log first, where it can be found,
     // so the window shows what was exported. Returns null, or why nothing was written.
     // file is written as given; the automation picks a name that is free.
     public static String automationExportDocx(String markdown, String file) {
@@ -3844,12 +3918,63 @@ public class JRock {
         // arbitrary number here has no meaning worth supporting.
         javax.swing.JComboBox<Integer> dpiF = new javax.swing.JComboBox<>();
         for (int dpi : IMAGES_DPI_OPTIONS) dpiF.addItem(dpi);
+        dpiF.setName("imagesDpi");
         dpiF.setSelectedItem(imagesDpi);
         dpiF.setFont(dpiF.getFont().deriveFont(java.awt.Font.PLAIN));
         dpiF.setToolTipText("How fine a picture to keep, per inch of page (72/96 "
                 + "screen, 150 documents, 203 fax/receipt, 300 print). PDF pages are "
-                + "rasterised at it, and \"Include with copy...\" downscales an image "
-                + "to it. Higher is sharper but costs more tokens.");
+                + "rasterised at it, a processed copy of an image is downscaled to it, "
+                + "and an image's size in cm is reckoned at it. Higher is sharper but "
+                + "costs more tokens.");
+
+        // How the two file types with more than one reading are included - the include
+        // dialog offers each type once, read the way these say (see showIncludeDialog).
+        String[] pdfModes = isCheerpJ()
+                ? new String[] { "Page images" }
+                : new String[] { "Page images", "HTML folder (xpdf)", "Text (xpdf)" };
+        javax.swing.JComboBox<String> pdfModeF = new javax.swing.JComboBox<>(pdfModes);
+        pdfModeF.setName("pdfIncludeMode");
+        pdfModeF.setSelectedIndex(pdfIncludeMode.equals(PDF_AS_HTML) ? 1
+                : pdfIncludeMode.equals(PDF_AS_TEXT) ? 2 : 0);
+        pdfModeF.setFont(pdfModeF.getFont().deriveFont(java.awt.Font.PLAIN));
+        pdfModeF.setToolTipText("Page images: one picture per page, by Ghostscript (PDF.js "
+                + "in the browser). HTML folder or Text: xpdf's pdftohtml or pdftotext, "
+                + "written beside the PDF under its name.");
+        javax.swing.JPanel pdfModeRow = new javax.swing.JPanel(new BorderLayout(12, 0));
+        pdfModeRow.add(pdfModeF, BorderLayout.WEST);
+        javax.swing.JComboBox<String> rtfModeF = new javax.swing.JComboBox<>(
+                new String[] { "Markdown (converted)", "Text as is (RTF markup)" });
+        rtfModeF.setName("rtfIncludeMode");
+        rtfModeF.setSelectedIndex(rtfIncludeMode.equals(RTF_AS_TEXT) ? 1 : 0);
+        rtfModeF.setFont(rtfModeF.getFont().deriveFont(java.awt.Font.PLAIN));
+        javax.swing.JPanel rtfModeRow = new javax.swing.JPanel(new BorderLayout(12, 0));
+        rtfModeRow.add(rtfModeF, BorderLayout.WEST);
+        javax.swing.JCheckBox refsF = new javax.swing.JCheckBox(
+                "Markdown reference above each include", includeMarkdownRefs);
+        refsF.setName("includeMarkdownRefs");
+        refsF.setFont(refsF.getFont().deriveFont(java.awt.Font.PLAIN));
+        refsF.setToolTipText("Every include gets a line above its token naming the file "
+                + "and saying what it is: ![Image: ...](photo.png) for a picture, "
+                + "[Text: ...](notes.txt) for anything else. A model reads it as the "
+                + "file's place in the text, and the DOCX export places a picture there.");
+        javax.swing.JCheckBox cacheF = new javax.swing.JCheckBox(
+                "Local prompt cache: answer a prompt sent before from JRock/messages/",
+                promptCacheOn);
+        cacheF.setName("promptCacheOn");
+        cacheF.setFont(cacheF.getFont().deriveFont(java.awt.Font.PLAIN));
+        cacheF.setToolTipText("A prompt identical to one answered before - same text, same "
+                + "included files - gets that answer again, with no call to Bedrock. Every "
+                + "file in JRock/messages/ counts: delete the ones whose answers should not "
+                + "be reused. Not for a prompt that goes with History's earlier messages.");
+        javax.swing.JCheckBox copiesF = new javax.swing.JCheckBox(
+                "Include from processed copies in JRock/", includeProcessedCopies);
+        copiesF.setName("includeProcessedCopies");
+        copiesF.setFont(copiesF.getFont().deriveFont(java.awt.Font.PLAIN));
+        copiesF.setToolTipText("Each picked file is copied into JRock/includes/ and "
+                + "included from there - an image downscaled to Images DPI on the way, so "
+                + "not always byte for byte - and conversions keep their results under "
+                + "JRock/. Off: files are included where they are, and a PDF, RTF, DOCX or "
+                + "XLSX that needs converting into JRock/ is refused.");
         // Autobackup, on a line of its own rather than beside the DPI, so two unrelated
         // settings never look like one thing: how fine a picture to keep has nothing
         // to do with zipping the folder up. The checkbox says what it is in its own label,
@@ -3896,6 +4021,11 @@ public class JRock {
         addRow(fields, c, row++, "", autoBackupF);
         addRow(fields, c, row++, "History limit:", historyRow);
         addRow(fields, c, row++, "Images DPI:", dpiRow);
+        addRow(fields, c, row++, "Include PDF as:", pdfModeRow);
+        addRow(fields, c, row++, "Include RTF as:", rtfModeRow);
+        addRow(fields, c, row++, "", refsF);
+        addRow(fields, c, row++, "", copiesF);
+        addRow(fields, c, row++, "", cacheF);
         if (deviceF != null) addRow(fields, c, row++, "Narrate on:", deviceF);
         if (micF != null) addRow(fields, c, row++, "Record from:", micF);
         if (transcribeF != null) addRow(fields, c, row++, "", transcribeF);
@@ -4026,6 +4156,16 @@ public class JRock {
         // Image resolution: picked from the list, so always valid.
         Object dpi = dpiF.getSelectedItem();
         if (dpi instanceof Integer) { imagesDpi = (Integer) dpi; }
+
+        // The include settings: from fixed lists and checkboxes, so always valid.
+        int pdfMode = pdfModeF.getSelectedIndex();
+        pdfIncludeMode = pdfMode == 1 ? PDF_AS_HTML : pdfMode == 2 ? PDF_AS_TEXT : PDF_AS_IMAGES;
+        rtfIncludeMode = rtfModeF.getSelectedIndex() == 1 ? RTF_AS_TEXT : RTF_AS_MARKDOWN;
+        includeMarkdownRefs = refsF.isSelected();
+        includeProcessedCopies = copiesF.isSelected();
+        // Off empties the table, and on again builds it afresh from the folder - both
+        // in the session report that applying this dialog runs (see syncPromptCache).
+        promptCacheOn = cacheF.isSelected();
 
         // Narrate's device: taken as it stands, empty included - unlike the model, an
         // empty field here means something, "no device", and is how one is unset.
@@ -4330,7 +4470,6 @@ public class JRock {
         String[][] keys = {
             {"Ctrl+Enter", "Send message (call a Bedrock model)"},
             {"Ctrl+I", "Include a text, image, audio, PDF, RTF, DOCX or XLSX file"},
-            {"Ctrl+Shift+I", "Include it with a copy kept under JRock/includes/"},
             {"Ctrl+U", "Fetch a URL and include what it answers with"},
             {"Ctrl+Space", "Start recording from the microphone; again to stop and include "
                     + "it (or type it, with Transcribe on)"},
@@ -6919,20 +7058,17 @@ public class JRock {
         log.clear();
     }
 
-    // What "text file" means in the Load prompt and Include dialogs: .txt plus the
-    // plain-text formats people actually reach for. A .md, .csv, .json, .xml, .html, .svg or .java
-    // file is text like any other, and loads or is included as it is named, with no
-    // renaming to .txt. (Any file still has to pass the looksBinary check on load.)
+    // What "text file" means in the Include dialog: .txt plus the plain-text formats
+    // people actually reach for. A .md, .csv, .json, .xml, .html, .svg or .java file is
+    // text like any other, and is included as it is named, with no renaming to .txt.
     //
-    // .rtf is in the list because an RTF file is text too - its markup is ASCII, which
-    // is how it carries everything else - and a model that knows RTF can read it as it
-    // stands, and answer in it. "as is" is what separates this from the include
-    // dialog's other offer for the same file: "RTF as Markdown text", which converts it
-    // and sends the Markdown instead.
+    // Not .rtf, which is text too - its markup is ASCII - but has a filter of its own,
+    // read as Markdown or as is by the Configure dialog's "Include RTF as" (see
+    // includeFile): each type is in exactly one of the dialog's filters.
     private static final String[] TEXT_EXTENSIONS =
-            { "txt", "md", "csv", "json", "xml", "html", "svg", "java", "rtf" };
+            { "txt", "md", "csv", "json", "xml", "html", "svg", "java" };
     private static final String TEXT_FILTER_LABEL =
-            "Text files as is (*.txt, *.md, *.csv, *.json, *.xml, *.html, *.svg, *.java, *.rtf)";
+            "Text files as is (*.txt, *.md, *.csv, *.json, *.xml, *.html, *.svg, *.java)";
 
     // The image formats ImageHeader can read a size out of, which is also the set the
     // DOCX export can place: named once, because two filters in the include dialog
@@ -7017,82 +7153,48 @@ public class JRock {
     }
 
     // ---- Include file (Ctrl+I) ---------------------------------------------
-    // Lets the user pick a text, image or audio file, a PDF to convert into per-page
-    // images (via Ghostscript) or into HTML or text (via xpdf), an RTF or DOCX to convert into
-    // Markdown (with the JDK's own RTF reader and XML parser), or an XLSX to convert
-    // into one CSV per sheet (with the same XML parser). Each included file is hashed, remembered as
-    // hash -> path in the non-persistent INCLUDES map, logged (with image dimensions or
-    // a recording's own header where applicable), and gets an "@txt <hash>" /
-    // "@img <hash>" / "@audio <hash>"
-    // token inserted at the prompt cursor - an image optionally with a Markdown
-    // "![](<hash>)" reference above it, which is what the DOCX export places.
+    // Lets the user pick files to include, and includes each the way includeFile says:
+    // by its type, read the way the Configure dialog says for the two types with more
+    // than one reading (a PDF as page images, an HTML folder or text; an RTF as Markdown
+    // or as is), from a processed copy under JRock/ or where it lies, with or without a
+    // Markdown reference above its token.
     //
-    // With copies on (Ctrl+Shift+I, "Include with copy..."), each file the user picks
-    // directly is copied into JRock/includes/ first and included from the copy - see
-    // includeCopyOf. Everything else about the dialog is the same, which is the point
-    // of it being the same dialog.
+    // The first filter, and the one the dialog opens on, takes every type there is; the
+    // others take one type each, and no type is in two of them - so which filter is
+    // picked only narrows what the chooser shows, and never changes how a file is read.
+    // That is the Configure dialog's job, and one place to look for it.
     private static void showIncludeDialog(JFrame frame, JTextArea input, LogView log,
-                                          boolean extend, boolean copies) {
+                                          boolean extend) {
         javax.swing.JFileChooser chooser =
                 new javax.swing.JFileChooser(includeChooserDir.start());
-        chooser.setDialogTitle(copies ? "Include file, with a copy under JRock"
-                                      : "Include file");
+        chooser.setDialogTitle("Include file");
         chooser.setAcceptAllFileFilterUsed(false);
-        javax.swing.filechooser.FileNameExtensionFilter imageFilter =
+        java.util.List<String> all = new java.util.ArrayList<>();
+        all.addAll(java.util.Arrays.asList(IMAGE_EXTENSIONS));
+        all.addAll(java.util.Arrays.asList(TEXT_EXTENSIONS));
+        all.addAll(java.util.Arrays.asList(AUDIO_EXTENSIONS));
+        all.addAll(java.util.Arrays.asList("pdf", "rtf", "docx", "xlsx"));
+        javax.swing.filechooser.FileNameExtensionFilter allFilter =
                 new javax.swing.filechooser.FileNameExtensionFilter(
-                        "Image files" + IMAGE_FILTER_SUFFIX, IMAGE_EXTENSIONS);
-        // The same files, with one line more in the prompt: a Markdown "![](<hash>)"
-        // above the token. The model reads it as a picture belonging to the text, and
-        // writes it back into its answer where the picture belongs - which is what the
-        // DOCX export then places (see exportSelectedMarkdown).
-        javax.swing.filechooser.FileNameExtensionFilter imageRefFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        "Image with a Markdown reference" + IMAGE_FILTER_SUFFIX, IMAGE_EXTENSIONS);
-        javax.swing.filechooser.FileNameExtensionFilter textFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        TEXT_FILTER_LABEL, TEXT_EXTENSIONS);
-        // Page images, for a PDF, by the PDF engine (see pdf()). Its text goes through
-        // xpdf instead (see includePdfWithXpdf): Ghostscript's txtwrite takes the text
-        // operators as they come and hands back something a model has to guess at,
-        // where xpdf's pdftotext and pdftohtml put the text back in reading order.
-        javax.swing.filechooser.FileNameExtensionFilter pdfImageFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter("PDF as page images (*.pdf)", "pdf");
-        javax.swing.filechooser.FileNameExtensionFilter pdfHtmlFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        "PDF as HTML folder, with xpdf (*.pdf)", "pdf");
-        javax.swing.filechooser.FileNameExtensionFilter pdfTextFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        "PDF as text, with xpdf (*.pdf)", "pdf");
-        javax.swing.filechooser.FileNameExtensionFilter rtfMarkdownFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        "RTF as Markdown text (*.rtf)", "rtf");
-        javax.swing.filechooser.FileNameExtensionFilter docxMarkdownFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        "DOCX as Markdown text (*.docx)", "docx");
-        javax.swing.filechooser.FileNameExtensionFilter xlsxCsvFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        "XLSX as CSV text, one file per sheet (*.xlsx)", "xlsx");
+                        ALL_FILTER_LABEL, all.toArray(new String[0]));
+        chooser.addChoosableFileFilter(allFilter);   // first in the dropdown
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "Image files" + IMAGE_FILTER_SUFFIX, IMAGE_EXTENSIONS));
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                TEXT_FILTER_LABEL, TEXT_EXTENSIONS));
         // A recording, sent as itself: the model is given the audio, not a transcript of
-        // it made here. There is nothing to convert and nothing to rasterise - the file
-        // goes out base64 in an "input_audio" part, the way an image goes out in an
-        // "image_url" one (see AUDIO_EXTENSIONS and buildParts).
-        javax.swing.filechooser.FileNameExtensionFilter audioFilter =
-                new javax.swing.filechooser.FileNameExtensionFilter(
-                        "Audio files" + AUDIO_FILTER_SUFFIX, AUDIO_EXTENSIONS);
-        chooser.addChoosableFileFilter(imageFilter);   // first in the dropdown
-        chooser.addChoosableFileFilter(imageRefFilter);
-        chooser.addChoosableFileFilter(textFilter);
-        chooser.addChoosableFileFilter(audioFilter);
-        chooser.addChoosableFileFilter(pdfImageFilter);
-        // Desktop only: xpdf is a program on PATH, and the browser has neither.
-        if (!isCheerpJ()) {
-            chooser.addChoosableFileFilter(pdfHtmlFilter);
-            chooser.addChoosableFileFilter(pdfTextFilter);
-        }
-        chooser.addChoosableFileFilter(rtfMarkdownFilter);
-        chooser.addChoosableFileFilter(docxMarkdownFilter);
-        chooser.addChoosableFileFilter(xlsxCsvFilter);
-        chooser.setFileFilter(imageFilter);            // default selection = image
+        // it made here (see AUDIO_EXTENSIONS and buildParts).
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "Audio files" + AUDIO_FILTER_SUFFIX, AUDIO_EXTENSIONS));
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                pdfFilterLabel(), "pdf"));
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                rtfFilterLabel(), "rtf"));
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "DOCX files, as Markdown text (*.docx)", "docx"));
+        chooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "XLSX files, as CSV text, one file per sheet (*.xlsx)", "xlsx"));
+        chooser.setFileFilter(allFilter);
         chooser.setMultiSelectionEnabled(true);        // allow selecting several files
 
         // A clipboard for the "File name" line, which on a touch screen is the only way
@@ -7105,56 +7207,19 @@ public class JRock {
 
         java.io.File[] selected = chooser.getSelectedFiles();
         if (selected == null || selected.length == 0) return;
-        javax.swing.filechooser.FileFilter chosen = chooser.getFileFilter();
-        boolean pdf = chosen == pdfImageFilter;
-        boolean pdfHtml = chosen == pdfHtmlFilter;
-        boolean pdfText = chosen == pdfTextFilter;
-        boolean rtf = chosen == rtfMarkdownFilter;
-        boolean docx = chosen == docxMarkdownFilter;
-        boolean xlsx = chosen == xlsxCsvFilter;
-        boolean isImage = chosen == imageFilter || chosen == imageRefFilter;
-        boolean isAudio = chosen == audioFilter;
-        boolean markdownRef = chosen == imageRefFilter;
 
-        // Process each chosen file in turn, all under the selected filter's kind.
-        //
         // Off the EDT, because a PDF include runs Ghostscript and waits for it: on a
         // big document that is minutes, and on the EDT nothing would repaint for all
         // of them - not the "Converting PDF with Ghostscript: ..." line, not gs's own
         // page-by-page progress, not even the window. The user would see a frozen
         // application and no explanation. Everything that touches a widget from here
-        // hops back onto the EDT with onEdt(). An RTF conversion is quick by
-        // comparison, but it parses a whole document, so it goes the same way.
+        // hops back onto the EDT with onEdt().
         final java.io.File[] files = selected;
+        final IncludeAction act = new IncludeAction(frame, input, log, extend, false, false);
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
-                for (java.io.File f : files) {
-                    Path file = f.toPath();
-                    if (pdf) {
-                        includePdf(frame, input, log, extend, file);
-                    } else if (pdfHtml || pdfText) {
-                        includePdfWithXpdf(frame, input, log, extend, file, pdfHtml, false);
-                    } else if (rtf) {
-                        includeRtfAsMarkdown(input, log, extend, file);
-                    } else if (docx) {
-                        includeDocxAsMarkdown(input, log, extend, file);
-                    } else if (xlsx) {
-                        includeXlsxAsCsv(input, log, extend, file);
-                    } else {
-                        // The copy, if one was asked for, happens here and not inside
-                        // includeOne: what the three conversions above include is
-                        // already a file they wrote under JRock/ themselves, so only
-                        // the file the user picked directly needs copying.
-                        final Path included =
-                                copies ? includeCopyOf(file, log, isImage) : file;
-                        // Left on the EDT: hashing and reading a plain include is
-                        // quick.
-                        onEdt(() -> includeOne(input, log, extend, included,
-                                isImage ? "img" : isAudio ? "audio" : "txt",
-                                isImage, markdownRef));
-                    }
-                }
+                for (java.io.File f : files) includeFile(act, f.toPath());
                 return null;
             }
 
@@ -7171,15 +7236,148 @@ public class JRock {
         }.execute();
     }
 
+    private static final String ALL_FILTER_LABEL =
+            "All supported files (images, text, audio, PDF, RTF, DOCX, XLSX)";
+
+    // The PDF and RTF filters say how they read, as the Configure dialog has it, so the
+    // chooser itself answers "what will this do with my PDF".
+    private static String pdfFilterLabel() {
+        String how = pdfIncludeMode.equals(PDF_AS_HTML) ? "an HTML folder, with xpdf"
+                : pdfIncludeMode.equals(PDF_AS_TEXT) ? "text, with xpdf" : "page images";
+        return "PDF files, as " + how + " (*.pdf)";
+    }
+
+    private static String rtfFilterLabel() {
+        return "RTF files, as " + (rtfIncludeMode.equals(RTF_AS_TEXT) ? "is" : "Markdown text")
+                + " (*.rtf)";
+    }
+
+    // One include action - a pick in the dialog, a folder, an automation call - and what
+    // holds for every file in it: the window and the prompt it goes into, whether each
+    // token gets a Markdown reference (the Configure setting, or forced by an automation
+    // that needs one), and how a reference names its file - by name, or for a folder's
+    // files by the path from the working directory (see pathFromWorkingDir).
+    private static final class IncludeAction {
+        final JFrame frame;
+        final JTextArea input;
+        final LogView log;
+        final boolean extend;
+        final boolean refs;
+        final boolean withPath;
+        // Whether the "turn processed copies on" dialog has been shown for this action:
+        // once is enough, however many files of a folder it refuses.
+        private final boolean[] copiesWarned;
+
+        IncludeAction(JFrame frame, JTextArea input, LogView log, boolean extend,
+                      boolean forceRefs, boolean withPath) {
+            this(frame, input, log, extend, forceRefs || includeMarkdownRefs, withPath,
+                    new boolean[1]);
+        }
+
+        private IncludeAction(JFrame frame, JTextArea input, LogView log, boolean extend,
+                              boolean refs, boolean withPath, boolean[] copiesWarned) {
+            this.frame = frame; this.input = input; this.log = log; this.extend = extend;
+            this.refs = refs; this.withPath = withPath; this.copiesWarned = copiesWarned;
+        }
+
+        // The same action for the files of a folder.
+        IncludeAction inFolder() {
+            return new IncludeAction(frame, input, log, extend, refs, true, copiesWarned);
+        }
+
+        // The name a reference gives file, or null when there are no references.
+        String target(Path file) {
+            if (!refs) return null;
+            return withPath ? pathFromWorkingDir(file) : file.getFileName().toString();
+        }
+
+        java.util.function.Function<Path, String> namer() {
+            return refs ? this::target : null;
+        }
+    }
+
+    // Includes one file the way its type is read (see includeKindOf), as the include
+    // dialog, Include directory and automationInclude all do:
+    //
+    //   an image, a text, a recording  -> itself, as @img / @txt / @audio
+    //   a PDF                          -> page images, an HTML folder or a .txt (Configure)
+    //   an RTF                         -> Markdown, or its markup as is (Configure)
+    //   a DOCX                         -> Markdown;   an XLSX -> one CSV per sheet
+    //
+    // With "Include from processed copies in JRock/" on, a file included as itself is
+    // copied into JRock/includes/ first - an image downscaled to Images DPI on the way -
+    // and included from the copy (see includeCopyOf). Off, it is included where it lies,
+    // and a type whose conversion keeps its result under JRock/ is refused, with a line
+    // and a dialog saying which setting to turn on. Off the EDT.
+    private static void includeFile(IncludeAction act, Path file) {
+        String kind = includeKindOf(file);
+        if (kind == null) {
+            act.log.gray("Not included: " + file + " - not a type Include file takes.");
+            return;
+        }
+        boolean toJRock = (kind.equals("pdf") && pdfIncludeMode.equals(PDF_AS_IMAGES))
+                || (kind.equals("rtf") && rtfIncludeMode.equals(RTF_AS_MARKDOWN))
+                || kind.equals("docx") || kind.equals("xlsx");
+        if (toJRock && !includeProcessedCopies) {
+            String what = kind.toUpperCase(java.util.Locale.ROOT);
+            act.log.gray("Not included: " + file + " - a " + what + " is converted into a "
+                    + "file under JRock/, and \"Include from processed copies in JRock/\" "
+                    + "is off. Turn it on in Configure to include it.");
+            if (!act.copiesWarned[0]) {
+                act.copiesWarned[0] = true;
+                onEdt(() -> javax.swing.JOptionPane.showMessageDialog(act.frame,
+                        "A " + what + " is included by converting it into a file under "
+                                + "JRock/, and \"Include from processed copies in JRock/\" "
+                                + "is off.\n\nTurn it on in Configure to include it.",
+                        "Processed copies are off", javax.swing.JOptionPane.WARNING_MESSAGE));
+            }
+            return;
+        }
+        switch (kind) {
+            case "pdf":
+                if (pdfIncludeMode.equals(PDF_AS_IMAGES)) {
+                    includePdf(act.frame, act.input, act.log, act.extend, file, act.namer());
+                } else {
+                    includePdfWithXpdf(act.frame, act.input, act.log, act.extend, file,
+                            pdfIncludeMode.equals(PDF_AS_HTML), act.refs);
+                }
+                return;
+            case "rtf":
+                if (rtfIncludeMode.equals(RTF_AS_MARKDOWN)) {
+                    includeRtfAsMarkdown(act.input, act.log, act.extend, file, act.namer());
+                    return;
+                }
+                kind = "txt";   // its markup, as it is
+                break;
+            case "docx":
+                includeDocxAsMarkdown(act.input, act.log, act.extend, file, act.namer());
+                return;
+            case "xlsx":
+                includeXlsxAsCsv(act.input, act.log, act.extend, file, act.namer());
+                return;
+            default:
+        }
+        boolean image = kind.equals("img");
+        Path included = includeProcessedCopies ? includeCopyOf(file, act.log, image) : file;
+        String as = kind;
+        // Named after the file that was picked, not the copy: that is the one the user
+        // knows by name.
+        String target = act.target(file);
+        onEdt(() -> includeOne(act.input, act.log, act.extend, included, as, image, null,
+                target));
+    }
+
     // ---- Include directory -------------------------------------------------
-    // Every file in one folder, included one by one in name order, each as the include
-    // dialog's filter for its extension would include it: images as @img, text as
-    // @txt, recordings as @audio, a PDF as page images, an RTF or a DOCX as Markdown,
-    // an XLSX as one CSV per sheet.
-    // With no filter to pick, a file's extension decides, and RTF goes as Markdown,
-    // the way DOCX does, rather than as its markup. A file of any other type, and a
-    // folder inside it, is skipped with a line in the log saying so: the folder is
-    // taken as it is, not searched.
+    // Every file in one folder and the folders inside it, each included as includeFile
+    // includes it. The folder's own files come first, in name order, then each folder in
+    // it, in name order, the same way down - so the order is the same every time, and a
+    // folder's files sit together in the prompt. A file of a type Include file does not
+    // take is skipped with a line in the log saying so. JRock's own folder is never
+    // gone into, nor a link to a folder (which could lead back up the tree).
+    //
+    // With Markdown references on, each one names its file by the path from the working
+    // directory (see pathFromWorkingDir): a folder's files may share names with each
+    // other's, and the path is what tells them apart.
     private static void showIncludeDirectoryDialog(JFrame frame, JTextArea input, LogView log,
                                                    boolean extend) {
         javax.swing.JFileChooser chooser =
@@ -7198,7 +7396,7 @@ public class JRock {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws IOException {
-                includeDirectory(frame, input, log, extend, dir, false);
+                includeDirectory(new IncludeAction(frame, input, log, extend, false, true), dir);
                 return null;
             }
 
@@ -7215,48 +7413,50 @@ public class JRock {
         }.execute();
     }
 
-    // The files of dir, included as showIncludeDirectoryDialog says. Off the EDT.
-    // imageRefs gives each image a Markdown "![](<hash>)" reference above its token,
-    // as the "Image with a Markdown reference" filter does.
-    private static void includeDirectory(JFrame frame, JTextArea input, LogView log,
-                                         boolean extend, Path dir, boolean imageRefs)
-            throws IOException {
+    // The files of dir and the folders under it, included as showIncludeDirectoryDialog
+    // says, with one line at the end counting them. Off the EDT.
+    private static void includeDirectory(IncludeAction act, Path dir) throws IOException {
+        int[] counts = new int[2];   // included, skipped
+        includeTree(act.inFolder(), dir, counts);
+        act.log.gray("Include directory " + dir + ": " + counts[0] + " file(s) included, "
+                + counts[1] + " skipped.");
+    }
+
+    private static void includeTree(IncludeAction act, Path dir, int[] counts) throws IOException {
         java.util.List<Path> entries = new java.util.ArrayList<>();
         try (java.util.stream.Stream<Path> list = Files.list(dir)) {
             list.forEach(entries::add);
         }
-        entries.sort(java.util.Comparator.comparing(
-                (Path p) -> p.getFileName().toString(), String.CASE_INSENSITIVE_ORDER));
-        int taken = 0, skipped = 0;
-        for (Path file : entries) {
-            String kind = Files.isRegularFile(file) ? includeKindOf(file) : null;
-            if (kind == null) {
-                skipped++;
-                log.gray("Skipped " + file + ": "
-                        + (Files.isDirectory(file) ? "a folder, which is not searched."
-                                : "not a type Include file takes."));
+        java.util.Comparator<Path> byName = java.util.Comparator
+                .comparing((Path p) -> p.getFileName().toString(), String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(p -> p.getFileName().toString());
+        entries.sort(byName);
+        java.util.List<Path> folders = new java.util.ArrayList<>();
+        for (Path entry : entries) {
+            if (Files.isDirectory(entry, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                folders.add(entry);
                 continue;
             }
-            taken++;
-            switch (kind) {
-                case "pdf":  includePdf(frame, input, log, extend, file); break;
-                case "rtf":  includeRtfAsMarkdown(input, log, extend, file); break;
-                case "docx": includeDocxAsMarkdown(input, log, extend, file); break;
-                case "xlsx": includeXlsxAsCsv(input, log, extend, file); break;
-                default: {
-                    boolean image = kind.equals("img");
-                    onEdt(() -> includeOne(input, log, extend, file, kind, image,
-                            image && imageRefs));
-                }
+            if (!Files.isRegularFile(entry) || includeKindOf(entry) == null) {
+                counts[1]++;
+                act.log.gray("Skipped " + entry + ": not a type Include file takes.");
+                continue;
             }
+            counts[0]++;
+            includeFile(act, entry);
         }
-        log.gray("Include directory " + dir + ": " + taken + " file(s) included, "
-                + skipped + " skipped.");
+        Path own = jrockDir().toAbsolutePath().normalize();
+        for (Path folder : folders) {
+            if (folder.toAbsolutePath().normalize().equals(own)) {
+                act.log.gray("Skipped " + folder + ": JRock's own folder.");
+                continue;
+            }
+            includeTree(act, folder, counts);
+        }
     }
 
-    // The include kind the include dialog would give this file by its extension -
-    // "img", "txt", "audio", "pdf", "rtf" (as Markdown), "docx" or "xlsx" (as CSV) - or null when none
-    // of its filters takes it.
+    // The include kind of this file by its extension - "img", "txt", "audio", "pdf",
+    // "rtf", "docx" or "xlsx" - or null when Include file takes no such file.
     private static String includeKindOf(Path file) {
         String name = file.getFileName().toString();
         int dot = name.lastIndexOf('.');
@@ -7305,7 +7505,7 @@ public class JRock {
     // JRock/ is in the folder the user owns, next to the log that names it.
     //
     // A failed copy is reported and the original included anyway: the point of
-    // "Include with copy..." is to keep the include available later, and refusing the
+    // processed copies is to keep the include available later, and refusing the
     // include now would be a worse answer to "the copy didn't work" than including the
     // file where it lies. Runs off the EDT with the rest of the include (it reads and
     // writes a whole file, which on a 40 MB photograph is not instant).
@@ -7381,7 +7581,7 @@ public class JRock {
     // that was already as fine as it was going to get, and the extra pixels are paid for
     // twice, once in tokens and once in the time spent sending them.
     //
-    // Only for "Include with copy...", deliberately. A plain include is a pointer at a
+    // Only for a processed copy ("Include from processed copies in JRock/"), deliberately. A plain include is a pointer at a
     // file JRock does not own, and rewriting somebody's photograph is not what "include
     // this file" asks for; a copy under JRock/includes/ is JRock's own file, made for
     // this purpose - and it says in its name what it is: "IMG_4002-1004x753.png".
@@ -7626,34 +7826,41 @@ public class JRock {
     // mode). Returns true if a token was inserted.
     private static boolean includeOne(JTextArea input, LogView log, boolean extend,
                                       Path file, String kind, boolean isImage) {
-        return includeOne(input, log, extend, file, kind, isImage, false);
+        return includeOne(input, log, extend, file, kind, isImage, null, null);
     }
 
-    // As above, and with markdownRef it also writes a Markdown image reference,
-    // "![](<hash>)", on the line above the token - two lines for one file.
-    //
-    // The token is what JRock sends; the reference is what the model sees as a picture
-    // sitting in the text, so its answer can put the picture back where it belongs and
-    // the DOCX export can place it there (see MarkdownExport).
+    // As above, and with markdownRef it also writes a Markdown reference on the line
+    // above the token naming the file by its name - see the general form.
     private static boolean includeOne(JTextArea input, LogView log, boolean extend,
                                       Path file, String kind, boolean isImage,
                                       boolean markdownRef) {
-        return includeOne(input, log, extend, file, kind, isImage,
-                markdownRef ? hash -> "![](" + hash + ")" : null);
+        return includeOne(input, log, extend, file, kind, isImage, null,
+                markdownRef ? file.getFileName().toString() : null);
     }
 
-    // The general form: reference, when given, is asked for the Markdown line to write
-    // above the token, and is handed the include's hash - which is why it is a function
-    // and not a string, the hash being known only once the file has been read.
-    //
-    // Two callers, wanting two different lines for the same reason: an image include
-    // refers to the picture by hash, which the DOCX export turns back into the file it
-    // placed, and a fetched URL refers to the address the file came from, which is
-    // what says where a page or a picture was found (see fetchUrl). null writes the
-    // token alone.
+    // As above, with the line above the token made by reference, which is handed the
+    // include's hash - which is why it is a function and not a string, the hash being
+    // known only once the file has been read. Fetch URL is the caller: its line is the
+    // address the file came from, which is what says where a page or a picture was
+    // found (see fetchUrl).
     private static boolean includeOne(JTextArea input, LogView log, boolean extend,
                                       Path file, String kind, boolean isImage,
                                       java.util.function.Function<String, String> reference) {
+        return includeOne(input, log, extend, file, kind, isImage, reference, null);
+    }
+
+    // The general form. refTarget, when given, puts a Markdown reference on the line
+    // above the token - "![<about>](<refTarget>)" for an image, "[<about>](<refTarget>)"
+    // for anything else - where <about> is the line this logs about the file ("Image:
+    // 514 x 529, 4.4 cm x 4.5 cm @ 300 DPI, ...") and refTarget is how the file is named:
+    // its name, or its path from the working directory for a folder's files (see
+    // IncludeAction.target). The token is what JRock sends; the reference is what the
+    // model reads as the file's place in the text - a picture it can put back where it
+    // belongs in its answer, which the DOCX export then places (see refTargetHash).
+    private static boolean includeOne(JTextArea input, LogView log, boolean extend,
+                                      Path file, String kind, boolean isImage,
+                                      java.util.function.Function<String, String> reference,
+                                      String refTarget) {
         String hash = hashFile(file);
         if (hash == null) {
             log.gray("Include failed: could not read " + file);
@@ -7662,60 +7869,35 @@ public class JRock {
         // Always (re)register the hash -> path mapping. After a restart this makes
         // an existing "@kind <hash>" token in the (recovered) prompt valid again.
         INCLUDES.put(hash, file);
-        // The one place this line is written: INCLUDE_LOG_LINE reads it back when the
-        // includes are reloaded from the log, so its wording is part of the format.
-        log.gray("Included @" + kind + " " + hash + " from " + file);
-        String refLine = (reference == null) ? null : reference.apply(hash);
-        if (refLine != null) log.gray("With a Markdown reference above it: " + refLine);
 
         long fileBytes = -1;
         try { fileBytes = Files.size(file); } catch (IOException ignore) { /* best-effort */ }
+        String about = includeAbout(file, kind, isImage, fileBytes);
 
-        if (isImage) {
-            // Dimensions + total pixel count + file size (all locale-formatted).
-            int[] size = ImageHeader.size(file);
-            if (size != null) {
-                long pixels = (long) size[0] * size[1];
-                log.gray("Image: " + size[0] + " x " + size[1]
-                        + ", " + fmtNum(pixels) + " pixels"
-                        + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
-            } else {
-                log.gray("Image: (dimensions not in the header)"
-                        + (fileBytes >= 0 ? "; " + fmtNum(fileBytes) + " bytes" : ""));
-            }
-        } else if ("audio".equals(kind)) {
-            // A recording's own header, the way an image include reports its dimensions:
-            // what the file claims to be, how it was sampled, and how long it plays -
-            // the three things that say whether the right file was picked. Unreadable, or
-            // a format AudioHeader does not know: the byte count, which is all that is
-            // certain then (see AudioHeader).
-            String about = AudioHeader.describe(file, fileBytes);
-            log.gray("Audio: " + (about != null ? about : "(nothing readable in the header)")
-                    + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
-            // The dialog's filter cannot offer anything but wav and mp3, but
-            // automationInclude can be handed any path at all - so a file the request
-            // cannot carry is said here, where it was picked, rather than left to come back
-            // as an HTTP 400 from the send.
+        String refLine = (reference == null) ? null : reference.apply(hash);
+        if (refLine == null && refTarget != null) {
+            refLine = (isImage ? "!" : "") + "[" + about.replace('[', '(').replace(']', ')')
+                    + "](" + markdownTarget(refTarget) + ")";
+            REF_TARGETS.put(refTarget, hash);
+        }
+        // The one place this line is written: INCLUDE_LOG_LINE reads it back when the
+        // includes are reloaded from the log, so its wording is part of the format -
+        // and so is the reference line's, which follows it (see reloadIncludes).
+        log.gray("Included @" + kind + " " + hash + " from " + file);
+        if (refLine != null) log.gray(REF_LOG_PREFIX + refLine);
+        log.gray(about);
+
+        // The dialog's filter cannot offer anything but wav and mp3, but
+        // automationInclude can be handed any path at all - so a file the request
+        // cannot carry is said here, where it was picked, rather than left to come back
+        // as an HTTP 400 from the send.
+        if ("audio".equals(kind)) {
             String format = audioFormat(file);
             if (!format.equals("wav") && !format.equals("mp3")) {
                 log.gray("This would go out as input_audio with format \"" + format
                         + "\", which the API does not take: the field is an enum of \"wav\" "
                         + "and \"mp3\", and an m4a comes back refused. Convert the file to "
                         + "one of those two first.");
-            }
-        } else {
-            // Text: symbol count (Unicode code points) + byte count.
-            try {
-                String content = readFileQuietly(file);
-                if (content != null) {
-                    int symbols = content.codePointCount(0, content.length());
-                    log.gray("Text: " + fmtNum(symbols) + " symbols"
-                            + (fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : ""));
-                } else if (fileBytes >= 0) {
-                    log.gray("Text: " + fmtNum(fileBytes) + " bytes (symbols unavailable)");
-                }
-            } catch (RuntimeException ex) {
-                log.gray("Text: (could not read stats: " + ex.getMessage() + ")");
             }
         }
 
@@ -7748,6 +7930,112 @@ public class JRock {
             input.append(insert);   // fallback: append at end
         }
         return true;
+    }
+
+    // How the reference line is introduced in the log - and found there again when the
+    // includes are reloaded (see reloadAllIncludes), so its wording is part of the format.
+    private static final String REF_LOG_PREFIX = "With a Markdown reference above it: ";
+
+    // The target of the reference in such a line: what is between the last "](" and the
+    // ")" that ends the line.
+    private static final java.util.regex.Pattern REF_TARGET_IN_LINE =
+            java.util.regex.Pattern.compile("\\]\\((<[^>]+>|[^)\\s]+)\\)\\s*$");
+
+    private static String unbracketed(String target) {
+        String t = target.trim();
+        return t.startsWith("<") && t.endsWith(">") ? t.substring(1, t.length() - 1).trim() : t;
+    }
+
+    // What each reference names, in the session: the target as written in the prompt
+    // ("photo.png", "scans/page-2.png") -> the hash of the file included under it. This
+    // is how the DOCX export finds the picture a "![...](photo.png)" in an answer means
+    // (see refTargetHash). Not persisted, like INCLUDES: Reload all includes rebuilds it
+    // from the log. The same name included twice names the later file.
+    private static final java.util.Map<String, String> REF_TARGETS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    // The hash a reference target names: the target itself when it is a hash (the
+    // "![](<hash>)" form), the include made under that name, or the include of the file
+    // at that path - from the working directory, or absolute. Null when none.
+    static String refTargetHash(String target) {
+        if (target == null) return null;
+        String t = target.trim();
+        if (t.startsWith("<") && t.endsWith(">")) t = t.substring(1, t.length() - 1).trim();
+        if (t.matches("[0-9a-f]{" + HASH_LEN + "}")) return t;
+        String named = REF_TARGETS.get(t);
+        if (named != null) return named;
+        if (t.contains("://")) return null;
+        try {
+            Path p = Paths.get(t);
+            Path file = (p.isAbsolute() ? p : workingDir.resolve(p)).toAbsolutePath().normalize();
+            for (java.util.Map.Entry<String, Path> e : INCLUDES.entrySet()) {
+                if (e.getValue().toAbsolutePath().normalize().equals(file)) return e.getKey();
+            }
+        } catch (RuntimeException ignored) {
+            // not a path on this file system
+        }
+        return null;
+    }
+
+    // A reference target as Markdown link syntax: in angle brackets when it holds a
+    // space or a bracket, which would otherwise end the link early. Forward slashes,
+    // so a path reads - and resolves - the same on every platform.
+    private static String markdownTarget(String target) {
+        String t = target.replace('\\', '/');
+        return t.matches(".*[\\s()<>].*") ? "<" + t.replace("<", "").replace(">", "") + ">" : t;
+    }
+
+    // How a folder's file is named in its reference: its path from the working
+    // directory when it is inside it, its absolute path otherwise.
+    private static String pathFromWorkingDir(Path file) {
+        Path abs = file.toAbsolutePath().normalize();
+        Path base = workingDir.toAbsolutePath().normalize();
+        String shown = abs.startsWith(base) ? base.relativize(abs).toString() : abs.toString();
+        return shown.replace('\\', '/');
+    }
+
+    // The line an include logs about its file, which is also the alt text of its
+    // Markdown reference: an image's pixel size, its size on paper at Images DPI, its
+    // pixel count and bytes; a recording's header; a text's symbols and bytes.
+    private static String includeAbout(Path file, String kind, boolean isImage, long fileBytes) {
+        String bytes = fileBytes >= 0 ? ", " + fmtNum(fileBytes) + " bytes" : "";
+        if (isImage) {
+            int[] size = ImageHeader.size(file);
+            if (size == null) {
+                return "Image: (dimensions not in the header)"
+                        + (fileBytes >= 0 ? "; " + fmtNum(fileBytes) + " bytes" : "");
+            }
+            long pixels = (long) size[0] * size[1];
+            return "Image: " + size[0] + " x " + size[1] + ", "
+                    + cm(size[0], imagesDpi) + " cm x " + cm(size[1], imagesDpi) + " cm @ "
+                    + imagesDpi + " DPI, " + fmtNum(pixels) + " pixels" + bytes;
+        }
+        if ("audio".equals(kind)) {
+            // A recording's own header, the way an image include reports its dimensions:
+            // what the file claims to be, how it was sampled, and how long it plays.
+            // Unreadable, or a format AudioHeader does not know: the byte count, which
+            // is all that is certain then (see AudioHeader).
+            String header = AudioHeader.describe(file, fileBytes);
+            return "Audio: " + (header != null ? header : "(nothing readable in the header)")
+                    + bytes;
+        }
+        // Text: symbol count (Unicode code points) + byte count.
+        try {
+            String content = readFileQuietly(file);
+            if (content != null) {
+                return "Text: " + fmtNum(content.codePointCount(0, content.length()))
+                        + " symbols" + bytes;
+            }
+            return fileBytes >= 0 ? "Text: " + fmtNum(fileBytes) + " bytes (symbols unavailable)"
+                                  : "Text: (could not read it)";
+        } catch (RuntimeException ex) {
+            return "Text: (could not read stats: " + ex.getMessage() + ")";
+        }
+    }
+
+    // A length in pixels as centimetres on paper at dpi, to the millimetre.
+    private static String cm(int pixels, int dpi) {
+        return String.format(java.util.Locale.ROOT, "%.1f", pixels * 2.54 / dpi);
     }
 
     // ---- Fetch URL (prompt menu, Ctrl+U) -----------------------------------
@@ -8236,6 +8524,7 @@ public class JRock {
 
         java.util.List<String[]> steps = new ArrayList<>(log.timeline());
         steps.add(new String[] { ROLE_HUMAN, input.getText() });
+        String lastIncluded = null;   // the hash of the include line just read
         for (String[] step : steps) {
             String text = step[1];
             if (text == null || text.isEmpty()) continue;
@@ -8243,7 +8532,17 @@ public class JRock {
                 // A gray line. Only one of them is a record of an include, and it is
                 // its own whole line.
                 java.util.regex.Matcher m = INCLUDE_LOG_LINE.matcher(text.trim());
-                if (m.matches()) remembered.put(m.group(2), Paths.get(m.group(3)));
+                if (m.matches()) {
+                    remembered.put(m.group(2), Paths.get(m.group(3)));
+                    lastIncluded = m.group(2);
+                } else if (lastIncluded != null && text.trim().startsWith(REF_LOG_PREFIX)) {
+                    // The reference the include just above was given: what its name
+                    // stands for, which is how a "![...](photo.png)" in an answer finds
+                    // the picture again (see refTargetHash).
+                    java.util.regex.Matcher target = REF_TARGET_IN_LINE.matcher(
+                            text.trim().substring(REF_LOG_PREFIX.length()));
+                    if (target.find()) REF_TARGETS.put(unbracketed(target.group(1)), lastIncluded);
+                }
                 continue;
             }
             // A message, from either side: the model's answer can carry a reference
@@ -8259,10 +8558,11 @@ public class JRock {
             }
             java.util.regex.Matcher refs = MarkdownExport.IMAGE_REF.matcher(text);
             while (refs.find()) {
-                kinds.putIfAbsent(refs.group(1), "img");
-                if (remembered.containsKey(refs.group(1))) {
-                    wanted.put(refs.group(1), remembered.get(refs.group(1)));
-                }
+                // A hash, or a name a reference gave an include (see refTargetHash).
+                String hash = refTargetHash(refs.group(1));
+                if (hash == null) continue;
+                kinds.putIfAbsent(hash, "img");
+                if (remembered.containsKey(hash)) wanted.put(hash, remembered.get(hash));
             }
         }
 
@@ -8649,7 +8949,7 @@ public class JRock {
     // which on a large PDF takes a long time. Anything touching a widget goes
     // through onEdt().
     private static void includePdf(JFrame frame, JTextArea input, LogView log,
-                                   boolean extend, Path pdf) {
+                                   boolean extend, Path pdf, java.util.function.Function<Path, String> refs) {
         PdfEngine engine = pdf();
         if (!engine.ready(frame, log, "convert PDFs")) return;
 
@@ -8677,7 +8977,8 @@ public class JRock {
             final Path p = page;
             // Inserts the token into the prompt's document, so: on the EDT.
             boolean[] added = new boolean[1];
-            onEdt(() -> added[0] = includeOne(input, log, extend, p, "img", true));
+            onEdt(() -> added[0] = includeOne(input, log, extend, p, "img", true, null,
+                    refs == null ? null : refs.apply(p)));
             if (added[0]) inserted++;
         }
         log.gray("Inserted " + inserted + " new @img token(s) for "
@@ -8701,15 +9002,15 @@ public class JRock {
     // include it as it is - so a conversion done once (and perhaps edited since) is
     // reused, and nothing the user has is ever overwritten.
     //
-    // imageRefs, for the HTML folder, gives each page image a Markdown "![](<hash>)"
-    // reference (see includeDirectory) - which is what an automation asks for when the
-    // answer is to become a DOCX with the pictures in it.
+    // refsOn gives every file included a Markdown reference above its token - for the
+    // HTML folder each named by its path (see IncludeAction) - which is what an
+    // automation asks for when the answer is to become a DOCX with the pictures in it.
     //
     // Runs on a background thread (see showIncludeDialog); dialogs and the include
     // itself go through onEdt().
     private static void includePdfWithXpdf(JFrame frame, JTextArea input, LogView log,
                                            boolean extend, Path pdf, boolean html,
-                                           boolean imageRefs) {
+                                           boolean refsOn) {
         String tool = html ? "pdftohtml" : "pdftotext";
         String exe = findOnPath(tool);
         if (exe == null) {
@@ -8773,13 +9074,14 @@ public class JRock {
 
         if (html) {
             try {
-                includeDirectory(frame, input, log, extend, out, imageRefs);
+                includeDirectory(new IncludeAction(frame, input, log, extend, refsOn, true), out);
             } catch (IOException ex) {
                 log.gray("Could not list " + out + ": " + ex.getMessage());
             }
         } else {
             boolean[] added = new boolean[1];
-            onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+            onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false, null,
+                    refsOn ? out.getFileName().toString() : null));
             log.gray("Inserted " + (added[0] ? 1 : 0) + " new @txt token(s) for "
                     + name + ".");
         }
@@ -9595,7 +9897,7 @@ public class JRock {
     // Runs on a background thread (see showIncludeDialog); the include itself, which
     // touches the prompt's document, goes through onEdt().
     private static void includeRtfAsMarkdown(JTextArea input, LogView log,
-                                             boolean extend, Path rtf) {
+                                             boolean extend, Path rtf, java.util.function.Function<Path, String> refs) {
         log.gray("Converting RTF to Markdown with Swing's RTF reader: " + rtf);
 
         String markdown;
@@ -9630,7 +9932,8 @@ public class JRock {
 
         boolean[] added = new boolean[1];
         // Inserts the token into the prompt's document, so: on the EDT.
-        onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+        onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false, null,
+                refs == null ? null : refs.apply(out)));
         log.gray("Inserted " + (added[0] ? 1 : 0) + " new @txt token(s) for "
                 + rtf.getFileName() + ".");
     }
@@ -10194,7 +10497,7 @@ public class JRock {
     // Runs on a background thread (see showIncludeDialog); the include itself, which
     // touches the prompt's document, goes through onEdt().
     private static void includeDocxAsMarkdown(JTextArea input, LogView log,
-                                              boolean extend, Path docx) {
+                                              boolean extend, Path docx, java.util.function.Function<Path, String> refs) {
         log.gray("Converting DOCX to Markdown: " + docx);
 
         String markdown;
@@ -10225,7 +10528,8 @@ public class JRock {
 
         boolean[] added = new boolean[1];
         // Inserts the token into the prompt's document, so: on the EDT.
-        onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+        onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false, null,
+                refs == null ? null : refs.apply(out)));
         log.gray("Inserted " + (added[0] ? 1 : 0) + " new @txt token(s) for "
                 + docx.getFileName() + ".");
     }
@@ -10660,7 +10964,7 @@ public class JRock {
     // Runs on a background thread (see showIncludeDialog); the includes themselves,
     // which touch the prompt's document, go through onEdt().
     private static void includeXlsxAsCsv(JTextArea input, LogView log,
-                                         boolean extend, Path xlsx) {
+                                         boolean extend, Path xlsx, java.util.function.Function<Path, String> refs) {
         log.gray("Converting XLSX to CSV, one file per sheet: " + xlsx);
 
         java.util.LinkedHashMap<String, String> sheets;
@@ -10697,7 +11001,8 @@ public class JRock {
             }
             log.gray("Sheet \"" + sheet.getKey() + "\" written to " + out);
             boolean[] added = new boolean[1];
-            onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false));
+            onEdt(() -> added[0] = includeOne(input, log, extend, out, "txt", false, null,
+                    refs == null ? null : refs.apply(out)));
             if (added[0]) inserted++;
         }
         log.gray("Inserted " + inserted + " new @txt token(s) for " + xlsx.getFileName() + ".");
@@ -11036,7 +11341,7 @@ public class JRock {
     // MarkdownExport), so what the log reports afterwards is what was written.
     //
     // The DOCX also carries the pictures: the session's includes are handed to the
-    // converter, so a "![](<hash>)" in the selection is placed as the image it names
+    // converter, so a "![...](<name>)" in the selection is placed as the image it names
     // and an "@img <hash>" becomes that image's file name. The RTF keeps the simpler
     // job - text only, both tags left as the text they are - because a picture in an
     // RTF is the picture's bytes hex-encoded into the file, and the format is offered
@@ -11193,10 +11498,12 @@ public class JRock {
         /** A bullet for an unordered item; an ordered one keeps its own number. */
         private static final String BULLET = "\u2022";
 
-        // A JRock include referred to from the Markdown: "![](<hash>)" for the picture
-        // itself, and the hash on its own as the thing that has to be looked up.
+        // A picture referred to from the Markdown, "![alt](target)": the target a hash
+        // ("![](<hash>)"), the name or path an include's reference gave it, or the same
+        // in angle brackets when it holds a space - and group 1 is that target, the
+        // thing that has to be looked up (see refTargetHash).
         private static final java.util.regex.Pattern IMAGE_REF =
-                java.util.regex.Pattern.compile("!\\[[^\\]\\n]*\\]\\(([0-9a-f]{" + HASH_LEN + "})\\)");
+                java.util.regex.Pattern.compile("!\\[[^\\]\\n]*\\]\\((<[^>\\n]+>|[^)\\s]+)\\)");
         private static final java.util.regex.Pattern HASH_REF =
                 java.util.regex.Pattern.compile("[0-9a-f]{" + HASH_LEN + "}");
 
@@ -11402,12 +11709,17 @@ public class JRock {
         // recorded. Each hash is looked up once: the same picture referred to twice is
         // read from disk once, and a hash nothing is included under is complained about
         // once.
-        private Image image(String hash) {
-            if (resolved.containsKey(hash)) return resolved.get(hash);
-            resolved.put(hash, null);
-            Path file = images.get(hash);
+        private Image image(String ref) {
+            if (resolved.containsKey(ref)) return resolved.get(ref);
+            resolved.put(ref, null);
+            // A hash, or a name an include's reference gave it (see refTargetHash).
+            Path file = images.get(ref);
+            String hash = file == null ? refTargetHash(ref) : null;
+            if (hash != null) file = images.get(hash);
             if (file == null) {
-                warn("No image is included under the hash " + hash);
+                warn(HASH_REF.matcher(ref).matches()
+                        ? "No image is included under the hash " + ref
+                        : "No image is included under the name " + ref);
                 return null;
             }
             int[] size = ImageHeader.size(file);
@@ -11430,7 +11742,7 @@ public class JRock {
             }
             Image image = new Image(file.getFileName().toString(), type[0], type[1], bytes,
                     size[0], size[1], frameWidth, frameHeight);
-            resolved.put(hash, image);
+            resolved.put(ref, image);
             return image;
         }
 
@@ -11732,6 +12044,8 @@ public class JRock {
                             boolean bold, boolean italic) {
             java.util.regex.Matcher m = IMAGE_REF.matcher(text);
             if (!m.find(at) || m.start() != at) return -1;
+            // A web address is a picture on the web, not an include: written as text.
+            if (m.group(1).contains("://")) return -1;
             Image image = placed(m.group(1));
             if (image == null) {
                 current.append(m.group());
@@ -13603,9 +13917,131 @@ public class JRock {
     private static void writeMessageFile(String role, String stamp, String text) {
         try {
             Files.createDirectories(logsDir());
-            Files.write(messageFile(role, stamp), text.getBytes(StandardCharsets.UTF_8));
+            Path file = messageFile(role, stamp);
+            Files.write(file, text.getBytes(StandardCharsets.UTF_8));
+            notePromptCache(role, file, text);
         } catch (IOException ex) {
             // Best-effort; the on-screen log still shows the message.
+        }
+    }
+
+    // ---- Local prompt cache ------------------------------------------------
+    // A prompt sent before is answered again from JRock/messages/, with no call to
+    // Bedrock: the same question, the same files, the same answer, for nothing.
+    //
+    // The table is every -operator.txt in JRock/messages/ - all of them, not only the
+    // ones the log still shows - by the SHA-256 of its text, each pointing at the
+    // -assistant.txt that came after it, which is its answer. A request that failed has
+    // no answer after it, and is not in the table. Built from the folder once, when the
+    // setting is on as a session begins (see syncPromptCache), and kept up to date from
+    // then on as each message file is written (see notePromptCache) - so the folder is
+    // read once, and a hit reads only the one answer it reuses.
+    //
+    // A prompt's text names its includes by hash ("@img <hash>"), and a send checks
+    // each include's file still hashes to its token before anything else (see
+    // verifyIncludes): so the same text is the same files too, and a hit is looked for
+    // only after that check has passed.
+    //
+    // Only for a request that carries no earlier messages: a message file holds the one
+    // message, so nothing on disk says what conversation an answer was given in.
+    // Neither does it say which model gave it, or what Clock told it the time was - an
+    // answer is reused as it was given. A folder whose old answers should not be reused
+    // is cleaned up by deleting files from JRock/messages/, or the setting turned off.
+    private static final Object PROMPT_CACHE_LOCK = new Object();
+    private static java.util.Map<String, Path> promptCache = null;   // null: not built
+    private static Path promptCacheDir = null;                        // the folder it was built from
+    private static String promptCachePending = null;                  // the last operator's key
+
+    // The file names the cache reads: a stamp, a role, nothing else.
+    private static final java.util.regex.Pattern MESSAGE_FILE_NAME = java.util.regex.Pattern
+            .compile("\\d{8}-\\d{6}-\\d{3}-(operator|assistant)\\.txt");
+
+    // Builds the table from the working folder's JRock/messages/ when the setting is on
+    // and it was not built from that folder yet, or empties it when the setting is off;
+    // then says in the session report which of the two it is.
+    private static void syncPromptCache(LogView log) {
+        synchronized (PROMPT_CACHE_LOCK) {
+            if (!promptCacheOn) {
+                promptCache = null;
+                promptCacheDir = null;
+                promptCachePending = null;
+                log.gray("Local prompt cache: off");
+                return;
+            }
+            Path dir = logsDir().toAbsolutePath().normalize();
+            if (promptCache == null || !dir.equals(promptCacheDir)) {
+                promptCache = buildPromptCache(dir);
+                promptCacheDir = dir;
+                promptCachePending = null;
+            }
+            log.gray("Local prompt cache: " + fmtNum(promptCache.size())
+                    + " answered prompt(s) in JRock/messages/");
+        }
+    }
+
+    // Every operator file in dir by its text's hash, pointing at the assistant file
+    // that comes next by stamp - the order they were written in.
+    private static java.util.Map<String, Path> buildPromptCache(Path dir) {
+        java.util.Map<String, Path> table = new java.util.HashMap<>();
+        java.util.List<Path> files = new java.util.ArrayList<>();
+        if (Files.isDirectory(dir)) {
+            try (java.util.stream.Stream<Path> list = Files.list(dir)) {
+                list.filter(p -> MESSAGE_FILE_NAME.matcher(p.getFileName().toString()).matches())
+                    .forEach(files::add);
+            } catch (IOException ex) {
+                return table;   // unreadable: an empty cache, nothing worse
+            }
+        }
+        files.sort(java.util.Comparator.comparing(p -> p.getFileName().toString()));
+        String pending = null;
+        for (Path file : files) {
+            if (file.getFileName().toString().endsWith("-operator.txt")) {
+                String text = readFileQuietly(file);
+                pending = text == null ? null : promptKey(text);
+            } else if (pending != null) {
+                table.put(pending, file);
+                pending = null;
+            }
+        }
+        return table;
+    }
+
+    // A message file just written, added to the table: an operator's key is held until
+    // the answer after it is written.
+    private static void notePromptCache(String role, Path file, String text) {
+        synchronized (PROMPT_CACHE_LOCK) {
+            if (promptCache == null) return;
+            if (ROLE_HUMAN.equals(role)) {
+                promptCachePending = promptKey(text);
+            } else if (ROLE_ASSISTANT.equals(role) && promptCachePending != null) {
+                promptCache.put(promptCachePending, file);
+                promptCachePending = null;
+            }
+        }
+    }
+
+    // The answer to this prompt from an earlier send, or null when there is none - or
+    // when the cache is off, or the file it pointed at has since been deleted.
+    private static String cachedAnswer(String prompt, Path[] from) {
+        Path file;
+        synchronized (PROMPT_CACHE_LOCK) {
+            if (promptCache == null) return null;
+            file = promptCache.get(promptKey(prompt));
+        }
+        String answer = file == null ? null : readFileQuietly(file);
+        if (answer != null && from != null) from[0] = file;
+        return answer;
+    }
+
+    private static String promptKey(String text) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) hex.append(String.format("%02x", b & 0xff));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);   // every JRE has SHA-256
         }
     }
 

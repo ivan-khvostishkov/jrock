@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  */
 class JRockXlsxIncludeTest extends JRockGuiFixture {
 
-    private static final String XLSX_FILTER = "XLSX as CSV text, one file per sheet (*.xlsx)";
+    private static final String XLSX_FILTER = "XLSX files, as CSV text, one file per sheet (*.xlsx)";
 
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;
 
