@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 class JRockAutomationDocTest extends JRockGuiFixture {
 
     @Test
-    @DisplayName("automationExportDocx places the image a ![](<hash>) in the Markdown names")
+    @DisplayName("automationExportDocx places the image a ![...](name) in the Markdown names")
     void exportsMarkdownWithItsPicturesAsADocx() throws Exception {
         awaitReadyCount(1);
         Path png = workingDirectory().resolve("logo.png");
@@ -41,7 +41,7 @@ class JRockAutomationDocTest extends JRockGuiFixture {
             assertThat(JRock.automationInclude(png.toString(), "imgref")).isNull();
             String prompt = JRock.automationPromptText();
             java.util.regex.Matcher ref =
-                    java.util.regex.Pattern.compile("!\\[\\]\\(([0-9a-f]{12})\\)").matcher(prompt);
+                    java.util.regex.Pattern.compile("!\\[[^\\]]*\\]\\(([^)]+)\\)").matcher(prompt);
             assertThat(ref.find()).describedAs("a reference in " + prompt).isTrue();
 
             Path docx = workingDirectory().resolve("letter.docx");
@@ -81,7 +81,7 @@ class JRockAutomationDocTest extends JRockGuiFixture {
             // included twice, so there may be one.
             int images = countOccurrences(prompt, "@img ");
             assertThat(images).isGreaterThanOrEqualTo(1);
-            assertThat(countOccurrences(prompt, "![](")).isEqualTo(images);
+            assertThat(countOccurrences(prompt, "![Image: ")).isEqualTo(images);
             assertThat(countOccurrences(prompt, "@txt ")).isGreaterThanOrEqualTo(3);
         } finally {
             JRock.automationEnd("done");

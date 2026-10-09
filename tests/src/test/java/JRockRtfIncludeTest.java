@@ -25,11 +25,11 @@ import org.junit.jupiter.api.Test;
 class JRockRtfIncludeTest extends JRockGuiFixture {
 
     /** The include chooser's filter that means "convert this RTF to Markdown". */
-    private static final String RTF_FILTER = "RTF as Markdown text (*.rtf)";
+    private static final String RTF_FILTER = "RTF files, as Markdown text (*.rtf)";
 
     /** The other offer for the same file: send the bytes on disk, markup and all. */
-    private static final String AS_IS_FILTER =
-            "Text files as is (*.txt, *.md, *.csv, *.json, *.xml, *.html, *.svg, *.java, *.rtf)";
+    /** The same filter, with Configure's "Include RTF as" set to the RTF's own markup. */
+    private static final String AS_IS_FILTER = "RTF files, as is (*.rtf)";
 
     /** Reading one small document in-process; only a slow CI runner needs the rest. */
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;
@@ -102,14 +102,15 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
     void includesTheRtfItselfUnderTheAsIsFilter() throws Exception {
         awaitReadyCount(1);
 
-        // The same document, under the other filter. An RTF file is text - its markup is
+        // The same document, read the other way. An RTF file is text - its markup is
         // ASCII, which is how it carries everything else - so a model that knows the
         // format can be handed it as it stands, and answer in it. That is a different
         // thing to ask for than Markdown, and the only difference between the two is
-        // which filter was chosen.
+        // Configure's "Include RTF as".
         Path rtf = FormattedRtf.write(workingDirectory().resolve("quarterly.rtf"));
+        field("rtfIncludeMode").set(null, "text");
 
-        chooseInTheIncludeDialog(AS_IS_FILTER, rtf);
+        chooseInTheIncludeDialog(AS_IS_FILTER, false, rtf);
         // A plain include has nothing to convert and no worker to wait for; the line it
         // logs as it registers the file is the signal.
         awaitLogLine("Included @txt ", CONVERSION_TIMEOUT_SECONDS);

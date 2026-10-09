@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.assertj.swing.finder.JOptionPaneFinder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +27,7 @@ import org.junit.jupiter.api.Test;
 class JRockDocxIncludeTest extends JRockGuiFixture {
 
     /** The include chooser's filter that means "convert this DOCX to Markdown". */
-    private static final String DOCX_FILTER = "DOCX as Markdown text (*.docx)";
+    private static final String DOCX_FILTER = "DOCX files, as Markdown text (*.docx)";
 
     /** Reading one small document in-process; only a slow CI runner needs the rest. */
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;
@@ -89,6 +90,26 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
         assertThat(workingDirectory().resolve("JRock").resolve("docx-md"))
                 .describedAs("JRock/docx-md/, which nothing should have created").doesNotExist();
+    }
+
+    @Test
+    @DisplayName("with processed copies off, a DOCX is refused and the setting to turn on is named")
+    void refusesAConversionIntoJRockWithCopiesOff() throws Exception {
+        awaitReadyCount(1);
+        Path docx = FormattedDocx.write(workingDirectory().resolve("quarterly.docx"));
+
+        // Converting means writing the Markdown under JRock/docx-md/, which is exactly
+        // what "Include from processed copies in JRock/" off rules out.
+        chooseInTheIncludeDialog(DOCX_FILTER, false, docx);
+        press(JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot)
+                .okButton());
+        awaitLogLine("Not included: " + docx, CONVERSION_TIMEOUT_SECONDS);
+
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .contains("\"Include from processed copies in JRock/\" is off. Turn it on "
+                        + "in Configure to include it.");
+        assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
+        assertThat(workingDirectory().resolve("JRock").resolve("docx-md")).doesNotExist();
     }
 
     /** The paths JRock currently has registered as includes. */
