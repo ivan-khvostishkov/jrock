@@ -437,6 +437,23 @@ public class JRock {
         String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
         String[] apisOnRuntime()      { return new String[] {}; }  // runtime not supported
         String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        // Card, Pricing (Standard, In-Region, per 1M tokens): $2.75 input and $16.50 output
+        // for 272K input tokens or fewer; $5.50 and $24.75 above that, for the whole
+        // request. AWS GovCloud (US-West): $3.375 and $20.25, with no long-context row -
+        // so no price there past 272K. Mantle serves it In-Region in us-east-1, us-east-2,
+        // us-west-2 and us-gov-west-1 only. Cache reads are counted at the input price.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            boolean longContext = inputTokens > 272_000;
+            switch (region == null ? "" : region) {
+                case "us-east-1": case "us-east-2": case "us-west-2":
+                    return longContext ? new double[] { 5.50, 24.75 }
+                                       : new double[] { 2.75, 16.50 };
+                case "us-gov-west-1":
+                    return longContext ? null : new double[] { 3.375, 20.25 };
+                default:
+                    return null;
+            }
+        }
     }
 
     // OpenAI GPT-6 Astra. Card: both endpoints. Runtime = Responses/Chat Completions/

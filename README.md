@@ -373,7 +373,7 @@ Built-in cards include:
 | Kimi K2.5 | `moonshotai.kimi-k2.5` | yes (`/v1`) | — |
 | DeepSeek-V3.1 | `deepseek.v3.1` | yes (`/v1`) | — |
 | Qwen3 32B | `qwen.qwen3-32b` | yes (`/v1`) | — |
-| GPT-5.4 | `openai.gpt-5.4` | yes (`/openai/v1`) | — |
+| GPT-5.4 | `openai.gpt-5.4` | yes (`/openai/v1`) | $2.75 / $16.50; past 272K input tokens $5.50 / $24.75 (us-east-1, us-east-2, us-west-2); GovCloud $3.375 / $20.25 up to 272K |
 | GPT-6 Astra | `openai.gpt-6-astra` | yes (`/openai/v1`) | $11 / $55; past 272K input tokens $22 / $82.50 (us-east-1, us-west-2) |
 | Voxtral Small 24B 2507 | `mistral.voxtral-small-24b-2507` | yes (`/v1`) | $0.10 / $0.30 in the US; by region elsewhere |
 | Gemma 4 26B-A4B | `google.gemma-4-26b-a4b` | yes (`/openai/v1`) | — |
@@ -2575,7 +2575,8 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   messages, the two sent with History off are the ones it leaves out.
 - **`JRockPricingTest`** checks the stats block's price lines against the cards: Grok 4.3 at
   $1.25 / $2.50 (and GovCloud's own rate), GPT-6 Astra doubling past 272K input tokens and
-  unpriced outside its two mantle regions, Voxtral Small by region and unpriced where the
+  unpriced outside its two mantle regions, GPT-5.4 the same way with GovCloud priced only up to
+  272K, Voxtral Small by region and unpriced where the
   pricing page has no row, and **no line at all** for a model whose card states no price. Then
   the startup total: every cost line in a log added up, and a line that only looks like one
   left out. No window.
