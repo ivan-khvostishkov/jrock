@@ -1,0 +1,22 @@
+how to insert a placeholder field ie a document number and reference it from different places? and then edit it from one place. 
+
+Give me step by step instructions procedure. 
+
+---
+Below is the content of the page from this url:
+
+  https://helpx.adobe.com/indesign/desktop.html
+
+Answer only with the content from the page.
+If theres no answer on this page, tell which section and/or URL from the same website to fetch next.
+
+  @txt 8cf0491db342
+
+
+Below also are the followup pages already fetched:
+
+  @txt bc8f2f0fa098
+  @txt b8d3135c2e98
+  @txt d46f79167af1
+
+
