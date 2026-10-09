@@ -46,12 +46,13 @@ jobs:
 
       # Two tests include a PDF as HTML and as text, which JRock does with xpdf's
       # pdftohtml and pdftotext. From xpdfreader.com, not apt: Ubuntu's pdftohtml is
-      # poppler's, a different program with different options.
+      # poppler's, a different program with different options. xpdf's -v prints the
+      # version and exits with 99, so only that code counts as success.
       - name: Install xpdf
         run: |
           curl -sSL https://dl.xpdfreader.com/xpdf-tools-linux-4.06.tar.gz | tar xz -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/xpdf-tools-linux-4.06/bin64" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/xpdf-tools-linux-4.06/bin64/pdftotext" -v
+          "$RUNNER_TEMP/xpdf-tools-linux-4.06/bin64/pdftotext" -v || [ $? -eq 99 ]
 
       - name: Run the GUI tests under a virtual display
         working-directory: tests
