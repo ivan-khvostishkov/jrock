@@ -1874,7 +1874,8 @@ browser.
   against A4 less 2 cm margins. Only reported at startup when it isn't the default; every PDF
   conversion logs its full Ghostscript command line regardless, and every downscale says what it
   did.
-- **Include PDF as** — *Page images* (the default), *HTML folder (xpdf)* or *Text (xpdf)*: how
+- **Include PDF as** — *Page images (Ghostscript)* (the default; *Page images (PDF.js)* in the
+  browser), *HTML folder (xpdf)* or *Text (xpdf)*: how
   the include dialog, **Include directory...** and `"auto"` automation includes read a PDF (see
   [Multimodal includes](#multimodal-includes-ctrli)). The browser offers page images only.
 - **Include RTF as** — *Markdown (converted)*, the default, or *Text as is (RTF markup)*.
