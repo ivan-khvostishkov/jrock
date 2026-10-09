@@ -1412,6 +1412,12 @@ public class JRock {
 
         private final JTextPane pane;
         private final java.util.List<Entry> entries = new ArrayList<>();
+        // The file these entries were loaded from and are saved back to. Taken when
+        // they are loaded, not looked up at every save: the working directory can move
+        // on (Configure, a restore) while lines of the old one are still on their way
+        // in, and those belong in the old folder's log, not at the top of the new one.
+        // Null until the first load, when it is wherever the working directory says.
+        private Path file;
         private boolean dialogOnly = false;
 
         // Tracks whether the log has been exported (Ctrl+L) since it last changed.
@@ -1527,7 +1533,7 @@ public class JRock {
                 entries.clear();
                 pane.setText("");
                 logCopySaved = true;   // nothing left to save
-                atomicWriteQuietly(logFile(), "");  // overwrite main log with empty
+                atomicWriteQuietly(savedTo(), "");  // overwrite main log with empty
             });
         }
 
@@ -1642,8 +1648,12 @@ public class JRock {
         // as a timeline: the entries themselves are only replaced later, on the EDT, so
         // a caller that reads the log straight away has to read it from this.
         java.util.List<String[]> loadFromDisk() {
-            java.util.List<Entry> loaded = parseMainLog();
+            Path from = logFile();
+            java.util.List<Entry> loaded = parseMainLog(from);
             SwingUtilities.invokeLater(() -> {
+                // Together with the entries, on the EDT: a line queued before this
+                // runs is saved with the entries it joins, into the file they came from.
+                file = from;
                 entries.clear();
                 entries.addAll(loaded);
                 logCopySaved = true;   // just loaded from disk; no unsaved changes
@@ -1658,9 +1668,9 @@ public class JRock {
         // in for the message body. On load we expand that single @<stamp> line back
         // to the message file's verbatim contents (like #include). Every other line
         // - including empty lines - is a plain gray line, reproduced as-is.
-        private java.util.List<Entry> parseMainLog() {
+        private java.util.List<Entry> parseMainLog(Path from) {
             java.util.List<Entry> out = new ArrayList<>();
-            String content = readFileQuietly(logFile());
+            String content = readFileQuietly(from);
             if (content == null) return out;
             String[] lines = content.split("\n", -1);
             // A non-empty file is written as a sequence of "<line>\n"; split(-1)
@@ -1756,8 +1766,10 @@ public class JRock {
                     sb.append(e.text).append('\n');
                 }
             }
-            atomicWriteQuietly(logFile(), sb.toString());
+            atomicWriteQuietly(savedTo(), sb.toString());
         }
+
+        private Path savedTo() { return file != null ? file : logFile(); }
     }
 
     // Normalizes a message as it is taken from the window or out of a reply, BEFORE
@@ -3964,8 +3976,8 @@ public class JRock {
         // How the two file types with more than one reading are included - the include
         // dialog offers each type once, read the way these say (see showIncludeDialog).
         String[] pdfModes = isCheerpJ()
-                ? new String[] { "Page images" }
-                : new String[] { "Page images", "HTML folder (xpdf)", "Text (xpdf)" };
+                ? new String[] { "Page images (PDF.js)" }
+                : new String[] { "Page images (Ghostscript)", "HTML folder (xpdf)", "Text (xpdf)" };
         javax.swing.JComboBox<String> pdfModeF = new javax.swing.JComboBox<>(pdfModes);
         pdfModeF.setName("pdfIncludeMode");
         pdfModeF.setSelectedIndex(pdfIncludeMode.equals(PDF_AS_HTML) ? 1
