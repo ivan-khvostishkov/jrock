@@ -2097,6 +2097,18 @@ It works on the two things an include leaves in the text, and the model repeats 
 | `![...](<name>)` or `![](<hash>)` of an **included** image | the picture itself, zipped into the package as a `word/media/` part and placed as an inline drawing |
 | `@img <hash>` of an **included** image | the file's **base name**, `IMG_4002.jpg`, as text — the token named a file, and the document says which |
 | either one, for a hash **not included** in this session | the line exactly as it stands, plus a warning in the log |
+| an inline `<svg ...>...</svg>`, such as a diagram the model drew | the picture itself, as a `word/media/imageN.svg` part, in the line where it was written, or in a paragraph of its own when a `<div>` wraps it |
+
+**Inline SVG** is placed at the size its markup gives it. Plain numbers and `px` in `width` and
+`height` are pixels at **Images DPI** from Configure, the same resolution an included image's size
+in cm is measured at, so `width="300"` is 5.08 cm at 150 dpi and 2.54 cm at 300 dpi. `in`, `cm`,
+`mm`, `pt` and `pc` keep their physical size at any setting. A missing dimension is worked out from
+the `viewBox` proportions, and an SVG with no size at all gets a browser's default of 300 × 150
+pixels. It is held to the text frame, never stretched past it. The part is written as a standalone `.svg` file, with the XML declaration and the `xmlns` that
+SVG embedded in HTML can leave out, so you can also open it on its own. Word 2016 and later draw it
+through their `svgBlip` extension, and the drawing's ordinary `r:embed` points at the same part for
+readers that don't know that extension. An SVG inside a code fence is code and stays text. One
+that isn't well-formed XML also stays text, and the log warns about it.
 
 **Nothing about an image stops an export.** A hash whose file was never included — a restart
 forgets the includes, and the model can invent a hash as easily as a word — is left in the text

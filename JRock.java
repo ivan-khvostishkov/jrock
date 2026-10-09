@@ -11507,6 +11507,23 @@ public class JRock {
         private static final java.util.regex.Pattern HASH_REF =
                 java.util.regex.Pattern.compile("[0-9a-f]{" + HASH_LEN + "}");
 
+        // An <svg> start or end tag, for finding where an inline SVG ends, nested ones
+        // included. The <div> a model often wraps one in is matched separately: it is
+        // dropped along with the SVG, and makes the picture a paragraph of its own.
+        private static final java.util.regex.Pattern SVG_TAG =
+                java.util.regex.Pattern.compile("<(/?)svg\\b[^>]*>");
+        private static final java.util.regex.Pattern DIV_OPEN_BEFORE =
+                java.util.regex.Pattern.compile("<div\\b[^>]*>\\s*$");
+        private static final java.util.regex.Pattern DIV_CLOSE_AFTER =
+                java.util.regex.Pattern.compile("\\s*</div\\s*>");
+        private static final java.util.regex.Pattern SVG_LENGTH =
+                java.util.regex.Pattern.compile(
+                        "([0-9]*\\.?[0-9]+(?:[eE][-+]?[0-9]+)?)\\s*(px|in|cm|mm|pt|pc)?");
+        // The key an inline SVG is placed under. It begins with a private-use character, so
+        // it cannot be confused with anything written in the Markdown itself.
+        private static final String SVG_KEY = "\uE000svg";
+        private static final String SVG_NS = "http://www.w3.org/2000/svg";
+
         /** A line holding nothing but image references, which becomes a paragraph of them. */
         private static final java.util.regex.Pattern IMAGE_LINE =
                 java.util.regex.Pattern.compile("(?:" + IMAGE_REF.pattern() + "\\s*)+");
@@ -11528,6 +11545,7 @@ public class JRock {
         // gives each one an external relationship, "rLink<n>", that its w:hyperlink names.
         private final java.util.Map<String, Integer> links = new java.util.LinkedHashMap<>();
         private int drawings;              // one id per placement, which a .docx wants unique
+        private int svgs;                  // inline SVGs found, which number their keys
 
         // The page this document is laid out on. Landscape turns A4 on its side, and that
         // is the whole of it: the two page dimensions swap, and so do the frame's - which
@@ -11540,6 +11558,10 @@ public class JRock {
         // after the other, and a document's page is a property of that document.
         private final boolean landscape;
         private final int pageWidth, pageHeight, frameWidth, frameHeight;
+
+        // The Images DPI setting when the export began: an inline SVG's pixels are
+        // reckoned at it, the same resolution an included image's size in cm is.
+        private final int dpi = imagesDpi;
 
         private MarkdownExport(java.util.Map<String, Path> images, boolean landscape) {
             this.images = images;
@@ -11672,11 +11694,20 @@ public class JRock {
 
             Image(String fileName, String extension, String mime, byte[] bytes,
                   int pixelWidth, int pixelHeight, int frameWidth, int frameHeight) {
+                this(fileName, extension, mime, bytes, pixelWidth, pixelHeight,
+                        frameWidth, frameHeight, EMU_PER_PIXEL_AT_300_DPI);
+            }
+
+            // The same, with a different largest size per pixel: an SVG is drawn at any
+            // size without blurring, so its limit is what its pixels measure at Images DPI.
+            Image(String fileName, String extension, String mime, byte[] bytes,
+                  int pixelWidth, int pixelHeight, int frameWidth, int frameHeight,
+                  long maxPerPixel) {
                 this.fileName = fileName;
                 this.extension = extension;
                 this.mime = mime;
                 this.bytes = bytes;
-                long perPixel = Math.min(EMU_PER_PIXEL_AT_300_DPI,
+                long perPixel = Math.min(maxPerPixel,
                         Math.min(frameWidth * EMU_PER_TWIP / pixelWidth,
                                  frameHeight * EMU_PER_TWIP / pixelHeight));
                 this.cx = Math.max(1, pixelWidth * perPixel);
@@ -11685,6 +11716,8 @@ public class JRock {
 
             /** Its name inside the package, which is numbered rather than the file's own. */
             String part() { return "image" + index + "." + extension; }
+
+            boolean svg() { return "svg".equals(extension); }
         }
 
         private static final class Block {
@@ -11789,10 +11822,153 @@ public class JRock {
             if (!warnings.contains(line)) warnings.add(line);
         }
 
+        // ---- inline SVG ----
+
+        // Every <svg>...</svg> written into the Markdown, replaced by a reference to the
+        // picture it draws, so the rest of the parse places it like an included image. A
+        // <div> directly around it goes too, and makes it a paragraph of its own; without
+        // one it sits in the line of text it was written in. Inside a code fence an SVG is
+        // code and is left alone, and so is one that is not well-formed XML, with a
+        // warning for the log.
+        private String inlineSvgs(String markdown) {
+            if (images == null || !markdown.contains("<svg")) return markdown;
+            List<int[]> fences = fencedSpans(markdown);
+            StringBuilder out = new StringBuilder(markdown.length());
+            java.util.regex.Matcher tag = SVG_TAG.matcher(markdown);
+            int copied = 0, from = 0;
+            while (tag.find(from)) {
+                int start = tag.start();
+                from = tag.end();
+                if (!tag.group(1).isEmpty() || inSpans(fences, start)) continue;
+                int end = svgEnd(tag);
+                if (end < 0) break;                // never closed: left as the text it is
+                from = end;
+                String key = svgKey(markdown.substring(start, end));
+                if (key == null) continue;
+                java.util.regex.Matcher open =
+                        DIV_OPEN_BEFORE.matcher(markdown).region(copied, start);
+                java.util.regex.Matcher close =
+                        DIV_CLOSE_AFTER.matcher(markdown).region(end, markdown.length());
+                boolean div = open.find() && close.lookingAt();
+                String ref = "![](" + key + ")";
+                out.append(markdown, copied, div ? open.start() : start)
+                   .append(div ? "\n\n" + ref + "\n\n" : ref);
+                copied = from = div ? close.end() : end;
+            }
+            return out.append(markdown, copied, markdown.length()).toString();
+        }
+
+        // Where the SVG whose start tag was just found ends, past its own closing tag
+        // rather than a nested one's, or -1 when it is never closed.
+        private static int svgEnd(java.util.regex.Matcher tag) {
+            if (tag.group().endsWith("/>")) return tag.end();
+            int depth = 1;
+            while (tag.find()) {
+                if (!tag.group(1).isEmpty()) depth--;
+                else if (!tag.group().endsWith("/>")) depth++;
+                if (depth == 0) return tag.end();
+            }
+            return -1;
+        }
+
+        // The character spans of the fenced code blocks, fence lines included.
+        private static List<int[]> fencedSpans(String markdown) {
+            List<int[]> spans = new ArrayList<>();
+            int start = -1, at = 0;
+            while (at <= markdown.length()) {
+                int eol = markdown.indexOf('\n', at);
+                if (eol < 0) eol = markdown.length();
+                String text = markdown.substring(at, eol).trim();
+                if (text.startsWith("```") || text.startsWith("~~~")) {
+                    if (start < 0) {
+                        start = at;
+                    } else {
+                        spans.add(new int[] { start, eol });
+                        start = -1;
+                    }
+                }
+                at = eol + 1;
+            }
+            if (start >= 0) spans.add(new int[] { start, markdown.length() });
+            return spans;
+        }
+
+        private static boolean inSpans(List<int[]> spans, int at) {
+            for (int[] span : spans) if (at >= span[0] && at < span[1]) return true;
+            return false;
+        }
+
+        // The key this SVG can be placed under, or null with a warning when it is not
+        // XML a reader could draw. The part is written as a file of its own would be:
+        // with an XML declaration and the namespaces that markup inside HTML may omit.
+        private String svgKey(String markup) {
+            String svg = markup;
+            String startTag = svg.substring(0, svg.indexOf('>'));
+            if (!startTag.contains("xmlns=")) {
+                svg = "<svg xmlns=\"" + SVG_NS + "\"" + svg.substring(4);
+            }
+            if (svg.contains("xlink:") && !startTag.contains("xmlns:xlink")) {
+                svg = "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"" + svg.substring(4);
+            }
+            byte[] bytes = (XML_HEAD + svg).getBytes(StandardCharsets.UTF_8);
+            org.w3c.dom.Element root;
+            try {
+                root = DocxMarkdown.document(bytes, "SVG").getDocumentElement();
+            } catch (IOException ex) {
+                warn("An inline SVG could not be placed: " + ex.getMessage());
+                return null;
+            }
+            double[] size = svgSize(root, dpi);
+            String key = SVG_KEY + (++svgs);
+            resolved.put(key, new Image("inline-svg-" + svgs + ".svg", "svg", "image/svg+xml",
+                    bytes, (int) Math.max(1, Math.round(size[0])),
+                    (int) Math.max(1, Math.round(size[1])), frameWidth, frameHeight,
+                    914400 / dpi));
+            return key;
+        }
+
+        // Width and height in pixels at dpi: its width and height, the one missing taken
+        // from the viewBox's proportions, the viewBox alone when neither is given, and
+        // 300 x 150 - a browser's default - for what is left.
+        private static double[] svgSize(org.w3c.dom.Element svg, int dpi) {
+            double width = pixels(svg.getAttribute("width"), dpi);
+            double height = pixels(svg.getAttribute("height"), dpi);
+            String[] box = svg.getAttribute("viewBox").trim().split("[\\s,]+");
+            if (box.length == 4) {
+                double boxWidth = pixels(box[2], dpi), boxHeight = pixels(box[3], dpi);
+                if (boxWidth > 0 && boxHeight > 0) {
+                    if (Double.isNaN(width) && Double.isNaN(height)) {
+                        width = boxWidth;
+                        height = boxHeight;
+                    } else if (Double.isNaN(width)) {
+                        width = height * boxWidth / boxHeight;
+                    } else if (Double.isNaN(height)) {
+                        height = width * boxHeight / boxWidth;
+                    }
+                }
+            }
+            return new double[] { Double.isNaN(width) ? 300 : width,
+                                  Double.isNaN(height) ? 150 : height };
+        }
+
+        // A length in pixels at dpi - a bare number or px is a pixel, in, cm, mm, pt and pc
+        // keep their physical size - or NaN for none, for one relative to something this
+        // cannot know (%, em), and for anything that is not a positive length.
+        private static double pixels(String length, int dpi) {
+            java.util.regex.Matcher m = SVG_LENGTH.matcher(length.trim());
+            if (!m.matches()) return Double.NaN;
+            double value = Double.parseDouble(m.group(1));
+            String unit = m.group(2) == null ? "px" : m.group(2);
+            double perUnit = unit.equals("in") ? dpi : unit.equals("cm") ? dpi / 2.54
+                    : unit.equals("mm") ? dpi / 25.4 : unit.equals("pt") ? dpi / 72.0
+                    : unit.equals("pc") ? dpi / 6.0 : 1;
+            return value > 0 ? value * perUnit : Double.NaN;
+        }
+
         // ---- parsing ----
 
         private void parse(String markdown) {
-            String[] lines = fileNames(markdown)
+            String[] lines = fileNames(inlineSvgs(markdown))
                     .replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
             boolean fenced = false;
             int i = 0;
@@ -12292,6 +12468,10 @@ public class JRock {
                 + " xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"";
         private static final String PICTURE_URI =
                 "http://schemas.openxmlformats.org/drawingml/2006/picture";
+        // Word's extension for an SVG picture, and the namespace of the element it holds.
+        private static final String SVG_BLIP_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}";
+        private static final String SVG_BLIP_NS =
+                "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
         private static final String CONTENT_TYPES_HEAD = XML_HEAD
                 + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/"
                 + "content-types\">"
@@ -12583,8 +12763,18 @@ public class JRock {
                .append("<pic:pic><pic:nvPicPr><pic:cNvPr id=\"").append(id)
                .append("\" name=\"").append(attr(image.fileName)).append("\"/>")
                .append("<pic:cNvPicPr/></pic:nvPicPr>")
-               .append("<pic:blipFill><a:blip r:embed=\"rId").append(image.relId).append("\"/>")
-               .append("<a:stretch><a:fillRect/></a:stretch></pic:blipFill>")
+               .append("<pic:blipFill><a:blip r:embed=\"rId").append(image.relId).append('"');
+            if (image.svg()) {
+                // Word draws an SVG from the svgBlip extension; a reader that does not know
+                // the extension reads r:embed, which names the same part.
+                xml.append("><a:extLst><a:ext uri=\"").append(SVG_BLIP_URI).append("\">")
+                   .append("<asvg:svgBlip xmlns:asvg=\"").append(SVG_BLIP_NS)
+                   .append("\" r:embed=\"rId").append(image.relId).append("\"/>")
+                   .append("</a:ext></a:extLst></a:blip>");
+            } else {
+                xml.append("/>");
+            }
+            xml.append("<a:stretch><a:fillRect/></a:stretch></pic:blipFill>")
                .append("<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"")
                .append(image.cx).append("\" cy=\"").append(image.cy).append("\"/></a:xfrm>")
                .append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>")
