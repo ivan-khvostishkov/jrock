@@ -682,11 +682,13 @@ public class JRock {
     private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
-    // gs-pdf/ on the desktop, pdfjs-pdf/ in the browser: one folder per engine.
-    private static Path pdfDir(PdfEngine e) { return jrockDir().resolve(e.tag() + "-pdf"); }
-    private static Path rtfMdDir()         { return jrockDir().resolve("rtf-md"); }
-    private static Path docxMdDir()        { return jrockDir().resolve("docx-md"); }
-    private static Path xlsxCsvDir()       { return jrockDir().resolve("xlsx-csv"); }
+    // What an include is made from, all under includes/: the copies of picked files
+    // themselves, and one subfolder per conversion - gs-pdf/ on the desktop, pdfjs-pdf/
+    // in the browser, one per PDF engine. URLs fetched keep a folder of their own.
+    private static Path pdfDir(PdfEngine e) { return includesDir().resolve(e.tag() + "-pdf"); }
+    private static Path rtfMdDir()         { return includesDir().resolve("rtf-md"); }
+    private static Path docxMdDir()        { return includesDir().resolve("docx-md"); }
+    private static Path xlsxCsvDir()       { return includesDir().resolve("xlsx-csv"); }
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
     private static Path urlsDir()          { return jrockDir().resolve("urls"); }
     // The last narration and the last recording, one file each, overwritten every time
@@ -770,9 +772,9 @@ public class JRock {
     // it is: true or false, and absent is false (see includeOne).
     private static final String CONFIG_MARKDOWN_REFS = "include-markdown-references";
     private static volatile boolean includeMarkdownRefs = false;
-    // Whether an include is made from a processed copy under JRock/ - a picked file
-    // copied into JRock/includes/, an image downscaled to Images DPI on the way - and
-    // whether a conversion may keep its result under JRock/ at all: true or false, and
+    // Whether an include is made from a processed copy under JRock/includes/ - a picked
+    // file copied there, an image downscaled to Images DPI on the way - and whether a
+    // conversion may keep its result in a subfolder of it at all: true or false, and
     // absent is true (see includeFile).
     private static final String CONFIG_PROCESSED_COPIES = "include-processed-copies";
     private static volatile boolean includeProcessedCopies = true;
@@ -3105,7 +3107,7 @@ public class JRock {
     //   "xlsx"   an XLSX, converted to one CSV per sheet
     //
     // Markdown references and processed copies follow the Configure dialog, as they do
-    // for an include by hand: with copies off, a conversion into JRock/ is refused.
+    // for an include by hand: with copies off, a conversion into JRock/includes/ is refused.
     //
     // Blocks for as long as the conversion takes, which for a long PDF is minutes.
     //
@@ -3125,8 +3127,8 @@ public class JRock {
         boolean toJRock = kind.equals("pdf") || kind.equals("rtf") || kind.equals("docx")
                 || kind.equals("xlsx");
         if (toJRock && !includeProcessedCopies) {
-            return "a \"" + kind + "\" include converts the file into JRock/, and "
-                    + "\"Include from processed copies in JRock/\" is off in Configure.";
+            return "a \"" + kind + "\" include converts the file into JRock/includes/, and "
+                    + "\"Include from processed copies in JRock/includes/\" is off in Configure.";
         }
         try {
             switch (kind) {
@@ -3979,14 +3981,14 @@ public class JRock {
                 + "file in JRock/messages/ counts: delete the ones whose answers should not "
                 + "be reused. Not for a prompt that goes with History's earlier messages.");
         javax.swing.JCheckBox copiesF = new javax.swing.JCheckBox(
-                "Include from processed copies in JRock/", includeProcessedCopies);
+                "Include from processed copies in JRock/includes/", includeProcessedCopies);
         copiesF.setName("includeProcessedCopies");
         copiesF.setFont(copiesF.getFont().deriveFont(java.awt.Font.PLAIN));
         copiesF.setToolTipText("Each picked file is copied into JRock/includes/ and "
                 + "included from there - an image downscaled to Images DPI on the way, so "
-                + "not always byte for byte - and conversions keep their results under "
-                + "JRock/. Off: files are included where they are, and a PDF, RTF, DOCX or "
-                + "XLSX that needs converting into JRock/ is refused.");
+                + "not always byte for byte - and conversions keep their results in its "
+                + "subfolders. Off: files are included where they are, and a PDF, RTF, DOCX "
+                + "or XLSX that needs converting into JRock/includes/ is refused.");
         // Autobackup, on a line of its own rather than beside the DPI, so two unrelated
         // settings never look like one thing: how fine a picture to keep has nothing
         // to do with zipping the folder up. The checkbox says what it is in its own label,
@@ -7168,7 +7170,7 @@ public class JRock {
     // Lets the user pick files to include, and includes each the way includeFile says:
     // by its type, read the way the Configure dialog says for the two types with more
     // than one reading (a PDF as page images, an HTML folder or text; an RTF as Markdown
-    // or as is), from a processed copy under JRock/ or where it lies, with or without a
+    // or as is), from a processed copy under JRock/includes/ or where it lies, with or without a
     // Markdown reference above its token.
     //
     // The first filter, and the one the dialog opens on, takes every type there is; the
@@ -7316,10 +7318,10 @@ public class JRock {
     //   an RTF                         -> Markdown, or its markup as is (Configure)
     //   a DOCX                         -> Markdown;   an XLSX -> one CSV per sheet
     //
-    // With "Include from processed copies in JRock/" on, a file included as itself is
+    // With "Include from processed copies in JRock/includes/" on, a file included as itself is
     // copied into JRock/includes/ first - an image downscaled to Images DPI on the way -
     // and included from the copy (see includeCopyOf). Off, it is included where it lies,
-    // and a type whose conversion keeps its result under JRock/ is refused, with a line
+    // and a type whose conversion keeps its result under JRock/includes/ is refused, with a line
     // and a dialog saying which setting to turn on. Off the EDT.
     private static void includeFile(IncludeAction act, Path file) {
         String kind = includeKindOf(file);
@@ -7333,13 +7335,13 @@ public class JRock {
         if (toJRock && !includeProcessedCopies) {
             String what = kind.toUpperCase(java.util.Locale.ROOT);
             act.log.gray("Not included: " + file + " - a " + what + " is converted into a "
-                    + "file under JRock/, and \"Include from processed copies in JRock/\" "
+                    + "file under JRock/includes/, and \"Include from processed copies in JRock/includes/\" "
                     + "is off. Turn it on in Configure to include it.");
             if (!act.copiesWarned[0]) {
                 act.copiesWarned[0] = true;
                 onEdt(() -> javax.swing.JOptionPane.showMessageDialog(act.frame,
                         "A " + what + " is included by converting it into a file under "
-                                + "JRock/, and \"Include from processed copies in JRock/\" "
+                                + "JRock/includes/, and \"Include from processed copies in JRock/includes/\" "
                                 + "is off.\n\nTurn it on in Configure to include it.",
                         "Processed copies are off", javax.swing.JOptionPane.WARNING_MESSAGE));
             }
@@ -7513,8 +7515,9 @@ public class JRock {
     // Why anyone would want that: the file JRock remembers is not always a file that
     // stays. In the browser build an uploaded file lands in CheerpJ's /uploads, and
     // that is gone after a reload - taking the path INCLUDES remembers with it, so
-    // the includes reloaded at the next start would name a file that no longer exists. A copy under
-    // JRock/ is in the folder the user owns, next to the log that names it.
+    // the includes reloaded at the next start would name a file that no longer exists.
+    // A copy under JRock/includes/ is in the folder the user owns, next to the log that
+    // names it.
     //
     // A failed copy is reported and the original included anyway: the point of
     // processed copies is to keep the include available later, and refusing the
@@ -7593,7 +7596,7 @@ public class JRock {
     // that was already as fine as it was going to get, and the extra pixels are paid for
     // twice, once in tokens and once in the time spent sending them.
     //
-    // Only for a processed copy ("Include from processed copies in JRock/"), deliberately. A plain include is a pointer at a
+    // Only for a processed copy ("Include from processed copies in JRock/includes/"), deliberately. A plain include is a pointer at a
     // file JRock does not own, and rewriting somebody's photograph is not what "include
     // this file" asks for; a copy under JRock/includes/ is JRock's own file, made for
     // this purpose - and it says in its name what it is: "IMG_4002-1004x753.png".
@@ -8930,9 +8933,9 @@ public class JRock {
     }
 
     // Renders a PDF to one PNG per page with the PDF engine (see pdf()), then includes
-    // each page. On the desktop that is Ghostscript, writing under JRock/gs-pdf/ as
+    // each page. On the desktop that is Ghostscript, writing under JRock/includes/gs-pdf/ as
     // "<pdfname>.gs.NNN.png"; in the browser it is PDF.js, writing under
-    // JRock/pdfjs-pdf/ as "<pdfname>.pdfjs.NNN.png". When the engine can't run - no
+    // JRock/includes/pdfjs-pdf/ as "<pdfname>.pdfjs.NNN.png". When the engine can't run - no
     // Ghostscript on PATH - it says why and what to do, and nothing else happens.
     //
     // Page images rather than extracted text: see the filters in showIncludeDialog for
@@ -9274,7 +9277,7 @@ public class JRock {
                 return null;
             }
 
-            // The produced page files (in JRock/gs-pdf/) in order, matching this
+            // The produced page files (in JRock/includes/gs-pdf/) in order, matching this
             // PDF's prefix; the caller includes them.
             java.util.List<Path> pages = new java.util.ArrayList<>();
             try (java.util.stream.Stream<Path> s = Files.list(outDir)) {
@@ -9876,7 +9879,7 @@ public class JRock {
     }
 
     // ---- RTF as Markdown ---------------------------------------------------
-    // Converts an RTF file to Markdown, writes it under JRock/rtf-md/ as
+    // Converts an RTF file to Markdown, writes it under JRock/includes/rtf-md/ as
     // "<rtfname>.md", and includes that file as an ordinary @txt token - so from the
     // prompt's point of view the model is simply reading a text file.
     //
@@ -9909,7 +9912,7 @@ public class JRock {
             return;
         }
 
-        // Output goes to JRock/rtf-md/, named "<rtfname>.md" - the RTF's full name
+        // Output goes to JRock/includes/rtf-md/, named "<rtfname>.md" - the RTF's full name
         // kept as the prefix (as with gs-pdf/), so "notes.rtf" becomes "notes.rtf.md"
         // and two RTFs of the same stem can't overwrite each other's Markdown.
         Path outDir = rtfMdDir();
@@ -10479,7 +10482,7 @@ public class JRock {
     // ---- DOCX as Markdown --------------------------------------------------
     // The same thing as includeRtfAsMarkdown for the other format a word processor
     // saves: unzips the .docx, reads word/document.xml, writes Markdown under
-    // JRock/docx-md/ as "<docxname>.md", and includes that as an ordinary @txt token.
+    // JRock/includes/docx-md/ as "<docxname>.md", and includes that as an ordinary @txt token.
     //
     // Also with nothing installed - a .docx is a ZIP of XML, so java.util.zip and the
     // JDK's XML parser are the whole toolchain, and this works in the browser too.
@@ -10506,7 +10509,7 @@ public class JRock {
             return;
         }
 
-        // Output goes to JRock/docx-md/, named "<docxname>.md" - the same naming as
+        // Output goes to JRock/includes/docx-md/, named "<docxname>.md" - the same naming as
         // gs-pdf/ and rtf-md/, so two documents of the same stem can't collide.
         Path outDir = docxMdDir();
         Path out = outDir.resolve(docx.getFileName().toString() + ".md");
@@ -10947,7 +10950,7 @@ public class JRock {
 
     // ---- XLSX as CSV -------------------------------------------------------
     // A spreadsheet, the way includeDocxAsMarkdown takes a document: unzips the .xlsx,
-    // writes each sheet under JRock/xlsx-csv/ as "<xlsxname>.<sheet>.csv", and
+    // writes each sheet under JRock/includes/xlsx-csv/ as "<xlsxname>.<sheet>.csv", and
     // includes every one of them as an ordinary @txt token - a sheet per file, because
     // a CSV has no way to say where one table ends and the next begins.
     //

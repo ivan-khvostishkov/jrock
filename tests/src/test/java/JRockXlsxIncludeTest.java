@@ -31,7 +31,7 @@ class JRockXlsxIncludeTest extends JRockGuiFixture {
 
         includeThroughTheDialog(XLSX_FILTER, CONVERSION_TIMEOUT_SECONDS, xlsx);
 
-        Path dir = workingDirectory().resolve("JRock").resolve("xlsx-csv");
+        Path dir = workingDirectory().resolve("JRock").resolve("includes").resolve("xlsx-csv");
         Path sales = dir.resolve("stock.xlsx.Sales Q1.csv");
         Path notes = dir.resolve("stock.xlsx.Заметки.csv");
         assertThat(read(sales)).describedAs("the first sheet's CSV").isEqualTo(FormattedXlsx.SALES_CSV);
