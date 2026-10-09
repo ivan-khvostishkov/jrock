@@ -414,7 +414,7 @@ abstract class JRockGuiFixture {
     }
 
     /**
-     * The same, with Configure's <em>Include from processed copies in JRock/</em> set to
+     * The same, with Configure's <em>Include from processed copies in JRock/includes/</em> set to
      * {@code copies} first: on, each chosen file is copied into {@code JRock/includes/}
      * and included from there; off, it is included where it lies.
      */

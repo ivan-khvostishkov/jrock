@@ -30,7 +30,7 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Multimodal includes** (text, image and audio files, plus PDF-to-page-images via Ghostscript
   on the desktop and PDF.js in the browser, PDF-to-HTML or -text via xpdf on the desktop, and
   RTF/DOCX-to-Markdown, links and all, and XLSX-to-CSV, one file per sheet, with no external
-  tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/`** — downscaled to the page they will be
+  tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/includes/`** — downscaled to the page they will be
   read on, so no tokens are spent on pixels nobody sees — and every include **reloaded from the
   log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
@@ -238,7 +238,7 @@ page hands the PDF to [PDF.js](https://mozilla.github.io/pdf.js/) — the render
 PDFs with — and gets each page back as a PNG, drawn at the same **Images DPI**. JRock talks to
 both through one PDF engine interface, so the include, the page files and the `@img` tokens are
 the same either way. PDF.js is loaded from jsDelivr the first time a PDF is included, so a session
-that never opens one never downloads it. Pages land in **`JRock/pdfjs-pdf/`**, named
+that never opens one never downloads it. Pages land in **`JRock/includes/pdfjs-pdf/`**, named
 `<pdfname>.pdfjs.NNN.png`.
 
 The [duplex merge](#merging-duplex-scans-ghostscript) is the one PDF feature that stays on the
@@ -513,12 +513,12 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   dialog-only transcript.
 - `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the region, model and
   images DPI (see [**Settings files**](#settings-files)).
-- `JRock/gs-pdf/` — the page images produced when a PDF is included via Ghostscript, and
-  `JRock/pdfjs-pdf/` the same from PDF.js in the browser (see Multimodal includes).
-- `JRock/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
+- `JRock/includes/gs-pdf/` — the page images produced when a PDF is included via Ghostscript, and
+  `JRock/includes/pdfjs-pdf/` the same from PDF.js in the browser (see Multimodal includes).
+- `JRock/includes/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
   (see Multimodal includes).
-- `JRock/docx-md/` — the same for a `.docx` included as Markdown text.
-- `JRock/xlsx-csv/` — the CSV files produced when an `.xlsx` is included, one per sheet.
+- `JRock/includes/docx-md/` — the same for a `.docx` included as Markdown text.
+- `JRock/includes/xlsx-csv/` — the CSV files produced when an `.xlsx` is included, one per sheet.
 
 The main log is a bit-perfect copy of the pane, except that each role header is followed by an
 `@<datetime>` include-style reference to the message's own file under `JRock/messages/`.
@@ -719,13 +719,13 @@ Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs*
    - **XLSX files, as CSV text, one file per sheet** —
      ([details](#xlsx-conversion-no-external-tool))
 
-   **Include from processed copies in JRock/** (Configure, **on** by default): each picked file
+   **Include from processed copies in JRock/includes/** (Configure, **on** by default): each picked file
    is copied under `JRock/includes/` first and included from the copy
    ([why](#includes-that-outlive-the-session)) — and an image bigger than the page it will be
    read on is **downscaled as it is copied**, to the **Images DPI** Configure is set to, so the
-   copy is not always byte for byte. The conversions keep their results under `JRock/` too.
+   copy is not always byte for byte. The conversions keep their results in its subfolders too.
    Turned **off**, files are included where they lie, and a PDF as page images, an RTF as
-   Markdown, a DOCX or an XLSX — each of which has to write its result under `JRock/` — is
+   Markdown, a DOCX or an XLSX — each of which has to write its result under `JRock/includes/` — is
    refused, with a line in the log and a dialog naming the setting to turn back on.
 
    **Include directory...** (prompt context menu) picks a folder instead and includes every
@@ -922,8 +922,8 @@ Details:
 - **JRock names itself** in the `User-Agent`, as `JRock/<version>
   (+https://github.com/ivan-khvostishkov/jrock)` — a client that says whose it is, which bot
   filters such as Akamai's (in front of `helpx.adobe.com`, among others) let through.
-- Because the file lands under `JRock/`, it is **already where the copies go** — a URL include
-  survives a restart the same way, reloaded from the log at startup.
+- Because the file lands in `JRock/urls/`, beside `JRock/includes/`, it is **already in a folder
+  you own**, as a copy is — a URL include survives a restart the same way, reloaded from the log at startup.
 - **In the browser it goes through the page**, `window.myBrowserHttp.fetchUrl` — the same
   arrangement as the model calls, one more method on the same object, so both builds run the
   identical code above this line. The reply carries the status, the `Content-Type`, the address
@@ -939,7 +939,7 @@ the whole transcript *are* restored from disk. So the tokens come back, and two 
 they still stand for their files: the files are kept where JRock can find them again, and the log
 that says where they are is read back at every start.
 
-**Include from processed copies in JRock/** — a checkbox in
+**Include from processed copies in JRock/includes/** — a checkbox in
 [Configure](#configure-dialog-top-left-button), **on** by default. A chosen file is **copied
 into `JRock/includes/` first and included from the copy**, so the log's line points inside the
 folder you own:
@@ -951,12 +951,14 @@ Included @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
 
 Two different files of the same name both survive, the second as `IMG_4002-2.jpg`; the same
 file twice is not copied twice. A file already under `JRock/includes/` is included where it is,
-and so is anything the conversions wrote (they write under `JRock/` themselves). A copy that
+and so is anything the conversions wrote: they write into subfolders of it themselves —
+`gs-pdf/` (`pdfjs-pdf/` in the browser), `rtf-md/`, `docx-md/` and `xlsx-csv/` — so everything an
+include is made from is in one place. A fetched URL is saved beside it, in `JRock/urls/`. A copy that
 fails is reported and the original included anyway — the setting is there to keep a file within
 reach, not to refuse the include. It matters most in the [browser](#jrock-web-in-the-browser),
 where an uploaded file lands in CheerpJ's `/uploads` and is gone after a reload, taking the only
 path the log recorded with it. Turned off, every file is included where it lies — and a type
-whose conversion has to write under `JRock/` is refused instead (see
+whose conversion has to write under `JRock/includes/` is refused instead (see
 [Multimodal includes](#multimodal-includes-ctrli)).
 
 **And a copy is JRock's own file, so an oversized image is downscaled into it** — which is why it is a *processed* copy, not always a byte-for-byte one. The page a
@@ -1027,7 +1029,7 @@ message, and goes to the model as the text it is — `@img 1f3a9c0b7e42` rather 
 while everything else is sent as usual:
 
 ```
-Warning: included file is missing: C:\demo\JRock\rtf-md\quarterly.rtf.md (@txt 8b52e0ad91cc); sent as text.
+Warning: included file is missing: C:\demo\JRock\includes\rtf-md\quarterly.rtf.md (@txt 8b52e0ad91cc); sent as text.
 Warning: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the log; sent as text. Re-include the file with Ctrl+I to send the file itself.
 ```
 
@@ -1039,7 +1041,7 @@ different file now, and including it again is the fix.
 Selecting the PDF filter runs **Ghostscript** to convert the PDF, one page image per page, then
 includes each produced page. Ghostscript must be on your PATH: `gswin64` on Windows, `gs` on
 macOS and Linux. In the [browser](#working-with-pdfs) the same filter renders with PDF.js
-instead, into `JRock/pdfjs-pdf/`.
+instead, into `JRock/includes/pdfjs-pdf/`.
 
 **Page images, not Ghostscript text.** There is no text filter on Ghostscript's `txtwrite`
 device, because `txtwrite` takes the text operators as they come and hands back something a model
@@ -1054,7 +1056,7 @@ alive. On **Windows** JRock runs the **windowed** build (`gswin64.exe`, preferri
 Everywhere else the console `gs` is run with `-q` omitted, and its progress — `Page 1`,
 `Page 2`, … — is echoed into the log as `gs:` lines while it works.
 
-- Output is written under **`JRock/gs-pdf/`**, named `<pdfname>.gs.NNN.png` — page images at
+- Output is written under **`JRock/includes/gs-pdf/`**, named `<pdfname>.gs.NNN.png` — page images at
   the **Images DPI** set in Configure (150 by default), the page's physical size being the
   PDF's own business.
 - The exact Ghostscript command and its output are echoed to the log.
@@ -1101,7 +1103,7 @@ survive as markup a model reads as structure instead of being thrown away.
 
 **From an RTF.**
 
-- Output is written under **`JRock/rtf-md/`**, named `<rtfname>.md` — `notes.rtf` becomes
+- Output is written under **`JRock/includes/rtf-md/`**, named `<rtfname>.md` — `notes.rtf` becomes
   `notes.rtf.md`, so two RTFs with the same stem can't overwrite each other.
 - What is mapped, and nothing more:
 
@@ -1125,7 +1127,7 @@ survive as markup a model reads as structure instead of being thrown away.
 reference, a table cell — so the conversion reads that structure rather than guessing at it from
 font sizes:
 
-- Output is written under **`JRock/docx-md/`**, named `<docxname>.md` — `quarterly.docx` becomes
+- Output is written under **`JRock/includes/docx-md/`**, named `<docxname>.md` — `quarterly.docx` becomes
   `quarterly.docx.md`, the same rule as for RTF.
 - Only `word/document.xml` is read, with its relationships part for link addresses, and only
   these parts of it:
@@ -1153,7 +1155,7 @@ font sizes:
 - A file that isn't really a `.docx` — an older `.doc`, a PDF, anything renamed — has no
   `word/document.xml`, and the log says exactly that: *Could not read DOCX renamed.docx: no
   word/document.xml inside it - is it really a Word .docx?* Nothing is included and no
-  `JRock/docx-md/` is created.
+  `JRock/includes/docx-md/` is created.
 
 ### XLSX conversion (no external tool)
 
@@ -1162,7 +1164,7 @@ order, as its own CSV and includes each as an `@txt` token, so a workbook of thr
 three tokens. Like a `.docx`, an `.xlsx` is a ZIP of XML, read with `java.util.zip` and the JDK's
 XML parser, so this works with nothing installed and in the browser too.
 
-- Output is written under **`JRock/xlsx-csv/`**, named `<xlsxname>.<sheet>.csv`, so
+- Output is written under **`JRock/includes/xlsx-csv/`**, named `<xlsxname>.<sheet>.csv`, so
   `stock.xlsx` with a sheet *Sales Q1* gives `stock.xlsx.Sales Q1.csv`. A character Windows
   forbids in a file name becomes `_`.
 - What a cell becomes:
@@ -1860,9 +1862,9 @@ that you cannot.
 - **Markdown reference above each include** — off by default: every include gets a line above
   its token naming the file, with what the log says of it as its text (see
   [Multimodal includes](#multimodal-includes-ctrli)).
-- **Include from processed copies in JRock/** — on by default: each picked file is included
+- **Include from processed copies in JRock/includes/** — on by default: each picked file is included
   from a copy under `JRock/includes/`, an image downscaled to **Images DPI** on the way; off, a
-  conversion that has to write under `JRock/` is refused (see
+  conversion that has to write under `JRock/includes/` is refused (see
   [Includes that outlive the session](#includes-that-outlive-the-session)).
 - **Local prompt cache** — on by default: a prompt identical to one answered before is
   answered from that answer, and Bedrock is not called (see
@@ -2452,30 +2454,30 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   gained the `@txt` tokens. A third test puts a hand-edited `.txt` there first and checks it is
   included as it is, with no conversion run and nothing overwritten.
 - **`JRockRtfIncludeTest`** includes an RTF through the real include dialog with the *RTF as
-  Markdown text* filter, and compares the file under `JRock/rtf-md/` against the **whole
+  Markdown text* filter, and compares the file under `JRock/includes/rtf-md/` against the **whole
   expected Markdown** — headings from the font sizes, bold and italic as markup, Word's bullets
   as a list, asterisks escaped, an umlaut intact as UTF-8 — plus the single `@txt` token in the
   prompt. The document is written by hand (`FormattedRtf`), one control word per mapping. A
   second test renames a plain text file to `.rtf` and checks JRock says it found no text and
   includes nothing. A third sets **Include RTF as** to *Text as is* and checks the
-  include is the `.rtf` itself, with nothing converted and no `JRock/rtf-md/` written — the
+  include is the `.rtf` itself, with nothing converted and no `JRock/includes/rtf-md/` written — the
   setting is the whole difference. No external program: the reader is the JDK's.
 - **`JRockDocxIncludeTest`** is the symmetric twin of that, for `.docx`: it includes a document
   through the real dialog with the *DOCX as Markdown text* filter and compares
-  `JRock/docx-md/quarterly.docx.md` against the **whole expected Markdown** — headings from the
+  `JRock/includes/docx-md/quarterly.docx.md` against the **whole expected Markdown** — headings from the
   styles (spelled both `Heading1` and `heading 2`), runs Word split mid-word joined back into
   words, a toggle switched off with `w:val="false"`, list markup that carries no bullet
   character at all, a hyperlink, a table with a bold header row, an umlaut, asterisks escaped.
   The document is written by hand (`FormattedDocx`), zip entries and all. A second test renames
   a text file to `.docx` and checks the log says there is no `word/document.xml` in it and that
-  no `JRock/docx-md/` is created.
+  no `JRock/includes/docx-md/` is created.
 - **`JRockAutomationDocTest`** drives the two calls the doc inventory's first pass is made of,
   from a thread of its own as an automation would: `automationInclude(pdf, "pdfhtml")`, answering
   **Yes** to the create question and checking every page image arrived with its `![...](<path>)`
   reference, and `automationExportDocx`, checking the DOCX carries the very PNG the reference
   named. Nothing is sent.
 - **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
-  sheet* and compares both CSVs under `JRock/xlsx-csv/` **whole**: shared, rich and inline
+  sheet* and compares both CSVs under `JRock/includes/xlsx-csv/` **whole**: shared, rich and inline
   strings, a comma and quotes quoted, a line break kept inside its field, dates in a built-in and
   a custom format as ISO, a time alone, a number whose format has a `d` only in quoted text left a
   number, a boolean, an error, formula values, and a skipped column and row kept in place. The
@@ -2496,7 +2498,7 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   with an `@img` token and its 120 × 80 read out of the saved file's header; and
   `application/pdf` has to be **refused by name**, in the log and in a dialog, leaving no
   `JRock/urls/` at all and the prompt untouched.
-- **`JRockIncludeCopyTest`** includes a file with **Include from processed copies in JRock/** on and checks
+- **`JRockIncludeCopyTest`** includes a file with **Include from processed copies in JRock/includes/** on and checks
   where the include then points: the copy line comes *before* the include it was made for, the
   copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what
   the hash is registered against. With the setting off it checks the other half: nothing is
