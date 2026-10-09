@@ -4358,7 +4358,7 @@ public class JRock {
         notes.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                 javax.swing.BorderFactory.createTitledBorder("Notes"), notes.getBorder()));
 
-        javax.swing.JPanel content = new javax.swing.JPanel();
+        javax.swing.JPanel content = new ViewportWidthPanel();
         content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
         content.add(title);
         content.add(javax.swing.Box.createVerticalStrut(8));
@@ -4391,6 +4391,30 @@ public class JRock {
         java.awt.Window owner = javax.swing.SwingUtilities.getWindowAncestor(parent);
         javax.swing.JOptionPane.showMessageDialog(owner != null ? owner : parent, scroll,
                 "JRock Help", javax.swing.JOptionPane.PLAIN_MESSAGE);
+    }
+
+    // A panel that is always exactly as wide as the scroll pane showing it, and only as
+    // tall as it needs to be. Without it the panel takes the width of its widest row -
+    // a titled border, a few pixels of insets - while the window shows less, so every
+    // row is stretched to that width and wrapped there, and its right edge is cut off
+    // with no scroll bar to reach it. Held to the viewport, the text wraps to what can
+    // be seen and only scrolls down.
+    private static final class ViewportWidthPanel extends javax.swing.JPanel
+            implements javax.swing.Scrollable {
+        @Override public java.awt.Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+        @Override public int getScrollableUnitIncrement(java.awt.Rectangle visible,
+                                                        int orientation, int direction) {
+            return 16;
+        }
+        @Override public int getScrollableBlockIncrement(java.awt.Rectangle visible,
+                                                         int orientation, int direction) {
+            return orientation == javax.swing.SwingConstants.VERTICAL
+                    ? Math.max(16, visible.height - 16) : visible.width;
+        }
+        @Override public boolean getScrollableTracksViewportWidth()  { return true; }
+        @Override public boolean getScrollableTracksViewportHeight() { return false; }
     }
 
     // A caption and a link after it, wrapped to width, which opens url when clicked.
