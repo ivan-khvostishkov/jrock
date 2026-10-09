@@ -69,6 +69,30 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
     }
 
     @Test
+    @DisplayName("a real restart reloads the includes from the log it loads from disk")
+    void reloadsTheIncludesAtStartup() throws Exception {
+        awaitReadyCount(1);
+
+        Path png = png("one", "IMG_4002.png", 120, 80);
+        Path txt = text("notes.txt", "Two included files, one of each kind.");
+        include(IMAGE_FILTER, png, "Image: 120 x 80");
+        include(TEXT_FILTER, txt, "Text: ");
+        Map<String, Path> before = new LinkedHashMap<>(includes());
+        assertThat(before).describedAs("the includes before the restart").hasSize(2);
+
+        // At startup the log pane is empty until the log read from disk is put into
+        // it, later, on the EDT: the reload has to read what was loaded, not the pane.
+        includes().clear();
+        restartTheApplication();
+        awaitReadyCount(2);
+
+        assertThat(includes()).describedAs("the includes after the restart")
+                .isEqualTo(before);
+        assertThat(logLines()).describedAs("the log's lines")
+                .contains("Includes reloaded from the log: 2 of 2 referred to");
+    }
+
+    @Test
     @DisplayName("a reference that names its file finds it again after a restart")
     void reloadsWhatAReferenceNamed() throws Exception {
         awaitReadyCount(1);

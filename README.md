@@ -2531,7 +2531,10 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockReloadIncludesTest`** includes a PNG and a text file, throws the hash → path map away by
   reflection — which is the state a restart leaves, minus the restart — and applies the Configure
   dialog unchanged, which runs the session report, and the reload with it, as a start does. The
-  map has to come back identical, and the report has to count both. Three more tests cover what a
+  map has to come back identical, and the report has to count both. A second test does it with
+  a real restart instead — the window disposed and `main()` run again in the same folder — which
+  is the case where the log pane is still empty when the reload runs, and the reload has to read
+  the log as it was just loaded from disk. Three more tests cover what a
   log can say instead: a token no include line accounts for is counted rather than dropped, a file
   deleted since is reloaded *and* counted as missing, and a file included twice from two folders
   is reloaded from where it was included **last**. One more checks the send: a missing file and
