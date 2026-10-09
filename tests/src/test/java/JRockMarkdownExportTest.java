@@ -427,6 +427,104 @@ class JRockMarkdownExportTest {
                 .contains("alt (http://example.com/cat.png)");
     }
 
+    @Test
+    @DisplayName("an inline SVG is packed into the DOCX as an .svg part and placed at its size")
+    void placesAnInlineSvg() throws Exception {
+        // What a model writes when it draws: the SVG in the middle of a sentence, in a
+        // <div>, with no xmlns - which HTML does not need and a file of its own does.
+        String markdown = "Text <div> <svg width=\"100\" height=\"50\">\n"
+                + "  <rect width=\"100\" height=\"50\" fill=\"red\"/>\n"
+                + "</svg> </div> Text continues.\n";
+
+        Object document = export(markdown, Collections.emptyMap());
+        assertThat(warnings(document)).describedAs("nothing to complain about").isEmpty();
+        assertThat(images(document)).describedAs("pictures placed").isEqualTo(1);
+        Map<String, byte[]> parts = unzip(docx(document));
+
+        // 1. The SVG is a part of its own, a standalone file with its namespace, and the
+        //    package says what kind of part it is.
+        String svg = text(parts.get("word/media/image1.svg"));
+        assertThat(svg).startsWith("<?xml").contains("xmlns=\"http://www.w3.org/2000/svg\"")
+                .contains("fill=\"red\"").doesNotContain("div");
+        assertThatCode(() -> parse(parts.get("word/media/image1.svg")))
+                .describedAs("the SVG part is well-formed XML").doesNotThrowAnyException();
+        assertThat(text(parts.get("[Content_Types].xml")))
+                .contains("<Default Extension=\"svg\" ContentType=\"image/svg+xml\"/>");
+
+        // 2. The drawing points at it both ways: through Word's svgBlip extension, and
+        //    through r:embed for a reader that does not know it.
+        String body = text(parts.get("word/document.xml"));
+        assertThat(body).contains("r:embed=\"rId2\"").contains("<asvg:svgBlip")
+                // 100 x 50 pixels at the default Images DPI of 150: 6096 EMU each.
+                .contains("<wp:extent cx=\"609600\" cy=\"304800\"/>")
+                // The <div> made it a paragraph of its own, between the two sentences.
+                .contains("Text</w:t>").contains("Text continues.</w:t>")
+                .doesNotContain("&lt;svg").doesNotContain("&lt;div");
+        assertThatCode(() -> parse(parts.get("word/document.xml")))
+                .describedAs("word/document.xml is still well-formed XML")
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("an SVG's pixels are reckoned at Images DPI, the viewBox filling in what is missing")
+    void sizesAnInlineSvgAtImagesDpi() throws Exception {
+        // Width only, in inches: two inches whatever the setting, and the height follows
+        // the viewBox's proportions.
+        assertThat(svgExtent("<svg width=\"2in\" viewBox=\"0 0 200 100\"></svg>"))
+                .isEqualTo("cx=\"1828800\" cy=\"914400\"");
+        // Neither: the viewBox is the size, in pixels at the default 150 dpi - one inch
+        // by half an inch.
+        assertThat(svgExtent("<svg viewBox=\"0,0,150,75\"/>"))
+                .isEqualTo("cx=\"914400\" cy=\"457200\"");
+        // Far too wide for the page: held to the text frame, proportions kept.
+        assertThat(svgExtent("<svg width=\"4000\" height=\"2000\"></svg>"))
+                .isEqualTo("cx=\"6120000\" cy=\"3060000\"");
+        // And at another setting the same pixels measure differently: 300 px at 300 dpi
+        // is one inch.
+        java.lang.reflect.Field dpi = JRock.class.getDeclaredField("imagesDpi");
+        dpi.setAccessible(true);
+        Object before = dpi.get(null);
+        dpi.set(null, 300);
+        try {
+            assertThat(svgExtent("<svg width=\"300\" height=\"150\"></svg>"))
+                    .isEqualTo("cx=\"914400\" cy=\"457200\"");
+        } finally {
+            dpi.set(null, before);
+        }
+    }
+
+    @Test
+    @DisplayName("an SVG in a code block is code, and a broken one stays text with a warning")
+    void leavesSvgsItCannotPlaceAsText() throws Exception {
+        String markdown = String.join("\n",
+                "```",
+                "<svg width=\"10\" height=\"10\"></svg>",
+                "```",
+                "",
+                "Broken: <svg width=\"10\"><g></svg>",
+                "");
+        Object document = export(markdown, Collections.emptyMap());
+        assertThat(images(document)).describedAs("nothing placeable").isEqualTo(0);
+        assertThat(warnings(document)).hasSize(1).first().asString()
+                .contains("An inline SVG could not be placed");
+        String body = text(unzip(docx(document)).get("word/document.xml"));
+        assertThat(body).doesNotContain("<w:drawing>")
+                .contains("&lt;svg width=\"10\" height=\"10\"&gt;&lt;/svg&gt;")
+                .contains("Broken: &lt;svg");
+        // And the RTF, which places no pictures, writes an SVG as the text it is.
+        assertThat(new String(rtf(export("<svg width=\"10\"></svg>")),
+                StandardCharsets.US_ASCII)).contains("<svg width=\"10\"></svg>");
+    }
+
+    /** The wp:extent of the one picture in a document of nothing but this SVG. */
+    private static String svgExtent(String svg) throws Exception {
+        String body = text(unzip(docx(export(svg, Collections.emptyMap())))
+                .get("word/document.xml"));
+        int at = body.indexOf("<wp:extent ");
+        assertThat(at).describedAs("a wp:extent in " + body).isNotNegative();
+        return body.substring(at + "<wp:extent ".length(), body.indexOf("/>", at));
+    }
+
     // ---- the classes under test, which are private to JRock ----
 
     /** {@code JRock.MarkdownExport.of(markdown)}: the parsed document. */
