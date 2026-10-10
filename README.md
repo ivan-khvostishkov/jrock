@@ -617,7 +617,7 @@ written atomically, so a crash or a failed write never leaves a truncated file:
 - `JRock/wav/` — the audio, a file of its own per narration and per recording, each named for
   the moment it was made: `narration-<date>-<time>.wav`, `recording-<date>-<time>.wav`, and
   `transcribe-<date>-<time>.wav` where a recording was transcribed into the prompt instead of
-  included (see [**Narrate**](#narrate-windows) and
+  included (see [**Narrate**](#narrate-windows-and-the-browser) and
   [**recording from the microphone**](#recording-from-the-microphone-ctrlspace)).
 - `JRock/jrock-context-menu-install.reg`, `-uninstall.reg`, and
   `JRock/jrock-agent-<name>-install.reg` / `-uninstall.reg` — on Windows, exactly what the
@@ -656,7 +656,7 @@ from inside the running application, and different for every way of launching it
   on a different one — or at a different DPI. An `images-dpi$` that isn't one of the values the
   Configure dropdown offers is reported in the startup log and ignored, since that dropdown
   could only show it as something else and then write that back. It also holds
-  `narrate-device$` and `record-device$`, the one speaker [Narrate](#narrate-windows) plays on
+  `narrate-device$` and `record-device$`, the one speaker [Narrate](#narrate-windows-and-the-browser) plays on
   and the one microphone [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from.
   Each is written only once one is set, and there is no default for either. On Windows,
   `narrate-voice$` is the voice Narrate reads in, by its Windows name; absent means whichever
@@ -1730,7 +1730,7 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
 - **Sounds**: a short rising chirp when an alarm is set, and an alarm clock's four quick beeps,
   once, when it rings. **Remove** (or Delete or Escape on it in the list) takes an alarm off
   the list, and stops it if it is still beeping. The agent makes the sounds itself, with no files,
-  and plays them with Java Sound on JRock's [**Narrate on**](#narrate-windows) speaker, never
+  and plays them with Java Sound on JRock's [**Narrate on**](#narrate-windows-and-the-browser) speaker, never
   on the Windows default. That device name is the only thing it takes from JRock's settings
   (`JRock.automationNarrateDevice()`). If no speaker is set, or it isn't connected, the window
   says so, and the alarm still shows.
@@ -2084,22 +2084,33 @@ rather than repeated on every row.
 **Audio**
 
 - **Narrate on** and **Record from** (Windows / desktop) — the one speaker
-  [Narrate](#narrate-windows) plays on and the one microphone
+  [Narrate](#narrate-windows-and-the-browser) plays on and the one microphone
   [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a
   dropdown, empty until the feature lists the devices, and never fall back to the default.
-- **Narrate with** (Windows) — **the voices** Narrate may read in, by their Windows names, over a
-  dropdown of every voice installed with its language beside it. **As many as you like, separated
-  by commas: the language of the text picks between them.** `Microsoft David Desktop, Microsoft
+- **Narrate with** (Windows, and the browser) — **the voices** Narrate may read in, by their
+  names, on a plain line with an **Add** dropdown beside it. **As many as you like, separated by
+  commas: the language of the text picks between them.** `Microsoft David Desktop, Microsoft
   Irina Desktop` reads an English answer in David and a Russian one in Irina, which is the point
   of the setting — no one voice reads every language. Empty — the default — means *whichever
-  installed voice speaks the language*, which is what JRock does when it has not been told
-  otherwise. The list fills itself the first time you narrate, like the device lists, since
-  enumerating the voices means starting PowerShell and a dialog opened to change the model should
-  not pay for that. Kept per folder as `narrate-voice$`.
+  voice here speaks the language*, which is what JRock does when it has not been told
+  otherwise. Kept per folder as `narrate-voice$`.
+
+  **Add** puts the voice you pick on the end of the line and goes back to blank, so the
+  dropdown is never mistaken for the value and the line — which is the value — stays text you
+  can type in, reorder or clear. A voice already named is not added twice, and each name appears
+  in the list once however many voices report it. On the desktop that list fills itself the first
+  time you narrate, like the device lists, since enumerating the voices means starting
+  PowerShell and a dialog opened to change the model should not pay for that; in the browser it
+  is filled as the dialog opens, the page keeping its voices in memory.
 - **Transcribe recordings into the prompt** (Windows) — under Record from: a recording is typed
   into the prompt by Windows speech recognition instead of being included as `@audio`.
 - **Mic always on: record when speech is heard** — under both (see
   [**Mic always on**](#mic-always-on)).
+
+In the browser the tab holds the **Narrate with** row alone: the page speaks through whatever
+it already plays sound on, so there is no device to pick, and it hands back no audio, so there
+is no file to name (see [**narrating in the browser**](#narrating-in-the-browser)). The
+microphone rows are desktop-only.
 
 Each row names the file its audio goes to, the way the Files tab names its folders:
 `JRock/wav/narration-<date>-<time>.wav`, `JRock/wav/recording-<date>-<time>.wav`, and
@@ -2167,11 +2178,13 @@ to save the transcript to a PDF, or print to a physical printer. If text is sele
 log pane, only the selection is printed (with its colors), so a single answer can be printed
 without the surrounding transcript.
 
-## Narrate (Windows)
+## Narrate (Windows, and the browser)
 
-Select text in the log, right-click, **Narrate selected text**: Windows reads it aloud with its
-own voices. While it reads, the same item says **Stop narrating** and stops it mid-word. The log
-says what is happening: how many characters, which voice, and when it finishes.
+Select text in the log, right-click, **Narrate selected text**: it is read aloud — by
+Windows' own voices on the desktop, and by the browser's own in [JRock
+Web](#jrock-web-in-the-browser). While it reads, the same item says **Stop narrating** and
+stops it mid-word. The log says what is happening: how many characters, which voice, and
+when it finishes.
 
 - **The speaker is yours to set, and nobody else's.** Windows moves its default output to
   whatever was plugged in last, so JRock does not use that default. A first run has no device set.
@@ -2191,7 +2204,11 @@ says what is happening: how many characters, which voice, and when it finishes.
   one that sounded wrong, and an overwrite would have thrown it away by the time anybody went
   looking. A stopped narration is saved as far as it played.
 - **Pick the voices, and the language picks between them.** **Configure → Audio → Narrate with**
-  takes as many voice names as you like, separated by commas, out of every voice Windows has —
+  is a plain line that takes as many voice names as you like, separated by commas, with an
+  **Add** dropdown beside it that puts one on the end of the line and then goes straight back
+  to blank — so what the dropdown shows is never mistaken for the setting (the line is), and
+  the line stays text you can type in, reorder or clear. Every voice Windows has is in that
+  list —
   `Microsoft David Desktop, Microsoft Irina Desktop` reads English in David and Russian in Irina.
   The order is the order of preference, and the rule is:
 
@@ -2226,6 +2243,35 @@ says what is happening: how many characters, which voice, and when it finishes.
   speech pack (**Settings → Time & language → Language**, or **Speech → Add voices**), but SAPI
   sees only the classic *Desktop* voices, such as Microsoft Irina Desktop (`ru-RU`). A newer
   voice that Settings lists may not be one of them.
+
+### Narrating in the browser
+
+In [JRock Web](#jrock-web-in-the-browser) the same menu item reads the selection out in the
+**browser's own voice**, over the same [page bridge](#http-transport) the HTTP client, the
+clipboard and the PDF engine use: the page is handed the text, the language JRock worked out
+from it, and the **Narrate with** line, and it picks between its own voices by exactly the
+rules above. The **Audio** tab appears in Configure for it, with that line and its **Add**
+dropdown — filled with the browser's voices the moment the dialog opens, since asking for them
+costs nothing there (on the desktop the list is what the last narration reported, because
+enumerating them means starting PowerShell).
+
+Three things are different in a tab, and the window says so rather than pretending otherwise:
+
+- **No output device**, so there is no *Narrate on* row: the page speaks through whatever it
+  already plays sound on, and offers nobody a say in it.
+- **No audio file.** The browser renders the speech itself and hands back nothing but the name
+  of the voice that read it, so there is no `JRock/wav/narration-...wav` to keep — and the
+  dialog does not name one.
+- **A browser may refuse the first one.** Speech synthesis needs the page to have been
+  interacted with, and the tap that reached the menu is long over by the time Java calls back.
+  The page spends your first touch or key press on an empty utterance to open the door; if a
+  browser still refuses, the log says what it said — tap the page and press Narrate again.
+
+What is the same: the Markdown is read and not the markup, the language of the text picks the
+voice, *Stop narrating* stops it mid-word, the log names the voice that read it, and
+`narrate-voice$` is kept in `JRock/jrock-config.txt` exactly as on the desktop. The microphone
+is **not** in the browser build — recording still wants `wav` or `mp3`, which is not what a
+browser hands back.
 
 ### Recording from the microphone (Ctrl+Space)
 
@@ -2455,7 +2501,7 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)). On
   **Windows**, *Narrate selected text* reads the selection aloud, and is *Stop narrating* while
-  it does (see [**Narrate**](#narrate-windows)). *Open URL in new tab* opens the address the
+  it does (see [**Narrate**](#narrate-windows-and-the-browser)). *Open URL in new tab* opens the address the
   selection holds or sits inside, so selecting ` - https://example.com/ ;` or just `xample.co`
   out of it opens `https://example.com/` — in the default browser on the desktop, in a new tab of
   the page in the browser. It is greyed out when the selection points at no address, and the log
@@ -2809,7 +2855,7 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   **no line at all** for a model whose card states no price, for one there is no card for, and
   for a reply that reported no token counts. And the startup total: every cost line in a log
   added up, and a line that only looks like one left out. No window.
-- **`JRockNarrationTextTest`** checks what [**Narrate selected text**](#narrate-windows) would
+- **`JRockNarrationTextTest`** checks what [**Narrate selected text**](#narrate-windows-and-the-browser) would
   hand the voice: headings, emphasis, list and quote markers, table pipes and include tokens
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
   English words in it, none for the reverse, `ja` rather than `zh` once there is kana. No
