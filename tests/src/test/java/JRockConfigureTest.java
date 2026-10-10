@@ -28,8 +28,7 @@ class JRockConfigureTest extends JRockGuiFixture {
     private static final String FAKE_API_KEY = "fake-bedrock-key-not-a-real-credential";
 
     /**
-     * A region that does not exist, so JRock's "bedrock-mantle.&lt;region&gt;.api.aws"
-     * host does not resolve.
+     * An endpoint whose host does not resolve, naming a region that does not exist.
      * <p>
      * Applying the dialog re-runs the session report, and with a key set the
      * model-list fetch runs - so without this the test would send a
@@ -37,17 +36,18 @@ class JRockConfigureTest extends JRockGuiFixture {
      * suite stays offline. There is no wildcard record under api.aws, so an
      * unknown region really is NXDOMAIN rather than something that resolves.
      */
-    private static final String UNROUTABLE_REGION = "moon-9";
+    private static final String UNROUTABLE_ENDPOINT =
+            "https://bedrock-mantle.moon-9.api.aws/v1/chat/completions";
 
     @Test
     @DisplayName("the Configure dialog accepts an API key and never shows it back")
     void neverShowsBackTheApiKeyItWasGiven() throws Exception {
         awaitReadyCount(1);
 
-        // Set directly rather than typed into the dialog's region field: several of
+        // Set directly rather than typed into the dialog's endpoint field: several of
         // the dialog's fields are JTextFields, and picking one out by type alone would
-        // be ambiguous. What is under test here is the key field, not the region field.
-        field("REGION").set(null, UNROUTABLE_REGION);
+        // be ambiguous. What is under test here is the key field, not the endpoint.
+        field("ENDPOINT").set(null, UNROUTABLE_ENDPOINT);
 
         JOptionPaneFixture dialog = openConfigure();
         // Blank on a first open too, not only after a key has been set.

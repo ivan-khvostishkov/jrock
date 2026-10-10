@@ -61,7 +61,7 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   **agents** that run such a chain by driving the real window, like AgentCore on your own
   machine, so you watch it work and carry on the conversation when it's done
   ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
-- **Keyboard-driven**, with a Configure dialog for API key, region, model and working directory.
+- **Keyboard-driven**, with a Configure dialog for API key, endpoint, model and working directory.
 
 ## Requirements
 
@@ -165,7 +165,7 @@ as WebAssembly), so nothing runs on a server.
   would look for it, and there is no JavaScript credentials dialog interrupting a send to ask
   for it again. The page shows the jar's SHA-256 so you can confirm it matches the reproducible
   build before typing anything, and the key never goes anywhere but the Bedrock endpoint. The
-  region and model live beside it in `JRock/jrock-config.txt`, the same as everywhere else.
+  endpoint and model live beside it in `JRock/jrock-config.txt`, the same as everywhere else.
 - **A folder in the address starts JRock in it.** `https://jrock.nosocial.net/?fl` starts JRock
   as soon as the jar has loaded, without waiting for **Run JRock**, with `/files/fl` as its working
   directory; `?fl/foo` gives `/files/fl/foo`. That is the same as pressing **Run JRock** and
@@ -347,7 +347,7 @@ provides the transport instead. Any host page can serve JRock by providing two f
   JSON either way. The `options` include the headers JRock built, `Authorization` among them: the
   key is JRock's in the browser too, so one dialog sets it and one file keeps it.
   **A page configures nothing.** Its `browserHttpInfo()` reply names its client for the startup
-  log, and that is all it is asked: it cannot pin the region, and it cannot hold the Bedrock key
+  log, and that is all it is asked: it cannot pin the endpoint, and it cannot hold the Bedrock key
   and attach the header in JRock's place. Everything is in the working folder's files on every
   platform, so each setting has one home, a missing key is always reported in the one place you
   would fix it, and nothing a page does can make a setting arrive by a second way you cannot see.
@@ -527,7 +527,7 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   each clock that was sent (see [**Clock**](#clock)). These are never modified or deleted (not
   even by Clear log). `cat`-ing the operator's and the assistant's in order reproduces the
   dialog-only transcript.
-- `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the region, model and
+- `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the endpoint, model and
   images DPI (see [**Settings files**](#settings-files)).
 - `JRock/includes/` — **one flat folder** holding everything an include is made from: a copy of
   each file picked with Ctrl+I (when **Include from processed copies** is on — see [**includes
@@ -583,7 +583,7 @@ from inside the running application, and different for every way of launching it
   place to put one; a key is never copied into a folder it wasn't typed for. It gets a file of
   its own because it's a credential: it can be locked down, kept out of a copy of the
   configuration, or deleted on its own.
-- **`JRock/jrock-config.txt`** — the **region**, the **model** and the **images DPI**, so the
+- **`JRock/jrock-config.txt`** — the **endpoint**, the **model** and the **images DPI**, so the
   next start comes up the way you left it. Seeded with the settings in effect when the folder
   has none. Per folder rather than per user on purpose: it is what lets one folder's
   [agent](#windows-agents-one-automation-per-folder) run on one model, and another folder's run
@@ -617,8 +617,8 @@ The config format is a name on one line and its **value on the next**:
 ' Leading and trailing spaces are dropped. Blank lines, and lines starting
 ' with ' (a single quote), are ignored.
 
-region$
-us-east-1
+endpoint$
+https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions
 
 model$
 xai.grok-4.3
@@ -1887,12 +1887,19 @@ the one they are looking for.
   in it. The key is never displayed. The row is there on every platform, since the key is always
   JRock's to hold and no hosting page can hold it instead (see [HTTP transport](#http-transport)).
   In the browser the row is a **plain, unmasked field with its own Paste button**. The mask is
-  what a phone's CheerpJ build will not raise a keyboard for — the region field beside it, same
+  what a phone's CheerpJ build will not raise a keyboard for — the endpoint field beside it, same
   dialog, does come up — and a row you cannot fill in is worse than one whose text can be read
   over your shoulder; the button then works whatever the keyboard does, since a key is pasted
   and never typed from memory. Its menu is **Paste** alone: a key that goes in does not need to
   come back out.
-- **Region** — free text. Kept in `JRock/jrock-config.txt`, so it survives a restart.
+- **API endpoint** — free text: the **Chat Completions URL every request goes to**, in full
+  — `https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions`. Another region is another
+  host, which is no more typing than a region was. Kept in `JRock/jrock-config.txt` as
+  `endpoint$`, so it survives a restart. The model list is read from `/models` beside it, and a
+  [model card](#models) that states its own path — the `/openai/v1` models — keeps that path on
+  this host. Prices come from the card for the **region named in the host**, so a host that
+  names none simply has no price line, the same silence a card gives for a region it has no
+  row for.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
   `JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
   folder's [agent](#windows-agents-one-automation-per-folder) a different agent from the same
@@ -1991,7 +1998,7 @@ overwritten.
 Every row above has a **right-click — or, on a touch screen, a long-press — menu** with Copy,
 Paste and Select all (the model's is on the combo's editor, which is what a tap lands on). On a
 phone there is no Ctrl+V, and *Select all* is in there because a field that already holds a
-region, a model or a path is a field whose contents are in the way of the one being pasted over
+an endpoint, a model or a path is a field whose contents are in the way of the one being pasted over
 it. The API key row is the exception, with Paste alone.
 
 The long press is timed **from the press and checked again on release**, not left to the timer
@@ -2744,7 +2751,7 @@ Nothing is stubbed and no credentials are needed: every test runs in a throwaway
 directory of its own, so its `JRock/bedrock-key.txt` is the empty one JRock creates and the
 startup model-list fetch is skipped for want of a key. Your own key cannot be picked up by a
 test, because nothing is read from the environment. No test contacts AWS — the one case that
-does set a key points the region at a host that doesn't resolve, so the fetch fails at DNS.
+does set a key points the endpoint at a host that doesn't resolve, so the fetch fails at DNS.
 
 Two external programs are needed: **Ghostscript on `PATH`** (`gs`, or `gswin64`/`gswin64c` on
 Windows) for the PDF test, and **xpdf's `pdftohtml` and `pdftotext`** (from
