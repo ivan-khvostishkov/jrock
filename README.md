@@ -1750,8 +1750,11 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   alarm is set and again when it rings (*"Alarm set for 07:30:00, C chord, 3 beeps"*), and every
   row in the list carries it as `C x3`. Numbering counts the alarms *set*, not the rows, so
   removing one from the middle never hands its sound to the next one.
-- **Sounds**: a short rising chirp when an alarm is set, and the chord above when it rings,
-  played once. **Remove** (or Delete or Escape on it in the list) takes an alarm off
+- **Sounds**: that chord **once** when the alarm is set — so setting a third alarm with two
+  still waiting is heard as a third sound, not the same chirp a third time — and the same chord
+  its own number of times when it rings. One beep against three or more, a little quieter, is
+  what tells *set* from *ringing* at the same chord. **Remove** (or Delete or Escape on it in
+  the list) takes an alarm off
   the list, and stops it if it is still beeping. The agent makes the sounds itself, with no files,
   and plays them with Java Sound on JRock's [**Narrate on**](#narrate-windows-and-the-browser) speaker, never
   on the Windows default. That device name is the only thing it takes from JRock's settings
