@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.10.0";
+    private static final String VERSION = "2.12.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -699,13 +699,18 @@ public class JRock {
     private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
-    // What an include is made from, all under includes/: the copies of picked files
-    // themselves, and one subfolder per conversion - gs-pdf/ on the desktop, pdfjs-pdf/
-    // in the browser, one per PDF engine. URLs fetched keep a folder of their own.
-    private static Path pdfDir(PdfEngine e) { return includesDir().resolve(e.tag() + "-pdf"); }
-    private static Path rtfMdDir()         { return includesDir().resolve("rtf-md"); }
-    private static Path docxMdDir()        { return includesDir().resolve("docx-md"); }
-    private static Path xlsxCsvDir()       { return includesDir().resolve("xlsx-csv"); }
+    // Everything an include is made from, in ONE folder: the copy of each picked file,
+    // and whatever a conversion made of it - page images, Markdown, CSV - beside the file
+    // it came from. A fetched URL keeps a folder of its own, being a download rather than
+    // a conversion.
+    //
+    // No hierarchy, because the hierarchy was never doing any work. Every converted file
+    // is named for the whole of its source, extension and all: a PDF's pages are
+    // "<name>.pdf.gs.001.png", an RTF's Markdown is "<name>.rtf.md", a sheet is
+    // "<name>.xlsx.<sheet>.csv". Those names are already unique among themselves and
+    // against the originals, so a folder per conversion added nothing but four more paths
+    // for the operator to remember and four more for this dialog to repeat. Sorting
+    // together under the name of the file they belong to is worth more than being apart.
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
     private static Path urlsDir()          { return jrockDir().resolve("urls"); }
     // The last narration and the last recording, one file each, overwritten every time
@@ -749,6 +754,9 @@ public class JRock {
     // The one output device Narrate plays on, by its exact name - or absent, which is
     // "not set" (see the Narrate section for why there is no default to fall back on).
     private static final String CONFIG_NARRATE_DEVICE = "narrate-device";
+    // The voice Narrate reads in, by its Windows name - or absent, which is "whichever
+    // one speaks the language of the text".
+    private static final String CONFIG_NARRATE_VOICE = "narrate-voice";
     // The same for the one microphone Ctrl+Space records from.
     private static final String CONFIG_RECORD_DEVICE = "record-device";
     // Whether a recording is transcribed into the prompt rather than included: true or
@@ -845,6 +853,8 @@ public class JRock {
             // no device has none, and Narrate says so rather than using the last one's.
             String device = settings.get(CONFIG_NARRATE_DEVICE);
             narrateDevice = (device == null) ? "" : device.trim();
+            String voice = settings.get(CONFIG_NARRATE_VOICE);
+            narrateVoice = (voice == null) ? "" : voice.trim();
             String mic = settings.get(CONFIG_RECORD_DEVICE);
             recordDevice = (mic == null) ? "" : mic.trim();
             recordTranscribe = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_TRANSCRIBE));
@@ -905,6 +915,7 @@ public class JRock {
         appendSetting(text, CONFIG_MODEL, MODEL_ID);
         appendSetting(text, CONFIG_IMAGES_DPI, String.valueOf(imagesDpi));
         appendSetting(text, CONFIG_NARRATE_DEVICE, narrateDevice);   // blank: left out
+        appendSetting(text, CONFIG_NARRATE_VOICE, narrateVoiceName(narrateVoice));
         appendSetting(text, CONFIG_RECORD_DEVICE, recordDevice);     // likewise
         if (transcribeAvailable()) {
             appendSetting(text, CONFIG_RECORD_TRANSCRIBE, String.valueOf(recordTranscribe));
@@ -1301,14 +1312,28 @@ public class JRock {
     private static final DateTimeFormatter STAMP_FMT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
 
-    // Human-readable local date/time in the user's locale (e.g.
-    // "Monday, 14 September 2026, 10:01:34"). Used for the startup line and, in
-    // extend mode, the dialog header timestamps.
+    // Human-readable local date/time in the user's locale (e.g. "Mon, 14 Sep 2026,
+    // 10:01:34"). Used for the startup line and, with History on, the dialog header
+    // timestamps.
+    //
+    // Abbreviated - "Mon" and "Sep", not "Monday" and "September" - because a header
+    // is a role and a date on one line, and on a phone the spelled-out form is wider
+    // than the window: it wraps, and every message in the transcript then costs two
+    // lines instead of one. The weekday is kept because it is the part a date alone
+    // does not tell anyone.
+    //
+    // The day and month names, and the order the date is written in, are the locale's
+    // own: a medium localized date and time with the weekday put in front of it.
     private static String humanNow() {
-        return java.time.format.DateTimeFormatter
-                .ofLocalizedDateTime(java.time.format.FormatStyle.FULL, java.time.format.FormatStyle.MEDIUM)
-                .withLocale(java.util.Locale.getDefault())
-                .format(java.time.ZonedDateTime.now());
+        java.util.Locale locale = java.util.Locale.getDefault();
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+        return now.getDayOfWeek().getDisplayName(java.time.format.TextStyle.SHORT, locale)
+                + ", "
+                + java.time.format.DateTimeFormatter
+                      .ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM,
+                                           java.time.format.FormatStyle.MEDIUM)
+                      .withLocale(locale)
+                      .format(now);
     }
 
     // ---- Clock -------------------------------------------------------------
@@ -1937,7 +1962,10 @@ public class JRock {
         if (narrateAvailable()) {
             log.gray("Narrate on: " + (narrateDevice.isEmpty()
                     ? "no output device set yet (Narrate lists them, Configure picks one)"
-                    : narrateDevice));
+                    : narrateDevice)
+                    // Only when one was chosen: "by the language of the text" is the
+                    // default, and a report line per default is a report nobody reads.
+                    + (narrateVoice.isEmpty() ? "" : ", in " + narrateVoice));
         }
         if (recordAvailable()) {
             log.gray("Record from: " + (recordDevice.isEmpty()
@@ -2057,17 +2085,55 @@ public class JRock {
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
         LogView log = new LogView(output);
 
-        // Top bar: [Configure] on the left; [Dialog only] [Clear log] on the right.
+        // Top bar: [Configure] [JRock/ v] on the left; [Dialog only] [Clear log] on the
+        // right.
         JButton configure = new JButton("Configure");
         configure.setToolTipText("Working directory, API key, region, model");
+        explains(configure, "Configure", "The working directory JRock saves into, the "
+                + "prompts & agents directory, the Bedrock API key, the region and the "
+                + "model, and every setting that applies to a send - on four tabs, with "
+                + "a note on each row behind the Help button in there. What you change is "
+                + "written to JRock/jrock-config.txt in the working directory, so the "
+                + "next start comes up the way you left it, and another folder can be set "
+                + "up differently.");
         // (Listener wired below, once `input` exists.)
+
+        // The status label beside Configure: it names the folder JRock saves everything
+        // into, and the caret beside it says it opens a menu - what that folder holds,
+        // the backup and the restore, the duplex merge, the Explorer entries and the
+        // window's own items (see windowMenu below).
+        javax.swing.JLabel folderStatus = new javax.swing.JLabel("JRock/");
+        folderStatus.setFont(folderStatus.getFont().deriveFont(java.awt.Font.PLAIN));
+        folderStatus.setForeground(java.awt.Color.GRAY);
+        folderStatus.setToolTipText("Everything JRock saves is in this folder - click for "
+                + "what is in it, the backup and restore, and the window's own items");
+        folderStatus.setIcon(caretIcon());
+        folderStatus.setHorizontalTextPosition(javax.swing.SwingConstants.LEFT);
+        folderStatus.setIconTextGap(5);
+        folderStatus.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createLineBorder(java.awt.Color.LIGHT_GRAY),
+                javax.swing.BorderFactory.createEmptyBorder(2, 6, 2, 6)));
 
         javax.swing.JCheckBox dialogOnly = new javax.swing.JCheckBox("Dialog only");
         dialogOnly.setToolTipText("Show only the headers and dialog (hide gray system text)");
         dialogOnly.addActionListener(e -> log.setDialogOnly(dialogOnly.isSelected()));
+        explains(dialogOnly, "Dialog only", "Ticked: the log shows the conversation and "
+                + "nothing else - your messages and the model's answers, under their "
+                + "headers. The gray lines go: what was called, what an include was made "
+                + "from, the tokens and what they cost, every warning. Nothing is lost by "
+                + "hiding them - untick it and they are all back, and JRock/jrock-log.txt "
+                + "has them either way (Ctrl+D).");
 
         JButton clear = new JButton("Clear log");
         clear.addActionListener(e -> clearLogConfirmed(frame, log));
+        clear.setToolTipText("Empty the log window and JRock/jrock-log.txt; the messages "
+                + "themselves are kept");
+        explains(clear, "Clear log", "Empties this window and JRock/jrock-log.txt, to "
+                + "start a session with a clean page. It does not touch the per-message "
+                + "files in JRock/messages/: every message you sent and every answer you "
+                + "were charged for is still there, so clearing the log costs you "
+                + "nothing. If the log has changed since you last saved a copy of it "
+                + "(Ctrl+L), you are asked first.");
 
         javax.swing.JPanel topRight = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
@@ -2076,6 +2142,7 @@ public class JRock {
         javax.swing.JPanel topLeft = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 4));
         topLeft.add(configure);
+        topLeft.add(folderStatus);
 
         javax.swing.JPanel topBar = new javax.swing.JPanel(new BorderLayout());
         topBar.add(topLeft, BorderLayout.WEST);
@@ -2156,6 +2223,15 @@ public class JRock {
             historyOn = extendMode.isSelected();
             saveConfigQuietly();
         });
+        explains(extendMode, "History", "Ticked: what was already said in this "
+                + "conversation goes out with each new message, so the model follows it "
+                + "instead of reading one message on its own. How much goes is the "
+                + "History limit in Configure; every message sent is one you pay for, so "
+                + "a long conversation costs more per send. Unticked, each message stands "
+                + "alone (Ctrl+E).\n\n"
+                + "With it on, each header in the log is dated as well, so the order of "
+                + "the conversation is plain to see. That date is printed for you and is "
+                + "never sent - telling the model the time is Clock's job, beside this.");
 
         // "Clock" mode: tell the model what time it is here, with each message. On by
         // default - a model that has to guess the date guesses wrong, and one extra
@@ -2168,8 +2244,27 @@ public class JRock {
             clockOn = clockMode.isSelected();
             saveConfigQuietly();
         });
+        explains(clockMode, "Clock", "A model has no clock: on its own it cannot tell "
+                + "whether now is Monday morning or Friday night, and asked for "
+                + "\"tomorrow\" it guesses. Ticked, the local date, time and time zone go "
+                + "to the model with each message, as one short extra message of its own, "
+                + "so \"today\", \"this evening\" and \"last week\" mean what you mean by "
+                + "them. Unticked, the model is told nothing about the time.\n\n"
+                + "This is not the date the log prints after a header, which History turns "
+                + "on: that one is written for you to read and is never sent. Each clock "
+                + "that is sent is saved as its own JRock/messages/<date>-<time>-clock.txt, "
+                + "so the record shows exactly what the model was told.");
 
         JButton send = new JButton("Send (Ctrl-Enter)");
+        send.setToolTipText("Call the model with the prompt below (Ctrl+Enter)");
+        explains(send, "Send", "Calls the model in Configure with the prompt below, and "
+                + "writes the answer into the log under its header (Ctrl+Enter). Every "
+                + "@img, @txt and @audio token in the prompt is checked first and the file "
+                + "behind it sent with the message; one that is missing stops the send, "
+                + "which is a checkbox in Configure. The prompt, the answer and the clock "
+                + "each get their own file in JRock/messages/, and the gray lines that "
+                + "follow say what was called, what it cost, and where it went. The "
+                + "button is held while a send - or a backup - is running.");
 
         // "Enter" mode: when on, plain Enter sends too. Off at startup and never
         // remembered - deliberately, both times.
@@ -2185,6 +2280,14 @@ public class JRock {
         enterSends.setToolTipText(
                 "Enter sends the prompt as well as Ctrl+Enter; Shift+Enter is always a "
                 + "new line. Off when JRock starts, and not remembered");
+        explains(enterSends, "Enter", "What the Enter key does in the prompt. Ticked, it "
+                + "sends - which is quick for one-line questions. Unticked, it types a new "
+                + "line, so a prompt can be written in paragraphs with no risk of half of "
+                + "it going early. Ctrl+Enter always sends and Shift+Enter always types a "
+                + "new line, whichever way this stands.\n\n"
+                + "It starts unticked every time JRock opens and is deliberately not "
+                + "remembered: what Enter does here is whatever this box says now, not "
+                + "what it was set to in a window that has since been closed.");
 
         // Two things disable Send - a request in flight and a backup in progress - and
         // they can overlap: a backup started while an answer was on its way must not
@@ -2462,6 +2565,14 @@ public class JRock {
             javax.swing.JLabel mic = new javax.swing.JLabel("Mic");
             mic.setFont(mic.getFont().deriveFont(java.awt.Font.PLAIN));
             mic.setToolTipText("The microphone is open");
+            explains(mic, "Mic", "Shown, with a blinking red dot, for as long as the "
+                    + "microphone is open - listening or recording, whether it was Ctrl+"
+                    + "Space, the prompt's menu, Mic always on or an agent that opened it. "
+                    + "Gone the moment it closes, so there is one place to look to know "
+                    + "nothing is being heard. The microphone it uses, and whether a "
+                    + "recording is included as @audio or typed into the prompt as text, "
+                    + "are on Configure's Audio tab; a recording is kept as "
+                    + "JRock/wav/recording-<date>-<time>.wav.");
             boolean[] lit = { true };
             mic.setIcon(new javax.swing.Icon() {
                 @Override public void paintIcon(java.awt.Component c, java.awt.Graphics g,
@@ -2503,17 +2614,6 @@ public class JRock {
         frame.add(topBar, BorderLayout.NORTH);
         frame.add(split, BorderLayout.CENTER);
         frame.add(buttonBar, BorderLayout.SOUTH);
-
-        // Hidden feature: Ctrl+M opens a Move & resize dialog. Bound at the window
-        // level so it fires regardless of which component has focus. (Ctrl+M is
-        // used instead of Ctrl+R, which reloads the page in the browser build.)
-        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_M, InputEvent.CTRL_DOWN_MASK), "jrock-move-resize");
-        frame.getRootPane().getActionMap().put("jrock-move-resize", new AbstractAction() {
-            @Override public void actionPerformed(ActionEvent e) {
-                showMoveResizeDialog(frame);
-            }
-        });
 
         // Ctrl+S: save a COPY of the current prompt to a file the user chooses.
         // The persistent jrock-prompt.txt autosave is unaffected.
@@ -2650,22 +2750,38 @@ public class JRock {
             listenForVoice(frame, input, log, extendMode::isSelected);
         }
 
-        // Configure button: opens the settings dialog, then re-runs the session
-        // report (CWD first, models loaded, ... Ready) exactly like startup.
-        // initSession reloads the log from the (possibly new) working directory,
-        // fully replacing the window contents - so switching directories shows
-        // only the new directory's log, with nothing carried over from the old one.
+        // Configure: opens the settings dialog, then re-runs the session report (CWD
+        // first, models loaded, ... Ready) exactly like startup. initSession reloads the
+        // log from the (possibly new) working directory, fully replacing the window
+        // contents - so switching directories shows only the new directory's log, with
+        // nothing carried over from the old one.
         //
         // The prompt goes with it when the directory changed (see
         // adoptPromptOfWorkingDir), and is reported like it is at startup. A dialog
         // that changed something else leaves the prompt, and its report line, alone.
-        configure.addActionListener(e -> {
+        //
+        // One handler for the two ways in - the button, and Ctrl+M on the Window tab -
+        // so a dialog opened by either applies the same way.
+        java.util.function.Consumer<String> openConfigure = tab -> {
             Path dirBefore = workingDir;
-            if (showConfigureDialog(frame)) {
+            if (showConfigureDialog(frame, tab)) {
                 boolean movedDir = !workingDir.equals(dirBefore);
                 // The title and the icon name the folder, so they move with it too.
                 if (movedDir) applyWindowIdentity(frame);
                 initSession(log, input, movedDir ? adoptPromptOfWorkingDir(input) : null);
+            }
+        };
+        configure.addActionListener(e -> openConfigure.accept(null));
+
+        // Ctrl+M opens that dialog straight onto its Window tab, where the window's size
+        // and place are four numbers and a Set button (see windowTab). Bound at the
+        // window level so it fires regardless of which component has focus. (Ctrl+M
+        // rather than Ctrl+R, which reloads the page in the browser build.)
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_M, InputEvent.CTRL_DOWN_MASK), "jrock-move-resize");
+        frame.getRootPane().getActionMap().put("jrock-move-resize", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                openConfigure.accept(CONFIGURE_WINDOW_TAB);
             }
         });
 
@@ -2806,25 +2922,34 @@ public class JRock {
         useBrowserClipboard(output, log, false);   // read-only: copy only
         useBrowserClipboard(input, log, true);
 
-        // Window chrome (empty area of the top bar, e.g. right of Configure): the duplex
-        // merge, then the backup pair, then Move & resize window...; in the browser, also
-        // show/hide the page's own header and footer; on Windows, install/uninstall the
-        // "Open JRock here" folder context-menu entry and the agent entries.
+        // The window's own menu, which hangs from the JRock/ status label beside
+        // Configure: what the JRock folder holds, the duplex merge, then the backup pair;
+        // in the browser, also show/hide the page's own header and footer; on Windows,
+        // install/uninstall the "Open JRock here" folder context-menu entry and the agent
+        // entries. The window's size and place are not here - they are Configure's Window
+        // tab, where a Set button applies them without closing anything (see windowTab).
         //
-        // The duplex merge leads the menu, alone above its separator, because it is the
-        // only item here that does something to documents rather than to JRock; backup
-        // and restore come next, above their own separator, because they are about the
-        // work rather than about the window - and because they are the items a hurry
-        // would look for.
+        // The label is the only way in, and that is the point: a menu on the empty part
+        // of a bar is a menu on whatever the bar has no button on, which on a phone is
+        // almost nothing and nowhere it says so. A label with a caret is a target that is
+        // always there, always the same size, and visibly for this.
+        //
+        // The folder's contents lead the menu, because the label it hangs from names that
+        // folder and the items below act on it. The duplex merge comes next, alone above
+        // its separator, because it is the only item here that does something to
+        // documents rather than to JRock; backup and restore follow, above their own
+        // separator, because they are about the work rather than about the window - and
+        // because they are the items a hurry would look for.
         javax.swing.JPopupMenu windowMenu = new javax.swing.JPopupMenu();
+        addMenuItem(windowMenu, "What is in the JRock folder...",
+                () -> showFolderDialog(frame));
+        windowMenu.addSeparator();
         addMenuItem(windowMenu, "Merge two-sided (duplex) PDF scans...",
                 () -> mergeDuplexScans(frame, log));
         windowMenu.addSeparator();
         addMenuItem(windowMenu, "Backup log...", () -> backupLog(frame, log, sendGate, true));
         addMenuItem(windowMenu, "Load from backup...",
                 () -> showRestoreDialog(frame, input, log, sendGate));
-        windowMenu.addSeparator();
-        addMenuItem(windowMenu, "Move & resize window...", () -> showMoveResizeDialog(frame));
         if (isCheerpJ()) {
             windowMenu.addSeparator();
             addMenuItem(windowMenu, "Show/hide the page header & footer",
@@ -2843,7 +2968,7 @@ public class JRock {
             addMenuItem(windowMenu, "Uninstall agent (Explorer menu)...",
                     () -> uninstallAgent(frame, log));
         }
-        attachPopup(topBar, windowMenu);
+        openOnPress(folderStatus, windowMenu);
 
         // The window is now complete, so publish its parts for the automation API -
         // last, and only once, so nothing can be driven from outside before all of it
@@ -2919,6 +3044,83 @@ public class JRock {
         addEditItem(menu, "Select all", field, field::selectAll);
         attachPopup(field, menu);
         useBrowserClipboard(field, log, true);
+    }
+
+    // ---- "What does this do?" popups ---------------------------------------
+    // Every button and checkbox in the window answers a right-click - or a long press
+    // on a touch screen - with its name and a few plain sentences on what it does.
+    //
+    // A tooltip says less and says it only to a mouse: a phone has nothing to hover
+    // with, so without this the short labels the bottom bar needs - Clock, History,
+    // Enter - are names to be guessed at, and Clock in particular is guessed at wrongly
+    // (it is the time sent to the model, not the date the log prints). A popup opens
+    // where the finger is, closes on the next tap, and takes nothing away from the
+    // window underneath.
+    //
+    // The text is in a panel inside the menu rather than in menu items, so there is
+    // nothing in it to click by accident; a tap on it puts it away, which is what a
+    // finger expects of something it has just read.
+    private static void explains(javax.swing.JComponent comp, String name, String text) {
+        java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+        int width = Math.max(200, Math.min(380, screen.width - 60));
+        java.awt.Font plainFont = plainLabelFont();
+
+        // The name in bold over the prose, both wrapped to the one width - so a control
+        // whose label is a sentence long gets a title over two lines rather than a popup
+        // wider than the phone it is on.
+        javax.swing.JTextArea title =
+                sized(name, plainFont.deriveFont(java.awt.Font.BOLD), width);
+        title.setAlignmentX(0f);
+        javax.swing.JTextArea body = sized(text, plainFont, width);
+        body.setAlignmentX(0f);
+
+        javax.swing.JPanel panel = new javax.swing.JPanel();
+        panel.setOpaque(false);          // the popup's own background shows through
+        panel.setLayout(new javax.swing.BoxLayout(panel, javax.swing.BoxLayout.Y_AXIS));
+        panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 8, 8, 8));
+        panel.add(title);
+        panel.add(javax.swing.Box.createVerticalStrut(4));
+        panel.add(body);
+
+        javax.swing.JPopupMenu menu = new FittedPopupMenu();
+        menu.add(panel);
+        panel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mousePressed(java.awt.event.MouseEvent e) {
+                menu.setVisible(false);
+            }
+        });
+
+        if (!(comp instanceof javax.swing.AbstractButton)) {
+            attachPopup(comp, menu);
+            return;
+        }
+
+        // A button and a checkbox both act on their own click, which makes a long press
+        // on one two things at once. Its model settles both.
+        //
+        // The menu opens only while the button is still held down: a quick click has let
+        // go before the half-second is up, so the model is no longer pressed and no menu
+        // appears - including for a click that opened a modal dialog, where this
+        // listener's own mouseReleased does not run until the dialog is closed again (see
+        // attachPopup).
+        //
+        // And a press held long enough to ask for the explanation must not also DO what
+        // the button does: disarming the model as the menu opens is what stops the
+        // release that follows from opening Configure or clearing the log. Armed first,
+        // pressed second - the other order is itself the click (see DefaultButtonModel).
+        javax.swing.ButtonModel model = ((javax.swing.AbstractButton) comp).getModel();
+        menu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override public void popupMenuWillBecomeVisible(
+                    javax.swing.event.PopupMenuEvent e) {
+                model.setArmed(false);
+                model.setPressed(false);
+            }
+            @Override public void popupMenuWillBecomeInvisible(
+                    javax.swing.event.PopupMenuEvent e) { }
+            @Override public void popupMenuCanceled(
+                    javax.swing.event.PopupMenuEvent e) { }
+        });
+        attachPopup(comp, menu, model::isPressed);
     }
 
     // ---- Automation API (public) -------------------------------------------
@@ -3791,7 +3993,23 @@ public class JRock {
     // fire during scrolling or text selection.
     private static final int LONG_PRESS_MS = 500;   // press-and-hold threshold
     private static final int LONG_PRESS_SLOP = 12;   // px of movement that cancels it
+
     private static void attachPopup(javax.swing.JComponent comp, javax.swing.JPopupMenu menu) {
+        attachPopup(comp, menu, null);
+    }
+
+    // stillHeld, when given, is asked whether the pointer is genuinely still down before
+    // a long press opens the menu. It is what a component with a job of its own needs.
+    //
+    // A button that opens a MODAL dialog is the case it exists for. The action fires from
+    // the button's own mouseReleased, which starts a nested event loop before this
+    // listener's mouseReleased is reached - so the cancel that a quick click relies on
+    // does not happen until the dialog is closed again, and the timer fires meanwhile and
+    // puts a menu over a dialog nobody asked it for. Asked whether the button is still
+    // pressed, the timer can tell the quick click from the held one by itself, whichever
+    // loop it fires in.
+    private static void attachPopup(javax.swing.JComponent comp, javax.swing.JPopupMenu menu,
+                                    java.util.function.BooleanSupplier stillHeld) {
         java.awt.event.MouseAdapter h = new java.awt.event.MouseAdapter() {
             private javax.swing.Timer timer;
             private java.awt.Point origin;
@@ -3799,6 +4017,8 @@ public class JRock {
             private boolean shown;
 
             private void showAt(int x, int y) { shown = true; menu.show(comp, x, y); }
+
+            private boolean held() { return stillHeld == null || stillHeld.getAsBoolean(); }
 
             private void cancel() {
                 if (timer != null) { timer.stop(); timer = null; }
@@ -3813,7 +4033,10 @@ public class JRock {
                 origin = e.getPoint();
                 pressedAt = System.currentTimeMillis();
                 final int x = e.getX(), y = e.getY();
-                timer = new javax.swing.Timer(LONG_PRESS_MS, ev -> { cancel(); showAt(x, y); });
+                timer = new javax.swing.Timer(LONG_PRESS_MS, ev -> {
+                    cancel();
+                    if (held()) showAt(x, y);
+                });
                 timer.setRepeats(false);
                 timer.start();
             }
@@ -3827,10 +4050,15 @@ public class JRock {
             // up), so the clock is read from the press instead of trusted to fire.
             @Override public void mouseReleased(java.awt.event.MouseEvent e) {
                 if (e.isPopupTrigger()) { cancel(); showAt(e.getX(), e.getY()); return; }
-                boolean held = !shown && origin != null
+                // Not for a component that acts on its own click: this runs after a modal
+                // dialog that the click opened has been closed again, and the press it
+                // would be measuring is minutes old by then. Such a component is given a
+                // stillHeld of its own, and the timer above is the whole of its long
+                // press.
+                boolean longPress = stillHeld == null && !shown && origin != null
                         && System.currentTimeMillis() - pressedAt >= LONG_PRESS_MS;
                 cancel();   // released before the threshold: normal click, no menu
-                if (held) showAt(e.getX(), e.getY());
+                if (longPress) showAt(e.getX(), e.getY());
             }
 
             @Override public void mouseDragged(java.awt.event.MouseEvent e) {
@@ -3844,13 +4072,66 @@ public class JRock {
         comp.addMouseMotionListener(h);
     }
 
+    // Opens a popup menu on any press - a right-click, a left-click or a tap - for a
+    // component whose whole job is to open one. A long press belongs on something that
+    // already does something else and cannot spare its plain click; a label that does
+    // nothing else should answer the first press, on every pointer there is.
+    //
+    // Below the component rather than under the pointer, the way a menu hangs from a
+    // menu bar: the finger that opened it is then not covering the first item.
+    private static void openOnPress(javax.swing.JComponent comp,
+                                    javax.swing.JPopupMenu menu) {
+        comp.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        comp.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mousePressed(java.awt.event.MouseEvent e) {
+                menu.show(comp, 0, comp.getHeight());
+            }
+        });
+    }
+
+    // A small downward caret, drawn rather than typed: it is the one mark that reads as
+    // "there is a menu here" on every platform, and drawing it means it looks the same
+    // in the browser, where the font that would carry the character may not be there.
+    private static javax.swing.Icon caretIcon() {
+        return new javax.swing.Icon() {
+            @Override public void paintIcon(java.awt.Component c, java.awt.Graphics g,
+                                            int x, int y) {
+                java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(java.awt.Color.GRAY);
+                g2.fillPolygon(new int[] { x, x + 7, x + 3 },
+                               new int[] { y + 3, y + 3, y + 8 }, 3);
+                g2.dispose();
+            }
+            @Override public int getIconWidth()  { return 8; }
+            @Override public int getIconHeight() { return 11; }
+        };
+    }
+
     // ---- Configure dialog --------------------------------------------------
-    // Three tabs: General (working directory, prompts & agents directory, API key -
-    // a write-only override - region, model and what applies to every send), File types
-    // (Images DPI, how a PDF and an RTF are read) and Audio & speech (the speaker and
-    // the microphone, where there are any).
+    // Four tabs, each named in one word so all four fit across a phone's screen:
+    // General (working directory, prompts & agents directory, API key - a write-only
+    // override - region, model and what applies to every send), Files (Images DPI, how a
+    // PDF and an RTF are read), Audio (the speaker and the microphone, where there are
+    // any) and Window (its size and where on the screen it sits).
     // Returns true if the user applied changes (so the caller re-inits the session).
+    //
+    // One word per tab, because four titles have to fit side by side across the width of
+    // a phone: a title long enough to be a phrase is a tab strip that scrolls, with the
+    // tab nobody can see being the one they are looking for.
+    private static final String CONFIGURE_GENERAL_TAB = "General";
+    private static final String CONFIGURE_FILES_TAB   = "Files";
+    private static final String CONFIGURE_AUDIO_TAB   = "Audio";
+    private static final String CONFIGURE_WINDOW_TAB  = "Window";
+
     private static boolean showConfigureDialog(JFrame frame) {
+        return showConfigureDialog(frame, null);
+    }
+
+    // The same, opened on a named tab - Ctrl+M opens it on Window. Null is "whichever
+    // tab is first", which is how the Configure button opens it.
+    private static boolean showConfigureDialog(JFrame frame, String openOnTab) {
         // Named, because these two rows are otherwise indistinguishable from each
         // other: same widget, and on a plain launch the same text as well.
         javax.swing.JTextField cwdF = new javax.swing.JTextField(workingDir.toString(), 30);
@@ -3935,6 +4216,86 @@ public class JRock {
             if (deviceEditor instanceof javax.swing.text.JTextComponent) {
                 addCopyPasteMenu((javax.swing.text.JTextComponent) deviceEditor, null);
             }
+        }
+
+        // The voices Narrate may read in, over the ones the last narration reported - so
+        // the list fills itself the first time Narrate is used, as the device list does.
+        //
+        // As MANY as you like, comma-separated: the language of the text picks between
+        // them, so one English voice and one Russian one read an English and a Russian
+        // answer each in its own (see NARRATE_SCRIPT). Empty is the default and means
+        // "whichever installed voice speaks the language", which is what JRock does when
+        // it has not been told otherwise.
+        javax.swing.JComboBox<String> voiceF = null;
+        if (narrateAvailable()) {
+            voiceF = new javax.swing.JComboBox<>(narrateVoices.toArray(new String[0]));
+            voiceF.setName("narrateVoice");
+            voiceF.setEditable(true);
+            voiceF.setSelectedItem(narrateVoice);
+            voiceF.setFont(voiceF.getFont().deriveFont(java.awt.Font.PLAIN));
+            voiceF.getEditor().getEditorComponent()
+                    .setFont(voiceF.getFont().deriveFont(java.awt.Font.PLAIN));
+            voiceF.setToolTipText("The voices Narrate reads in, comma-separated: the "
+                    + "language of the text picks between them, so name one per language. "
+                    + "Empty: whichever installed voice speaks it. The list is filled by "
+                    + "narrating once.");
+            explains(voiceF, "Narrate with", "The voice the selection is read in. Pick one "
+                    + "from the list, or write several separated by commas - the language "
+                    + "of the text then picks between them, so \"Microsoft David Desktop, "
+                    + "Microsoft Irina Desktop\" reads English in David and Russian in "
+                    + "Irina.\n\n"
+                    + "Empty, the language picks from everything installed, which is what "
+                    + "JRock does unasked. A language none of your voices speaks falls "
+                    + "back to one that does, and the log says which: a voice reading a "
+                    + "language it was not built for makes gibberish, or nothing at all.\n\n"
+                    + "The list is filled by narrating once - enumerating the voices means "
+                    + "starting PowerShell, which this dialog should not wait for. More "
+                    + "voices come from Settings > Time & language > Speech.");
+            java.awt.Component voiceEditor = voiceF.getEditor().getEditorComponent();
+            if (voiceEditor instanceof javax.swing.text.JTextComponent) {
+                addCopyPasteMenu((javax.swing.text.JTextComponent) voiceEditor, null);
+            }
+
+            // Picking from the list ADDS to the field rather than replacing it, which is
+            // how anybody finds out the field takes more than one voice: pick an English
+            // one, pick a Russian one, and the comma appears by itself. A dropdown that
+            // replaced would leave a list of voices as something only a tooltip knows.
+            //
+            // Nothing else changes: it is still a text field, so a voice picked by
+            // mistake is deleted like any other text, and the order they end up in is the
+            // order they were picked - which is the order of preference the script reads.
+            //
+            // The text is kept as the popup opens, because by the time a pick is reported
+            // the editor already holds the picked item alone and the old text is gone.
+            final javax.swing.JComboBox<String> voices = voiceF;
+            final String[] before = { narrateVoice };
+            final boolean[] filling = { false };
+            voices.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+                @Override public void popupMenuWillBecomeVisible(
+                        javax.swing.event.PopupMenuEvent e) {
+                    Object held = voices.getEditor().getItem();
+                    before[0] = (held == null) ? "" : held.toString();
+                }
+                @Override public void popupMenuWillBecomeInvisible(
+                        javax.swing.event.PopupMenuEvent e) { }
+                @Override public void popupMenuCanceled(
+                        javax.swing.event.PopupMenuEvent e) { }
+            });
+            voices.addActionListener(e -> {
+                // "comboBoxChanged" is a pick from the list; "comboBoxEdited" is Enter in
+                // the field, which is the user's own text and is left alone.
+                if (filling[0] || !"comboBoxChanged".equals(e.getActionCommand())) return;
+                Object picked = voices.getSelectedItem();
+                if (picked == null) return;
+                String added = narrateVoiceName(picked.toString());
+                String had = narrateVoiceName(before[0]);
+                String all = had.isEmpty() ? added
+                        : (", " + had + ",").contains(", " + added + ",") ? had   // already in
+                        : had + ", " + added;
+                filling[0] = true;
+                voices.getEditor().setItem(all);
+                filling[0] = false;
+            });
         }
 
         // The microphone Ctrl+Space records from, the same way: listed only by Ctrl+Space
@@ -4058,10 +4419,29 @@ public class JRock {
                 + "the working directory after " + IDLE_BACKUP_MINUTES + " minutes "
                 + "without the cursor moving in the prompt");
 
+        // Every checkbox in this dialog answers a right-click - or a long press on a
+        // touch screen - with its label and what it does, the way the window's own
+        // buttons and checkboxes do (see explains). The text is the row's tooltip, so
+        // there is one wording of it and a phone, which has nothing to hover with, is
+        // told exactly what a mouse is told.
+        for (javax.swing.JCheckBox box : new javax.swing.JCheckBox[] {
+                autoBackupF, refsF, copiesF, missingF, cacheF, transcribeF, alwaysOnF }) {
+            if (box != null && box.getToolTipText() != null) {
+                explains(box, box.getText(), box.getToolTipText());
+            }
+        }
+
         // In a wrapper so the layout's horizontal fill doesn't stretch a
-        // three-digit dropdown across the whole dialog.
+        // three-digit dropdown across the whole dialog - and with its unit beside it,
+        // because the Files tab's left column names the file type rather than the
+        // setting, and three digits on their own are a number with nothing to be: "150"
+        // says nothing, "150 DPI" says what it measures.
         javax.swing.JPanel dpiRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         dpiRow.add(dpiF, BorderLayout.WEST);
+        javax.swing.JLabel dpiUnit = new javax.swing.JLabel("DPI");
+        dpiUnit.setFont(plainLabelFont());
+        dpiUnit.setToolTipText(dpiF.getToolTipText());
+        dpiRow.add(dpiUnit, BorderLayout.CENTER);
 
         // How much of the conversation History sends. Editable, since any number is a
         // number worth having; the list only offers the usual ones.
@@ -4077,10 +4457,14 @@ public class JRock {
         javax.swing.JPanel historyRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         historyRow.add(historyF, BorderLayout.WEST);
 
-        // Three tabs, so no one of them is a wall of rows: General for what every send
-        // depends on, File types for the settings that only matter to one kind of file,
-        // and Audio & speech for the speaker and the microphone - a tab that is left
-        // out where neither can be had, as in the browser.
+        // Four tabs, so no one of them is a wall of rows: General for what every send
+        // depends on, Files for the settings that only matter to one kind of file, Audio
+        // for the speaker and the microphone - a tab that is left out where neither can
+        // be had, as in the browser - and Window for the window's own size and place.
+        //
+        // One word each, because four tab titles have to fit side by side across the
+        // width of a phone: a title long enough to be a phrase is a tab strip that
+        // scrolls, with the tab nobody can see being the one they are looking for.
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
         c.insets = new java.awt.Insets(4, 4, 4, 4);
         c.anchor = java.awt.GridBagConstraints.WEST;
@@ -4097,29 +4481,82 @@ public class JRock {
         addRow(general, c, row++, "Model:", modelF);
         addRow(general, c, row++, "", autoBackupF);
         addRow(general, c, row++, "History limit:", historyRow);
-        addRow(general, c, row++, "", refsF);
+        addRow(general, c, row++, "", cacheF);
+        // The three that are about includes, last and together, under one label in the
+        // left column - the same place "History limit:" names what its row is about. A
+        // run of checkboxes against an empty column reads as one list of unrelated
+        // switches; a label over them says which three belong to each other.
+        addRow(general, c, row++, "Includes:", refsF);
         addRow(general, c, row++, "", copiesF);
         addRow(general, c, row++, "", missingF);
-        addRow(general, c, row++, "", cacheF);
+
+        // The Files tab, by file type: the type in bold down the left, how it is read on
+        // the right, and under each one the folder its copy or its conversion is written
+        // to - the folder only, because that is the one thing about a file type that
+        // cannot be worked out from the window. What each reading means is a tooltip, or
+        // a right-click, or the Help window; here it would be three screens of prose in
+        // front of four dropdowns.
+        //
+        // Each folder is one short line that stays one line, so changing a dropdown
+        // swaps the path and moves nothing. An asterisk marks a type that cannot be
+        // included without that folder, explained once at the foot of the tab rather
+        // than on every row it applies to.
+        int noteW = Math.max(200, Math.min(380,
+                java.awt.Toolkit.getDefaultToolkit().getScreenSize().width - 150));
 
         javax.swing.JPanel fileTypes = new javax.swing.JPanel(new java.awt.GridBagLayout());
         row = 0;
-        addRow(fileTypes, c, row++, "Images DPI:", dpiRow);
-        addRow(fileTypes, c, row++, "Include PDF as:", pdfModeRow);
-        addRow(fileTypes, c, row++, "Include RTF as:", rtfModeRow);
+        addSection(fileTypes, c, row++, "Images", dpiRow);
+        addSection(fileTypes, c, row++, "PDF *",  pdfModeRow);
+        addSection(fileTypes, c, row++, "RTF *",  rtfModeRow);
+        // Where any of it is written, said ONCE: there is one folder now, so a line per
+        // file type saying the same path was the repetition and not the information.
+        // DOCX, XLSX, text, images and audio have nothing to choose and nowhere of their
+        // own to go, so they have stopped being rows at all.
+        addRow(fileTypes, c, row++, "", narrow(fileNote("Every include - the copy of the "
+                + "file picked, and whatever a conversion made of it - is written to "
+                + "JRock/includes/, named after the file it came from. A fetched URL is "
+                + "saved in JRock/urls/ and included from there.", noteW)));
+        // In a wrapper, so the layout's horizontal fill cannot stretch the note past the
+        // width it was wrapped to and off the edge of the dialog.
+        addRow(fileTypes, c, row++, "", narrow(
+                fileNote("* A PDF, RTF, DOCX or XLSX has to be converted, and needs "
+                + "\"Include from processed copies in JRock/includes/\" on the General tab "
+                + "to have somewhere to write the result. With it off those four are "
+                + "refused, and everything else is included where it already is.",
+                noteW)));
 
         javax.swing.JPanel audio = new javax.swing.JPanel(new java.awt.GridBagLayout());
         row = 0;
         if (deviceF != null) addRow(audio, c, row++, "Narrate on:", deviceF);
-        if (micF != null) addRow(audio, c, row++, "Record from:", micF);
-        if (transcribeF != null) addRow(audio, c, row++, "", transcribeF);
+        if (voiceF != null) {
+            addRow(audio, c, row++, "Narrate with:", voiceF);
+            addRow(audio, c, row++, "", hint("Several, comma-separated - the text's "
+                    + "language picks. Pick again to add one."));
+            addRow(audio, c, row++, "", where("JRock/wav/narration-<date>-<time>.wav"));
+        }
+        if (micF != null) {
+            addRow(audio, c, row++, "Record from:", micF);
+            addRow(audio, c, row++, "", where("JRock/wav/recording-<date>-<time>.wav"));
+        }
+        if (transcribeF != null) {
+            addRow(audio, c, row++, "", transcribeF);
+            addRow(audio, c, row++, "", where("JRock/wav/transcribe-<date>-<time>.wav"));
+        }
         if (alwaysOnF != null) addRow(audio, c, row++, "", alwaysOnF);
 
         javax.swing.JTabbedPane fields = new javax.swing.JTabbedPane();
         fields.setName("configureTabs");
-        fields.addTab("General", topAligned(general));
-        fields.addTab("File types", topAligned(fileTypes));
-        if (row > 0) fields.addTab("Audio & speech", topAligned(audio));
+        fields.addTab(CONFIGURE_GENERAL_TAB, topAligned(general));
+        fields.addTab(CONFIGURE_FILES_TAB, topAligned(fileTypes));
+        if (row > 0) fields.addTab(CONFIGURE_AUDIO_TAB, topAligned(audio));
+        // The window's size and place, applied by a Set button of its own rather than by
+        // this dialog's OK (see windowTab).
+        fields.addTab(CONFIGURE_WINDOW_TAB, windowTab(frame));
+        if (openOnTab != null) {
+            int tab = fields.indexOfTab(openOnTab);
+            if (tab >= 0) fields.setSelectedIndex(tab);
+        }
 
         java.awt.Font plainFont = plainLabelFont();
 
@@ -4264,6 +4701,13 @@ public class JRock {
             Object device = deviceF.getEditor().getItem();
             narrateDevice = (device == null) ? "" : device.toString().trim();
         }
+        // The voice, kept as the name alone: a value picked from the list carries the
+        // culture after it for the reader's sake, and SAPI wants the name (see
+        // narrateVoiceName). Empty included, which is how it goes back to the language.
+        if (voiceF != null) {
+            Object voice = voiceF.getEditor().getItem();
+            narrateVoice = narrateVoiceName(voice == null ? "" : voice.toString());
+        }
         if (micF != null) {
             Object mic = micF.getEditor().getItem();
             recordDevice = (mic == null) ? "" : mic.toString().trim();
@@ -4350,6 +4794,71 @@ public class JRock {
         p.add(field, c);
     }
 
+    // The same row with a bold heading in the left column instead of a field's label.
+    // The Files tab is laid out by file type rather than by setting, so the type is a
+    // heading the rows under it belong to, and reads as one.
+    private static void addSection(javax.swing.JPanel p, java.awt.GridBagConstraints c,
+                                   int row, String heading, javax.swing.JComponent field) {
+        c.gridx = 0; c.gridy = row; c.weightx = 0;
+        javax.swing.JLabel label = new javax.swing.JLabel(heading);
+        label.setFont(label.getFont().deriveFont(java.awt.Font.BOLD));
+        c.anchor = java.awt.GridBagConstraints.NORTHWEST;
+        p.add(label, c);
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.gridx = 1; c.weightx = 1;
+        p.add(field, c);
+    }
+
+    // A line of explanation under a row, wrapped to the width it is given.
+    //
+    // An HTML label rather than a text area: a label wrapped by a width in its own
+    // markup asks the layout for the height that width really needs, which a wrapping
+    // text area only knows once it has been laid out at least once (see sized).
+    //
+    // A one-cell table rather than a styled body, because a table cell's width is the
+    // width and a CSS one is a suggestion: a note holding something long and unbreakable
+    // - "JRock/includes/", a quoted setting name, an address - is laid out as wide as
+    // that run needs on a styled body, which is a line running off the edge of the
+    // dialog. A cell wraps inside its own width whatever is in it.
+    private static String noteHtml(String text, int width) {
+        return "<html><table cellpadding='0' cellspacing='0'><tr><td width='"
+                + (width - browserTextSlack(width)) + "'>" + text + "</td></tr></table></html>";
+    }
+
+    private static javax.swing.JLabel fileNote(String text, int width) {
+        javax.swing.JLabel note = new javax.swing.JLabel(noteHtml(text, width));
+        note.setFont(plainLabelFont());
+        note.setForeground(java.awt.Color.DARK_GRAY);   // a note, not another label
+        addTextSlack(note, width);
+        return note;
+    }
+
+    // The folder a file type's copy or conversion is written to, under the row that
+    // chooses how it is read - and the file an audio device records to, on the Audio tab.
+    //
+    // One line, never wrapped, dimmer than the labels around it: it is a path to go and
+    // look in rather than a sentence to read, and a path that always takes one line is a
+    // path whose row cannot move when a dropdown beside it changes.
+    private static javax.swing.JLabel where(String path) {
+        javax.swing.JLabel label = new javax.swing.JLabel(path);
+        label.setFont(plainLabelFont());
+        label.setForeground(java.awt.Color.DARK_GRAY);
+        return label;
+    }
+
+    // The same line, in italics, for a word about how the row above it is used rather
+    // than a place something is written. Italic so a reader can tell the two kinds of
+    // dim line apart at a glance.
+    //
+    // For a row whose field does something a field does not usually do - "Narrate with"
+    // taking several voices - because a tooltip says it only to a mouse, and a dialog
+    // that has to be read about elsewhere to be used is a dialog with a gap in it.
+    private static javax.swing.JLabel hint(String text) {
+        javax.swing.JLabel label = where(text);
+        label.setFont(label.getFont().deriveFont(java.awt.Font.ITALIC));
+        return label;
+    }
+
     // ---- Help dialog (the Help button in Configure) -------------------------
     // What JRock is, who to write to, every shortcut, and what the settings do. It
     // opens on top of the Configure dialog rather than being part of it, so the form is
@@ -4388,6 +4897,14 @@ public class JRock {
         notes.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                 javax.swing.BorderFactory.createTitledBorder("Notes"), notes.getBorder()));
 
+        // The whole of what JRock saves, named file by file (see folderNotes), in its own
+        // box above the notes: the one place in the window that says what the folder
+        // holding the prompt, the transcript, the messages and the key can contain.
+        javax.swing.JTextArea files = wrapped(folderNotes(), plainFont, contentW);
+        files.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+                javax.swing.BorderFactory.createTitledBorder("The JRock folder"),
+                files.getBorder()));
+
         javax.swing.JPanel content = new ViewportWidthPanel();
         content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
         content.add(title);
@@ -4400,8 +4917,11 @@ public class JRock {
         content.add(javax.swing.Box.createVerticalStrut(10));
         javax.swing.JPanel shortcuts = shortcutsPanel(plainFont, (int) (contentW * 0.62) - 16);
         shortcuts.setAlignmentX(0f);   // all left, or BoxLayout shifts them against each other
+        files.setAlignmentX(0f);
         notes.setAlignmentX(0f);
         content.add(shortcuts);
+        content.add(javax.swing.Box.createVerticalStrut(10));
+        content.add(files);
         content.add(javax.swing.Box.createVerticalStrut(10));
         content.add(notes);
 
@@ -4421,6 +4941,42 @@ public class JRock {
         java.awt.Window owner = javax.swing.SwingUtilities.getWindowAncestor(parent);
         javax.swing.JOptionPane.showMessageDialog(owner != null ? owner : parent, scroll,
                 "JRock Help", javax.swing.JOptionPane.PLAIN_MESSAGE);
+    }
+
+    // What the JRock folder holds, in a window of its own: the same text the Help window
+    // carries in its "The JRock folder" box (see folderNotes), one tap away from the main
+    // window rather than three. It is where the prompt, the transcript, every message,
+    // the key and the settings are, so it is worth being able to ask about it without
+    // opening a settings dialog first.
+    private static void showFolderDialog(java.awt.Component parent) {
+        java.awt.Font plainFont = plainLabelFont();
+        // Sized against the screen for the reason the Help window is: a window taller
+        // than the screen is one whose button is off the edge of it.
+        java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+        int contentW = Math.max(240, Math.min(520, screen.width - 140));
+        int contentH = Math.max(240, Math.min(540, screen.height - 220));
+
+        javax.swing.JLabel where = new javax.swing.JLabel(jrockDir().toString());
+        where.setFont(plainFont.deriveFont(java.awt.Font.BOLD));
+        where.setAlignmentX(0f);
+        javax.swing.JTextArea notes = wrapped(folderNotes(), plainFont, contentW);
+        notes.setAlignmentX(0f);
+
+        javax.swing.JPanel content = new ViewportWidthPanel();
+        content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
+        content.add(where);
+        content.add(javax.swing.Box.createVerticalStrut(8));
+        content.add(notes);
+
+        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(content);
+        scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder());
+        scroll.setHorizontalScrollBarPolicy(
+                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setPreferredSize(new java.awt.Dimension(contentW + 28, contentH));
+
+        javax.swing.JOptionPane.showMessageDialog(parent, scroll,
+                "The JRock folder", javax.swing.JOptionPane.PLAIN_MESSAGE);
     }
 
     // A panel that is always exactly as wide as the scroll pane showing it, and only as
@@ -4494,6 +5050,45 @@ public class JRock {
         return area;
     }
 
+    // The same wrapped text area, laid out at the width it will be shown at, so the
+    // height it asks for is the height its text really takes.
+    //
+    // For the places that show one outside a scroll pane. A wrapping text area measures
+    // itself against the width it already has, and one that has never been laid out has
+    // none: asked first, it answers for a single line, and a box built to that answer
+    // shows the first line of a paragraph and hides the rest. Given the width first, it
+    // answers with every line it will wrap into, and both are then pinned so a layout
+    // cannot stretch it back out.
+    private static javax.swing.JTextArea sized(String text, java.awt.Font font, int width) {
+        javax.swing.JTextArea area = wrapped(text, font, width);
+        area.setSize(width, Short.MAX_VALUE);
+        area.setPreferredSize(new java.awt.Dimension(width, area.getPreferredSize().height));
+        area.setMaximumSize(area.getPreferredSize());
+        // Prose, not a field: without this it takes the focus when it is shown and
+        // blinks a text cursor at the reader in a box there is nothing to type into.
+        area.setFocusable(false);
+        return area;
+    }
+
+    // A popup menu that is moved to fit the screen rather than cut off by it: asked to
+    // open somewhere its bottom or its right edge would be past the edge of the screen,
+    // it slides back by as much as it has to. Swing's own fitting keeps the top-left
+    // corner where it was asked for, which for a tall popup opened from the bottom bar -
+    // the Clock and History checkboxes, Send - is a window with its last lines under the
+    // edge of the screen.
+    private static final class FittedPopupMenu extends javax.swing.JPopupMenu {
+        @Override public void show(java.awt.Component invoker, int x, int y) {
+            java.awt.Dimension size = getPreferredSize();
+            java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+            java.awt.Point at = invoker.isShowing() ? invoker.getLocationOnScreen() : null;
+            if (at != null) {
+                x = Math.max(-at.x, Math.min(x, screen.width  - size.width  - at.x));
+                y = Math.max(-at.y, Math.min(y, screen.height - size.height - at.y));
+            }
+            super.show(invoker, x, y);
+        }
+    }
+
     // Room on the right of wrapped text for the browser build to draw into. CheerpJ
     // on a phone draws text wider than its font metrics say, so a line Swing wraps to
     // fit exactly runs on past the edge of its component and its last word is cut off.
@@ -4511,6 +5106,58 @@ public class JRock {
                 javax.swing.BorderFactory.createEmptyBorder(0, 0, 0, slack);
         c.setBorder(c.getBorder() == null ? room
                 : javax.swing.BorderFactory.createCompoundBorder(c.getBorder(), room));
+    }
+
+    // Every file and folder JRock can put inside its JRock/ folder, each with the one
+    // line that says what it holds - the complete list, so nothing in there has to be
+    // guessed at and nothing JRock keeps is a surprise found later.
+    //
+    // It is in the Help window and behind the status label beside Configure, which is to
+    // say two taps from the window at most. That matters more than it looks: this is
+    // where the prompt, the transcript, every message ever sent, the API key and the
+    // settings live, and it is a folder the user is meant to open, read, copy and back
+    // up. A list of what is in it is what makes that an invitation rather than a dig.
+    private static String folderNotes() {
+        return
+              "Everything JRock keeps is in the JRock folder of the working directory, "
+            + "and nothing is kept anywhere else. It is all plain files in a folder of "
+            + "yours, to open, read, edit, copy and back up. The whole of what can be "
+            + "in it:\n\n"
+            + "jrock-prompt.txt - the prompt, written again on every keystroke, so a "
+            + "restart comes back to what was being typed.\n\n"
+            + "jrock-log.txt - the transcript in the window, loaded again at the next "
+            + "start.\n\n"
+            + "messages/ - one file per message: <date>-<time>-operator.txt, "
+            + "-assistant.txt, and -clock.txt for each clock sent. Append-only - nothing "
+            + "here is ever changed or deleted, not even by Clear log - so what you paid "
+            + "for stays yours.\n\n"
+            + "bedrock-key.txt - the API key, on a line of its own, so it can be locked "
+            + "down or deleted without touching anything else.\n\n"
+            + "jrock-config.txt - every other setting of this folder: region, model, "
+            + "Images DPI, History limit, the speaker and microphone, and the checkboxes "
+            + "Configure and the window remember.\n\n"
+            + "includes/ - one flat folder holding everything an include is made from: a "
+            + "copy of each file picked with Ctrl+I, and whatever a conversion made of it, "
+            + "beside the file it came from. Each converted file is named for the whole of "
+            + "its source - picture.pdf.gs.001.png for a page image, notes.rtf.md and "
+            + "report.docx.md for Markdown, book.xlsx.Sheet1.csv for a sheet, "
+            + "paper.pdf.txt and the folder paper.pdf.html for an xpdf reading - so they "
+            + "sort together under the name of the file they belong to and no two can "
+            + "collide.\n\n"
+            + "urls/ - what Fetch URL (Ctrl+U) downloaded, one file per address.\n\n"
+            + "wav/ - the audio, a file of its own per narration and per recording, each "
+            + "named for the moment it was made: narration-<date>-<time>.wav, "
+            + "recording-<date>-<time>.wav, and transcribe-<date>-<time>.wav where a "
+            + "recording was transcribed into the prompt rather than included.\n\n"
+            + "jrock-agent-<name>-install.reg, jrock-agent-<name>-uninstall.reg, "
+            + "jrock-context-menu-install.reg, jrock-context-menu-uninstall.reg - on "
+            + "Windows, exactly what the Explorer menu items applied, kept so it can be "
+            + "read, run again or undone by hand.\n\n"
+            + "A jrock<digits>.tmp or a scaling-<digits> file is a save or a resize in "
+            + "progress and goes by itself; neither is ever included or sent.\n\n"
+            + "Backup log, in the menu behind the status label beside Configure, zips the "
+            + "lot into a jrock-backup-<date>.zip in the working directory - beside the "
+            + "JRock folder, not inside it - and Load from backup puts it back.";
     }
 
     // What the Configure dialog's rows mean, and where what they set is kept. One text
@@ -4544,7 +5191,13 @@ public class JRock {
                + "pick from. A device that is disconnected makes Narrate fail and say so - "
                + "JRock never falls back to the Windows default. Empty the field and press "
                + "Narrate again to list the devices anew. Each narration is also saved as "
-               + "JRock/wav/narration.wav, overwritten every time.\n\n"
+               + "JRock/wav/narration-<date>-<time>.wav, a file of its own.\n\n"
+               + "Narrate with holds the voices it may read in - as many as you like, "
+               + "comma-separated, with the language of the text picking between them, so "
+               + "one English voice and one Russian one read each in its own. Empty, the "
+               + "language picks from everything installed. The list fills itself the "
+               + "first time you narrate, and picking from it adds to the field rather "
+               + "than replacing it.\n\n"
                : "")
             + (recordAvailable()
                ? "Record from is the one microphone Ctrl+Space records from, kept there "
@@ -4561,8 +5214,9 @@ public class JRock {
                + "A red dot and \"Mic\" beside Clock show whenever the microphone is open.\n\n"
                + (transcribeAvailable()
                   ? "With Transcribe recordings ticked, Windows speech recognition turns the "
-                  + "recording into text typed into the prompt instead, and the audio is one "
-                  + "file, JRock/wav/transcribe.wav, overwritten every time.\n\n"
+                  + "recording into text typed into the prompt instead. The audio is kept "
+                  + "as JRock/wav/transcribe-<date>-<time>.wav, a file per recording like "
+                  + "any other, so a word the recognizer got wrong can be played back.\n\n"
                   : "")
                : "");
 
@@ -4570,6 +5224,14 @@ public class JRock {
             + "Clearing the log only clears jrock-log.txt (and the window); the "
             + "per-message files in JRock/messages/ are never deleted, so your inputs "
             + "and outputs are preserved.\n\n"
+            + "Clock and the date in the log are two different things. Clock sends the "
+            + "model the local time and zone with each message; the date printed after a "
+            + "role header, which History turns on, is written for you and is never sent. "
+            + "Untick Clock and the model is told nothing about the time, however many "
+            + "dates the transcript shows.\n\n"
+            + "Every button and checkbox in the window has a right-click - or long-press "
+            + "- menu of its own saying what it does, and the status label beside "
+            + "Configure holds the backup, restore and window items.\n\n"
             + "The prompts & agents directory is where Load prompt (Ctrl+O) and Save "
             + "prompt copy (Ctrl+S) always open - they don't drift to wherever you last "
             + "browsed - and where Install agent looks for the .java automations that "
@@ -5926,6 +6588,35 @@ public class JRock {
     private static volatile String narrateDevice = "";
     private static java.util.List<String> outputDevices = new ArrayList<>();
 
+    // The voice Narrate reads in, by the name Windows gives it ("Microsoft Hazel
+    // Desktop"), or empty for "whichever one speaks the language of the text". Kept per
+    // folder, as narrate-voice$ in the config, like the device beside it.
+    //
+    // The list is what the last narration reported (see narratorMessages): empty until
+    // Narrate has run once, the same way the output devices are, because enumerating the
+    // voices means starting PowerShell and nothing should pay a second of that for a
+    // dialog it opened to change the model.
+    private static volatile String narrateVoice = "";
+    private static java.util.List<String> narrateVoices = new ArrayList<>();
+
+    // The voice names on their own, out of what the field holds: the dropdown's entries
+    // carry the language after the name ("Microsoft Hazel Desktop  (en-GB)") so the list
+    // can be read, and SAPI wants the name. Several, comma-separated, stay several - one
+    // voice per language is the whole point of allowing more than one (see
+    // NARRATE_SCRIPT), and the order they are written in is the order of preference.
+    private static String narrateVoiceName(String chosen) {
+        if (chosen == null) return "";
+        StringBuilder names = new StringBuilder();
+        for (String part : chosen.split(",")) {
+            int marker = part.indexOf("  (");
+            String name = (marker > 0 ? part.substring(0, marker) : part).trim();
+            if (name.isEmpty()) continue;
+            if (names.length() > 0) names.append(", ");
+            names.append(name);
+        }
+        return names.toString();
+    }
+
     // The one name among Java Sound's mixers that is not a device but a pointer to the
     // Windows default - exactly what this feature exists not to use.
     private static final String DEFAULT_DEVICE_ALIAS = "Primary Sound Driver";
@@ -5945,18 +6636,44 @@ public class JRock {
     private static final class Narration {
         volatile Process process;
         volatile javax.sound.sampled.SourceDataLine line;
+        // The voice that actually spoke, as the script reported it - so a narration that
+        // produced no sound can name the voice that produced none.
+        volatile String voice;
     }
     private static volatile Narration narration;
 
     // The SAPI side, run as powershell -Command. Everything it says goes to stderr, one
-    // line each - the voice it picked ("voice|<name>|<culture>"), or that none speaks the
-    // language asked for ("novoice|<lang>") - because stdout is the audio. The whole
-    // script is in "$null = & { }" so no stray pipeline output lands in the PCM.
+    // line each - every voice Windows has ("installed|<name>|<culture>"), the one it
+    // picked ("voice|<name>|<culture>"), that none of the chosen voices speaks the
+    // language of the text so another was used ("otherlang|<name>|<lang>"), that none of
+    // the chosen voices is installed at all ("novoicename|<names>"), or that nothing
+    // installed speaks the language asked for ("novoice|<lang>") - because stdout is the
+    // audio. The whole script is in "$null = & { }" so no stray pipeline output lands in
+    // the PCM.
     //
     // A sentence at a time, into a MemoryStream and out: SAPI refuses a stream it cannot
     // seek ("Stream does not support seeking"), which a pipe is not. So each sentence is
     // rendered whole and written out while the next one renders, and the voice starts
     // after the first sentence rather than after the whole selection.
+    //
+    // ---- Which voice reads ----
+    // "Narrate with" holds as many voices as you like, comma-separated, and the LANGUAGE
+    // OF THE TEXT picks between them: name one English voice and one Russian one, and an
+    // English answer is read in the first and a Russian answer in the second. That is
+    // what makes the setting worth having at all, there being no one voice that reads
+    // every language.
+    //
+    // In order:
+    //   1. a chosen voice whose own language is the language of the text;
+    //   2. failing that, ANY installed voice whose language it is - because a voice
+    //      reading a language it does not have is the one outcome worth overriding a
+    //      choice to avoid: it comes out as gibberish, or as silence;
+    //   3. failing that, the first chosen voice, whatever it speaks - there is no better
+    //      guess, and it is what was asked for;
+    //   4. failing that, SAPI's own default.
+    //
+    // The installed voices go out whichever way it goes, so the dropdown that names them
+    // is filled by the act of narrating once - as the device list is.
     private static final String NARRATE_SCRIPT = String.join("\n",
             "$ErrorActionPreference = 'Stop'",
             "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
@@ -5965,13 +6682,43 @@ public class JRock {
             "  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
             "  $t = [IO.File]::ReadAllText($env:JROCK_NARRATE_FILE, [Text.Encoding]::UTF8)",
             "  $lang = $env:JROCK_NARRATE_LANG",
+            "  $want = @()",
+            "  if ($env:JROCK_NARRATE_VOICE) { $want = @($env:JROCK_NARRATE_VOICE.Split(',')"
+                    + " | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }",
+            "  $all = @($s.GetInstalledVoices() | Where-Object { $_.Enabled })",
+            "  foreach ($iv in $all) { [Console]::Error.WriteLine('installed|'"
+                    + " + $iv.VoiceInfo.Name + '|' + $iv.VoiceInfo.Culture.Name) }",
+            "  $pick = $null",
             "  if ($lang) {",
-            "    $v = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and"
+            "    foreach ($w in $want) {",
+            "      $pick = $all | Where-Object { $_.VoiceInfo.Name -eq $w -and"
                     + " $_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq $lang }"
                     + " | Select-Object -First 1",
-            "    if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }"
-                    + " else { [Console]::Error.WriteLine('novoice|' + $lang) }",
+            "      if ($pick) { break }",
+            "    }",
+            "    if (-not $pick) {",
+            "      $pick = $all | Where-Object {"
+                    + " $_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq $lang }"
+                    + " | Select-Object -First 1",
+            // "none of yours speaks it" and "none of yours is even installed" are two
+            // different things to be told, and the second is a typo in the field.
+            "      $have = @($all | Where-Object { $want -contains $_.VoiceInfo.Name })",
+            "      if ($pick -and $want.Count -gt 0) { [Console]::Error.WriteLine("
+                    + "($(if ($have.Count) { 'otherlang|' } else { 'othervoice|' }))"
+                    + " + $pick.VoiceInfo.Name + '|' + $lang) }",
+            "      if (-not $pick) { [Console]::Error.WriteLine('novoice|' + $lang) }",
+            "    }",
             "  }",
+            "  if (-not $pick) {",
+            "    foreach ($w in $want) {",
+            "      $pick = $all | Where-Object { $_.VoiceInfo.Name -eq $w }"
+                    + " | Select-Object -First 1",
+            "      if ($pick) { break }",
+            "    }",
+            "    if (-not $pick -and $want.Count -gt 0) {"
+                    + " [Console]::Error.WriteLine('novoicename|' + ($want -join ', ')) }",
+            "  }",
+            "  if ($pick) { $s.SelectVoice($pick.VoiceInfo.Name) }",
             "  [Console]::Error.WriteLine('voice|' + $s.Voice.Name + '|' + $s.Voice.Culture.Name)",
             "  $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050,"
                     + " [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen,"
@@ -6062,7 +6809,7 @@ public class JRock {
         // long as the reading does.
         Thread t = new Thread(() -> {
             Path file = null;
-            // What was played, kept for JRock/wav/narration.wav - played, so a narration
+            // What was played, kept for JRock/wav/narration-<date>-<time>.wav - played,
             // stopped halfway is saved as far as it was heard.
             java.io.ByteArrayOutputStream heard = new java.io.ByteArrayOutputStream();
             try {
@@ -6099,13 +6846,14 @@ public class JRock {
                         "-NonInteractive", "-Command", NARRATE_SCRIPT);
                 pb.environment().put("JROCK_NARRATE_FILE", file.toString());
                 pb.environment().put("JROCK_NARRATE_LANG", lang == null ? "" : lang);
+                pb.environment().put("JROCK_NARRATE_VOICE", narrateVoiceName(narrateVoice));
                 Process p = pb.start();
                 p.getOutputStream().close();   // the script reads the file, not stdin
                 mine.process = p;
                 if (narration != mine) { stopNarration(mine); return; }  // stopped already
                 log.gray("Narrating " + fmtNum(text.length()) + " characters on " + device
                         + (lang == null ? "" : " (language: " + lang + ")") + "...");
-                Thread messages = narratorMessages(p, log);
+                Thread messages = narratorMessages(p, log, mine);
 
                 line.start();
                 byte[] buf = new byte[4096];
@@ -6159,7 +6907,11 @@ public class JRock {
                     try { Files.deleteIfExists(file); } catch (IOException ignored) { }
                 }
                 if (heard.size() > 0) {
-                    Path wav = wavDir().resolve("narration.wav");
+                    // A file of its own per narration, like a recording: the one worth
+                    // hearing again is the one that sounded wrong, and that is the one an
+                    // overwrite would already have thrown away by the time anybody went
+                    // looking (see stampedWav).
+                    Path wav = stampedWav("narration");
                     try {
                         writeWav(wav, heard.toByteArray(), NARRATE_FORMAT);
                         log.gray("Narration audio saved to " + wav);
@@ -6167,6 +6919,17 @@ public class JRock {
                         log.gray("Could not save the narration audio to " + wav + ": "
                                 + ex.getMessage());
                     }
+                } else if (mine.voice != null) {
+                    // The voice ran, said it was speaking, and rendered not one sample.
+                    // A third-party voice asked for a language it does not have does
+                    // exactly this: no error, no sound. Silence is the hardest thing to
+                    // debug, so it is reported rather than left as "finished".
+                    log.gray("The voice " + mine.voice + " produced no audio at all - "
+                            + "nothing was heard. A voice reads only the language it was "
+                            + "built for, and makes silence of any other"
+                            + (lang == null ? "" : " (this text is \"" + lang + "\")")
+                            + ". Name a voice for this language in Configure > Narrate "
+                            + "with, or empty the field to let the language pick one.");
                 }
             }
         }, "jrock-narrate");
@@ -6197,16 +6960,44 @@ public class JRock {
 
     // Reads the script's stderr into the log: the voice lines it writes on purpose, and
     // whatever PowerShell writes when something fails.
-    private static Thread narratorMessages(Process p, LogView log) {
+    private static Thread narratorMessages(Process p, LogView log, Narration n) {
         Thread t = new Thread(() -> {
             try (java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
                 String line;
+                // Every voice the script reports, in the order it reports them, so the
+                // dropdown in Configure offers them next time it is opened.
+                java.util.List<String> installed = new ArrayList<>();
                 while ((line = r.readLine()) != null) {
                     line = line.trim();
-                    if (line.startsWith("voice|")) {
+                    if (line.startsWith("installed|")) {
                         String[] v = line.split("\\|", 3);
+                        // Name and culture together, which is how two voices of the same
+                        // name in different languages are told apart in the list; the
+                        // name alone is what gets selected (see narrateVoiceName).
+                        installed.add(v.length > 2 ? v[1] + "  (" + v[2] + ")" : v[1]);
+                        narrateVoices = new ArrayList<>(installed);
+                    } else if (line.startsWith("voice|")) {
+                        String[] v = line.split("\\|", 3);
+                        n.voice = v[1];
                         log.gray("Voice: " + v[1] + (v.length > 2 ? " (" + v[2] + ")" : ""));
+                    } else if (line.startsWith("otherlang|")) {
+                        String[] v = line.split("\\|", 3);
+                        log.gray("None of the voices in Configure > Narrate with speaks \""
+                                + (v.length > 2 ? v[2] : "") + "\", so " + v[1]
+                                + " reads this one: a voice without the language makes "
+                                + "gibberish, or silence. Add a voice for it there to "
+                                + "choose which.");
+                    } else if (line.startsWith("othervoice|")) {
+                        String[] v = line.split("\\|", 3);
+                        log.gray("No voice named in Configure > Narrate with is installed, "
+                                + "so " + v[1] + " reads this one, as it would have with "
+                                + "the field left empty. The voices really there are now "
+                                + "listed in that dropdown.");
+                    } else if (line.startsWith("novoicename|")) {
+                        log.gray("No voice named in Configure > Narrate with is installed ("
+                                + line.substring(12) + ") - using the default one. The "
+                                + "voices really there are now listed in that dropdown.");
                     } else if (line.startsWith("novoice|")) {
                         log.gray("No installed voice speaks \"" + line.substring(8)
                                 + "\" - using the default one. The language's speech "
@@ -6301,15 +7092,16 @@ public class JRock {
     // the log and no recording; "Primary Sound Capture Driver", Java's name for the
     // Windows default, is never offered.
     //
-    // A new file every time, named for the moment it was made - unlike narration.wav,
-    // which is overwritten. A recording is an include, and an include is checked at
-    // every send against the file it names (verifyIncludes), History's earlier turns
-    // included: one file overwritten would change under every earlier token of it and
-    // stop the conversation from going on.
+    // A new file every time, named for the moment it was made (see stampedWav). For a
+    // recording that is not only for troubleshooting but a requirement: a recording is an
+    // include, and an include is checked at every send against the file it names
+    // (verifyIncludes), History's earlier turns included - so one file overwritten would
+    // change under every earlier token of it and stop the conversation from going on.
     //
     // With Transcribe recordings on (Windows), the recording is not included but heard:
-    // SAPI's recognizer turns it into text typed at the prompt's caret, and the audio
-    // is then one file, transcribe.wav, overwritten - no token will ever name it.
+    // SAPI's recognizer turns it into text typed at the prompt's caret. The audio is
+    // kept as transcribe-<date>-<time>.wav, a file of its own like any other recording -
+    // no token names it, but a word the recognizer got wrong is a wav to play back.
     //
     // Java Sound has no event for a device plugged in or pulled out, so the configured
     // microphone is looked for every two seconds (see watchMicrophone), and the log says
@@ -6318,6 +7110,21 @@ public class JRock {
     // Anywhere but the browser: Java Sound captures on every desktop.
     private static boolean recordAvailable() {
         return !isCheerpJ();
+    }
+
+    // A wav named for the moment it was made: JRock/wav/<what>-<date>-<time>.wav, with
+    // the milliseconds added when two land in the same second. Every recording keeps a
+    // file of its own, transcribed or included, so the audio behind anything odd is
+    // still there to play back afterwards.
+    private static Path stampedWav(String what) {
+        String stamp = java.time.LocalDateTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        Path wav = wavDir().resolve(what + "-" + stamp + ".wav");
+        if (Files.exists(wav)) {   // two in one second
+            wav = wavDir().resolve(what + "-" + stamp + "-"
+                    + (System.currentTimeMillis() % 1000) + ".wav");
+        }
+        return wav;
     }
 
     private static String recordDevice = "";
@@ -6930,10 +7737,13 @@ public class JRock {
                 }
                 log.gray("Recording done: " + String.format(java.util.Locale.ROOT, "%.1f", seconds)
                         + " s.");
-                // Transcribed: the text is what stays, and the audio is only the way to
-                // it - so one file, overwritten, like narration.wav.
+                // Transcribed: the text is what stays, and the audio is the way to it -
+                // kept all the same, and under its own stamped name, because what the
+                // recognizer heard is the only evidence of why it typed what it typed.
+                // A word that came out wrong is a wav to play back; one file overwritten
+                // every time would already be the next recording by then.
                 if (recordTranscribe && transcribeAvailable()) {
-                    Path wav = wavDir().resolve("transcribe.wav");
+                    Path wav = stampedWav("transcribe");
                     writeWav(wav, bytes.toByteArray(), format);
                     log.gray("Recording saved to " + wav + " - transcribing...");
                     String said = transcribe(wav, log);
@@ -6951,13 +7761,7 @@ public class JRock {
                             + " characters into the prompt.");
                     return;
                 }
-                String stamp =java.time.LocalDateTime.now().format(
-                        java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-                Path wav = wavDir().resolve("recording-" + stamp + ".wav");
-                if (Files.exists(wav)) {   // two in one second
-                    wav = wavDir().resolve("recording-" + stamp + "-"
-                            + (System.currentTimeMillis() % 1000) + ".wav");
-                }
+                Path wav = stampedWav("recording");
                 writeWav(wav, bytes.toByteArray(), format);
                 Path included = wav;
                 log.gray("Recording saved to " + wav);
@@ -8569,8 +9373,8 @@ public class JRock {
     //   https://example.org/page.php        -> page.php.html
     //   https://example.org/                -> example.org.html
     //
-    // The existing name is kept whole and the extension added to it (as gs-pdf/ and
-    // rtf-md/ do), rather than replaced: ".php" is not what the file is, but it is part
+    // The existing name is kept whole and the extension added to it (as every conversion
+    // under includes/ does), rather than replaced: ".php" is not what the file is, but it is part
     // of what the file is called, and dropping it would make one name out of two pages.
     // Anything a file system might object to becomes "-", and a very long name is cut.
     private static String urlFileName(URI uri, String ext) {
@@ -9049,9 +9853,9 @@ public class JRock {
     }
 
     // Renders a PDF to one PNG per page with the PDF engine (see pdf()), then includes
-    // each page. On the desktop that is Ghostscript, writing under JRock/includes/gs-pdf/ as
+    // each page. On the desktop that is Ghostscript, writing into JRock/includes/ as
     // "<pdfname>.gs.NNN.png"; in the browser it is PDF.js, writing under
-    // JRock/includes/pdfjs-pdf/ as "<pdfname>.pdfjs.NNN.png". When the engine can't run - no
+    // the same folder as "<pdfname>.pdfjs.NNN.png". When the engine can't run - no
     // Ghostscript on PATH - it says why and what to do, and nothing else happens.
     //
     // Page images rather than extracted text: see the filters in showIncludeDialog for
@@ -9067,7 +9871,7 @@ public class JRock {
 
         // One folder per engine, and the PDF's whole name kept as the prefix, so pages
         // from different PDFs - or from the two engines - don't collide.
-        Path outDir = pdfDir(engine);
+        Path outDir = includesDir();
         try {
             Files.createDirectories(outDir);
         } catch (IOException ex) {
@@ -9130,10 +9934,14 @@ public class JRock {
             return;
         }
 
+        // Named for the WHOLE of the PDF's name, extension and all - "report.pdf.html"
+        // and "report.pdf.txt" - which is how every other conversion names its output
+        // (see includesDir). The stem alone would make "report.txt" out of "report.pdf",
+        // and that is a name a text file of the user's own can already have: everything
+        // an include is made from shares one folder, so a conversion must not be able to
+        // land on top of something that was put there.
         String name = pdf.getFileName().toString();
-        String stem = name.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")
-                ? name.substring(0, name.length() - 4) : name;
-        Path out = pdf.toAbsolutePath().resolveSibling(html ? stem : stem + ".txt");
+        Path out = pdf.toAbsolutePath().resolveSibling(name + (html ? ".html" : ".txt"));
         String what = html ? "folder" : "file";
 
         if (Files.exists(out)) {
@@ -9393,7 +10201,7 @@ public class JRock {
                 return null;
             }
 
-            // The produced page files (in JRock/includes/gs-pdf/) in order, matching this
+            // The produced page files (in JRock/includes/) in order, matching this
             // PDF's prefix; the caller includes them.
             java.util.List<Path> pages = new java.util.ArrayList<>();
             try (java.util.stream.Stream<Path> s = Files.list(outDir)) {
@@ -9995,7 +10803,7 @@ public class JRock {
     }
 
     // ---- RTF as Markdown ---------------------------------------------------
-    // Converts an RTF file to Markdown, writes it under JRock/includes/rtf-md/ as
+    // Converts an RTF file to Markdown, writes it under JRock/includes/ as
     // "<rtfname>.md", and includes that file as an ordinary @txt token - so from the
     // prompt's point of view the model is simply reading a text file.
     //
@@ -10028,10 +10836,10 @@ public class JRock {
             return;
         }
 
-        // Output goes to JRock/includes/rtf-md/, named "<rtfname>.md" - the RTF's full name
-        // kept as the prefix (as with gs-pdf/), so "notes.rtf" becomes "notes.rtf.md"
+        // Output goes to JRock/includes/, named "<rtfname>.md" - the RTF's full name kept
+        // as the prefix (as every conversion does), so "notes.rtf" becomes "notes.rtf.md"
         // and two RTFs of the same stem can't overwrite each other's Markdown.
-        Path outDir = rtfMdDir();
+        Path outDir = includesDir();
         Path out = outDir.resolve(rtf.getFileName().toString() + ".md");
         try {
             Files.createDirectories(outDir);
@@ -10598,7 +11406,7 @@ public class JRock {
     // ---- DOCX as Markdown --------------------------------------------------
     // The same thing as includeRtfAsMarkdown for the other format a word processor
     // saves: unzips the .docx, reads word/document.xml, writes Markdown under
-    // JRock/includes/docx-md/ as "<docxname>.md", and includes that as an ordinary @txt token.
+    // JRock/includes/ as "<docxname>.md", and includes that as an ordinary @txt token.
     //
     // Also with nothing installed - a .docx is a ZIP of XML, so java.util.zip and the
     // JDK's XML parser are the whole toolchain, and this works in the browser too.
@@ -10625,9 +11433,9 @@ public class JRock {
             return;
         }
 
-        // Output goes to JRock/includes/docx-md/, named "<docxname>.md" - the same naming as
-        // gs-pdf/ and rtf-md/, so two documents of the same stem can't collide.
-        Path outDir = docxMdDir();
+        // Output goes to JRock/includes/, named "<docxname>.md" - the same naming as every
+        // other conversion, so two documents of the same stem can't collide.
+        Path outDir = includesDir();
         Path out = outDir.resolve(docx.getFileName().toString() + ".md");
         try {
             Files.createDirectories(outDir);
@@ -11066,7 +11874,7 @@ public class JRock {
 
     // ---- XLSX as CSV -------------------------------------------------------
     // A spreadsheet, the way includeDocxAsMarkdown takes a document: unzips the .xlsx,
-    // writes each sheet under JRock/includes/xlsx-csv/ as "<xlsxname>.<sheet>.csv", and
+    // writes each sheet under JRock/includes/ as "<xlsxname>.<sheet>.csv", and
     // includes every one of them as an ordinary @txt token - a sheet per file, because
     // a CSV has no way to say where one table ends and the next begins.
     //
@@ -11091,10 +11899,10 @@ public class JRock {
             return;
         }
 
-        // The workbook's whole name kept as the prefix, as in docx-md/, and the sheet's
+        // The workbook's whole name kept as the prefix, as every conversion does, and the sheet's
         // name after it - made safe for a file name, with a number added should two
         // sheets come out the same that way.
-        Path outDir = xlsxCsvDir();
+        Path outDir = includesDir();
         java.util.Set<String> used = new java.util.HashSet<>();
         int inserted = 0;
         for (java.util.Map.Entry<String, String> sheet : sheets.entrySet()) {
@@ -12915,21 +13723,26 @@ public class JRock {
         }
     }
 
-    // ---- Move & resize dialog (Ctrl+M) -------------------------------------
-    // Lets the user set the window size and on-screen position numerically, and
-    // shows which screen the window is on plus that screen's bounds. Useful for
-    // precise placement and moving the window across monitors without a mouse.
-    private static void showMoveResizeDialog(JFrame frame) {
+    // ---- The Window tab of Configure (Ctrl+M) ------------------------------
+    // The window's size and its place on the screen as four numbers, with the screens
+    // themselves described below them: which one holds the window, what each one's
+    // bounds are. For precise placement, and for moving the window to another monitor
+    // without a mouse.
+    //
+    // It has a Set button of its own, and that is the point of the tab: Set applies the
+    // four numbers to the window at once, so the result is there to be looked at - and
+    // nudged again, and again - with the dialog still open. Nothing here is a setting
+    // this dialog writes, so Cancel is then the right way out: the window stays where Set
+    // put it, and the session is not re-read the way OK makes it.
+    private static javax.swing.JPanel windowTab(JFrame frame) {
         java.awt.Rectangle win = frame.getBounds();
-        boolean maximized =
-                (frame.getExtendedState() & java.awt.Frame.MAXIMIZED_BOTH) == java.awt.Frame.MAXIMIZED_BOTH;
 
         // When maximized, Windows places the frame slightly off-screen (e.g. -7,-7
         // with oversized bounds) so its invisible borders sit outside the monitor.
         // Showing those raw values is confusing, so prefill the fields with the
         // clean visible bounds of the screen the window is on instead.
         java.awt.Rectangle prefill = win;
-        if (maximized) {
+        if (isMaximized(frame)) {
             java.awt.Rectangle screen = screenBoundsFor(win);
             if (screen != null) prefill = screen;
         }
@@ -12945,59 +13758,106 @@ public class JRock {
         javax.swing.JTextField yF      = new javax.swing.JTextField(String.valueOf(prefill.y), 6);
         yF.setName("windowY");
 
-        // Screen info: find the device whose bounds contain the window's center.
-        String header = maximized
-                ? "NOTE: window is MAXIMIZED (Windows reports it at " + win.x + "," + win.y
-                  + " size " + win.width + "x" + win.height + ").\nApplying will restore it "
-                  + "to normal and use the values above.\n\n"
-                : "";
-        javax.swing.JTextArea info = new javax.swing.JTextArea(header + describeScreens(win));
+        javax.swing.JTextArea info = new javax.swing.JTextArea(screenReport(frame));
         info.setEditable(false);
         info.setOpaque(false);
         info.setLineWrap(true);
         info.setWrapStyleWord(true);
         info.setFont(javax.swing.UIManager.getFont("Label.font"));
 
-        javax.swing.JPanel fields = new javax.swing.JPanel(new java.awt.GridLayout(4, 2, 6, 6));
-        fields.add(new javax.swing.JLabel("Width:"));      fields.add(widthF);
-        fields.add(new javax.swing.JLabel("Height:"));     fields.add(heightF);
-        fields.add(new javax.swing.JLabel("Position X:")); fields.add(xF);
-        fields.add(new javax.swing.JLabel("Position Y:")); fields.add(yF);
+        JButton set = new JButton("Set");
+        set.setName("windowSet");
+        set.setToolTipText("Move and resize the window now, with this dialog left open");
+        explains(set, "Set", "Moves and resizes the window to these four numbers straight "
+                + "away, with this dialog still open - so the result can be looked at and "
+                + "the numbers tried again. A maximized window is restored to normal "
+                + "first, since a maximized one cannot be placed.\n\n"
+                + "The window's size and place are not settings JRock keeps, so there is "
+                + "nothing here for OK to save: Set has already done it, and Cancel is the "
+                + "way out that leaves the rest of this dialog alone.");
+        set.addActionListener(e -> {
+            applyWindowBounds(set, frame, widthF, heightF, xF, yF);
+            info.setText(screenReport(frame));
+            info.setCaretPosition(0);
+        });
 
-        javax.swing.JPanel panel = new javax.swing.JPanel(new BorderLayout(8, 8));
-        panel.add(fields, BorderLayout.NORTH);
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.insets = new java.awt.Insets(4, 4, 4, 4);
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        javax.swing.JPanel rows = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        int row = 0;
+        addRow(rows, c, row++, "Width:",      narrow(widthF));
+        addRow(rows, c, row++, "Height:",     narrow(heightF));
+        addRow(rows, c, row++, "Position X:", narrow(xF));
+        addRow(rows, c, row++, "Position Y:", narrow(yF));
+        addRow(rows, c, row++, "",            narrow(set));
+
         javax.swing.JScrollPane infoScroll = new javax.swing.JScrollPane(info);
         infoScroll.setBorder(javax.swing.BorderFactory.createTitledBorder("Screens"));
-        infoScroll.setPreferredSize(new java.awt.Dimension(480, 280));
+        infoScroll.setPreferredSize(new java.awt.Dimension(400, 180));
         // Wrapping handles width, so no horizontal scrollbar is ever needed.
         infoScroll.setHorizontalScrollBarPolicy(
                 javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        panel.add(infoScroll, BorderLayout.CENTER);
 
-        int result = javax.swing.JOptionPane.showConfirmDialog(
-                frame, panel, "Move & resize",
-                javax.swing.JOptionPane.OK_CANCEL_OPTION,
-                javax.swing.JOptionPane.PLAIN_MESSAGE);
-        if (result != javax.swing.JOptionPane.OK_OPTION) return;
+        javax.swing.JPanel tab = new javax.swing.JPanel(new BorderLayout(8, 8));
+        tab.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 4, 4, 4));
+        tab.add(rows, BorderLayout.NORTH);
+        tab.add(infoScroll, BorderLayout.CENTER);
+        return tab;
+    }
 
+    // A field or a button at its own width, rather than stretched across the dialog by
+    // the layout's horizontal fill - the same wrapper the Images DPI dropdown gets.
+    private static javax.swing.JPanel narrow(javax.swing.JComponent comp) {
+        javax.swing.JPanel row = new javax.swing.JPanel(new BorderLayout(12, 0));
+        row.add(comp, BorderLayout.WEST);
+        return row;
+    }
+
+    private static boolean isMaximized(JFrame frame) {
+        return (frame.getExtendedState() & java.awt.Frame.MAXIMIZED_BOTH)
+                == java.awt.Frame.MAXIMIZED_BOTH;
+    }
+
+    // What the Screens box says: the screens, which of them holds the window, and - when
+    // the window is maximized - the raw bounds Windows reports for it, which are not the
+    // ones in the fields above and would otherwise look like an error.
+    private static String screenReport(JFrame frame) {
+        java.awt.Rectangle win = frame.getBounds();
+        String header = isMaximized(frame)
+                ? "NOTE: window is MAXIMIZED (Windows reports it at " + win.x + "," + win.y
+                  + " size " + win.width + "x" + win.height + ").\nSet will restore it "
+                  + "to normal and use the values above.\n\n"
+                : "";
+        return header + describeScreens(win);
+    }
+
+    // Moves and resizes the window to the four fields' numbers. Whole numbers only, and
+    // a size below what the window can usefully be is raised to it rather than refused.
+    private static void applyWindowBounds(java.awt.Component parent, JFrame frame,
+                                          javax.swing.JTextField widthF,
+                                          javax.swing.JTextField heightF,
+                                          javax.swing.JTextField xF,
+                                          javax.swing.JTextField yF) {
         try {
-            int w = Integer.parseInt(widthF.getText().trim());
-            int h = Integer.parseInt(heightF.getText().trim());
+            int w = Math.max(200, Integer.parseInt(widthF.getText().trim()));
+            int h = Math.max(150, Integer.parseInt(heightF.getText().trim()));
             int x = Integer.parseInt(xF.getText().trim());
             int y = Integer.parseInt(yF.getText().trim());
-            // Guard against degenerate sizes.
-            w = Math.max(200, w);
-            h = Math.max(150, h);
             // If maximized, restore to normal first so setBounds actually applies.
-            if ((frame.getExtendedState() & java.awt.Frame.MAXIMIZED_BOTH) != 0) {
-                frame.setExtendedState(java.awt.Frame.NORMAL);
-            }
+            if (isMaximized(frame)) frame.setExtendedState(java.awt.Frame.NORMAL);
             frame.setBounds(x, y, w, h);
             // Moving to another monitor sometimes needs a revalidate to repaint.
             frame.revalidate();
             frame.repaint();
+            // The numbers as they were taken, so a size that was raised to the minimum
+            // says so rather than leaving the field disagreeing with the window.
+            widthF.setText(String.valueOf(w));
+            heightF.setText(String.valueOf(h));
         } catch (NumberFormatException ex) {
-            javax.swing.JOptionPane.showMessageDialog(frame,
+            javax.swing.JOptionPane.showMessageDialog(
+                    javax.swing.SwingUtilities.getWindowAncestor(parent),
                     "Please enter whole numbers for width, height, X and Y.",
                     "Invalid input", javax.swing.JOptionPane.WARNING_MESSAGE);
         }

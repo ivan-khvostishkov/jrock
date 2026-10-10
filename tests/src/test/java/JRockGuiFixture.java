@@ -23,6 +23,7 @@ import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JRootPane;
 import javax.swing.JTextArea;
@@ -498,25 +499,30 @@ abstract class JRockGuiFixture {
     }
 
     /**
-     * Invokes an item of the window's own context menu - the one on the top bar, beside
-     * the Configure button - by its label.
+     * Invokes an item of the window's own menu - the one behind the {@code JRock/} label
+     * beside the Configure button - by its label.
      * <p>
-     * The same popup trigger as {@link #chooseInThePromptMenu}, aimed at the other
-     * component that has a menu: the top bar, found as what the content pane lays out to
-     * the north rather than by counting children.
+     * A plain press, not a popup trigger: that label is there to open this menu and
+     * opens it on any press, which is what makes it work for a finger as well as for a
+     * right-click. Dispatched to the component rather than injected, for the reasons
+     * given in {@link #press}.
      */
     protected void chooseInTheWindowMenu(final String label) {
-        final JFrame frame = (JFrame) window.target();
-        java.awt.Component topBar = GuiActionRunner.execute(new GuiQuery<java.awt.Component>() {
+        final JLabel status = robot.finder().find(window.target(),
+                new GenericTypeMatcher<JLabel>(JLabel.class) {
+                    @Override
+                    protected boolean isMatching(JLabel candidate) {
+                        return "JRock/".equals(candidate.getText());
+                    }
+                });
+        GuiActionRunner.execute(new GuiTask() {
             @Override
-            protected java.awt.Component executeInEDT() {
-                java.awt.Container content = frame.getContentPane();
-                return ((java.awt.BorderLayout) content.getLayout())
-                        .getLayoutComponent(java.awt.BorderLayout.NORTH);
+            protected void executeInEDT() {
+                status.dispatchEvent(new java.awt.event.MouseEvent(status,
+                        java.awt.event.MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                        0, 4, 4, 1, false));     // popupTrigger = false: a plain press
             }
         });
-        assertThat(topBar).describedAs("the window's top bar").isNotNull();
-        rightClick(topBar);
         pressMenuItem(label);
     }
 
@@ -525,7 +531,7 @@ abstract class JRockGuiFixture {
      * the operating system has decided where it went. Dispatched to the component rather
      * than injected, for the reasons given in {@link #press}.
      */
-    private static void rightClick(final java.awt.Component comp) {
+    protected static void rightClick(final java.awt.Component comp) {
         GuiActionRunner.execute(new GuiTask() {
             @Override
             protected void executeInEDT() {
