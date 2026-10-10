@@ -1704,6 +1704,14 @@ the voice, so the microphone doesn't record the last answer as the next question
   window says so. Press Ctrl+Space (or Narrate) in JRock's own window once to list the devices
   into Configure, pick one, and carry on. An answer that could not be read aloud still counts as
   answered: it is on the screen.
+- **A turn that brings no answer says so out loud**, in one fixed phrase: **"Error. Should I
+  try again?"** — for a send that failed, a reply that never came, and a reply that arrived
+  empty, which is a failed turn to anyone listening however well the request itself went.
+  Hands-free, nobody is looking at the window, and a silence where an answer should be says
+  nothing about whether one is still coming; the phrase is nothing like an answer, so it cannot
+  be mistaken for one. Trying again is yours: hands-free listens again by itself after two
+  seconds, and a held turn is the button pressed once more. The reason is still shown in the
+  window, and when the phrase itself cannot be read aloud — no speaker set — that is shown too.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
