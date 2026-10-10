@@ -62,6 +62,39 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   machine, so you watch it work and carry on the conversation when it's done
   ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
 - **Keyboard-driven**, with a Configure dialog for API key, endpoint, model and working directory.
+- **Paper is the unit**, in and out: what arrives is a scan or a PDF in a standard page size,
+  and what leaves is a document ready for a printer ([**paper in, paper
+  out**](#paper-in-paper-out)).
+
+## Paper in, paper out
+
+JRock is built on an assumption about where written natural language actually comes from: **not
+from a text box, but from paper**. A scanned letter, a contract, a form, an invoice, a spec, a
+manual — printed once, filed, and now a PDF in a standard page size, A4 above all. And what you
+want back is usually paper again: something to sign, file, hand over, or post.
+
+So the page is not a detail at the end of the pipeline here, it is **the unit of measure
+throughout**:
+
+- **Coming in**, a PDF is included as **page images** at *Images DPI* — the document as it
+  looks, not as a text extractor guesses it ([PDF conversion](#pdf-conversion-ghostscript)).
+  Two-sided originals are handled where they are actually produced: the **fronts and the
+  reversed backs** a sheet feeder gives you, interleaved into one PDF
+  ([merging duplex scans](#merging-duplex-scans-ghostscript)). An include's copy is
+  **downscaled to what A4 at that DPI has room for**, because pixels past the page nobody reads
+  and you pay for them twice ([includes that outlive the
+  session](#includes-that-outlive-the-session)).
+- **Going out**, an answer becomes **A4 portrait or landscape with 2 cm margins**, headings,
+  tables and its pictures placed at their physical size in cm — a DOCX or RTF a word processor
+  or a layout application opens, not a Markdown file looking for a converter
+  ([Markdown export](#markdown-export-rtf-and-docx)). Or **Ctrl+P**, which prints the
+  transcript — or just the selected answer — to a printer or straight to PDF
+  ([printing](#printing--pdf-ctrlp)).
+
+The point of this is a question you never have to ask: *what can this Markdown be converted
+to, and with which tool?* The reply you are reading is **already one keystroke from the shape
+you need it in** — and the loop closes, because a transcript printed to PDF with Ctrl+P can be
+included straight back as page images in the next prompt.
 
 ## Requirements
 
