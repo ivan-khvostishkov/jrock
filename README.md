@@ -63,8 +63,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
 - **Keyboard-driven**, with a Configure dialog for API key, endpoint, model and working directory.
 - **Paper is the unit**, in and out: what arrives is a scan or a PDF in a standard page size,
-  and what leaves is a document ready for a printer ([**paper in, paper
-  out**](#paper-in-paper-out)).
+  and what leaves is a document ready for a printer — or for **Adobe InDesign**, by its style
+  names ([**paper in, paper out**](#paper-in-paper-out)).
 
 ## Paper in, paper out
 
@@ -86,15 +86,23 @@ throughout**:
   session](#includes-that-outlive-the-session)).
 - **Going out**, an answer becomes **A4 portrait or landscape with 2 cm margins**, headings,
   tables and its pictures placed at their physical size in cm — a DOCX or RTF a word processor
-  or a layout application opens, not a Markdown file looking for a converter
+  opens, not a Markdown file looking for a converter
   ([Markdown export](#markdown-export-rtf-and-docx)). Or **Ctrl+P**, which prints the
   transcript — or just the selected answer — to a printer or straight to PDF
   ([printing](#printing--pdf-ctrlp)).
+- **And on into professional typesetting.** The DOCX is written to be **placed in Adobe
+  InDesign**, which imports a Word file by mapping the document's style *names* onto your own
+  paragraph styles — so the paragraphs carry them: *Normal*, *Heading 1–6*, *Code*, *Quote*,
+  with the pictures already in the flow at their physical size. An answer lands in **your**
+  template's typography instead of whatever a converter felt like, and the PDF that comes out
+  of InDesign is **typeset**, not printed from a text editor. RTF is the same idea at the lower
+  standard — no style names, but everything opens it.
 
-The point of this is a question you never have to ask: *what can this Markdown be converted
+The point of all this is a question you never have to ask: *what can this Markdown be converted
 to, and with which tool?* The reply you are reading is **already one keystroke from the shape
-you need it in** — and the loop closes, because a transcript printed to PDF with Ctrl+P can be
-included straight back as page images in the next prompt.
+you need it in** — whether that shape is a page out of the printer, a file somebody else can
+edit, or copy flowing into a layout. And the loop closes, because a transcript printed to PDF
+with Ctrl+P can be included straight back as page images in the next prompt.
 
 ## Requirements
 
