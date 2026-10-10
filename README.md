@@ -581,7 +581,8 @@ and it says so itself — untick Clock and the model knows nothing about the tim
 
 ## Persistence (crash recovery + full local history)
 
-Everything lives under a **`JRock/`** subfolder of the working directory:
+Everything lives under a **`JRock/`** subfolder of the working directory — git-ignored, and
+written atomically, so a crash or a failed write never leaves a truncated file:
 
 - `JRock/jrock-prompt.txt` — the prompt, autosaved on every keystroke (atomic temp-file swap,
   so a crash can't corrupt it).
@@ -2649,50 +2650,6 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+P | Print log (or the selected text) / save as PDF |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |
 
-## Reproducible builds
-
-CI compiles `JRock.java` with a **pinned OpenJDK 11 patch (Temurin 11.0.32+9)** and repacks
-the classes into a **byte-for-byte reproducible** `jrock.jar` (see `.github/build/BuildJar.java`).
-The same source therefore yields the **same SHA-256 and MD5 on any machine or OS**.
-
-For robustness the build runs on **three operating systems** and publishes three artifacts:
-
-- `jrock-macos-latest.zip`
-- `jrock-ubuntu-latest.zip`
-- `jrock-windows-latest.zip`
-
-Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
-(`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
-`JRock.java`, the sample prompts and the automation scripts) and `agentic-samples/` loose
-beside it, so the samples can be read without unpacking anything — and so an
-[automation](#automating-the-chain-jrockdocinventoryjava) is one `cp jrock.jar
-agentic-samples/` away from running. Because the build is reproducible, the `jrock.jar`
-inside all three archives is identical.
-
-To verify and run JRock from a build artifact, unzip it, then:
-
-```sh
-cd jrock-ubuntu-latest/
-
-sha256sum jrock.jar
-md5sum jrock.jar
-
-java -jar jrock.jar
-```
-
-Current build hashes:
-
-```
-f51cc49eed6b59ffb1a7882360f5983ec6809b574954b4e368aef38c0dda89ac  jrock.jar
-9bb6ed3689d8903edc311a9bc3eb6b78  jrock.jar
-```
-
-Or, if you want to modify the source and run it in place (no build step):
-
-```sh
-java JRock.java
-```
-
 ## Tests
 
 Tests live in **`tests/`** and run on **JUnit 5**. Most are GUI tests, using
@@ -2917,7 +2874,46 @@ Markdown. It uses nothing but the JDK and needs no third-party action, the same 
 java .github/build/TestSummary.java tests/target/surefire-reports
 ```
 
-## Notes
+## Reproducible builds
 
-- All files created by the app are under `JRock/` and are git-ignored.
-- File writes are atomic, so a crash or a failed write never leaves a truncated file.
+CI compiles `JRock.java` with a **pinned OpenJDK 11 patch (Temurin 11.0.32+9)** and repacks
+the classes into a **byte-for-byte reproducible** `jrock.jar` (see `.github/build/BuildJar.java`).
+The same source therefore yields the **same SHA-256 and MD5 on any machine or OS**.
+
+For robustness the build runs on **three operating systems** and publishes three artifacts:
+
+- `jrock-macos-latest.zip`
+- `jrock-ubuntu-latest.zip`
+- `jrock-windows-latest.zip`
+
+Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
+(`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
+`JRock.java`, the sample prompts and the automation scripts) and `agentic-samples/` loose
+beside it, so the samples can be read without unpacking anything — and so an
+[automation](#automating-the-chain-jrockdocinventoryjava) is one `cp jrock.jar
+agentic-samples/` away from running. Because the build is reproducible, the `jrock.jar`
+inside all three archives is identical.
+
+To verify and run JRock from a build artifact, unzip it, then:
+
+```sh
+cd jrock-ubuntu-latest/
+
+sha256sum jrock.jar
+md5sum jrock.jar
+
+java -jar jrock.jar
+```
+
+Current build hashes:
+
+```
+f51cc49eed6b59ffb1a7882360f5983ec6809b574954b4e368aef38c0dda89ac  jrock.jar
+9bb6ed3689d8903edc311a9bc3eb6b78  jrock.jar
+```
+
+Or, if you want to modify the source and run it in place (no build step):
+
+```sh
+java JRock.java
+```
