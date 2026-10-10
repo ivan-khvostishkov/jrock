@@ -20,8 +20,13 @@
 //   2. A small window opens beside JRock's: a time, hh:mm:ss, and Set. Set, and a short
 //      rising chirp says the alarm is on. The list under it counts down to every alarm set
 //      since the window opened - nothing is kept across runs.
-//   3. At the time, the alarm rings once - beep-beep-beep-beep - and the list shows it
-//      rang. Remove (or Delete, or Escape on it in the list) takes an alarm off the list.
+//   3. At the time, the alarm rings once and the list shows it rang. Remove (or Delete,
+//      or Escape on it in the list) takes an alarm off the list.
+//   4. Every alarm rings its own sound, so two of them due minutes apart can be told
+//      apart from across the room: the first alarm set rings a C chord three times, the
+//      second a G four times, the third an E five times, and the fourth starts the
+//      chords again on C with six beeps. The window names the sound when the alarm is
+//      set and again when it rings, and every row in the list carries it ("C x3").
 //
 // The time is the time of day the alarm rings, 24-hour: 07:30:00 is half past seven, today
 // if that is still to come and tomorrow if it has gone. "+hh:mm:ss" is a timer instead:
@@ -87,9 +92,22 @@ public final class JRockTimer {
     private static final class Alarm {
         final String label;      // what was set, as it is shown: "07:30:00" or "+00:05:00"
         final Instant due;
+        // Which alarm this is, counting from 1 since the window opened - and so which
+        // chord it rings on and how many times (see CHORDS and beeps). Counted on
+        // setting rather than taken from the list, so an alarm removed from the middle
+        // does not hand its sound to the next one set: two alarms waiting together are
+        // never the same sound, which is the whole point of having more than one.
+        final int number;
         volatile Phase phase = Phase.WAITING;
-        Alarm(String label, Instant due) { this.label = label; this.due = due; }
+        Alarm(String label, Instant due, int number) {
+            this.label = label; this.due = due; this.number = number;
+        }
     }
+
+    // How many alarms have been set since the window opened. Set from the window (EDT)
+    // and from another agent's connection (its own thread), so it is counted atomically.
+    private static final java.util.concurrent.atomic.AtomicInteger SET_COUNT =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     // Every sound goes through this one thread, so two never play over each other: a
     // confirmation set during a ring waits for the ring's pattern to finish.
@@ -150,13 +168,14 @@ public final class JRockTimer {
             due = when.toInstant();
             label = at.format(HMS);
         }
-        Alarm alarm = new Alarm(label, due);
+        Alarm alarm = new Alarm(label, due, SET_COUNT.incrementAndGet());
         later(() -> {
             // In the order they ring.
             int i = 0;
             while (i < alarms.size() && !alarms.get(i).due.isAfter(due)) i++;
             alarms.add(i, alarm);
-            say("Alarm set for " + ringsAt(alarm) + (from == null ? "." : ", by " + from + "."));
+            say("Alarm set for " + ringsAt(alarm) + ", " + sounds(alarm)
+                    + (from == null ? "." : ", by " + from + "."));
         });
         SOUND.submit(() -> play(confirmation(), () -> false));
         Thread wait = new Thread(() -> await(alarm), "jrock-timer-" + label);
@@ -181,11 +200,13 @@ public final class JRockTimer {
         if (alarm.phase == Phase.REMOVED) return;
         alarm.phase = Phase.RINGING;
         later(() -> {
-            say("Ringing: " + ringsAt(alarm) + ".");
+            say("Ringing: " + ringsAt(alarm) + ", " + sounds(alarm) + ".");
             list.repaint();
         });
         SOUND.submit(() -> {
-            if (alarm.phase == Phase.RINGING) play(ring(), () -> alarm.phase != Phase.RINGING);
+            if (alarm.phase == Phase.RINGING) {
+                play(ring(alarm), () -> alarm.phase != Phase.RINGING);
+            }
             if (alarm.phase == Phase.RINGING) alarm.phase = Phase.RANG;
             later(list::repaint);
         });
@@ -258,31 +279,87 @@ public final class JRockTimer {
         return concat(tone(880, 90, 0.45), silence(40), tone(1318.5, 150, 0.45));
     }
 
-    // Ringing: the alarm clock's four quick beeps, played once.
-    private static byte[] ring() {
+    // One chord per alarm, in the order they were set: C major, G major, E major, and
+    // round again from the fourth. Three notes each, around the fifth octave where the
+    // single beep used to be, so a chord carries across a room as that beep did.
+    private static final double[][] CHORDS = {
+        { 523.25, 659.26, 783.99 },     // C major: C5, E5, G5
+        { 783.99, 987.77, 1174.66 },    // G major: G5, B5, D6
+        { 659.26, 830.61, 987.77 },     // E major: E5, G#5, B5
+    };
+    private static final String[] CHORD_NAMES = { "C", "G", "E" };
+
+    // Beeps for the first alarm; every one after it gets one more.
+    private static final int BEEPS_FIRST = 3;
+
+    // Ringing: the alarm's own chord, beeped its own number of times, played once.
+    //
+    // Two alarms can come due minutes apart, or together, and from across the room the
+    // only thing that says WHICH has gone off is the sound. So the chord and the count
+    // both move with the alarm's number: the first rings C three times, the second G
+    // four times, the third E five times, and the fourth starts the chords again on C
+    // with six. The chords cycle because three are enough to tell neighbours apart; the
+    // count keeps rising because it is what tells two alarms sharing a chord apart.
+    private static byte[] ring(Alarm alarm) {
+        double[] notes = CHORDS[(alarm.number - 1) % CHORDS.length];
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        for (int i = 0; i < 4; i++) {
-            out.writeBytes(tone(1000, 110, 0.6));
+        for (int i = 0; i < beeps(alarm); i++) {
+            // Louder than the single beep was (0.6), because a chord is quieter at the
+            // same figure: three notes divided by three peak at well under one note's
+            // amplitude, their phases never lining up. 0.95 puts the loudness back where
+            // it was and still leaves a third of the scale unused.
+            out.writeBytes(chord(notes, 110, 0.95));
             out.writeBytes(silence(90));
         }
         return out.toByteArray();
     }
 
-    // A sine with its third harmonic, for a brighter beep that carries, faded in and
-    // out over 5 ms so it does not click.
-    private static byte[] tone(double hz, int ms, double volume) {
+    private static int beeps(Alarm alarm) {
+        return BEEPS_FIRST + alarm.number - 1;
+    }
+
+    // What an alarm will sound like, in words, for the status line: the window says it
+    // when the alarm is set and again when it rings, so a sound coming out of the
+    // speaker can be matched to the alarm that made it without counting beeps twice.
+    private static String sounds(Alarm alarm) {
+        return CHORD_NAMES[(alarm.number - 1) % CHORD_NAMES.length] + " chord, "
+                + beeps(alarm) + " beeps";
+    }
+
+    // The same, short enough for a row in the list: "C x3".
+    private static String soundTag(Alarm alarm) {
+        return CHORD_NAMES[(alarm.number - 1) % CHORD_NAMES.length] + " x" + beeps(alarm);
+    }
+
+    // A chord: its notes summed, each of them a sine with its third harmonic for a
+    // brighter beep that carries, faded in and out over 5 ms so it does not click.
+    //
+    // Divided by the number of notes, so three of them come out no louder than one and
+    // nothing clips: a sum of sines peaks at the sum of their amplitudes, which is where
+    // a chord played like a single tone turns into a crackle.
+    private static byte[] chord(double[] notes, int ms, double volume) {
         int n = (int) (RATE * ms / 1000);
         int fade = (int) (RATE * 0.005);
         byte[] pcm = new byte[n * 2];
         for (int i = 0; i < n; i++) {
             double t = i / RATE;
-            double v = Math.sin(2 * Math.PI * hz * t) * 0.8 + Math.sin(2 * Math.PI * hz * 3 * t) * 0.2;
+            double v = 0;
+            for (double hz : notes) {
+                v += Math.sin(2 * Math.PI * hz * t) * 0.8
+                        + Math.sin(2 * Math.PI * hz * 3 * t) * 0.2;
+            }
+            v /= notes.length;
             double edge = Math.min(1.0, Math.min(i, n - 1 - i) / (double) fade);
             int sample = (int) (v * edge * volume * Short.MAX_VALUE);
             pcm[2 * i] = (byte) sample;
             pcm[2 * i + 1] = (byte) (sample >> 8);
         }
         return pcm;
+    }
+
+    // One note, which is a chord of one - the confirmation chirp is made of these.
+    private static byte[] tone(double hz, int ms, double volume) {
+        return chord(new double[] { hz }, ms, volume);
     }
 
     private static byte[] silence(int ms) {
@@ -407,7 +484,7 @@ public final class JRockTimer {
                 Alarm a = (Alarm) value;
                 setFont(rowFont);
                 setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 10, 5, 10));
-                setText(ringsAt(a) + "    " + countdown(a));
+                setText(ringsAt(a) + "  " + soundTag(a) + "    " + countdown(a));
                 if (!selected) setForeground(a.phase == Phase.RINGING ? RINGING
                         : a.phase == Phase.RANG ? MUTED : INK);
                 return this;

@@ -1741,8 +1741,17 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
 - **The time is when the alarm rings**, 24-hour `hh:mm:ss`: `07:30:00` is today if that is
   still to come, and otherwise tomorrow. `+hh:mm:ss` is a timer instead: `+00:05:00` rings in
   five minutes.
-- **Sounds**: a short rising chirp when an alarm is set, and an alarm clock's four quick beeps,
-  once, when it rings. **Remove** (or Delete or Escape on it in the list) takes an alarm off
+- **Every alarm rings its own sound**, because more than one can be set and from across the
+  room the sound is the only thing that says *which* has gone off. The chord and the number of
+  beeps both move with the alarm: the **first** rings a **C** chord **three** times, the
+  **second** a **G** four times, the **third** an **E** five times, and the **fourth** starts
+  the chords again on C with **six** — the three chords cycle, while the count keeps rising, so
+  two alarms that share a chord are still a beep apart. The window names the sound when the
+  alarm is set and again when it rings (*"Alarm set for 07:30:00, C chord, 3 beeps"*), and every
+  row in the list carries it as `C x3`. Numbering counts the alarms *set*, not the rows, so
+  removing one from the middle never hands its sound to the next one.
+- **Sounds**: a short rising chirp when an alarm is set, and the chord above when it rings,
+  played once. **Remove** (or Delete or Escape on it in the list) takes an alarm off
   the list, and stops it if it is still beeping. The agent makes the sounds itself, with no files,
   and plays them with Java Sound on JRock's [**Narrate on**](#narrate-windows-and-the-browser) speaker, never
   on the Windows default. That device name is the only thing it takes from JRock's settings
