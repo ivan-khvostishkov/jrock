@@ -82,6 +82,54 @@ class JRockPricingTest {
     }
 
     @Test
+    @DisplayName("the 2026 cards are costed from their own rows, each in its own Regions")
+    void pricesTheNewerCards() throws Exception {
+        // Grok 4.6: $2.20 / $6.60 at any length, in its two mantle Regions and nowhere
+        // else - a card with no long-context row at all.
+        assertThat(costLine("xai.grok-4.6", "us-west-2", 1_000_000, 1_000_000))
+                .contains("in $2.20 + out $6.60 = $8.80");
+        assertThat(costLine("xai.grok-4.6", "us-gov-east-1", 1_000_000, 500_000))
+                .contains("in $2.20 + out $3.30 = $5.50");
+        assertThat(costLine("xai.grok-4.6", "us-east-1", 1000, 1000)).isEmpty();
+
+        // GPT-5.5: $5.50 / $33.00 up to 272K, $11.00 / $49.50 above it.
+        assertThat(costLine("openai.gpt-5.5", "us-east-2", 200_000, 200_000))
+                .contains("in $1.10 + out $6.60 = $7.70");
+        assertThat(costLine("openai.gpt-5.5", "us-east-2", 1_000_000, 200_000))
+                .contains("in $11.00 + out $9.90 = $20.90");
+        assertThat(costLine("openai.gpt-5.5", "us-west-2", 1000, 1000)).isEmpty();
+
+        // GPT-5.6 Sol: $4.40 / $22.00, doubling and a half above 272K.
+        assertThat(costLine("openai.gpt-5.6-sol", "us-east-1", 100_000, 100_000))
+                .contains("in $0.44 + out $2.20 = $2.64");
+        assertThat(costLine("openai.gpt-5.6-sol", "us-east-1", 1_000_000, 100_000))
+                .contains("in $8.80 + out $3.30 = $12.10");
+
+        // GPT-5.6 Terra: the one card here that prices every mantle Region it is in,
+        // GovCloud included - and GovCloud is dearer.
+        assertThat(costLine("openai.gpt-5.6-terra", "us-west-2", 100_000, 100_000))
+                .contains("in $0.22 + out $1.32 = $1.54");
+        assertThat(costLine("openai.gpt-5.6-terra", "us-gov-west-1", 100_000, 100_000))
+                .contains("in $0.27 + out $1.62 = $1.89");
+        assertThat(costLine("openai.gpt-5.6-terra", "us-gov-east-1", 1_000_000, 100_000))
+                .contains("in $5.40 + out $2.43 = $7.83");
+
+        // GPT-6 Sol and GPT-6.1 Sol: the same rows, in us-east-1 alone.
+        for (String model : new String[] { "openai.gpt-6-sol", "openai.gpt-6.1-sol" }) {
+            assertThat(costLine(model, "us-east-1", 100_000, 100_000))
+                    .describedAs(model).contains("in $0.22 + out $1.10 = $1.32");
+            assertThat(costLine(model, "us-east-1", 1_000_000, 100_000))
+                    .describedAs(model).contains("in $4.40 + out $1.65 = $6.05");
+            assertThat(costLine(model, "us-east-2", 1000, 1000)).describedAs(model).isEmpty();
+        }
+
+        // Kimi K3 and GLM 5.3 are bedrock-runtime models: no mantle In-Region row to
+        // read, and JRock does not call that endpoint, so there is no cost to state.
+        assertThat(costLine("moonshotai.kimi-k3", "us-east-1", 1000, 1000)).isEmpty();
+        assertThat(costLine("zai.glm-5.3", "us-east-1", 1000, 1000)).isEmpty();
+    }
+
+    @Test
     @DisplayName("the smaller the request, the more digits it is costed to")
     void writesSmallAmountsToMoreDigits() throws Exception {
         // Grok 4.3 at $1.25 / $2.50 per 1M. Under a dollar the total is written to a

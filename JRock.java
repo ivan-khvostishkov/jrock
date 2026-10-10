@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.13.0";
+    private static final String VERSION = "2.14.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -428,6 +428,31 @@ public class JRock {
             }
             return false;
         }
+
+        // Whether the card lists bedrock-mantle among the endpoints it is served on.
+        boolean servedOnMantle() {
+            for (String endpoint : endpointsSupported()) {
+                if (endpoint.equals("bedrock-mantle")) return true;
+            }
+            return false;
+        }
+
+        // Why JRock cannot send to this model, as the tail of "Model X is not served
+        // via Chat Completions on bedrock-mantle; it ...". Two different reasons, and
+        // the difference matters to whoever reads it: a model on another API there is
+        // one JRock could learn to call, while a model that is not on mantle at all is
+        // on the endpoint JRock does not use.
+        String mantleGap() {
+            if (!servedOnMantle()) {
+                return "is served on bedrock-runtime only, and every JRock request goes "
+                        + "to the bedrock-mantle endpoint in Configure";
+            }
+            if (mantleMessagesPath() != null) {
+                return "uses the Anthropic Messages API (" + mantleMessagesPath()
+                        + "), which JRock does not implement yet";
+            }
+            return "uses an API JRock does not implement yet";
+        }
     }
 
     // xAI Grok 4.3.
@@ -452,6 +477,61 @@ public class JRock {
             return "us-gov-west-1".equals(region) ? new double[] { 1.50, 3.00 }
                                                   : new double[] { 1.25, 2.50 };
         }
+    }
+
+    // xAI Grok 4.6: 500K context, reasoning always on (low by default).
+    // Card: both endpoints, mantle base /openai/v1, Responses + Chat Completions there.
+    private static final class Grok46Card extends BedrockModelCard {
+        String modelId()              { return "xai.grok-4.6"; }
+        String displayName()          { return "Grok 4.6"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-xai-grok-4-6.html"; }
+        String[] inputModalities()    { return new String[] { "Image", "Text" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse", "Invoke" }; }
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        @Override String mantleChatCompletionsPath() { return "/openai/v1/chat/completions"; }
+        // Card, Pricing (Standard, In-Region, per 1M tokens): $2.20 input and $6.60
+        // output, at any input length - this card has no long-context row. Mantle serves
+        // it In-Region in us-west-2 and us-gov-east-1 only, and GovCloud East reads the
+        // same row. Cache reads, at $0.55, are counted at the input price here.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            return ("us-west-2".equals(region) || "us-gov-east-1".equals(region))
+                    ? new double[] { 2.20, 6.60 } : null;
+        }
+    }
+
+    // Moonshot AI Kimi K3: 1M context, vision, open weights. Card: bedrock-runtime
+    // ONLY - it is not on mantle at all, so JRock cannot send to it (see mantleGap),
+    // and there is no In-Region price to state: the card prices cross-Region inference
+    // alone ($3.00/$15.00 Global, $3.30/$16.50 US and India).
+    private static final class KimiK3Card extends BedrockModelCard {
+        String modelId()              { return "moonshotai.kimi-k3"; }
+        String displayName()          { return "Kimi K3"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-moonshot-ai-kimi-k3.html"; }
+        String[] inputModalities()    { return new String[] { "Image", "Text" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse", "Invoke" }; }
+        String[] apisOnMantle()       { return new String[] {}; }
+        // Not served on mantle: no path to build one from, rather than the default /v1.
+        @Override String mantleChatCompletionsPath() { return null; }
+    }
+
+    // Z.AI GLM 5.3: 744B-parameter mixture of experts, 1M context, text only. Card:
+    // bedrock-runtime ONLY, and cross-Region inference only even there, so JRock cannot
+    // send to it (see mantleGap). Its card states no price at all and points to the
+    // Bedrock pricing page, so none is stated here either.
+    private static final class Glm53Card extends BedrockModelCard {
+        String modelId()              { return "zai.glm-5.3"; }
+        String displayName()          { return "GLM 5.3"; }
+        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-zai-glm-5-3.html"; }
+        String[] inputModalities()    { return new String[] { "Text" }; }
+        String[] outputModalities()   { return new String[] { "Text" }; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse", "Invoke" }; }
+        String[] apisOnMantle()       { return new String[] {}; }
+        @Override String mantleChatCompletionsPath() { return null; }
     }
 
     // Moonshot AI Kimi K2.5.
@@ -534,6 +614,122 @@ public class JRock {
             if (!"us-east-1".equals(region) && !"us-west-2".equals(region)) return null;
             return inputTokens > 272_000 ? new double[] { 22.00, 82.50 }
                                          : new double[] { 11.00, 55.00 };
+        }
+    }
+
+    // OpenAI GPT-5.5: 1.05M context. Card: bedrock-mantle ONLY - the runtime row is a
+    // red cross for every API - with Responses + Chat Completions there.
+    private static final class Gpt55Card extends OpenAiModelCard {
+        String modelId()     { return "openai.gpt-5.5"; }
+        String displayName() { return "GPT-5.5"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-55.html"; }
+        String[] endpointsSupported() { return new String[] { "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] {}; }  // runtime not supported
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        // Card, Pricing (Standard, Commercial Regions, In-Region, per 1M tokens): $5.50
+        // input and $33.00 output for 272K input tokens or fewer; $11.00 and $49.50
+        // above that, and the card is explicit that those apply to the WHOLE request.
+        // Mantle serves it In-Region in us-east-1 and us-east-2 only. No GovCloud row.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            if (!"us-east-1".equals(region) && !"us-east-2".equals(region)) return null;
+            return inputTokens > 272_000 ? new double[] { 11.00, 49.50 }
+                                         : new double[] { 5.50, 33.00 };
+        }
+    }
+
+    // OpenAI GPT-5.6 Sol: the frontier one of the 5.6 pair, 1.05M context. Card: both
+    // endpoints; runtime = Responses/Chat Completions/Converse, mantle = Responses +
+    // Chat Completions.
+    private static final class Gpt56SolCard extends OpenAiModelCard {
+        String modelId()     { return "openai.gpt-5.6-sol"; }
+        String displayName() { return "GPT-5.6 Sol"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-sol.html"; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse" }; }
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        // Card, Pricing (Standard, Commercial Regions, In-Region, per 1M tokens): $4.40
+        // input and $22.00 output for 272K input tokens or fewer; $8.80 and $33.00 above
+        // that. Mantle serves it In-Region in us-east-1 and us-east-2 only. No GovCloud
+        // row. Cache reads, at $0.44, are counted at the input price here.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            if (!"us-east-1".equals(region) && !"us-east-2".equals(region)) return null;
+            return inputTokens > 272_000 ? new double[] { 8.80, 33.00 }
+                                         : new double[] { 4.40, 22.00 };
+        }
+    }
+
+    // OpenAI GPT-5.6 Terra: the balanced one of the 5.6 pair, 1.05M context, and the
+    // only model here mantle serves in both GovCloud Regions. Card: both endpoints;
+    // runtime = Responses/Chat Completions/Converse, mantle = Responses + Chat
+    // Completions.
+    private static final class Gpt56TerraCard extends OpenAiModelCard {
+        String modelId()     { return "openai.gpt-5.6-terra"; }
+        String displayName() { return "GPT-5.6 Terra"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-terra.html"; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse" }; }
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        // Card, Pricing (Standard, In-Region, per 1M tokens): Commercial $2.20 input and
+        // $13.20 output for 272K input tokens or fewer, $4.40 and $19.80 above that;
+        // AWS GovCloud (US-East and US-West) $2.70 and $16.20, and $5.40 and $24.30
+        // above 272K. Mantle serves it In-Region in us-east-1, us-east-2, us-west-2 and
+        // both GovCloud Regions - every one of which the card prices, so unlike the
+        // other OpenAI cards here none of its mantle Regions is left without one.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            boolean longContext = inputTokens > 272_000;
+            switch (region == null ? "" : region) {
+                case "us-east-1": case "us-east-2": case "us-west-2":
+                    return longContext ? new double[] { 4.40, 19.80 }
+                                       : new double[] { 2.20, 13.20 };
+                case "us-gov-east-1": case "us-gov-west-1":
+                    return longContext ? new double[] { 5.40, 24.30 }
+                                       : new double[] { 2.70, 16.20 };
+                default:
+                    return null;
+            }
+        }
+    }
+
+    // OpenAI GPT-6 Sol: 1.05M context, reasoning effort from none to max. Card: both
+    // endpoints; runtime = Responses/Chat Completions/Converse/Invoke, mantle =
+    // Responses + Chat Completions.
+    private static final class Gpt6SolCard extends OpenAiModelCard {
+        String modelId()     { return "openai.gpt-6-sol"; }
+        String displayName() { return "GPT-6 Sol"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-sol.html"; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse", "Invoke" }; }
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        // Card, Pricing (Standard, Commercial Regions, mantle in-Region, per 1M tokens):
+        // $2.20 input and $11.00 output for 272K input tokens or fewer; $4.40 and $16.50
+        // above that, for the whole request. Mantle serves it In-Region in us-east-1
+        // only. Cache reads, at $0.22, are counted at the input price here.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            if (!"us-east-1".equals(region)) return null;
+            return inputTokens > 272_000 ? new double[] { 4.40, 16.50 }
+                                         : new double[] { 2.20, 11.00 };
+        }
+    }
+
+    // OpenAI GPT-6.1 Sol: 1M context, and the one model here with a second service tier
+    // on mantle - Ultrafast, six times the price, which JRock never asks for (it sends
+    // no service_tier, and Standard is what that means). Card: both endpoints; runtime =
+    // Responses/Chat Completions/Converse/Invoke, mantle = Responses + Chat Completions.
+    private static final class Gpt61SolCard extends OpenAiModelCard {
+        String modelId()     { return "openai.gpt-6.1-sol"; }
+        String displayName() { return "GPT-6.1 Sol"; }
+        String cardUrl()     { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html"; }
+        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
+        String[] apisOnRuntime()      { return new String[] { "Responses", "Chat Completions", "Converse", "Invoke" }; }
+        String[] apisOnMantle()       { return new String[] { "Responses", "Chat Completions" }; }
+        // Card, Pricing (Standard, Commercial Regions, Regional on mantle, per 1M
+        // tokens): $2.20 input and $11.00 output for 272K input tokens or fewer; $4.40
+        // and $16.50 above that, for the whole request. Mantle serves it In-Region in
+        // us-east-1 only. Cache reads, at $0.11, are counted at the input price here.
+        @Override double[] pricePer1M(String region, long inputTokens) {
+            if (!"us-east-1".equals(region)) return null;
+            return inputTokens > 272_000 ? new double[] { 4.40, 16.50 }
+                                         : new double[] { 2.20, 11.00 };
         }
     }
 
@@ -699,8 +895,12 @@ public class JRock {
 
     // Registry of known model cards, and a lookup by model id.
     private static final BedrockModelCard[] MODEL_CARDS = {
-        new Grok43Card(), new KimiK25Card(), new DeepSeekV31Card(), new Qwen332bCard(),
-        new Gpt54Card(), new Gpt6AstraCard(), new VoxtralSmall24bCard(),
+        new Grok43Card(), new Grok46Card(),
+        new KimiK25Card(), new KimiK3Card(), new Glm53Card(),
+        new DeepSeekV31Card(), new Qwen332bCard(),
+        new Gpt54Card(), new Gpt55Card(), new Gpt56SolCard(), new Gpt56TerraCard(),
+        new Gpt6SolCard(), new Gpt61SolCard(), new Gpt6AstraCard(),
+        new VoxtralSmall24bCard(),
         new Gemma426bA4bCard(), new Gemma4E2bCard(),
         new ClaudeOpus5Card(), new ClaudeFable51Card(),
     };
@@ -2455,14 +2655,12 @@ public class JRock {
             // card is the one for the configured endpoint (see cardForEndpoint).
             BedrockModelCard card = cardForEndpoint();
             if (card != null && !card.supportsMantleChatCompletions()) {
-                String via = card.mantleMessagesPath() != null
-                        ? "the Anthropic Messages API (" + card.mantleMessagesPath() + ")"
-                        : "an API JRock does not implement";
+                String gap = card.mantleGap();
                 String why = "model \"" + MODEL_ID + "\" is not served via Chat Completions "
-                        + "on bedrock-mantle; it uses " + via + ".";
+                        + "on bedrock-mantle; it " + gap + ".";
                 log.gray("Model \"" + MODEL_ID + "\" is not served via Chat Completions on "
-                        + "bedrock-mantle; it uses " + via + ", which JRock does not implement "
-                        + "yet. Choose a Chat-Completions-capable model.");
+                        + "bedrock-mantle; it " + gap + ". Choose a Chat-Completions-capable "
+                        + "model.");
                 log.gray("");
                 sendGate.accept(true);
                 sendFinished(why);
@@ -14839,14 +15037,11 @@ public class JRock {
         // The card is the one for the configured endpoint (see cardForEndpoint).
         BedrockModelCard card = cardForEndpoint();
         if (card != null && !card.supportsMantleChatCompletions()) {
-            String via = card.mantleMessagesPath() != null
-                    ? "the Anthropic Messages API (" + card.mantleMessagesPath() + ")"
-                    : "an API JRock does not implement";
             return new String[] {
                 "0",
                 "Model \"" + MODEL_ID + "\" is not served via Chat Completions on "
-                    + "bedrock-mantle; it uses " + via + ", which JRock does not "
-                    + "implement yet. Choose a Chat-Completions-capable model.",
+                    + "bedrock-mantle; it " + card.mantleGap()
+                    + ". Choose a Chat-Completions-capable model.",
                 null
             };
         }

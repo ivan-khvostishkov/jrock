@@ -419,10 +419,18 @@ Built-in cards include:
 | Model | Model ID | Chat Completions on mantle | Price per 1M tokens (in / out) |
 |---|---|---|---|
 | Grok 4.3 | `xai.grok-4.3` | yes (`/openai/v1`) | $1.25 / $2.50; GovCloud $1.50 / $3.00 |
+| Grok 4.6 | `xai.grok-4.6` | yes (`/openai/v1`) | $2.20 / $6.60, at any input length (us-west-2, us-gov-east-1) |
 | Kimi K2.5 | `moonshotai.kimi-k2.5` | yes (`/v1`) | — |
+| Kimi K3 | `moonshotai.kimi-k3` | no (bedrock-runtime only) | — |
+| GLM 5.3 | `zai.glm-5.3` | no (bedrock-runtime only) | — |
 | DeepSeek-V3.1 | `deepseek.v3.1` | yes (`/v1`) | — |
 | Qwen3 32B | `qwen.qwen3-32b` | yes (`/v1`) | — |
 | GPT-5.4 | `openai.gpt-5.4` | yes (`/openai/v1`) | $2.75 / $16.50; past 272K input tokens $5.50 / $24.75 (us-east-1, us-east-2, us-west-2); GovCloud $3.375 / $20.25 up to 272K |
+| GPT-5.5 | `openai.gpt-5.5` | yes (`/openai/v1`) | $5.50 / $33; past 272K input tokens $11 / $49.50 (us-east-1, us-east-2) |
+| GPT-5.6 Sol | `openai.gpt-5.6-sol` | yes (`/openai/v1`) | $4.40 / $22; past 272K input tokens $8.80 / $33 (us-east-1, us-east-2) |
+| GPT-5.6 Terra | `openai.gpt-5.6-terra` | yes (`/openai/v1`) | $2.20 / $13.20; past 272K $4.40 / $19.80; GovCloud $2.70 / $16.20 and $5.40 / $24.30 |
+| GPT-6 Sol | `openai.gpt-6-sol` | yes (`/openai/v1`) | $2.20 / $11; past 272K input tokens $4.40 / $16.50 (us-east-1) |
+| GPT-6.1 Sol | `openai.gpt-6.1-sol` | yes (`/openai/v1`) | $2.20 / $11; past 272K input tokens $4.40 / $16.50 (us-east-1) |
 | GPT-6 Astra | `openai.gpt-6-astra` | yes (`/openai/v1`) | $11 / $55; past 272K input tokens $22 / $82.50 (us-east-1, us-west-2) |
 | Voxtral Small 24B 2507 | `mistral.voxtral-small-24b-2507` | yes (`/v1`) | $0.10 / $0.30 in the US; by region elsewhere |
 | Gemma 4 26B-A4B | `google.gemma-4-26b-a4b` | yes (`/openai/v1`) | — |
@@ -435,6 +443,12 @@ to the Bedrock pricing page, whose regional rows are copied instead — and they
 [stats block](#conversation-log) costs a request at. A card without a price, a region it has no
 row for, or a model with no card at all gets **no cost line**: a figure in dollars reads as a
 bill, and a guess is not one.
+
+> **Kimi K3** and **GLM 5.3** are `bedrock-runtime` models: their cards show a red cross for
+> `bedrock-mantle` altogether, and GLM 5.3 is cross-Region-only even there. JRock calls the
+> mantle endpoint in Configure and nothing else, so selecting one reports that and sends
+> nothing. Their cards price cross-Region inference alone (GLM 5.3's states no price at all),
+> so there is no In-Region row to cost a request at either.
 
 > Anthropic Claude models are served on mantle via the Anthropic **Messages API**
 > (`/anthropic/v1/messages`), not Chat Completions. JRock doesn't implement Messages yet,
@@ -2851,10 +2865,13 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   $1.25 / $2.50 (and GovCloud's own rate), GPT-6 Astra doubling past 272K input tokens and
   unpriced outside its two mantle regions, GPT-5.4 the same way with GovCloud priced only up to
   272K, Voxtral Small by region — a tenth of a cent apart, which is where the extra digits a
-  small amount gets earn their keep — and unpriced where the pricing page has no row. Then
-  **no line at all** for a model whose card states no price, for one there is no card for, and
-  for a reply that reported no token counts. And the startup total: every cost line in a log
-  added up, and a line that only looks like one left out. No window.
+  small amount gets earn their keep — and unpriced where the pricing page has no row. Then the
+  2026 cards: Grok 4.6 flat at any input length, GPT-5.5, GPT-5.6 Sol, GPT-6 Sol and GPT-6.1 Sol
+  each in the Regions mantle serves them in and nowhere else, GPT-5.6 Terra in all five of its
+  own with GovCloud dearer, and nothing for the two `bedrock-runtime` models. Then **no line at
+  all** for a model whose card states no price, for one there is no card for, and for a reply
+  that reported no token counts. And the startup total: every cost line in a log added up, and a
+  line that only looks like one left out. No window.
 - **`JRockNarrationTextTest`** checks what [**Narrate selected text**](#narrate-windows-and-the-browser) would
   hand the voice: headings, emphasis, list and quote markers, table pipes and include tokens
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
