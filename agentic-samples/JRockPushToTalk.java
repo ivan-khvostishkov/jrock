@@ -85,6 +85,12 @@
 // press Ctrl+Space (or Narrate) in JRock once to list the devices into Configure, pick
 // one, and carry on. A narration that cannot play is not a failed turn - the answer is
 // on the screen all the same.
+//
+// A turn that brings no answer - a send that failed, a reply that never came, a reply
+// that arrived empty - is said out loud as well as shown: "Error. Should I try again?",
+// the same fixed phrase every time, because hands-free nobody is looking at the window
+// and a silence where an answer should be says nothing about whether one is still
+// coming. Trying again is the operator's: say it again, or press the button again.
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -154,6 +160,16 @@ public final class JRockPushToTalk {
     // enough that a failure which repeats at once - a microphone not back yet - does not
     // spin, short enough that the operator can simply say it again.
     private static final long RETRY_PAUSE_MS = 2000;
+
+    // What a turn that brought no answer says out loud.
+    //
+    // Fixed, short, and nothing like an answer: hands-free, nobody is looking at the
+    // window, and a silence where an answer should be is indistinguishable from a model
+    // still thinking - so the one thing the operator must not have to guess is whether
+    // anything is coming. It asks rather than tells, because trying again is theirs to
+    // do and takes nothing but saying it again: hands-free listens by itself after
+    // RETRY_PAUSE_MS, and a held turn is the button pressed once more.
+    private static final String FAILED_ALOUD = "Error. Should I try again?";
 
     // The sentence an answer sets an alarm with, the time the model thinks it is and the
     // time to ring. The apostrophe as typed or as typeset, and "I am" too, since a model
@@ -270,7 +286,7 @@ public final class JRockPushToTalk {
                 recordingStarted = false;
                 outcome = answer(false);
             } catch (Stop stop) {
-                outcome = "That turn failed: " + stop.getMessage();
+                outcome = join("That turn failed: " + stop.getMessage(), sayFailed());
             }
             String said = outcome;
             later(() -> {
@@ -328,6 +344,12 @@ public final class JRockPushToTalk {
         later(() -> showAnswer(reply));
         String alarm = alarmIn(reply);
         if (handsFreeTurn && !handsFree) return join(note, alarm);
+        // An answer of nothing at all - a reply that arrived empty - is a failed turn to
+        // anyone listening, however well the request itself went: reading it out loud
+        // would be silence, which is the one thing a spoken answer cannot be.
+        if (reply.isBlank()) {
+            return join(note, alarm, "The reply was empty.", sayFailed());
+        }
         String silent = JRock.automationNarrate(reply);
         return join(note, alarm, silent == null ? null : "Not read aloud: " + silent);
     }
@@ -383,6 +405,19 @@ public final class JRockPushToTalk {
         String answer = read(JRock.automationMessageFile("assistant", sent[2]));
         if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
         return answer;
+    }
+
+    // Says FAILED_ALOUD out loud, and returns what the status line should add about
+    // saying it - null when it was said, the reason when it could not be (no speaker set
+    // on this JRock, or the one set is not connected).
+    //
+    // Every turn that ends without an answer goes through here, whether the button was
+    // held or hands-free is on: the reason on screen is for afterwards, and this is for
+    // the moment it happens. A narration already playing is stopped first by
+    // automationNarrate, so the phrase never queues behind half an old answer.
+    private static String sayFailed() {
+        String silent = JRock.automationNarrate(FAILED_ALOUD);
+        return silent == null ? null : "Not read aloud: " + silent;
     }
 
     // The notes that are there, in one line; null when there are none.
@@ -532,7 +567,8 @@ public final class JRockPushToTalk {
                     note = answer(true);
                 } catch (Stop failed) {
                     JRock.automationListen(false);
-                    note = "That did not work: " + failed.getMessage() + " Say it again.";
+                    note = join("That did not work: " + failed.getMessage() + " Say it again.",
+                            sayFailed());
                     String shown = note;
                     later(() -> setState(State.IDLE, shown));
                     for (long w = 0; handsFree && w < RETRY_PAUSE_MS; w += LISTEN_POLL_MS) {
