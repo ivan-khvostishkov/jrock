@@ -8,11 +8,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The price lines of the stats block, and the running total read back out of a log.
+ * The cost line of the stats block, and the running total read back out of a log.
  * <p>
- * A price is logged only where a model card states one: Grok 4.3, GPT-5.4 and GPT-6 Astra
- * from their cards, Voxtral Small from the pricing page its card points to - and nothing at
- * all for a model or a region with none. No GUI.
+ * What a request cost is logged only where a model card states a price for the model in
+ * that region: Grok 4.3, GPT-5.4 and GPT-6 Astra from their cards, Voxtral Small from the
+ * pricing page its card points to - and nothing at all for a model or a region with none.
+ * The rate is not printed, so each case asserts the cost it produces, at token counts
+ * chosen to divide exactly: a round number of dollars is the card's rate, scaled. No GUI.
  */
 class JRockPricingTest {
 
@@ -26,58 +28,81 @@ class JRockPricingTest {
     }
 
     @Test
-    @DisplayName("Grok 4.3 is priced from its card: $1.25 in, $2.50 out, GovCloud higher")
+    @DisplayName("Grok 4.3 is costed from its card: $1.25 in, $2.50 out, GovCloud higher")
     void pricesGrokFromItsCard() throws Exception {
-        String lines = priceLines("xai.grok-4.3", "us-west-2", 1_000_000, 200_000);
-        assertThat(lines).isEqualTo(
-                "\nPrice (model card, us-west-2): $1.25 per 1M input tokens, $2.5 per 1M output"
-                + "\nCost (model card): in $1.25 + out $0.50 = $1.75");
-        assertThat(priceLines("xai.grok-4.3", "us-gov-west-1", 1_000_000, 0))
-                .contains("$1.5 per 1M input tokens, $3 per 1M output");
+        // 1M in at $1.25 and 200K out at $2.50 per 1M.
+        assertThat(costLine("xai.grok-4.3", "us-west-2", 1_000_000, 200_000))
+                .isEqualTo("\nCost (model card): in $1.25 + out $0.50 = $1.75");
+        // GovCloud's own rates: $1.50 and $3.00, here a million of each.
+        assertThat(costLine("xai.grok-4.3", "us-gov-west-1", 1_000_000, 1_000_000))
+                .contains("in $1.50 + out $3.00 = $4.50");
     }
 
     @Test
-    @DisplayName("GPT-6 Astra costs double past 272K input tokens, and has no price off mantle's regions")
+    @DisplayName("GPT-6 Astra costs double past 272K input tokens, and nothing off mantle's regions")
     void pricesAstraByContextLength() throws Exception {
-        assertThat(priceLines("openai.gpt-6-astra", "us-east-1", 272_000, 0))
-                .contains("$11 per 1M input tokens, $55 per 1M output");
-        assertThat(priceLines("openai.gpt-6-astra", "us-east-1", 272_001, 0))
-                .contains("$22 per 1M input tokens, $82.5 per 1M output");
-        assertThat(priceLines("openai.gpt-6-astra", "eu-west-1", 1000, 1000)).isEmpty();
+        // Up to 272K: $11 / $55 per 1M, so 100K of each is a tenth of that.
+        assertThat(costLine("openai.gpt-6-astra", "us-east-1", 100_000, 100_000))
+                .contains("in $1.10 + out $5.50 = $6.60");
+        // Past it: $22 / $82.50 per 1M - a million in, 100K out.
+        assertThat(costLine("openai.gpt-6-astra", "us-east-1", 1_000_000, 100_000))
+                .contains("in $22.00 + out $8.25 = $30.25");
+        assertThat(costLine("openai.gpt-6-astra", "eu-west-1", 1000, 1000)).isEmpty();
     }
 
     @Test
     @DisplayName("GPT-5.4 costs more past 272K input tokens, GovCloud only up to it")
     void pricesGpt54ByContextLength() throws Exception {
-        assertThat(priceLines("openai.gpt-5.4", "us-east-2", 272_000, 0))
-                .contains("$2.75 per 1M input tokens, $16.5 per 1M output");
-        assertThat(priceLines("openai.gpt-5.4", "us-east-2", 272_001, 0))
-                .contains("$5.5 per 1M input tokens, $24.75 per 1M output");
-        assertThat(priceLines("openai.gpt-5.4", "us-gov-west-1", 1000, 1000))
-                .contains("$3.375 per 1M input tokens, $20.25 per 1M output");
-        assertThat(priceLines("openai.gpt-5.4", "us-gov-west-1", 272_001, 0)).isEmpty();
-        assertThat(priceLines("openai.gpt-5.4", "eu-west-1", 1000, 1000)).isEmpty();
+        // Up to 272K: $2.75 / $16.50 per 1M, here 200K of each.
+        assertThat(costLine("openai.gpt-5.4", "us-east-2", 200_000, 200_000))
+                .contains("in $0.55 + out $3.30 = $3.85");
+        // Past it: $5.50 / $24.75 per 1M - a million in, 200K out.
+        assertThat(costLine("openai.gpt-5.4", "us-east-2", 1_000_000, 200_000))
+                .contains("in $5.50 + out $4.95 = $10.45");
+        // GovCloud: $3.375 / $20.25 per 1M, here 80K of each.
+        assertThat(costLine("openai.gpt-5.4", "us-gov-west-1", 80_000, 80_000))
+                .contains("in $0.27 + out $1.62 = $1.89");
+        // And no price there past 272K, so no line at all.
+        assertThat(costLine("openai.gpt-5.4", "us-gov-west-1", 272_001, 0)).isEmpty();
+        assertThat(costLine("openai.gpt-5.4", "eu-west-1", 1000, 1000)).isEmpty();
     }
 
     @Test
-    @DisplayName("Voxtral Small is priced by region, and not where the page lists no row")
+    @DisplayName("Voxtral Small is costed by region, and not where the page lists no row")
     void pricesVoxtralByRegion() throws Exception {
-        assertThat(priceLines("mistral.voxtral-small-24b-2507", "us-east-2", 1000, 1000))
-                .contains("$0.1 per 1M input tokens, $0.3 per 1M output");
-        assertThat(priceLines("mistral.voxtral-small-24b-2507", "ap-southeast-2", 1000, 1000))
-                .contains("$0.103 per 1M input tokens, $0.309 per 1M output");
-        assertThat(priceLines("mistral.voxtral-small-24b-2507", "eu-central-1", 1000, 1000))
+        // $0.10 / $0.30 per 1M in the US, and a few thousandths more in Sydney:
+        // $0.103 / $0.309. A million of each, so the cost IS the rate - and under a
+        // dollar it is written to a tenth of a cent, which is what tells the two apart.
+        assertThat(costLine("mistral.voxtral-small-24b-2507", "us-east-2",
+                1_000_000, 1_000_000)).contains("in $0.100 + out $0.300 = $0.400");
+        assertThat(costLine("mistral.voxtral-small-24b-2507", "ap-southeast-2",
+                1_000_000, 1_000_000)).contains("in $0.103 + out $0.309 = $0.412");
+        assertThat(costLine("mistral.voxtral-small-24b-2507", "eu-central-1", 1000, 1000))
                 .isEmpty();
     }
 
     @Test
-    @DisplayName("a model whose card states no price gets no price line, not a guess")
+    @DisplayName("the smaller the request, the more digits it is costed to")
+    void writesSmallAmountsToMoreDigits() throws Exception {
+        // Grok 4.3 at $1.25 / $2.50 per 1M. Under a dollar the total is written to a
+        // tenth of a cent, and under a cent to a hundredth of one, so a real request
+        // does not print as $0.00.
+        assertThat(costLine("xai.grok-4.3", "us-east-1", 100_000, 100_000))
+                .contains("in $0.125 + out $0.250 = $0.375");
+        assertThat(costLine("xai.grok-4.3", "us-east-1", 2000, 2000))
+                .contains("in $0.0025 + out $0.0050 = $0.0075");
+    }
+
+    @Test
+    @DisplayName("no price, no counts, no line - and never a guess")
     void logsNothingWithoutAPrice() throws Exception {
-        assertThat(priceLines("moonshotai.kimi-k2.5", "us-east-1", 1000, 1000)).isEmpty();
-        assertThat(priceLines("someone.unknown-model", "us-east-1", 1000, 1000)).isEmpty();
-        // Known price, no counts from the API: the price, and no cost.
-        assertThat(priceLines("xai.grok-4.3", "us-east-1", -1, -1))
-                .contains("Price (model card").doesNotContain("Cost (model card)");
+        // A card that states no price, and a model there is no card for at all.
+        assertThat(costLine("moonshotai.kimi-k2.5", "us-east-1", 1000, 1000)).isEmpty();
+        assertThat(costLine("someone.unknown-model", "us-east-1", 1000, 1000)).isEmpty();
+        // A known price, but the reply reported no token counts: nothing to multiply,
+        // so nothing is written - not a line about the rate instead.
+        assertThat(costLine("xai.grok-4.3", "us-east-1", -1, -1)).isEmpty();
+        assertThat(costLine("xai.grok-4.3", "us-east-1", 1000, -1)).isEmpty();
     }
 
     @Test
@@ -98,15 +123,15 @@ class JRockPricingTest {
         assertThat(JRock.loggedCosts(null)).containsExactly(0.0, 0.0);
     }
 
-    private String priceLines(String model, String region, long in, long out) throws Exception {
+    private String costLine(String model, String region, long in, long out) throws Exception {
         Field m = field("MODEL_ID"), r = field("REGION");
         if (savedModel == null) savedModel = (String) m.get(null);
         if (savedRegion == null) savedRegion = (String) r.get(null);
         m.set(null, model);
         r.set(null, region);
-        Method lines = JRock.class.getDeclaredMethod("priceLines", long.class, long.class);
-        lines.setAccessible(true);
-        return (String) lines.invoke(null, in, out);
+        Method line = JRock.class.getDeclaredMethod("costLine", long.class, long.class);
+        line.setAccessible(true);
+        return (String) line.invoke(null, in, out);
     }
 
     private static Field field(String name) throws Exception {
