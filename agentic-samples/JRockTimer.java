@@ -17,9 +17,9 @@
 //
 //   1. JRock is started and taken as an automation: its prompt read-only and Mic always
 //      on muted, so this JRock never records what is said to another one.
-//   2. A small window opens beside JRock's: a time, hh:mm:ss, and Set. Set, and a short
-//      rising chirp says the alarm is on. The list under it counts down to every alarm set
-//      since the window opened - nothing is kept across runs.
+//   2. A small window opens beside JRock's: a time, hh:mm:ss, and Set. Set, and one
+//      beep in the alarm's own chord says it is on. The list under it counts down to
+//      every alarm set since the window opened - nothing is kept across runs.
 //   3. At the time, the alarm rings once and the list shows it rang. Remove (or Delete,
 //      or Escape on it in the list) takes an alarm off the list.
 //   4. Every alarm rings its own sound, so two of them due minutes apart can be told
@@ -177,7 +177,7 @@ public final class JRockTimer {
             say("Alarm set for " + ringsAt(alarm) + ", " + sounds(alarm)
                     + (from == null ? "." : ", by " + from + "."));
         });
-        SOUND.submit(() -> play(confirmation(), () -> false));
+        SOUND.submit(() -> play(confirmation(alarm), () -> false));
         Thread wait = new Thread(() -> await(alarm), "jrock-timer-" + label);
         wait.setDaemon(true);
         wait.start();
@@ -274,9 +274,15 @@ public final class JRockTimer {
     private static final javax.sound.sampled.AudioFormat FORMAT =
             new javax.sound.sampled.AudioFormat(RATE, 16, 1, true, false);
 
-    // Set: two short notes going up, A5 then E6.
-    private static byte[] confirmation() {
-        return concat(tone(880, 90, 0.45), silence(40), tone(1318.5, 150, 0.45));
+    // Set: the alarm's own chord, once.
+    //
+    // The same chord it will ring on, so setting an alarm already says which alarm it
+    // is - and setting a third one, with two still waiting, is heard as a third sound
+    // rather than as the same chirp a third time. Once against the ring's three times or
+    // more, and a little quieter, is what tells "set" from "ringing" at the same chord:
+    // the count is the difference, which is the same thing that tells two alarms apart.
+    private static byte[] confirmation(Alarm alarm) {
+        return chord(CHORDS[(alarm.number - 1) % CHORDS.length], 170, 0.7);
     }
 
     // One chord per alarm, in the order they were set: C major, G major, E major, and
@@ -357,19 +363,8 @@ public final class JRockTimer {
         return pcm;
     }
 
-    // One note, which is a chord of one - the confirmation chirp is made of these.
-    private static byte[] tone(double hz, int ms, double volume) {
-        return chord(new double[] { hz }, ms, volume);
-    }
-
     private static byte[] silence(int ms) {
         return new byte[(int) (RATE * ms / 1000) * 2];
-    }
-
-    private static byte[] concat(byte[]... parts) {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        for (byte[] p : parts) out.writeBytes(p);
-        return out.toByteArray();
     }
 
     // Plays pcm on JRock's Narrate on device, a slice at a time so stop() is looked at
