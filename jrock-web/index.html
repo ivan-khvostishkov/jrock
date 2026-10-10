@@ -839,23 +839,35 @@
         return named.filter(speaks)[0] || voices.filter(speaks)[0] || named[0] || null;
       }
 
-      // Chrome refuses speechSynthesis until the page has been interacted with, and the
-      // tap that reached JRock's menu is long over by the time Java calls back here. So
-      // the first touch or key on this page spends an empty utterance to open the door,
-      // once, and nothing is heard of it.
-      var speechPrimed = false;
+      // A browser speaks only for a page that has been interacted with, and the tap that
+      // reached JRock's menu is long over by the time Java calls back here - so the door
+      // is opened on the way past: every touch and every key press spends one utterance
+      // nobody can hear, until one of them is seen to START. That is the only proof the
+      // browser accepts speech from this page; "no error" is not proof, which is the
+      // whole lesson of this block.
+      //
+      // A SPACE, not an empty string: WebKit - which is every browser on iOS, Edge
+      // included - drops an empty utterance without a sound and without a start event,
+      // so an empty one opens nothing and nothing says so. And not `once`: if the first
+      // attempt is refused, the next tap tries again.
+      var speechStarted = false;     // a start event has been seen on this page
       function primeSpeech() {
-        if (speechPrimed || !window.speechSynthesis) return;
-        speechPrimed = true;
+        if (speechStarted || !window.speechSynthesis) return;
         try {
-          speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+          var silent = new SpeechSynthesisUtterance(" ");
+          silent.volume = 0;
+          silent.onstart = function () { speechStarted = true; };
+          speechSynthesis.speak(silent);
+          // A queue left paused by an earlier cancel is the other way a browser "speaks"
+          // in silence - see the resume() in narrate() for the same reason.
           speechSynthesis.resume();
         } catch (e) {
           // Nothing to do about it here; narrate() reports what the browser says.
         }
       }
-      document.addEventListener("pointerdown", primeSpeech, { once: true, capture: true });
-      document.addEventListener("keydown", primeSpeech, { once: true, capture: true });
+      document.addEventListener("pointerdown", primeSpeech, { capture: true });
+      document.addEventListener("touchend", primeSpeech, { capture: true });
+      document.addEventListener("keydown", primeSpeech, { capture: true });
 
       async function Java_JRock_browserNarrateVoices(lib) {
         try {
@@ -873,6 +885,12 @@
         }
       }
 
+      // How long to wait for the voice to actually begin before giving up on it. A
+      // browser that has not been allowed to speak reports no error at all: it takes the
+      // utterance, raises end, and makes no sound - so the start event is what is waited
+      // for, and its absence is the failure worth reporting.
+      var SPEECH_START_MS = 2500;
+
       async function Java_JRock_browserNarrate(lib, text, lang, names) {
         var said = (text === null || text === undefined) ? "" : String(text);
         if (!said.trim()) return "0\nthere was nothing to read out";
@@ -880,37 +898,83 @@
         try {
           var voice = pickVoice(await speechVoices(), lang, names);
           var utterance = new SpeechSynthesisUtterance(said);
-          if (voice) utterance.voice = voice;
-          if (lang) utterance.lang = voice ? voice.lang : String(lang);
-          speechSynthesis.cancel();     // one at a time, as JRock means it
+          // Only when one was actually matched. An unset voice is the browser's own
+          // choice, which it always honours; a voice object from a list it has since
+          // rebuilt is one WebKit answers with silence.
+          if (voice) {
+            utterance.voice = voice;
+            utterance.lang = voice.lang;
+          } else if (lang) {
+            utterance.lang = String(lang);
+          }
+          // Pinned rather than left to whatever the last utterance left behind.
+          utterance.volume = 1;
+          utterance.rate = 1;
+          utterance.pitch = 1;
+
+          // Only cancel something that is really going, and never straight into a speak:
+          // on WebKit a cancel immediately followed by a speak drops the new utterance
+          // without a word, and can leave the queue paused as well.
+          if (speechSynthesis.speaking || speechSynthesis.pending) {
+            speechSynthesis.cancel();
+            await new Promise(function (go) { setTimeout(go, 120); });
+          }
+
           var finished = new Promise(function (resolve) {
             var settled = false;
+            var watchdog = 0;
+            var startTimer = 0;
+            var began = false;
             var settle = function (reply) {
               if (settled) return;
               settled = true;
-              clearInterval(watchdog);
+              if (watchdog) clearInterval(watchdog);
+              if (startTimer) clearTimeout(startTimer);
               resolve(reply);
+            };
+            var done = function () {
+              return "1\n" + (voice ? voice.name : "the browser's default voice");
+            };
+
+            utterance.onstart = function () {
+              began = true;
+              speechStarted = true;        // speech is allowed here; stop priming
+              if (startTimer) clearTimeout(startTimer);
+              // Only now is there a reading for the queue to be asked about. Armed after
+              // the start because `speaking` reads false for a moment before it, and a
+              // watchdog armed earlier would call an unstarted utterance finished.
+              watchdog = setInterval(function () {
+                if (!speechSynthesis.speaking && !speechSynthesis.pending) settle(done());
+              }, 500);
             };
             // A reading that is cancelled arrives here as an error, and is a stop:
             // JRock has already said so, and says nothing twice.
-            utterance.onend = function () {
-              settle("1\n" + (voice ? voice.name : "the browser's default voice"));
-            };
             utterance.onerror = function (e) {
               var why = (e && e.error) ? String(e.error) : "the browser stopped speaking";
               settle(why === "interrupted" || why === "canceled"
                      ? "1\nstopped" : "0\n" + why);
             };
-            // Chrome has been known to drop onend on a long utterance, and JRock's
-            // narration thread would then wait for a voice that has already finished.
-            // The queue itself is the second opinion: nothing speaking, nothing pending.
-            var watchdog = setInterval(function () {
-              if (!speechSynthesis.speaking && !speechSynthesis.pending) {
-                settle("1\n" + (voice ? voice.name : "the browser's default voice"));
-              }
-            }, 500);
+            utterance.onend = function () {
+              settle(began ? done()
+                     : "0\nthe browser took the text and said nothing - it has not "
+                       + "allowed this page to speak yet. Tap the page once and press "
+                       + "Narrate again; on a phone, check the silent switch and the "
+                       + "volume too");
+            };
+            startTimer = setTimeout(function () {
+              if (began) return;
+              settle("0\nthe voice never started (speaking=" + speechSynthesis.speaking
+                     + ", pending=" + speechSynthesis.pending
+                     + ", paused=" + speechSynthesis.paused
+                     + "). Tap the page once and press Narrate again; on a phone, check "
+                     + "the silent switch and the volume too");
+            }, SPEECH_START_MS);
           });
+
           speechSynthesis.speak(utterance);
+          // A queue left paused - by an earlier cancel, or by the tab having been away -
+          // takes the utterance, raises its events and plays nothing. Harmless otherwise.
+          if (speechSynthesis.paused) speechSynthesis.resume();
           return await finished;
         } catch (e) {
           return "0\n" + reason(e);
