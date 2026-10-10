@@ -86,13 +86,14 @@ abstract class JRockGuiFixture {
      * The mutable statics the application keeps its configuration in.
      * <p>
      * These matter because Surefire reuses one JVM for every test class, so a test
-     * that changes the region or sets an API key override would otherwise hand that
+     * that changes the endpoint or sets an API key override would otherwise hand that
      * on to whatever runs next - and the next test would start making network calls.
      * Saved before each test and put back after it.
      */
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
-            "workingDir", "promptsDir", "promptsDirNote", "apiKey", "REGION",
-            "regionSource", "MODEL_ID", "availableModels", "imagesDpi", "autoBackupLog",
+            "workingDir", "promptsDir", "promptsDirNote", "apiKey", "ENDPOINT",
+            "endpointSource", "REGION", "MODEL_ID", "availableModels", "imagesDpi",
+            "autoBackupLog",
             "pdfIncludeMode", "rtfIncludeMode", "includeMarkdownRefs", "includeProcessedCopies",
             "missingIncludeStopsSend", "promptCacheOn");
 

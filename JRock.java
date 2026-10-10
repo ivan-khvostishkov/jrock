@@ -72,7 +72,7 @@
 //   Bedrock API key can be generated from the AWS console at:
 //   https://console.aws.amazon.com/bedrock-mantle/api-keys
 //   Put it in that file, or type it into the Configure dialog (top-left button),
-//   which writes it there. Nothing is read from the environment: the region and
+//   which writes it there. Nothing is read from the environment: the endpoint and
 //   the model live beside the key in JRock/jrock-config.txt (see "Settings
 //   files"), where they can be read, edited and copied like any other file.
 //   The browser build keeps the key in the same file, in the browser's own
@@ -122,13 +122,31 @@ public class JRock {
 
     // ---- Configuration (mutable: changed via the Configure dialog) ----------
     private static final String DEFAULT_REGION = "us-east-1";
-    // Region/model start from the built-in defaults, are replaced by whatever the
+    private static final String DEFAULT_ENDPOINT =
+            "https://bedrock-mantle." + DEFAULT_REGION + ".api.aws/v1/chat/completions";
+
+    // The Chat Completions URL every request goes to, in full.
+    //
+    // A whole URL rather than a region, because the region was only ever a piece of one:
+    // "bedrock-mantle.<region>.api.aws" was assembled around it, which made the region
+    // the only part of the address anyone could change. Moving to another region is now
+    // editing the host, which is no more typing than the region was, and the rest of the
+    // address stops being a thing JRock insists on.
+    //
+    // Endpoint/model start from the built-in defaults, are replaced by whatever the
     // working folder's JRock/jrock-config.txt holds (see adoptSettingsOfWorkingDir),
     // and can be changed at runtime in the Configure dialog.
-    private static String REGION = DEFAULT_REGION;
-    // Where REGION came from, phrased for the startup log; null for the built-in
+    private static String ENDPOINT = DEFAULT_ENDPOINT;
+    // Where ENDPOINT came from, phrased for the startup log; null for the built-in
     // default and once the user sets it in the Configure dialog.
-    private static String regionSource = null;
+    private static String endpointSource = null;
+
+    // The AWS region, read back out of the endpoint (see regionOfEndpoint): the model
+    // cards price per region, so the price lines need to know which one the endpoint is
+    // in. Null when the address is not a bedrock-mantle one, and a null region simply
+    // has no price - which is what every card already answers for a region it has no
+    // row for.
+    private static String REGION = DEFAULT_REGION;
     private static String MODEL_ID = "xai.grok-4.3";
     private static final String PROMPT = "Hello, assistant.";
 
@@ -288,21 +306,50 @@ public class JRock {
     private static final ChooserDir scanChooserDir     = new ChooserDir(() -> workingDir);
 
     // Derived endpoints/paths (recomputed from the mutable config above).
-    private static String mantleHost()     { return "https://bedrock-mantle." + REGION + ".api.aws"; }
-    private static String modelsEndpoint() { return mantleHost() + "/v1/models"; }
+
+    // The scheme and host of the configured endpoint, with no path: what a model card's
+    // own path is hung from (see endpoint).
+    private static String endpointOrigin() {
+        int scheme = ENDPOINT.indexOf("://");
+        int slash = ENDPOINT.indexOf('/', scheme < 0 ? 0 : scheme + 3);
+        return slash < 0 ? ENDPOINT : ENDPOINT.substring(0, slash);
+    }
+
+    // Keeps REGION in step with the endpoint, so the price lines are the ones for the
+    // region the requests are actually going to. Called wherever ENDPOINT is set.
+    private static void applyRegionOfEndpoint() {
+        REGION = regionOfEndpoint();
+    }
+
+    // The region named in a bedrock-mantle host, for the model cards to price against,
+    // or null when the endpoint is not one of those hosts.
+    private static String regionOfEndpoint() {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("://bedrock-mantle\\.([^./]+)\\.api\\.aws")
+                .matcher(ENDPOINT);
+        return m.find() ? m.group(1) : null;
+    }
+
+    // The model list, beside the configured endpoint: the same base path with "models"
+    // in place of "chat/completions", which is where every Chat Completions API puts it.
+    private static String modelsEndpoint() {
+        int at = ENDPOINT.lastIndexOf("/chat/completions");
+        return at < 0 ? ENDPOINT : ENDPOINT.substring(0, at) + "/models";
+    }
 
     // Chat Completions URL for the currently configured model, or NULL if the
     // model has no Chat Completions path on mantle (e.g. Anthropic/Messages-only).
-    //   - Known card with a chat path -> that URL (mantle default /v1, or /openai/v1).
+    //   - No card (unknown/free-text)  -> the configured endpoint, as it stands.
+    //   - Known card with a chat path -> that path, on the configured host (the cards
+    //     differ from each other only in the path: mantle's default /v1, or /openai/v1).
     //   - Known card with a null chat path -> null (NOT a faked default).
-    //   - No card (unknown/free-text)  -> the mantle default /v1/chat/completions.
     private static String endpoint() {
         BedrockModelCard card = cardFor(MODEL_ID);
         if (card == null) {
-            return mantleHost() + "/v1/chat/completions";   // unknown model: default
+            return ENDPOINT;                 // unknown model: the endpoint as configured
         }
         String path = card.mantleChatCompletionsPath();
-        return (path == null) ? null : mantleHost() + path;
+        return (path == null) ? null : endpointOrigin() + path;
     }
 
     // The path part of a mantle URL. Request lines log the path alone: the host is
@@ -745,7 +792,7 @@ public class JRock {
     // dialog, a restore from a backup. A folder with no configuration yet is seeded
     // with the settings in effect; the key is NEVER copied into a folder it was not
     // typed for, a credential being nobody's idea of a convenience feature.
-    private static final String CONFIG_REGION = "region";
+    private static final String CONFIG_ENDPOINT = "endpoint";
     private static final String CONFIG_MODEL  = "model";
     // Kept per folder for the same reason the model is: one folder holds receipts to
     // read at 203 dpi and another holds drawings that need 300, and an agent installed
@@ -841,10 +888,11 @@ public class JRock {
             settingsSource = "JRock/jrock-config.txt (created with the current settings)";
         } else {
             java.util.Map<String, String> settings = parseConfig(stored);
-            String region = settings.get(CONFIG_REGION);
-            if (region != null) {
-                REGION = region;
-                regionSource = "from JRock/jrock-config.txt";
+            String endpoint = settings.get(CONFIG_ENDPOINT);
+            if (endpoint != null && !endpoint.isEmpty()) {
+                ENDPOINT = endpoint;
+                endpointSource = "from JRock/jrock-config.txt";
+                applyRegionOfEndpoint();
             }
             String model = settings.get(CONFIG_MODEL);
             if (model != null) MODEL_ID = model;
@@ -901,7 +949,7 @@ public class JRock {
         atomicWriteQuietly(keyFile(), key.trim() + "\n");
     }
 
-    // Writes the settings of the working folder: the region, the model and the images
+    // Writes the settings of the working folder: the endpoint, the model and the images
     // DPI, which are the ones that have to survive a restart to be worth setting at all.
     // Per folder rather than per user on purpose - one folder's agent can then run on a
     // different model, or render its pages at a different DPI, than the next one's.
@@ -911,7 +959,7 @@ public class JRock {
     // this setting's value.
     private static void saveConfigQuietly() {
         StringBuilder text = new StringBuilder(CONFIG_HEADER);
-        appendSetting(text, CONFIG_REGION, REGION);
+        appendSetting(text, CONFIG_ENDPOINT, ENDPOINT);
         appendSetting(text, CONFIG_MODEL, MODEL_ID);
         appendSetting(text, CONFIG_IMAGES_DPI, String.valueOf(imagesDpi));
         appendSetting(text, CONFIG_NARRATE_DEVICE, narrateDevice);   // blank: left out
@@ -1134,7 +1182,7 @@ public class JRock {
     //
     // Which is what an installed agent needs: Explorer starts a right-click command in
     // whichever folder was clicked, and an agent's whole point is the opposite - the
-    // document can be anywhere, while the model, the region, the key and the DPI come
+    // document can be anywhere, while the model, the endpoint, the key and the DPI come
     // from one folder that was set up for this kind of work (see installAgent). The
     // same flag lets the same agent be installed twice, from two folders, with two sets
     // of settings.
@@ -1933,13 +1981,13 @@ public class JRock {
             log.gray("Bedrock API key: " + apiKeySource);
         }
         log.gray("Settings: " + settingsSource);
-        if (regionSource != null) {
-            log.gray("AWS region: " + REGION + " (" + regionSource + ")");
+        // The one place the address is spelled out in full; later request lines log the
+        // path alone, which keeps them narrow enough to read on a phone.
+        if (endpointSource != null) {
+            log.gray("API endpoint: " + ENDPOINT + " (" + endpointSource + ")");
         } else {
-            log.gray("AWS region: " + REGION);
+            log.gray("API endpoint: " + ENDPOINT);
         }
-        // The one place the host is spelled out; later request lines log paths only.
-        log.gray("Bedrock endpoint: " + mantleHost());
         log.gray("Configured model: " + MODEL_ID);
         resolveAndLogCard(MODEL_ID, log);
         // Only when it has been changed: silent for everyone on the default, but
@@ -2088,9 +2136,9 @@ public class JRock {
         // Top bar: [Configure] [JRock/ v] on the left; [Dialog only] [Clear log] on the
         // right.
         JButton configure = new JButton("Configure");
-        configure.setToolTipText("Working directory, API key, region, model");
+        configure.setToolTipText("Working directory, API key, endpoint, model");
         explains(configure, "Configure", "The working directory JRock saves into, the "
-                + "prompts & agents directory, the Bedrock API key, the region and the "
+                + "prompts & agents directory, the Bedrock API key, the endpoint and the "
                 + "model, and every setting that applies to a send - on four tabs, with "
                 + "a note on each row behind the Help button in there. What you change is "
                 + "written to JRock/jrock-config.txt in the working directory, so the "
@@ -4112,7 +4160,7 @@ public class JRock {
     // ---- Configure dialog --------------------------------------------------
     // Four tabs, each named in one word so all four fit across a phone's screen:
     // General (working directory, prompts & agents directory, API key - a write-only
-    // override - region, model and what applies to every send), Files (Images DPI, how a
+    // override - endpoint, model and what applies to every send), Files (Images DPI, how a
     // PDF and an RTF are read), Audio (the speaker and the microphone, where there are
     // any) and Window (its size and where on the screen it sits).
     // Returns true if the user applied changes (so the caller re-inits the session).
@@ -4158,7 +4206,7 @@ public class JRock {
                 dirRow(frame, promptsF, "Choose prompts & agents directory");
 
         // The key row: masked on the desktop, and a PLAIN field in the browser. On a
-        // phone CheerpJ raises the on-screen keyboard for the region field next to it
+        // phone CheerpJ raises the on-screen keyboard for the endpoint field next to it
         // and not for this one, and the echo character is the only difference between
         // the two - so the mask is what makes the row impossible to fill in, and a row
         // you cannot fill in is worse than one whose text can be read over your
@@ -4172,14 +4220,17 @@ public class JRock {
         // Select all has nothing to select in a field that opens empty. No log here: a
         // modal dialog has none to write to (see addPasteMenu).
         addPasteMenu(keyF, null);
-        javax.swing.JTextField regionF = new javax.swing.JTextField(REGION, 16);
+        javax.swing.JTextField endpointF = new javax.swing.JTextField(ENDPOINT, 30);
+        endpointF.setName("endpoint");
+        endpointF.setToolTipText("The Chat Completions URL every request goes to. "
+                + "Another AWS region is another host: bedrock-mantle.<region>.api.aws.");
         // Copy, Paste and Select all on every row a value is put into, because on a
         // phone there is no Ctrl+V - and Select all because a field that already holds a
-        // region, a model or a path is a field whose contents are in the way of the one
+        // an endpoint, a model or a path is a field whose contents are in the way of the one
         // being pasted over it (see addCopyPasteMenu). No log, as above.
         addCopyPasteMenu(cwdF, null);
         addCopyPasteMenu(promptsF, null);
-        addCopyPasteMenu(regionF, null);
+        addCopyPasteMenu(endpointF, null);
         // Editable combo: free text, plus a dropdown of the most recently fetched
         // available models (empty until the first successful /v1/models call).
         javax.swing.JComboBox<String> modelF =
@@ -4477,7 +4528,7 @@ public class JRock {
         // In the browser the row carries a Paste button of its own - see pasteRow.
         addRow(general, c, row++, "Bedrock API key:",
                 isCheerpJ() ? pasteRow(keyF, "key") : keyF);
-        addRow(general, c, row++, "AWS region:", regionF);
+        addRow(general, c, row++, "API endpoint:", endpointF);
         addRow(general, c, row++, "Model:", modelF);
         addRow(general, c, row++, "", autoBackupF);
         addRow(general, c, row++, "History limit:", historyRow);
@@ -4669,9 +4720,9 @@ public class JRock {
             saveKeyQuietly(apiKey);
         }
 
-        // Region + model (free text).
-        String r = regionF.getText().trim();
-        if (!r.isEmpty()) { REGION = r; regionSource = null; }
+        // Endpoint + model (free text).
+        String r = endpointF.getText().trim();
+        if (!r.isEmpty()) { ENDPOINT = r; endpointSource = null; applyRegionOfEndpoint(); }
         Object selected = modelF.getEditor().getItem();  // typed or picked value
         String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
@@ -5133,7 +5184,7 @@ public class JRock {
             + "for stays yours.\n\n"
             + "bedrock-key.txt - the API key, on a line of its own, so it can be locked "
             + "down or deleted without touching anything else.\n\n"
-            + "jrock-config.txt - every other setting of this folder: region, model, "
+            + "jrock-config.txt - every other setting of this folder: endpoint, model, "
             + "Images DPI, History limit, the speaker and microphone, and the checkboxes "
             + "Configure and the window remember.\n\n"
             + "includes/ - one flat folder holding everything an include is made from: a "
@@ -5180,7 +5231,7 @@ public class JRock {
                + "a masked field, so on a phone there would otherwise be no way to fill "
                + "it in at all.\n\n"
                : "\n\n")
-            + "The region, the model and the images DPI are kept in "
+            + "The endpoint, the model and the images DPI are kept in "
             + "JRock/jrock-config.txt beside it, so they survive a restart. Both files "
             + "belong to the working directory and are plain text you can edit "
             + "yourself - which is what lets one folder's agent run on a different "
@@ -14681,7 +14732,12 @@ public class JRock {
     // the cost line does not.
     private static String priceLines(long inputTokens, long outputTokens) {
         BedrockModelCard card = exactCard(MODEL_ID);   // a vendor's generic card has none
-        double[] price = card == null ? null : card.pricePer1M(REGION, inputTokens);
+        // No region, no price. The cards price per AWS region, so an endpoint that names
+        // none has no row to read - and a card that answers a price for any region it is
+        // not asked about would otherwise put a figure in the log that nothing backs.
+        // Silence is what every card already gives for a region it has no price for.
+        double[] price = (card == null || REGION == null)
+                ? null : card.pricePer1M(REGION, inputTokens);
         if (price == null) return "";
         String lines = "\nPrice (model card, " + REGION + "): $" + rate(price[0])
                 + " per 1M input tokens, $" + rate(price[1]) + " per 1M output";
