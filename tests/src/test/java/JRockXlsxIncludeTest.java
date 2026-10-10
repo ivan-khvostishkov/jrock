@@ -24,14 +24,14 @@ class JRockXlsxIncludeTest extends JRockGuiFixture {
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;
 
     @Test
-    @DisplayName("an XLSX is written to xlsx-csv/ as one CSV per sheet, each tagged @txt")
+    @DisplayName("an XLSX is written beside the copies as one CSV per sheet, each tagged @txt")
     void convertsEachSheetToItsOwnCsv() throws Exception {
         awaitReadyCount(1);
         Path xlsx = FormattedXlsx.write(workingDirectory().resolve("stock.xlsx"));
 
         includeThroughTheDialog(XLSX_FILTER, CONVERSION_TIMEOUT_SECONDS, xlsx);
 
-        Path dir = workingDirectory().resolve("JRock").resolve("includes").resolve("xlsx-csv");
+        Path dir = workingDirectory().resolve("JRock").resolve("includes");
         Path sales = dir.resolve("stock.xlsx.Sales Q1.csv");
         Path notes = dir.resolve("stock.xlsx.Заметки.csv");
         assertThat(read(sales)).describedAs("the first sheet's CSV").isEqualTo(FormattedXlsx.SALES_CSV);

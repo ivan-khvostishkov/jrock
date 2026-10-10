@@ -38,7 +38,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
         answerYes();
         awaitLogLine("token(s) for " + pdf.getFileName(), CONVERSION_TIMEOUT_SECONDS);
 
-        Path txt = workingDirectory().resolve("two-page-a4.txt");
+        Path txt = workingDirectory().resolve("two-page-a4.pdf.txt");
         assertThat(new String(Files.readAllBytes(txt), StandardCharsets.UTF_8))
                 .describedAs("the text pdftotext wrote")
                 .contains("JRock PDF test - page 1")
@@ -63,7 +63,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
         answerYes();
         awaitLogLine("Include directory ", CONVERSION_TIMEOUT_SECONDS);
 
-        Path dir = workingDirectory().resolve("two-page-a4");
+        Path dir = workingDirectory().resolve("two-page-a4.pdf.html");
         assertThat(dir.resolve("page1.html")).isRegularFile();
         assertThat(dir.resolve("page2.html")).isRegularFile();
         assertThat(new String(Files.readAllBytes(dir.resolve("page2.html")),
@@ -83,7 +83,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
         assertThat(onPath("pdftotext")).describedAs("pdftotext on PATH").isNotNull();
 
         Path pdf = A4Pdf.writeTwoPages(workingDirectory().resolve("two-page-a4.pdf"));
-        Path txt = workingDirectory().resolve("two-page-a4.txt");
+        Path txt = workingDirectory().resolve("two-page-a4.pdf.txt");
         Files.write(txt, "edited by hand".getBytes(StandardCharsets.UTF_8));
         field("pdfIncludeMode").set(null, "text");
         chooseInTheIncludeDialog(PDF_TEXT_FILTER, pdf);
