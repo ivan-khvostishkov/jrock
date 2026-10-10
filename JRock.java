@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.12.0";
+    private static final String VERSION = "2.13.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -130,8 +130,8 @@ public class JRock {
     // A whole URL rather than a region, because the region was only ever a piece of one:
     // "bedrock-mantle.<region>.api.aws" was assembled around it, which made the region
     // the only part of the address anyone could change. Moving to another region is now
-    // editing the host, which is no more typing than the region was, and the rest of the
-    // address stops being a thing JRock insists on.
+    // editing the host, which is no more typing than the region was, and an address that
+    // is not spelled out cannot be reported in the log the way this one is.
     //
     // Endpoint/model start from the built-in defaults, are replaced by whatever the
     // working folder's JRock/jrock-config.txt holds (see adoptSettingsOfWorkingDir),
@@ -339,17 +339,30 @@ public class JRock {
 
     // Chat Completions URL for the currently configured model, or NULL if the
     // model has no Chat Completions path on mantle (e.g. Anthropic/Messages-only).
-    //   - No card (unknown/free-text)  -> the configured endpoint, as it stands.
+    //   - No card for this endpoint (see cardForEndpoint) -> the endpoint as configured.
     //   - Known card with a chat path -> that path, on the configured host (the cards
     //     differ from each other only in the path: mantle's default /v1, or /openai/v1).
     //   - Known card with a null chat path -> null (NOT a faked default).
     private static String endpoint() {
-        BedrockModelCard card = cardFor(MODEL_ID);
+        BedrockModelCard card = cardForEndpoint();
         if (card == null) {
-            return ENDPOINT;                 // unknown model: the endpoint as configured
+            return ENDPOINT;                 // the endpoint as configured
         }
         String path = card.mantleChatCompletionsPath();
         return (path == null) ? null : endpointOrigin() + path;
+    }
+
+    // The card to read for the configured endpoint, or null when there is none to read.
+    //
+    // A card records where a model sits on the mantle hosts it was written down from:
+    // some are served under /openai/v1 rather than /v1, and the card is the only record
+    // of which. That holds for an address of the form the cards were recorded against,
+    // and is an assumption anywhere else - a gateway, a proxy, a stand-in for testing
+    // can put the same model behind any path they like. So the address as configured is
+    // sent to unchanged rather than rebuilt around a card, and the region in the host is
+    // what says whether there is a card to apply at all.
+    private static BedrockModelCard cardForEndpoint() {
+        return regionOfEndpoint() == null ? null : cardFor(MODEL_ID);
     }
 
     // The path part of a mantle URL. Request lines log the path alone: the host is
@@ -2432,8 +2445,9 @@ public class JRock {
             }
 
             // If the model isn't served via Chat Completions on mantle, don't even
-            // log "Calling ..." - report why and stop, without any HTTP request.
-            BedrockModelCard card = cardFor(MODEL_ID);
+            // log "Calling ..." - report why and stop, without any HTTP request. The
+            // card is the one for the configured endpoint (see cardForEndpoint).
+            BedrockModelCard card = cardForEndpoint();
             if (card != null && !card.supportsMantleChatCompletions()) {
                 String via = card.mantleMessagesPath() != null
                         ? "the Anthropic Messages API (" + card.mantleMessagesPath() + ")"
@@ -2457,7 +2471,7 @@ public class JRock {
                 @Override
                 protected String[] doInBackground() {
                     try {
-                        return callModel(prompt, history, clock);
+                        return callModel(prompt, history, clock, log);
                     } catch (Throwable ex) {
                         // Catch Throwable, not just Exception: a JVM without a real
                         // socket layer (CheerpJ in the browser, with no page-side
@@ -8841,10 +8855,65 @@ public class JRock {
                                       Path file, String kind, boolean isImage,
                                       java.util.function.Function<String, String> reference,
                                       String refTarget) {
+        Included inc = registerInclude(log, file, kind, isImage, reference, refTarget);
+        if (inc == null) return false;
+
+        // Dedup: if this exact token is already in the prompt (or, in extend mode,
+        // in any prior human turn), don't insert a duplicate - just keep the
+        // re-registered mapping above. This avoids duplicate tags after a restart
+        // when the user reattaches files.
+        boolean alreadyPresent = input.getText().contains(inc.token);
+        if (!alreadyPresent && extend) {
+            for (String[] turn : limitHistory(log.dialogHistory(), historyLimit)) {
+                if (ROLE_HUMAN.equals(turn[0]) && turn[1].contains(inc.token)) {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+        }
+        if (alreadyPresent) {
+            log.gray("Already referenced (" + inc.token + "); token not duplicated.");
+            return false;
+        }
+
+        // Insert the include's lines at the cursor (no leading newline).
+        String insert = inc.lines + "\n";
+        int pos = input.getCaretPosition();
+        try {
+            input.getDocument().insertString(pos, insert, null);
+        } catch (BadLocationException ex) {
+            input.append(insert);   // fallback: append at end
+        }
+        return true;
+    }
+
+    // One include, as it stands in a message.
+    private static final class Included {
+        final String token;   // what JRock sends it as: "@img 078adf22bb5d"
+        final String lines;   // what goes into the text: the token, under its reference
+
+        Included(String token, String lines) { this.token = token; this.lines = lines; }
+    }
+
+    // Makes one file an include of this session and logs it, returning the lines that
+    // stand for it in a message - or null when the file cannot be read, which is said in
+    // the log. Everything an include is, apart from where those lines then go: the hash,
+    // the hash -> path mapping, the Markdown reference and what it names, the log lines
+    // the reload reads back, and the warning about a format the request cannot carry.
+    //
+    // Two callers put the lines in two different places. includeOne types them into the
+    // prompt, which is an include the user made. saveReplyPayload puts them in the
+    // answer, which is a picture or a recording the model sent back - the same include
+    // in every other respect, and deliberately so: one hash, one log format, one set of
+    // rules about references, and one thing for the exports to resolve.
+    private static Included registerInclude(LogView log, Path file, String kind,
+                                            boolean isImage,
+                                            java.util.function.Function<String, String> reference,
+                                            String refTarget) {
         String hash = hashFile(file);
         if (hash == null) {
             log.gray("Include failed: could not read " + file);
-            return false;
+            return null;
         }
         // Always (re)register the hash -> path mapping. After a restart this makes
         // an existing "@kind <hash>" token in the (recovered) prompt valid again.
@@ -8854,15 +8923,20 @@ public class JRock {
         try { fileBytes = Files.size(file); } catch (IOException ignore) { /* best-effort */ }
         String about = includeAbout(file, kind, isImage, fileBytes);
 
+        // The reference above the token: "![<about>](<refTarget>)" for an image, the
+        // same without the "!" for anything else. Brackets in the alt text become
+        // parentheses, which would otherwise end it early. No refTarget and no reference
+        // function means references are off, and then the token goes in on its own.
         String refLine = (reference == null) ? null : reference.apply(hash);
         if (refLine == null && refTarget != null) {
             refLine = (isImage ? "!" : "") + "[" + about.replace('[', '(').replace(']', ')')
                     + "](" + markdownTarget(refTarget) + ")";
             REF_TARGETS.put(refTarget, hash);
         }
-        // The one place this line is written: INCLUDE_LOG_LINE reads it back when the
-        // includes are reloaded from the log, so its wording is part of the format -
-        // and so is the reference line's, which follows it (see reloadIncludes).
+
+        // The one place these lines are written: INCLUDE_LOG_LINE reads the first back
+        // and REF_LOG_PREFIX the second when the includes are reloaded from the log, so
+        // their wording is part of the format (see reloadIncludes).
         log.gray("Included @" + kind + " " + hash + " from " + file);
         if (refLine != null) log.gray(REF_LOG_PREFIX + refLine);
         log.gray(about);
@@ -8881,35 +8955,8 @@ public class JRock {
             }
         }
 
-        // Dedup: if this exact token is already in the prompt (or, in extend mode,
-        // in any prior human turn), don't insert a duplicate - just keep the
-        // re-registered mapping above. This avoids duplicate tags after a restart
-        // when the user reattaches files.
         String token = "@" + kind + " " + hash;
-        boolean alreadyPresent = input.getText().contains(token);
-        if (!alreadyPresent && extend) {
-            for (String[] turn : limitHistory(log.dialogHistory(), historyLimit)) {
-                if (ROLE_HUMAN.equals(turn[0]) && turn[1].contains(token)) {
-                    alreadyPresent = true;
-                    break;
-                }
-            }
-        }
-        if (alreadyPresent) {
-            log.gray("Already referenced (@" + kind + " " + hash + "); token not duplicated.");
-            return false;
-        }
-
-        // Insert "@kind <hash>\n" at the cursor (no leading newline), preceded by the
-        // Markdown reference when one was asked for.
-        String insert = (refLine == null ? "" : refLine + "\n") + token + "\n";
-        int pos = input.getCaretPosition();
-        try {
-            input.getDocument().insertString(pos, insert, null);
-        } catch (BadLocationException ex) {
-            input.append(insert);   // fallback: append at end
-        }
-        return true;
+        return new Included(token, (refLine == null ? "" : refLine + "\n") + token);
     }
 
     // How the reference line is introduced in the log - and found there again when the
@@ -14584,7 +14631,7 @@ public class JRock {
     //   [2] = raw request/response/stats detail block (gray), or null.
     // Only a successful reply is treated as dialog; failures are logged in gray.
     private static String[] callModel(String prompt, java.util.List<String[]> history,
-                                      boolean clock) throws Exception {
+                                      boolean clock, LogView log) throws Exception {
         HttpTransport http = http();
         String apiKey = resolveApiKey();
         boolean haveKey = apiKey != null && !apiKey.isBlank();
@@ -14601,7 +14648,8 @@ public class JRock {
         // If the resolved model card says this model isn't served via Chat
         // Completions on mantle (e.g. any anthropic.* model, which uses the
         // Messages API), don't send a Chat Completions request - it would fail.
-        BedrockModelCard card = cardFor(MODEL_ID);
+        // The card is the one for the configured endpoint (see cardForEndpoint).
+        BedrockModelCard card = cardForEndpoint();
         if (card != null && !card.supportsMantleChatCompletions()) {
             String via = card.mantleMessagesPath() != null
                     ? "the Anthropic Messages API (" + card.mantleMessagesPath() + ")"
@@ -14666,8 +14714,9 @@ public class JRock {
             return new String[] {
                 "0",
                 "HTTP " + resp.status,
-                // Nothing to mask in the body: there is no reply, only an error.
-                rawDump(maskedRequestBody, resp.body)
+                // No reply to mask out of the body, only an error - which is shown
+                // whole, bar any blob the service echoed back at us (see maskLongBlobs).
+                rawDump(maskedRequestBody, maskLongBlobs(resp.body))
             };
         }
 
@@ -14684,6 +14733,20 @@ public class JRock {
             inputSymbols += turn[1].length();
         }
         int outputSymbols = reply.length();
+
+        // A picture or a recording in the reply: saved under JRock/includes/, with the
+        // reference and the token for it appended to the answer (see saveReplyPayload).
+        // After the counts above, which measure the model's own text - these two lines
+        // are JRock's, and a picture is not text symbols in any case.
+        String payloadLines = saveReplyPayload(resp.body, log);
+        if (payloadLines != null) {
+            reply = reply.isEmpty() ? payloadLines : reply + "\n\n" + payloadLines;
+        }
+        if (reply.isEmpty()) {
+            // Neither text nor anything saved. An empty turn in the transcript would say
+            // nothing at all; the raw response below is where the answer is.
+            reply = "(no text in the reply; see the raw response below)";
+        }
 
         // Token counts come from the API's "usage" object (best-effort parse).
         long inputTokens = extractLong(resp.body, "prompt_tokens");
@@ -14710,9 +14773,10 @@ public class JRock {
     private static final String RAW_REQUEST_HEADER = "--- raw request ---";
     private static final String RAW_RESPONSE_HEADER = "--- raw response ---";
 
-    // The raw request/response dump logged after a call, for either outcome. The
-    // response body is the caller's choice: masked on success (the reply is already
-    // shown above), verbatim on failure. A success then appends its stats block.
+    // The raw request/response dump logged after a call, for either outcome. How much
+    // of the response body is masked is the caller's choice: the reply too on success
+    // (it is already shown above), blobs alone on failure, where the body is the whole
+    // of what there is to report. A success then appends its stats block.
     private static String rawDump(String maskedRequestBody, String responseBody) {
         return RAW_REQUEST_HEADER + "\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
                 + "\n\n" + RAW_RESPONSE_HEADER + "\n" + responseBody;
@@ -14836,10 +14900,98 @@ public class JRock {
         return chatRequestBody(masked);
     }
 
-    // Masks the assistant reply text inside the raw response body, and shortens the
-    // response id, which is noise either way.
+    // Masks the assistant reply text inside the raw response body, masks every long
+    // base64-looking value in it, and shortens the response id, which is noise either way.
     private static String maskResponse(String rawResponse, String reply) {
-        return shortenId(maskFirst(rawResponse, jsonEscape(reply), "<output masked>"));
+        return shortenId(maskLongBlobs(maskFirst(rawResponse, jsonEscape(reply), "<output masked>")));
+    }
+
+    // How long a JSON string value has to be before it counts as a blob rather than
+    // as something a reader might want to read. Past the response id (~40 characters)
+    // and past an include hash, and far short of any base64 payload.
+    private static final int BLOB_MIN_CHARS = 80;
+
+    // Masks long base64-looking string VALUES in a response body, keeping the shape
+    // of the response and the length of what was dropped:
+    //
+    //   "data":"iVBORw0KGgoAAA...<2.4MB>...SuQmCC"   ->   "data":"<blob masked 2395716 chars>"
+    //
+    // What comes back beside the reply is binary written out as text: a generated image
+    // arrives as a megabyte of base64 on one line, a recording is the same again, and a
+    // model may add a signature of its own of a few hundred thousand characters beside
+    // either. None of it is readable, and any one of it is enough to bury the fields
+    // around it - which are the part of the dump worth having, since they are what says
+    // what the payload is (`"mime_type":"image/png"`) and where it sat in the response.
+    // The character count is kept because it is the one thing the blob itself tells you:
+    // how much came back - and this dump is the only copy of the response JRock keeps,
+    // the -assistant.txt message file being the reply TEXT and not the body it came in.
+    //
+    // A value qualifies by being long and made up only of base64, base64url and hex
+    // characters, so it cannot be prose: reply text carries spaces and punctuation
+    // from outside that alphabet. Keys are left alone, however long - a field name is
+    // what makes the masked line readable.
+    private static String maskLongBlobs(String json) {
+        StringBuilder out = new StringBuilder(json.length());
+        int i = 0;
+        while (i < json.length()) {
+            char ch = json.charAt(i);
+            if (ch != '"') {
+                out.append(ch);
+                i++;
+                continue;
+            }
+            int close = endOfJsonString(json, i);
+            if (close < 0) {                      // unterminated: leave the tail as it is
+                out.append(json, i, json.length());
+                break;
+            }
+            String value = json.substring(i + 1, close);
+            if (looksLikeBlob(value) && !isJsonKeyAt(json, close)) {
+                out.append('"').append("<blob masked ").append(value.length())
+                        .append(" chars>").append('"');
+            } else {
+                out.append(json, i, close + 1);
+            }
+            i = close + 1;
+        }
+        return out.toString();
+    }
+
+    // Index of the quote that closes the string opened at openQuote, or -1 if the
+    // string never closes. Escapes are skipped so a \" doesn't read as the end.
+    private static int endOfJsonString(String json, int openQuote) {
+        for (int i = openQuote + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '\\') {
+                i++;                              // whatever is escaped, it isn't the end
+            } else if (c == '"') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // Whether the string ending at closeQuote is an object key, i.e. whether a colon
+    // is the next thing after it.
+    private static boolean isJsonKeyAt(String json, int closeQuote) {
+        int i = closeQuote + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        return i < json.length() && json.charAt(i) == ':';
+    }
+
+    // Whether a string value is long enough, and plain enough, to be binary written
+    // out as text: base64 (A-Z a-z 0-9 + / =), base64url (- _) and hex all live in
+    // this alphabet, and a sentence does not.
+    private static boolean looksLikeBlob(String value) {
+        if (value.length() < BLOB_MIN_CHARS) return false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            boolean base64ish = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '+' || c == '/' || c == '=' || c == '-' || c == '_';
+            if (!base64ish) return false;
+        }
+        return true;
     }
 
     // How much of the response id to keep: the "chatcmpl-" prefix plus four
@@ -14900,14 +15052,23 @@ public class JRock {
     // Best-effort extraction of choices[0].message.content from an OpenAI Chat
     // Completions reply. Deliberately hand-rolled: pulling in a JSON library would
     // cost JRock its "single file, zero dependencies" property for one field.
+    //
+    // A content that is not a string means the reply has no text, which "" says: a
+    // model answering with a picture sends "content":null and puts the picture in the
+    // binary field beside it (see saveReplyPayload). Taking the next quoted thing in the
+    // JSON for the reply instead would report the name of the field after it as the
+    // model's own words.
     private static String extractContent(String json) {
         int msg = json.indexOf("\"message\"");
         int from = msg >= 0 ? msg : 0;
         int c = json.indexOf("\"content\"", from);
         if (c < 0) return "(could not locate content; see raw response)";
-        int start = json.indexOf(':', c);
-        int firstQuote = json.indexOf('"', start + 1);
-        if (firstQuote < 0) return "(unparsed)";
+        int colon = json.indexOf(':', c);
+        if (colon < 0) return "(unparsed)";
+        int at = colon + 1;
+        while (at < json.length() && Character.isWhitespace(json.charAt(at))) at++;
+        if (at >= json.length() || json.charAt(at) != '"') return "";
+        int firstQuote = at;
         StringBuilder sb = new StringBuilder();
         for (int i = firstQuote + 1; i < json.length(); i++) {
             char ch = json.charAt(i);
@@ -14943,6 +15104,242 @@ public class JRock {
             }
         }
         return sb.toString();
+    }
+
+    // ---- A picture or a recording in the reply ------------------------------
+    // A model that answers with an image or with speech cannot put it in the text: what
+    // comes back is base64 in the message's one binary field, with a media type beside
+    // it saying what it really is. This saves that payload into JRock/includes/ - where
+    // an include's own processed copy goes - and returns the two lines that make it an
+    // include of this session:
+    //
+    //     ![Image: 1004 x 669, 17.0 cm x 11.3 cm @ 150 DPI, 671,676 pixels, 175,969 bytes](20261010-202058-403.png)
+    //     @img 078adf22bb5d
+    //
+    // which callModel appends to the reply. The answer then carries the picture the way
+    // a prompt carries an include: the reference is what the DOCX and Markdown exports
+    // place the image from (see refTargetHash), and the token is the handle the session
+    // knows the file by. So "generate me an image" can be selected in the log and
+    // exported into a document with the picture in it, and the file is in a folder the
+    // user owns, named in the log, like every other include.
+    //
+    // It IS an include, made by registerInclude like any other - same hash, same log
+    // lines to be reloaded from, same "Markdown references" setting deciding whether the
+    // reference goes above the token or the token stands alone. The only thing this does
+    // differently is where the lines end up: in the answer, not in the prompt.
+    //
+    // The field is called "audio" because the Chat Completions message has exactly one
+    // field for binary output and that is its name. Nothing here reads the name as a
+    // promise of sound: the media type decides the extension, and the extension decides
+    // what kind of include it is - a png is an @img, a wav is an @audio.
+    //
+    // The bytes are written exactly as they arrived, unlike an include's copy, which is
+    // downscaled to Images DPI on the way in (see downscaledCopy). This one is the
+    // model's own output at the size it chose, and it is the only copy there is: the raw
+    // response in the log has the payload masked out of it (see maskLongBlobs).
+    //
+    // Null when the reply carries no payload, or none that a prompt could carry back -
+    // the file is saved either way, and the log says which of the two happened.
+    private static String saveReplyPayload(String responseBody, LogView log) {
+        String[] payload = extractBinaryPayload(responseBody);
+        if (payload == null) return null;
+
+        byte[] bytes;
+        try {
+            // The lenient decoder: the field is one long line here, but a service that
+            // wrapped it would still be sending the same picture.
+            bytes = java.util.Base64.getMimeDecoder().decode(payload[0]);
+        } catch (IllegalArgumentException ex) {
+            log.gray("The reply carried " + fmtNum(payload[0].length()) + " characters of "
+                    + "data that are not base64, so nothing was saved: " + ex.getMessage());
+            return null;
+        }
+        String hash = hashBytes(bytes);
+        if (hash == null) return null;        // no hash, no token: nothing to be done with it
+
+        // The type as given, then as the bytes themselves say, then neither - in which
+        // case it is still saved, under ".bin", because this is its only copy.
+        String ext = payloadExtension(payload[1]);
+        if (ext == null) ext = sniffedExtension(bytes);
+        String named = ext;
+        if (ext == null) ext = "bin";
+
+        Path file = writePayload(includesDir(), ext, hash, bytes, log);
+        if (file == null) return null;
+
+        String kind = named == null ? null : includeKindOf(file);
+        if (kind == null) {
+            log.gray("What it is is not said in the reply and not in the bytes, so it has "
+                    + "no @-token: the file above is the whole of it.");
+            return null;
+        }
+
+        // Included on the EDT, where every other include is made: the maps it writes are
+        // the window's, and this runs on the send's worker thread. Queued before the
+        // reply is logged, so the answer is exportable the moment it is on screen.
+        //
+        // The reference names the file by its own name, as an include from the dialog
+        // does - and only when "Markdown references" is on, which is the setting that
+        // says whether a message carries them at all.
+        Path saved = file;
+        String target = includeMarkdownRefs ? file.getFileName().toString() : null;
+        Included[] included = new Included[1];
+        onEdt(() -> included[0] =
+                registerInclude(log, saved, kind, kind.equals("img"), null, target));
+        return included[0] == null ? null : included[0].lines;
+    }
+
+    // Writes the payload into dir as "<datetime>.<ext>", and returns the file - or the
+    // file that already holds those same bytes, which is what a picture asked for twice
+    // comes back as. Null when it could not be written, which the log says.
+    //
+    // Named after the moment it arrived, like the message files: the model gives its
+    // output no name, and the time is what ties the file to the turn it came in.
+    private static Path writePayload(Path dir, String ext, String hash, byte[] bytes,
+                                     LogView log) {
+        try {
+            Files.createDirectories(dir);
+            Path target = includeCopyTarget(dir, LocalDateTime.now().format(STAMP_FMT)
+                    + "." + ext, hash);
+            if (Files.exists(target)) {
+                log.gray("The reply's " + ext + " was already saved: " + target);
+            } else {
+                Files.write(target, bytes);
+                log.gray("Saved the " + ext + " the reply carried (" + fmtNum(bytes.length)
+                        + " bytes): " + target);
+            }
+            return target;
+        } catch (IOException | RuntimeException ex) {
+            log.gray("Could not save the " + fmtNum(bytes.length) + " bytes the reply "
+                    + "carried into " + dir + ": " + ex.getMessage());
+            return null;
+        }
+    }
+
+    // The binary payload of a reply's message: {base64, media type or null}, or null
+    // when there is none.
+    //
+    // The media type is whatever the message says about it - a "mime_type" beside the
+    // data, or the "format" the API documents - looked for anywhere inside that object,
+    // because services differ in how deeply they nest it and the type is the one thing
+    // worth having. A payload with no type at all is read from its own bytes instead
+    // (see sniffedExtension).
+    private static String[] extractBinaryPayload(String json) {
+        int msg = json.indexOf("\"message\"");
+        int key = json.indexOf("\"audio\"", msg >= 0 ? msg : 0);
+        if (key < 0) return null;
+        int colon = json.indexOf(':', key);
+        if (colon < 0) return null;
+        int open = colon + 1;
+        while (open < json.length() && Character.isWhitespace(json.charAt(open))) open++;
+        // "audio":null is what a reply with no payload says, where it says anything.
+        if (open >= json.length() || json.charAt(open) != '{') return null;
+        int close = endOfJsonObject(json, open);
+        String audio = json.substring(open, close < 0 ? json.length() : close + 1);
+
+        String data = jsonStringValue(audio, "data");
+        if (data == null || data.isEmpty()) return null;
+        String mime = jsonStringValue(audio, "mime_type");
+        if (mime == null) mime = jsonStringValue(audio, "format");
+        return new String[] { data, mime };
+    }
+
+    // Index of the brace closing the object that opens at `open`, or -1 when it never
+    // closes. Strings are stepped over whole, so a brace inside one - a transcript, a
+    // snippet of code - is not counted as structure.
+    private static int endOfJsonObject(String json, int open) {
+        int depth = 0;
+        for (int i = open; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '"') {
+                int end = endOfJsonString(json, i);
+                if (end < 0) return -1;
+                i = end;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // The string value of "key" in json, as it is written there, or null when the key is
+    // absent or its value is not a string. No unescaping: the fields read this way hold
+    // base64 and media types, which carry no escapes.
+    private static String jsonStringValue(String json, String key) {
+        int k = json.indexOf("\"" + key + "\"");
+        if (k < 0) return null;
+        int colon = json.indexOf(':', k + key.length() + 2);
+        if (colon < 0) return null;
+        int i = colon + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        if (i >= json.length() || json.charAt(i) != '"') return null;
+        int end = endOfJsonString(json, i);
+        return end < 0 ? null : json.substring(i + 1, end);
+    }
+
+    // A payload's media type -> the extension it is saved under, keyed by the subtype:
+    // "image/png" from a mime_type and the bare "png" of a format field are the same
+    // thing. The images are the ones an include sends and the exports can place; the
+    // audio formats are the two the request takes, so a recording that came back can go
+    // straight back in. JPEG goes by two names and WAV by four, services differing in
+    // which they send (RFC 2361 named one of them and the others are still in use).
+    private static final java.util.Map<String, String> PAYLOAD_EXTENSIONS = payloadExtensions();
+
+    private static java.util.Map<String, String> payloadExtensions() {
+        java.util.Map<String, String> types = new java.util.LinkedHashMap<>();
+        types.put("png", "png");
+        types.put("jpeg", "jpg");
+        types.put("jpg", "jpg");
+        types.put("gif", "gif");
+        types.put("webp", "webp");
+        types.put("wav", "wav");
+        types.put("wave", "wav");
+        types.put("x-wav", "wav");
+        types.put("vnd.wave", "wav");
+        types.put("mpeg", "mp3");
+        types.put("mp3", "mp3");
+        return java.util.Collections.unmodifiableMap(types);
+    }
+
+    // The extension for a payload labelled `mime`, or null when it is labelled with
+    // something this does not know. Parameters are dropped ("audio/wav;rate=24000"), and
+    // the subtype is what is looked up.
+    private static String payloadExtension(String mime) {
+        if (mime == null) return null;
+        String m = mime.trim().toLowerCase(java.util.Locale.ROOT);
+        int semi = m.indexOf(';');
+        if (semi >= 0) m = m.substring(0, semi).trim();
+        int slash = m.lastIndexOf('/');
+        return PAYLOAD_EXTENSIONS.get(slash >= 0 ? m.substring(slash + 1) : m);
+    }
+
+    // The extension the bytes themselves say, for a payload that arrived with no media
+    // type - which the API's own audio output does, the format having been asked for in
+    // the request rather than repeated in the answer. The signatures of the formats
+    // JRock sends and takes, and null for anything else.
+    private static String sniffedExtension(byte[] b) {
+        if (bytesAt(b, 0, 0x89, 'P', 'N', 'G')) return "png";
+        if (bytesAt(b, 0, 0xFF, 0xD8, 0xFF)) return "jpg";
+        if (bytesAt(b, 0, 'G', 'I', 'F', '8')) return "gif";
+        if (bytesAt(b, 0, 'R', 'I', 'F', 'F')) {
+            // Both formats are RIFF containers; the tag at 8 says which.
+            if (bytesAt(b, 8, 'W', 'E', 'B', 'P')) return "webp";
+            if (bytesAt(b, 8, 'W', 'A', 'V', 'E')) return "wav";
+        }
+        if (bytesAt(b, 0, 'I', 'D', '3')) return "mp3";          // tagged
+        // An untagged MP3 starts at a frame sync: 11 bits set.
+        if (b.length >= 2 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xE0) == 0xE0) return "mp3";
+        return null;
+    }
+
+    private static boolean bytesAt(byte[] b, int at, int... expected) {
+        if (b.length < at + expected.length) return false;
+        for (int i = 0; i < expected.length; i++) {
+            if ((b[at + i] & 0xFF) != expected[i]) return false;
+        }
+        return true;
     }
 
     // Whether four hex digits start at `at`. Integer.parseInt would accept a sign or

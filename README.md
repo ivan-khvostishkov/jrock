@@ -460,6 +460,26 @@ bill, and a guess is not one.
   and included files stay referenced only by hash. The response `id` is elided after its
   first few characters (`"id":"chatcmpl-abcd<...>"`) — in full it is long enough on its own
   to put a horizontal scrollbar under the dump.
+- **Long base64 values in the response are masked too**, under whatever field they arrive
+  in, and replaced by their size — `"data":"<blob masked 2395720 chars>"`. A response can
+  carry binary written out as text: a generated image is a megabyte of base64 on one line,
+  a recording is the same again, and a model may add a signature of its own of a few
+  hundred thousand characters beside either. Masked, what is left of such a response is one
+  readable screen that still says what came back and where it sat in the reply:
+
+  ```
+  {"choices":[{"finish_reason":"stop","index":0,"logprobs":null,"message":{"audio":
+  {"data":"<blob masked 2395720 chars>","extra_content":{"mime_type":"image/png"}},
+  "content":null,"extra_content":{"signature":"<blob masked 1540924 chars>"},
+  "role":"assistant"}}],...
+  ```
+
+  A value is masked when it is long (80 characters or more) and made up only of base64,
+  base64url or hex characters, so a reply of prose is never touched — its spaces and
+  punctuation are outside that alphabet. Field names are never masked, however long: the
+  name is what makes the masked line mean anything. The payload itself is not lost by
+  being masked here: a picture or a recording is [saved as an
+  include](#a-picture-or-a-recording-in-the-reply) before the dump is built.
 - Both headers **name the file that half of the exchange was written to** under
   [`JRock/messages/`](#persistence-crash-recovery--full-local-history), with the arrow the
   direction it went:
@@ -900,6 +920,51 @@ is; unticking **Clock** is the fix, and it is yours to make — once per folder,
 remembers it.
 
 **Fetch URL** does not download audio; audio comes from Ctrl+I.
+
+### A picture or a recording in the reply
+
+An include works the other way round too. A model that answers with an **image** or with
+**speech** cannot put it in the text: what comes back is base64 in the message's one binary
+field, with a media type beside it saying what it really is. JRock saves that payload into
+`JRock/includes/`, named after the moment it arrived, and **makes it an include of the
+session** — so the picture is a file you own, in the folder the log names, with a hash of its
+own:
+
+```
+Saved the png the reply carried (175,969 bytes): C:\work\JRock\includes\20261010-202058-403.png
+Included @img 078adf22bb5d from C:\work\JRock\includes\20261010-202058-403.png
+With a Markdown reference above it: ![Image: 1004 x 669, 17.0 cm x 11.3 cm @ 150 DPI, 671,676 pixels, 175,969 bytes](20261010-202058-403.png)
+Image: 1004 x 669, 17.0 cm x 11.3 cm @ 150 DPI, 671,676 pixels, 175,969 bytes
+```
+
+and the **answer itself carries the same two lines an include puts in the prompt**:
+
+```
+![Image: 1004 x 669, 17.0 cm x 11.3 cm @ 150 DPI, 671,676 pixels, 175,969 bytes](20261010-202058-403.png)
+@img 078adf22bb5d
+```
+
+That is the point of doing it this way: **select the reply and export it** (Markdown, or
+[DOCX](#images-in-the-docx)) and the picture is *in* the document, because the reference is
+exactly what the export resolves. It is one include in every other respect as well — the same
+hash, the same line in the log, the same reload of that line at the next start, so the answer
+is still exportable after a restart.
+
+- The **extension comes from the media type** the reply gave the payload — a `png`, a `jpg`,
+  a `wav`, an `mp3` — which is also what decides the kind of token: an image is `@img`, a
+  recording is `@audio`. A payload with no type at all (the Chat Completions audio output
+  states its format in the *request*, not in the answer) is read from its own first bytes
+  instead. Something neither says anything about is still saved, under `.bin`, and gets no
+  token — a file nothing can be sent as is not pretended to be one.
+- It respects [**Markdown reference above each include**](#configure-dialog-top-left-button),
+  the same setting an include from the dialog follows. Off (the default), the answer carries
+  the bare `@img <hash>` and no reference line.
+- The bytes are written **exactly as they arrived**, unlike an include's processed copy, which
+  is downscaled to *Images DPI* on the way in. This one is the model's own output at the size
+  it chose.
+- A reply that is *only* a picture has no text, and says so rather than inventing some: a
+  reply whose `content` is `null` is read as no text at all, and what the log shows is the
+  reference and the token.
 
 ### Fetching a URL
 
@@ -2720,6 +2785,19 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   being no key). An answer written during the session is reused without the folder being read
   again; with the setting off nothing is reused and the table is gone. And History: of six
   messages, the two sent with History off are the ones it leaves out.
+- **`JRockReplyPayloadTest`** answers a real send from a chat-completions endpoint of its own
+  on 127.0.0.1, with a picture where the text would be: the PNG arrives under the message's
+  binary field and has to come out as [an include of the
+  session](#a-picture-or-a-recording-in-the-reply) — saved under `JRock/includes/` byte for
+  byte, hashed, logged, and named in the answer by the reference the DOCX export resolves.
+  Then the same with **Markdown reference above each include** off (the token alone), a WAV
+  the reply gives no media type at all (read from its own bytes, `@audio`, its header in the
+  log), and a reply with neither text nor payload, which says so rather than logging an empty
+  turn. Each run also checks the base64 never reaches the transcript.
+- **`JRockMaskedDumpTest`** checks the masking of the raw response: a long base64 value
+  replaced by its length with the fields beside it intact, every blob in one response and not
+  just the first, prose and short values and field names left alone, a truncated response kept
+  whole, and the whole pass together — reply out, blobs out, id shortened. No window.
 - **`JRockPricingTest`** checks the stats block's price lines against the cards: Grok 4.3 at
   $1.25 / $2.50 (and GovCloud's own rate), GPT-6 Astra doubling past 272K input tokens and
   unpriced outside its two mantle regions, GPT-5.4 the same way with GovCloud priced only up to
@@ -2750,8 +2828,9 @@ mvn test
 Nothing is stubbed and no credentials are needed: every test runs in a throwaway working
 directory of its own, so its `JRock/bedrock-key.txt` is the empty one JRock creates and the
 startup model-list fetch is skipped for want of a key. Your own key cannot be picked up by a
-test, because nothing is read from the environment. No test contacts AWS — the one case that
-does set a key points the endpoint at a host that doesn't resolve, so the fetch fails at DNS.
+test, because nothing is read from the environment. No test contacts AWS: of the two that set
+a key at all, one points the endpoint at a host that doesn't resolve, so the fetch fails at
+DNS, and the other points it at a server of its own on 127.0.0.1.
 
 Two external programs are needed: **Ghostscript on `PATH`** (`gs`, or `gswin64`/`gswin64c` on
 Windows) for the PDF test, and **xpdf's `pdftohtml` and `pdftotext`** (from
