@@ -25,7 +25,13 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Runs directly:** `java JRock.java`.
 - **Bedrock API key auth** (Bearer token), no SigV4, no AWS SDK, no `~/.aws` credentials.
 - **Everything local & transparent.** No server-side session state; all history lives in
-  plain files under a `JRock/` folder you own and can inspect.
+  plain files under a `JRock/` folder you own and can inspect — and the window itself lists
+  every file and subfolder that folder can hold, under *What is in the JRock folder...* in the
+  menu behind the **`JRock/`** label beside *Configure*, so nothing JRock keeps has to be
+  guessed at ([**Persistence**](#persistence-crash-recovery--full-local-history)).
+- **Every control explains itself.** A right-click — or a long press on a touch screen — on any
+  button or checkbox gives its name and a few plain sentences on what it does, which is what a
+  tooltip cannot do on a phone ([**context menus**](#context-menus-right-click--long-tap)).
 - **Crash-safe persistence** of the prompt and the full conversation.
 - **Multimodal includes** (text, image and audio files, plus PDF-to-page-images via Ghostscript
   on the desktop and PDF.js in the browser, PDF-to-HTML or -text via xpdf on the desktop, and
@@ -166,7 +172,9 @@ as WebAssembly), so nothing runs on a server.
   choosing that folder in the Configure dialog, new folders included, which are created. So a
   bookmark per project opens straight into that project's settings, key and log. A query
   containing `=` is a parameter rather than a folder and is ignored, and so is one with a `.` or
-  `..` segment.
+  `..` segment. The page says so itself, under the Run button, with the whole address written
+  out — `https://jrock.nosocial.net/?home` — as a link that is equally there to be clicked, or
+  copied and bookmarked.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
 - **The page gets out of the way — and comes back.** A few seconds after launch the page hides
   its own header and footer, giving the Swing display the whole tab. That is what the **Hide
@@ -175,8 +183,8 @@ as WebAssembly), so nothing runs on a server.
   sits in the main area under the text about the checksum and the Configure dialog, with the note
   that brings them back, and not in the header, where a label that long would be the whole
   header on a phone.
-  To check the checksum again, the top-bar context menu has **Show/hide the page header &
-  footer**: it calls one function in the page, which flips the chrome and reports which way it
+  To check the checksum again, the window's menu - the `JRock/` label beside *Configure* - has
+  **Show/hide the page header & footer**: it calls one function in the page, which flips the chrome and reports which way it
   went. The page owns that state, so JRock never has to guess.
 - **Copy and paste reach other apps.** CheerpJ gives the JVM a clipboard of its own that
   nothing else can see, so JRock goes through the browser's clipboard instead: text moves
@@ -238,7 +246,7 @@ page hands the PDF to [PDF.js](https://mozilla.github.io/pdf.js/) — the render
 PDFs with — and gets each page back as a PNG, drawn at the same **Images DPI**. JRock talks to
 both through one PDF engine interface, so the include, the page files and the `@img` tokens are
 the same either way. PDF.js is loaded from jsDelivr the first time a PDF is included, so a session
-that never opens one never downloads it. Pages land in **`JRock/includes/pdfjs-pdf/`**, named
+that never opens one never downloads it. Pages land in **`JRock/includes/`**, named
 `<pdfname>.pdfjs.NNN.png`.
 
 The [duplex merge](#merging-duplex-scans-ghostscript) is the one PDF feature that stays on the
@@ -410,8 +418,11 @@ bill, and a guess is not one.
 - **History** mode (Ctrl+E): each send includes the prior dialog so the model sees a
   continuous conversation (stateless multi-turn) — or only its last requests, each with its
   answer, when a [**History limit**](#configure-dialog-top-left-button) is set. In this mode role headers are
-  timestamped (e.g. `[OPERATOR'S ASSISTANT] · Monday, 14 September 2026, 10:01:34`) so the
-  time order of stateless turns is visible — and that timestamp is also what History goes by:
+  timestamped (e.g. `[OPERATOR'S ASSISTANT] · Mon, 14 Sep 2026, 10:01:34`) so the
+  time order of stateless turns is visible. The day and month are abbreviated, and the names and
+  their order are your locale's own: a header is a role and a date on one line, and spelled out
+  in full it is wider than a phone's screen, so every message in the transcript would cost two
+  lines instead of one. That timestamp is also what History goes by:
   it sends **only the messages that were sent with History ticked**, and their answers. Untick
   it to ask a **side question**, and the question and its answer stay out of the conversation:
   tick it again and the dialog goes on as if they had never been asked. The headers are kept in
@@ -498,6 +509,11 @@ The clock goes with every request the checkbox is ticked for, whatever else that
 model turns out not to want a `system` message beside what you are sending it, untick Clock and
 send again, which is one click in the same window.
 
+**Clock is the only time the model is told.** It is not the date printed after a role header,
+which [**History**](#conversation-log) turns on: that one is written for you to read the transcript by
+and is never sent, however many dates the log shows. Right-click (or long-press) either checkbox
+and it says so itself — untick Clock and the model knows nothing about the time.
+
 ## Persistence (crash recovery + full local history)
 
 Everything lives under a **`JRock/`** subfolder of the working directory:
@@ -513,12 +529,39 @@ Everything lives under a **`JRock/`** subfolder of the working directory:
   dialog-only transcript.
 - `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the region, model and
   images DPI (see [**Settings files**](#settings-files)).
-- `JRock/includes/gs-pdf/` — the page images produced when a PDF is included via Ghostscript, and
-  `JRock/includes/pdfjs-pdf/` the same from PDF.js in the browser (see Multimodal includes).
-- `JRock/includes/rtf-md/` — the Markdown produced when an RTF is included as Markdown text
-  (see Multimodal includes).
-- `JRock/includes/docx-md/` — the same for a `.docx` included as Markdown text.
-- `JRock/includes/xlsx-csv/` — the CSV files produced when an `.xlsx` is included, one per sheet.
+- `JRock/includes/` — **one flat folder** holding everything an include is made from: a copy of
+  each file picked with Ctrl+I (when **Include from processed copies** is on — see [**includes
+  that outlive the session**](#includes-that-outlive-the-session)), and whatever a conversion made
+  of it, beside the file it came from. Each converted file is named for **the whole of its
+  source**, extension and all, so they sort together under the file they belong to and no two can
+  collide:
+
+  | included | written beside it |
+  |---|---|
+  | `scan.pdf` as page images | `scan.pdf.gs.001.png`, `…002.png`, … (`.pdfjs.` in the browser) |
+  | `scan.pdf` as xpdf text / HTML | `scan.pdf.txt` / the folder `scan.pdf.html` |
+  | `notes.rtf` as Markdown | `notes.rtf.md` |
+  | `report.docx` | `report.docx.md` |
+  | `book.xlsx` | `book.xlsx.Sheet1.csv`, one per sheet |
+
+  There are **no per-conversion subfolders**. The names already guarantee uniqueness, so folders
+  added nothing but paths to remember — and one of the conversions (xpdf) never used them anyway.
+- `JRock/urls/` — what **Fetch URL** (Ctrl+U) downloaded, one file per address (see [**fetching a
+  URL**](#fetching-a-url)).
+- `JRock/wav/` — the audio, a file of its own per narration and per recording, each named for
+  the moment it was made: `narration-<date>-<time>.wav`, `recording-<date>-<time>.wav`, and
+  `transcribe-<date>-<time>.wav` where a recording was transcribed into the prompt instead of
+  included (see [**Narrate**](#narrate-windows) and
+  [**recording from the microphone**](#recording-from-the-microphone-ctrlspace)).
+- `JRock/jrock-context-menu-install.reg`, `-uninstall.reg`, and
+  `JRock/jrock-agent-<name>-install.reg` / `-uninstall.reg` — on Windows, exactly what the
+  Explorer menu items applied, kept to be read, run again or undone by hand (see [**Explorer
+  right-click integration**](#windows-explorer-right-click-integration)).
+
+A `jrock<digits>.tmp` or a `scaling-<digits>` file is a save or a resize in progress and goes by
+itself; neither is ever included or sent. The whole list is in the window too, under **What is in
+the JRock folder...** in the menu behind the `JRock/` label beside *Configure*, and in the
+**Help** window's *The JRock folder* box — so nothing in there has to be guessed at.
 
 The main log is a bit-perfect copy of the pane, except that each role header is followed by an
 `@<datetime>` include-style reference to the message's own file under `JRock/messages/`.
@@ -550,6 +593,8 @@ from inside the running application, and different for every way of launching it
   `narrate-device$` and `record-device$`, the one speaker [Narrate](#narrate-windows) plays on
   and the one microphone [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from.
   Each is written only once one is set, and there is no default for either. On Windows,
+  `narrate-voice$` is the voice Narrate reads in, by its Windows name; absent means whichever
+  installed voice speaks the language of the text.
   `record-transcribe$` (`true`/`false`) says whether a recording is transcribed.
   `record-always-on$` (`true`/`false`) is [Mic always on](#mic-always-on).
   `clock$` (`true`/`false`) is the [**Clock**](#clock) checkbox; absent is `true`.
@@ -588,8 +633,8 @@ to get wrong. Lines starting with `'` are comments, and blank lines separate the
 
 ## Backup and restore
 
-The whole working folder in one file, from the **top bar's context menu** (right-click the empty
-area beside *Configure*):
+The whole working folder in one file, from the **window's menu** (click the **`JRock/`** label
+beside *Configure*):
 
 - **Backup log...** asks for a `.zip` name - offering `jrock-backup-yymmddhhmm.zip`, in the same
   folder *Save log as* opens in - and packs the entire `JRock/` directory into it: the log, the
@@ -624,8 +669,8 @@ such lock to take.
 
 ## Merging duplex scans (Ghostscript)
 
-**Right-click the empty area of the top bar → Merge two-sided (duplex) PDF scans...** — the first
-item in that menu, alone above its separator.
+**Click the `JRock/` label beside Configure → Merge two-sided (duplex) PDF scans...** — alone
+above its separator, under *What is in the JRock folder...*.
 
 A sheet feeder with no duplex unit takes a two-sided batch in two goes: the first pass gives the
 fronts, in order, and then the stack goes back into the feeder exactly as it came out of it — so
@@ -951,9 +996,9 @@ Included @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
 
 Two different files of the same name both survive, the second as `IMG_4002-2.jpg`; the same
 file twice is not copied twice. A file already under `JRock/includes/` is included where it is,
-and so is anything the conversions wrote: they write into subfolders of it themselves —
-`gs-pdf/` (`pdfjs-pdf/` in the browser), `rtf-md/`, `docx-md/` and `xlsx-csv/` — so everything an
-include is made from is in one place. A fetched URL is saved beside it, in `JRock/urls/`. A copy that
+and so is anything the conversions wrote: they write into that same folder themselves, each
+output named after the file it came from — so everything an
+include is made from is in one place, and in one flat list. A fetched URL is saved beside it, in `JRock/urls/`. A copy that
 fails is reported and the original included anyway — the setting is there to keep a file within
 reach, not to refuse the include. It matters most in the [browser](#jrock-web-in-the-browser),
 where an uploaded file lands in CheerpJ's `/uploads` and is gone after a reload, taking the only
@@ -1029,7 +1074,7 @@ read, or has no include line in the log is named in the log, one line per file, 
 message, and nothing goes to Bedrock:
 
 ```
-Missing include: included file is missing: C:\demo\JRock\includes\rtf-md\quarterly.rtf.md (@txt 8b52e0ad91cc).
+Missing include: included file is missing: C:\demo\JRock\includes\quarterly.rtf.md (@txt 8b52e0ad91cc).
 Missing include: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the log.
 Not sent: 2 included files are missing. Include them again with Ctrl+I, or turn off "Stop a send on a missing include" in Configure to send their tokens as text.
 ```
@@ -1039,7 +1084,7 @@ model as the text it is — `@img 1f3a9c0b7e42` rather than the picture — whil
 sent as usual:
 
 ```
-Warning: included file is missing: C:\demo\JRock\includes\rtf-md\quarterly.rtf.md (@txt 8b52e0ad91cc); sent as text.
+Warning: included file is missing: C:\demo\JRock\includes\quarterly.rtf.md (@txt 8b52e0ad91cc); sent as text.
 Warning: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the log; sent as text.
 ```
 
@@ -1051,7 +1096,7 @@ different file now, and including it again is the fix.
 Selecting the PDF filter runs **Ghostscript** to convert the PDF, one page image per page, then
 includes each produced page. Ghostscript must be on your PATH: `gswin64` on Windows, `gs` on
 macOS and Linux. In the [browser](#working-with-pdfs) the same filter renders with PDF.js
-instead, into `JRock/includes/pdfjs-pdf/`.
+instead, into `JRock/includes/`.
 
 **Page images, not Ghostscript text.** There is no text filter on Ghostscript's `txtwrite`
 device, because `txtwrite` takes the text operators as they come and hands back something a model
@@ -1066,7 +1111,7 @@ alive. On **Windows** JRock runs the **windowed** build (`gswin64.exe`, preferri
 Everywhere else the console `gs` is run with `-q` omitted, and its progress — `Page 1`,
 `Page 2`, … — is echoed into the log as `gs:` lines while it works.
 
-- Output is written under **`JRock/includes/gs-pdf/`**, named `<pdfname>.gs.NNN.png` — page images at
+- Output is written under **`JRock/includes/`**, named `<pdfname>.gs.NNN.png` — page images at
   the **Images DPI** set in Configure (150 by default), the page's physical size being the
   PDF's own business.
 - The exact Ghostscript command and its output are echoed to the log.
@@ -1113,7 +1158,7 @@ survive as markup a model reads as structure instead of being thrown away.
 
 **From an RTF.**
 
-- Output is written under **`JRock/includes/rtf-md/`**, named `<rtfname>.md` — `notes.rtf` becomes
+- Output is written under **`JRock/includes/`**, named `<rtfname>.md` — `notes.rtf` becomes
   `notes.rtf.md`, so two RTFs with the same stem can't overwrite each other.
 - What is mapped, and nothing more:
 
@@ -1137,7 +1182,7 @@ survive as markup a model reads as structure instead of being thrown away.
 reference, a table cell — so the conversion reads that structure rather than guessing at it from
 font sizes:
 
-- Output is written under **`JRock/includes/docx-md/`**, named `<docxname>.md` — `quarterly.docx` becomes
+- Output is written under **`JRock/includes/`**, named `<docxname>.md` — `quarterly.docx` becomes
   `quarterly.docx.md`, the same rule as for RTF.
 - Only `word/document.xml` is read, with its relationships part for link addresses, and only
   these parts of it:
@@ -1165,7 +1210,7 @@ font sizes:
 - A file that isn't really a `.docx` — an older `.doc`, a PDF, anything renamed — has no
   `word/document.xml`, and the log says exactly that: *Could not read DOCX renamed.docx: no
   word/document.xml inside it - is it really a Word .docx?* Nothing is included and no
-  `JRock/includes/docx-md/` is created.
+  Markdown is written.
 
 ### XLSX conversion (no external tool)
 
@@ -1174,7 +1219,7 @@ order, as its own CSV and includes each as an `@txt` token, so a workbook of thr
 three tokens. Like a `.docx`, an `.xlsx` is a ZIP of XML, read with `java.util.zip` and the JDK's
 XML parser, so this works with nothing installed and in the browser too.
 
-- Output is written under **`JRock/includes/xlsx-csv/`**, named `<xlsxname>.<sheet>.csv`, so
+- Output is written under **`JRock/includes/`**, named `<xlsxname>.<sheet>.csv`, so
   `stock.xlsx` with a sheet *Sales Q1* gives `stock.xlsx.Sales Q1.csv`. A character Windows
   forbids in a file name becomes `_`.
 - What a cell becomes:
@@ -1816,10 +1861,14 @@ that you cannot.
 
 ## Configure dialog (top-left button)
 
-Three tabs, so no one of them is a wall of rows: **General** for what every send depends on,
-**File types** for the settings that matter to one kind of file only, and **Audio & speech** for
-the speaker and the microphone — a tab that is left out where neither can be had, as in the
-browser.
+Four tabs, so no one of them is a wall of rows: **General** for what every send depends on,
+**Files** for the settings that matter to one kind of file only, **Audio** for the speaker and
+the microphone — a tab that is left out where neither can be had, as in the browser — and
+**Window** for the window's own size and place.
+
+One word per title, because four of them have to fit side by side across the width of a phone: a
+title long enough to be a phrase is a tab strip that scrolls, with the tab nobody can see being
+the one they are looking for.
 
 **General**
 
@@ -1845,7 +1894,7 @@ browser.
   come back out.
 - **Region** — free text. Kept in `JRock/jrock-config.txt`, so it survives a restart.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
-  `JRock/jrock-config.txt` too — as is the **Images DPI** on the File types tab, which is what makes one
+  `JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
   folder's [agent](#windows-agents-one-automation-per-folder) a different agent from the same
   automation installed from another folder.
 - **Autobackup log** — on a line of its own, right under the Model, and **on by default**: after five
@@ -1860,6 +1909,15 @@ browser.
   value that is no number keeps the limit there was. An `#include` already sent in a request
   the limit leaves out is sent again, since the model does not see that request. Kept in
   `JRock/jrock-config.txt`, per folder, like the model it usually depends on.
+- **Local prompt cache** — on by default: a prompt identical to one answered before is
+  answered from that answer, and Bedrock is not called (see
+  [**Local prompt cache**](#local-prompt-cache)).
+
+The three below are the ones about includes, and the dialog keeps them together at the bottom of
+the tab under a single **Includes:** label in its left column — the same place **History limit:**
+names what its row is about. A run of checkboxes against an empty column reads as one list of
+unrelated switches; a label over them says which three belong to each other.
+
 - **Markdown reference above each include** — off by default: every include gets a line above
   its token naming the file, with what the log says of it as its text (see
   [Multimodal includes](#multimodal-includes-ctrli)).
@@ -1871,11 +1929,8 @@ browser.
   read or is not recorded in the log stops the send, each one named in the log; off, the send goes
   with a warning, and that file's token is sent as text (see
   [Includes that outlive the session](#includes-that-outlive-the-session)).
-- **Local prompt cache** — on by default: a prompt identical to one answered before is
-  answered from that answer, and Bedrock is not called (see
-  [**Local prompt cache**](#local-prompt-cache)).
 
-**File types**
+**Files**
 
 - **Images DPI** — how fine a picture JRock keeps, per inch of page: 72 / 96 (screen), **150**
   (documents, the default), 203 (fax/receipt), 300 (print). The image is what the model actually
@@ -1898,16 +1953,40 @@ These two and the four on General above them are kept in `JRock/jrock-config.txt
 as `include-pdf-as$`, `include-rtf-as$`, `include-markdown-references$`,
 `include-processed-copies$`, `include-missing-stops-send$` and `local-prompt-cache$`.
 
-**Audio & speech**
+The tab is laid out **by file type**, not by setting: the type in bold down the left, how it is
+read on the right. Only the three types with something to choose are rows — Images, PDF and RTF —
+and where any of it is written is said **once**, at the foot: everything goes to
+`JRock/includes/`, named after the file it came from, and a fetched URL to `JRock/urls/`. A line
+per file type repeating the same path was the repetition, not the information.
+
+An asterisk marks a type that **cannot be included without that folder** — PDF, RTF, DOCX and
+XLSX, whose conversions have nowhere else to write — explained once at the foot of the tab
+rather than repeated on every row.
+
+**Audio**
 
 - **Narrate on** and **Record from** (Windows / desktop) — the one speaker
   [Narrate](#narrate-windows) plays on and the one microphone
   [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a
   dropdown, empty until the feature lists the devices, and never fall back to the default.
+- **Narrate with** (Windows) — **the voices** Narrate may read in, by their Windows names, over a
+  dropdown of every voice installed with its language beside it. **As many as you like, separated
+  by commas: the language of the text picks between them.** `Microsoft David Desktop, Microsoft
+  Irina Desktop` reads an English answer in David and a Russian one in Irina, which is the point
+  of the setting — no one voice reads every language. Empty — the default — means *whichever
+  installed voice speaks the language*, which is what JRock does when it has not been told
+  otherwise. The list fills itself the first time you narrate, like the device lists, since
+  enumerating the voices means starting PowerShell and a dialog opened to change the model should
+  not pay for that. Kept per folder as `narrate-voice$`.
 - **Transcribe recordings into the prompt** (Windows) — under Record from: a recording is typed
   into the prompt by Windows speech recognition instead of being included as `@audio`.
 - **Mic always on: record when speech is heard** — under both (see
   [**Mic always on**](#mic-always-on)).
+
+Each row names the file its audio goes to, the way the Files tab names its folders:
+`JRock/wav/narration-<date>-<time>.wav`, `JRock/wav/recording-<date>-<time>.wav`, and
+`JRock/wav/transcribe-<date>-<time>.wav` when a recording was transcribed — one file each, never
+overwritten.
 
 Every row above has a **right-click — or, on a touch screen, a long-press — menu** with Copy,
 Paste and Select all (the model's is on the combo's editor, which is what a tap lands on). On a
@@ -1937,9 +2016,11 @@ IntelliJ IDEA. That line wraps on a screen too narrow for it, such as a phone's.
 
 Which JRock this is — the title and version, repeated at the top — what it is, where to write
 about it — **jrock@nosocial.net** — and where the source is, both as links that open the mail
-program and the browser; then the whole **Shortcuts** list and the **Notes** on what every
-setting does and which file keeps it. All of it in one scrolling window that opens *on top of*
-Configure and centred on it, so anything already typed into the form is still there when it
+program and the browser; then the whole **Shortcuts** list, **The JRock folder** — every file and
+subfolder JRock can keep in the working folder, each with the line that says what it holds (see
+[**Persistence**](#persistence-crash-recovery--full-local-history)) — and the **Notes** on what
+every setting does and which file keeps it. All of it in one scrolling window that opens *on top
+of* Configure and centred on it, so anything already typed into the form is still there when it
 closes.
 
 It is a window of its own rather than part of the Configure dialog, so someone who opened
@@ -1948,11 +2029,18 @@ prose is one button away when it is wanted. The window is sized against the scre
 [Fetch URL](#fetching-a-url) dialog, so on a phone it is a short window that scrolls rather than a tall one with its button
 off the bottom.
 
-## Window move & resize (Ctrl+M)
+## Window size and position (Configure → Window, Ctrl+M)
 
-A dialog to set the window **width/height** and **on-screen X/Y** numerically, plus info
-about the screens (which monitor holds the window, each screen's bounds). Handy for precise
-placement or moving across monitors without the mouse.
+The **Window** tab of the Configure dialog sets the window's **width/height** and **on-screen
+X/Y** numerically, and describes the screens below them: which monitor holds the window, and each
+screen's bounds. Handy for precise placement, or for moving across monitors without the mouse.
+**Ctrl+M** opens Configure straight onto it.
+
+It has a **Set** button of its own, and that is the point of it being a tab: Set applies the four
+numbers to the window at once, so the result is there to be looked at — and nudged again, and
+again — with the dialog still open. The window's size and place are not settings JRock keeps in
+a file, so there is nothing here for OK to save: **Cancel** is the way out, and it leaves the
+window where Set put it without re-reading the session the way OK does.
 
 ## Printing / PDF (Ctrl+P)
 
@@ -1980,8 +2068,28 @@ says what is happening: how many characters, which voice, and when it finishes.
 - **SAPI renders, Java plays.** `System.Speech` can only play on the Windows default, so it
   renders 22.05 kHz 16-bit mono PCM into a pipe instead, and JRock plays that with Java Sound on
   the chosen device.
-- **Each narration is saved** as `JRock/wav/narration.wav`, overwritten every time, for when
-  something sounds wrong. A stopped narration is saved as far as it played.
+- **Each narration is saved** as `JRock/wav/narration-<date>-<time>.wav` — a file of its own,
+  never overwritten, for when something sounds wrong: the narration worth hearing again is the
+  one that sounded wrong, and an overwrite would have thrown it away by the time anybody went
+  looking. A stopped narration is saved as far as it played.
+- **Pick the voices, and the language picks between them.** **Configure → Audio → Narrate with**
+  takes as many voice names as you like, separated by commas, out of every voice Windows has —
+  `Microsoft David Desktop, Microsoft Irina Desktop` reads English in David and Russian in Irina.
+  The order is the order of preference, and the rule is:
+
+  1. a voice you named whose own language is the language of the text;
+  2. failing that, **any** installed voice whose language it is — because a voice reading a
+     language it does not have comes out as gibberish, or as pure silence, which is the one
+     outcome worth overriding your choice to avoid (a third-party English voice asked for Russian
+     renders nothing at all, with no error);
+  3. failing that, the first voice you named, whatever it speaks;
+  4. failing that, SAPI's own default.
+
+  Left empty, rule 2 is the whole of it — which is what makes a Russian answer read in Russian
+  with nothing configured. The log names the voice that spoke every time, and says so when it had
+  to fall back, when none of your names is installed, and when a voice produced no audio at all.
+  More voices come from **Settings → Time & language → Speech** — SAPI sees only the classic
+  *Desktop* ones, not the newer (OneCore) voices.
 
 - **SAPI, through PowerShell, not JNI.** The voice is SAPI 5, reached through `System.Speech`,
   the .NET wrapper that comes with PowerShell on every Windows. JNI would mean a native DLL built
@@ -2034,8 +2142,9 @@ Windows, but not in the browser.
 - **Transcribe recordings into the prompt** (Windows; the checkbox under **Record from:**, kept
   as `record-transcribe$`). With it ticked, the recording is not included. Windows speech
   recognition (SAPI dictation, the same `System.Speech` Narrate speaks with) turns it into
-  text, and the text is typed at the prompt cursor. The audio is then one file,
-  `JRock/wav/transcribe.wav`, overwritten every time, since no token ever names it. The
+  text, and the text is typed at the prompt cursor. The audio is kept as
+  `JRock/wav/transcribe-<date>-<time>.wav` — a file per recording like any other, even though no
+  token ever names it, because a word the recognizer got wrong is a wav worth playing back. The
   recognizer is always the **en-GB** one, whatever Windows' default is, and the log names it.
   System.Speech sees only the classic *Desktop* recognizers (English and a few others), so
   Russian speech, for one, is not recognized. **Use a proper microphone.** A Bluetooth
@@ -2253,15 +2362,29 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   one thing in particular: the include dialog is multi-select, but a tap selects a single file
   and there is no Shift to hold. Several names typed or pasted into that box, each in quotes —
   `"cat.png" "dog.png"` — is how a phone attaches more than one file at a time.
-- **Top bar (empty area)** — Merge two-sided (duplex) PDF scans... first, on its own above a
-  separator (see [**merging duplex scans**](#merging-duplex-scans-ghostscript)), then Backup
-  log... and Load from backup... (see [**backup and restore**](#backup-and-restore)), then Move &
-  resize window...; in the **browser**, also Show/hide the page header & footer; on **Windows**,
-  Install / Uninstall the "JRock here!" Explorer entry and Install / Uninstall agent (see below).
+- **The `JRock/` label beside Configure** — the window's own menu, and the one that opens on a
+  plain click or tap rather than a right-click, the label being there for nothing else. *What is
+  in the JRock folder...* first, naming every file and subfolder JRock can keep there (see
+  [**Persistence**](#persistence-crash-recovery--full-local-history)), then Merge two-sided
+  (duplex) PDF scans... above its own separator (see [**merging duplex
+  scans**](#merging-duplex-scans-ghostscript)), then Backup log... and Load from backup... (see
+  [**backup and restore**](#backup-and-restore)); in the **browser**, also Show/hide the page
+  header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer entry and
+  Install / Uninstall agent (see below). A label with a caret is a target that is always there,
+  always the same size and visibly for this, which the empty part of a bar is not — least of all
+  on a phone, where there is hardly any of it. The window's own size and position are **not**
+  here: they are Configure's [**Window** tab](#window-size-and-position-configure--window-ctrlm),
+  where a Set button applies them without closing anything.
+- **Every button and checkbox in the window, and every checkbox in Configure** — its own name and
+  a few plain sentences on what it does, on a right-click or a long press. *Clock* and *History*
+  in particular say which of them the model is told about: Clock sends the model the local time,
+  while the date the log prints after a role header is written for you and is never sent. A
+  tooltip says the same thing in one line, but only to a mouse — a phone has nothing to hover
+  with, and short labels like *Clock*, *History* and *Enter* are otherwise names to be guessed at.
 
 ## Windows: Explorer right-click integration
 
-On Windows, the top-bar context menu (right-click the empty area of the top bar) offers
+On Windows, the window's menu (click the `JRock/` label beside *Configure*) offers
 **Install "JRock here!" (Explorer menu)...** and **Uninstall "JRock here!" (Explorer
 menu)...**. These items appear only on Windows. Installing adds two Explorer right-click
 entries at once:
@@ -2405,7 +2528,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+Space | Start recording from the microphone; again to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle History (send the prior dialog too) |
-| Ctrl+M | Move & resize the window |
+| Ctrl+M | Open Configure on its **Window** tab (size and on-screen position) |
 | Ctrl+P | Print log (or the selected text) / save as PDF |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |
 
@@ -2483,30 +2606,30 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   gained the `@txt` tokens. A third test puts a hand-edited `.txt` there first and checks it is
   included as it is, with no conversion run and nothing overwritten.
 - **`JRockRtfIncludeTest`** includes an RTF through the real include dialog with the *RTF as
-  Markdown text* filter, and compares the file under `JRock/includes/rtf-md/` against the **whole
+  Markdown text* filter, and compares the file under `JRock/includes/` against the **whole
   expected Markdown** — headings from the font sizes, bold and italic as markup, Word's bullets
   as a list, asterisks escaped, an umlaut intact as UTF-8 — plus the single `@txt` token in the
   prompt. The document is written by hand (`FormattedRtf`), one control word per mapping. A
   second test renames a plain text file to `.rtf` and checks JRock says it found no text and
   includes nothing. A third sets **Include RTF as** to *Text as is* and checks the
-  include is the `.rtf` itself, with nothing converted and no `JRock/includes/rtf-md/` written — the
+  include is the `.rtf` itself, with nothing converted and no `JRock/includes/` written — the
   setting is the whole difference. No external program: the reader is the JDK's.
 - **`JRockDocxIncludeTest`** is the symmetric twin of that, for `.docx`: it includes a document
   through the real dialog with the *DOCX as Markdown text* filter and compares
-  `JRock/includes/docx-md/quarterly.docx.md` against the **whole expected Markdown** — headings from the
+  `JRock/includes/quarterly.docx.md` against the **whole expected Markdown** — headings from the
   styles (spelled both `Heading1` and `heading 2`), runs Word split mid-word joined back into
   words, a toggle switched off with `w:val="false"`, list markup that carries no bullet
   character at all, a hyperlink, a table with a bold header row, an umlaut, asterisks escaped.
   The document is written by hand (`FormattedDocx`), zip entries and all. A second test renames
   a text file to `.docx` and checks the log says there is no `word/document.xml` in it and that
-  no `JRock/includes/docx-md/` is created.
+  no Markdown is written.
 - **`JRockAutomationDocTest`** drives the two calls the doc inventory's first pass is made of,
   from a thread of its own as an automation would: `automationInclude(pdf, "pdfhtml")`, answering
   **Yes** to the create question and checking every page image arrived with its `![...](<path>)`
   reference, and `automationExportDocx`, checking the DOCX carries the very PNG the reference
   named. Nothing is sent.
 - **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
-  sheet* and compares both CSVs under `JRock/includes/xlsx-csv/` **whole**: shared, rich and inline
+  sheet* and compares both CSVs under `JRock/includes/` **whole**: shared, rich and inline
   strings, a comma and quotes quoted, a line break kept inside its field, dates in a built-in and
   a custom format as ISO, a time alone, a number whose format has a `d` only in quoted text left a
   number, a boolean, an error, formula values, and a skipped column and row kept in place. The
@@ -2531,7 +2654,7 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   where the include then points: the copy line comes *before* the include it was made for, the
   copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what
   the hash is registered against. With the setting off it checks the other half: nothing is
-  copied and no `JRock/includes/` is created.
+  copied and the folder is not created at all.
   A third test includes two *different* files both called `photo.png` and checks that neither is
   lost (the second becomes `photo-2.png`), and that the same file again is not copied a third time.
   A fourth includes a 3000 × 2000 PNG and measures the copy: at the default **Images DPI** of 150

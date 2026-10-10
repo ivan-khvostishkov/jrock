@@ -139,8 +139,8 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
     /** Opens Configure, picks the DPI from the dropdown, and applies it. */
     private void chooseDpiInConfigureDialog() {
         JOptionPaneFixture dialog = openConfigure();
-        // On the File types tab, which has to be showing for its rows to be found.
-        dialog.tabbedPane("configureTabs").selectTab("File types");
+        // On the Files tab, which has to be showing for its rows to be found.
+        dialog.tabbedPane("configureTabs").selectTab("Files");
         // Found by its name: the dialog has several dropdowns, and their order is
         // the layout's business.
         select(dialog.comboBox(new GenericTypeMatcher<JComboBox>(JComboBox.class) {
