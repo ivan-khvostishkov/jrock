@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.9.2";
+    private static final String VERSION = "2.10.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -795,6 +795,11 @@ public class JRock {
     // absent is true (see includeFile).
     private static final String CONFIG_PROCESSED_COPIES = "include-processed-copies";
     private static volatile boolean includeProcessedCopies = true;
+    // Whether a send stops when a file it includes cannot be had - gone, unreadable, or
+    // never recorded in the log - rather than sending that token as text with a
+    // warning: true or false, and absent is true (see verifyIncludes).
+    private static final String CONFIG_MISSING_STOPS_SEND = "include-missing-stops-send";
+    private static volatile boolean missingIncludeStopsSend = true;
     // Whether a prompt answered before is answered again from JRock/messages/ rather
     // than by Bedrock: true or false, and absent is true (see the Local prompt cache).
     private static final String CONFIG_PROMPT_CACHE = "local-prompt-cache";
@@ -853,6 +858,8 @@ public class JRock {
             includeMarkdownRefs = "true".equalsIgnoreCase(trimmed(settings.get(CONFIG_MARKDOWN_REFS)));
             includeProcessedCopies =
                     !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROCESSED_COPIES)));
+            missingIncludeStopsSend =
+                    !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_MISSING_STOPS_SEND)));
             promptCacheOn = !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROMPT_CACHE)));
             settingsSource = "JRock/jrock-config.txt";
         }
@@ -914,6 +921,7 @@ public class JRock {
         appendSetting(text, CONFIG_RTF_MODE, rtfIncludeMode);
         appendSetting(text, CONFIG_MARKDOWN_REFS, String.valueOf(includeMarkdownRefs));
         appendSetting(text, CONFIG_PROCESSED_COPIES, String.valueOf(includeProcessedCopies));
+        appendSetting(text, CONFIG_MISSING_STOPS_SEND, String.valueOf(missingIncludeStopsSend));
         appendSetting(text, CONFIG_PROMPT_CACHE, String.valueOf(promptCacheOn));
         atomicWriteQuietly(configFile(), text.toString());
     }
@@ -2216,22 +2224,34 @@ public class JRock {
 
             // Verify all @img/@txt includes - in the new prompt AND in prior human
             // turns (extend mode re-sends those, expanding their tokens too). A file
-            // that cannot be had is a warning, right after the [HUMAN OPERATOR]
-            // message, and its token goes as text; a file that has changed stops the
-            // send.
-            java.util.Set<String> includeWarnings = new java.util.LinkedHashSet<>();
-            String includeError = verifyIncludes(prompt, includeWarnings);
+            // that has changed stops the send. One that cannot be had stops it too,
+            // with "Stop a send on a missing include" on in Configure (the default);
+            // off, it is a warning right after the [HUMAN OPERATOR] message, and its
+            // token goes as text.
+            java.util.Set<String> missing = new java.util.LinkedHashSet<>();
+            String includeError = verifyIncludes(prompt, missing);
             if (includeError == null) {
                 for (String[] turn : history) {
                     if (ROLE_HUMAN.equals(turn[0])) {
-                        includeError = verifyIncludes(turn[1], includeWarnings);
+                        includeError = verifyIncludes(turn[1], missing);
                         if (includeError != null) break;
                     }
                 }
             }
-            if (includeError == null && !includeWarnings.isEmpty()) {
-                for (String warning : includeWarnings) log.gray(warning);
-                log.gray("");
+            if (includeError == null && !missing.isEmpty()) {
+                if (missingIncludeStopsSend) {
+                    for (String problem : missing) log.gray("Missing include: " + problem + ".");
+                    includeError = "Not sent: " + fmtNum(missing.size()) + " included "
+                            + (missing.size() == 1 ? "file is" : "files are") + " missing. "
+                            + "Include them again with Ctrl+I, or turn off \""
+                            + MISSING_STOPS_SEND_LABEL + "\" in Configure to send their "
+                            + "tokens as text.";
+                } else {
+                    for (String problem : missing) {
+                        log.gray("Warning: " + problem + "; sent as text.");
+                    }
+                    log.gray("");
+                }
             }
             if (includeError != null) {
                 log.gray(includeError);
@@ -4012,6 +4032,14 @@ public class JRock {
                 + "included files - gets that answer again, with no call to Bedrock. Every "
                 + "file in JRock/messages/ counts: delete the ones whose answers should not "
                 + "be reused. Not for a prompt that goes with History's earlier messages.");
+        javax.swing.JCheckBox missingF = new javax.swing.JCheckBox(
+                MISSING_STOPS_SEND_LABEL, missingIncludeStopsSend);
+        missingF.setName("missingIncludeStopsSend");
+        missingF.setFont(missingF.getFont().deriveFont(java.awt.Font.PLAIN));
+        missingF.setToolTipText("An included file that is gone, cannot be read or is not "
+                + "recorded in the log stops the send, with each one named in the log. "
+                + "Off: the send goes, with a warning, and that file's token is sent as "
+                + "text.");
         javax.swing.JCheckBox copiesF = new javax.swing.JCheckBox(
                 "Include from processed copies in JRock/includes/", includeProcessedCopies);
         copiesF.setName("includeProcessedCopies");
@@ -4071,6 +4099,7 @@ public class JRock {
         addRow(general, c, row++, "History limit:", historyRow);
         addRow(general, c, row++, "", refsF);
         addRow(general, c, row++, "", copiesF);
+        addRow(general, c, row++, "", missingF);
         addRow(general, c, row++, "", cacheF);
 
         javax.swing.JPanel fileTypes = new javax.swing.JPanel(new java.awt.GridBagLayout());
@@ -4224,6 +4253,7 @@ public class JRock {
         rtfIncludeMode = rtfModeF.getSelectedIndex() == 1 ? RTF_AS_TEXT : RTF_AS_MARKDOWN;
         includeMarkdownRefs = refsF.isSelected();
         includeProcessedCopies = copiesF.isSelected();
+        missingIncludeStopsSend = missingF.isSelected();
         // Off empties the table, and on again builds it afresh from the folder - both
         // in the session report that applying this dialog runs (see syncPromptCache).
         promptCacheOn = cacheF.isSelected();
@@ -8681,8 +8711,10 @@ public class JRock {
                 + " of " + fmtNum(kinds.size()) + " referred to"
                 + (missing > 0 ? ", " + fmtNum(missing) + " with a missing file" : "")
                 + (unknown > 0 ? ", " + fmtNum(unknown) + " not recorded in the log" : "")
-                + (missing + unknown > 0
-                   ? " - a send warns about each one and sends its token as text" : ""));
+                + (missing + unknown == 0 ? ""
+                   : missingIncludeStopsSend
+                   ? " - a send stops until each one is included again"
+                   : " - a send warns about each one and sends its token as text"));
     }
 
     // An image's dimensions, read straight out of its header.
@@ -13021,13 +13053,13 @@ public class JRock {
 
     // ---- Multimodal include verification & content assembly ----------------
     // Checks every @img/@txt token in the prompt. One whose file cannot be had - a hash
-    // no include in the log names, a file that is gone or cannot be read - adds a
-    // warning to warnings, and buildParts sends that token as the text it is: the rest
-    // of the conversation still goes, and the model is told no less than the prompt
-    // says. A file that is there but no longer hashes to its token is an error, the
-    // first one found returned, and the send stops: it is a different file now, and
-    // re-including it is the fix. Null when the send can go ahead.
-    private static String verifyIncludes(String prompt, java.util.Set<String> warnings) {
+    // no include in the log names, a file that is gone or cannot be read - adds what is
+    // wrong to missing, and the send decides: it stops, or (with "Stop a send on a
+    // missing include" off) buildParts sends that token as the text it is, the rest of
+    // the conversation still going. A file that is there but no longer hashes to its
+    // token is an error, the first one found returned, and the send stops: it is a
+    // different file now, and re-including it is the fix. Null when nothing has changed.
+    private static String verifyIncludes(String prompt, java.util.Set<String> missing) {
         java.util.regex.Matcher m = INCLUDE_TOKEN.matcher(prompt);
         while (m.find()) {
             String kind = m.group(1);
@@ -13035,20 +13067,16 @@ public class JRock {
             String token = "@" + kind + " " + hash;
             Path path = INCLUDES.get(hash);
             if (path == null) {
-                warnings.add("Warning: " + token + " is not known - no include of it is "
-                        + "recorded in the log; sent as text. Re-include the file with Ctrl+I "
-                        + "to send the file itself.");
+                missing.add(token + " is not known - no include of it is recorded in the log");
                 continue;
             }
             if (!includeAvailable(hash)) {
-                warnings.add("Warning: included file is missing: " + path + " (" + token
-                        + "); sent as text.");
+                missing.add("included file is missing: " + path + " (" + token + ")");
                 continue;
             }
             String current = hashFile(path);
             if (current == null) {
-                warnings.add("Warning: could not read included file: " + path + " ("
-                        + token + "); sent as text.");
+                missing.add("could not read included file: " + path + " (" + token + ")");
                 continue;
             }
             if (!current.equals(hash)) {
@@ -13058,6 +13086,9 @@ public class JRock {
         }
         return null;
     }
+
+    // The Configure checkbox, which the send's refusal names so it can be found.
+    private static final String MISSING_STOPS_SEND_LABEL = "Stop a send on a missing include";
 
     // Whether the file behind a hash can be sent: known, and there to be read.
     private static boolean includeAvailable(String hash) {

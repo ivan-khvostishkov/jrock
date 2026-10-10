@@ -131,8 +131,7 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .contains("Includes reloaded from the log: 0 of 1 referred to, 1 not "
-                        + "recorded in the log - a send warns about each one and sends its "
-                        + "token as text");
+                        + "recorded in the log - a send stops until each one is included again");
         assertThat(includes()).describedAs("the includes, which gained nothing").isEmpty();
     }
 
@@ -151,8 +150,7 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .contains("Includes reloaded from the log: 0 of 1 referred to, 1 with a "
-                        + "missing file - a send warns about each one and sends its token "
-                        + "as text");
+                        + "missing file - a send stops until each one is included again");
         // Registered all the same: the mapping is what the log recorded, and the send
         // will say the file is missing rather than that the hash is unknown.
         assertThat(includes()).describedAs("the includes after reloading them")
@@ -183,7 +181,38 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
     }
 
     @Test
-    @DisplayName("a send warns about a missing file and sends its token as text")
+    @DisplayName("by default a send stops on a missing file, naming it and the setting")
+    void stopsTheSendOnAMissingFile() throws Exception {
+        awaitReadyCount(1);
+        assertThat(field("missingIncludeStopsSend").get(null))
+                .describedAs("the setting, on by default").isEqualTo(true);
+
+        Path png = png("one", "IMG_4002.png", 120, 80);
+        include(IMAGE_FILTER, png, "Image: 120 x 80");
+        String hash = includes().keySet().iterator().next();
+        Files.delete(png);
+
+        // Refused before anything goes out, so no key or network is needed.
+        press(window.button(new org.assertj.swing.core.GenericTypeMatcher<javax.swing.JButton>(
+                javax.swing.JButton.class) {
+            @Override
+            protected boolean isMatching(javax.swing.JButton button) {
+                return button.getText() != null && button.getText().startsWith("Send");
+            }
+        }));
+        awaitLogLine("Not sent: ", RELOAD_TIMEOUT_SECONDS);
+
+        assertThat(logLines()).describedAs("the log's lines")
+                .contains("Missing include: included file is missing: " + png
+                        + " (@img " + hash + ").")
+                .contains("Not sent: 1 included file is missing. Include them again with "
+                        + "Ctrl+I, or turn off \"Stop a send on a missing include\" in "
+                        + "Configure to send their tokens as text.");
+        assertThat(logPane().text()).doesNotContain("Calling ");
+    }
+
+    @Test
+    @DisplayName("what a send is told about a missing file, which buildParts sends as text")
     void sendsTheTokenOfAMissingFileAsText() throws Exception {
         awaitReadyCount(1);
 
@@ -197,12 +226,9 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
         Method verify = method("verifyIncludes", String.class, Set.class);
         assertThat(verify.invoke(null, prompt, warnings))
                 .describedAs("the error that would stop the send").isNull();
-        assertThat(warnings).describedAs("the warnings for the log").containsExactly(
-                "Warning: included file is missing: " + png + " (@img " + hash
-                        + "); sent as text.",
-                "Warning: @txt 0123456789ab is not known - no include of it is recorded in "
-                        + "the log; sent as text. Re-include the file with Ctrl+I to send "
-                        + "the file itself.");
+        assertThat(warnings).describedAs("what is missing").containsExactly(
+                "included file is missing: " + png + " (@img " + hash + ")",
+                "@txt 0123456789ab is not known - no include of it is recorded in the log");
 
         // Neither token is expanded: the prompt goes as the one text it is.
         List<?> parts = (List<?>) method("buildParts", String.class).invoke(null, prompt);
