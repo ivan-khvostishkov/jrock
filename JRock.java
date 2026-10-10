@@ -417,7 +417,7 @@ public class JRock {
         // The Standard-tier, In-Region price per 1M tokens as { input, output }, as the
         // card states it for this region and a request of inputTokens input tokens (-1
         // when unknown) - or null when it states none, which is the default: JRock logs
-        // a price only where a card gives one (see priceLines).
+        // a price only where a card gives one (see costLine).
         double[] pricePer1M(String region, long inputTokens) { return null; }
 
         // Whether this model exposes Chat Completions on mantle (i.e. usable by
@@ -1976,7 +1976,7 @@ public class JRock {
         } else {
             log.gray("New log file created: JRock/jrock-log.txt");
         }
-        // The running total of every cost line in the log (see priceLines): all the
+        // The running total of every cost line in the log (see costLine): all the
         // sessions since it was last cleared, at the prices their model cards state.
         // Requests to a model whose card has no price are not in it, and the line says
         // how many requests it does cover.
@@ -14762,7 +14762,7 @@ public class JRock {
                 + "\nOutput text symbols: " + outputSymbols
                 + "\nInput tokens:   " + tokenStr(inputTokens)
                 + "\nOutput tokens:  " + tokenStr(outputTokens)
-                + priceLines(inputTokens, outputTokens);
+                + costLine(inputTokens, outputTokens);
 
         return new String[] { "1", reply, details };
     }
@@ -14786,15 +14786,17 @@ public class JRock {
         return v < 0 ? "(not reported)" : Long.toString(v);
     }
 
-    // The price lines of the stats block: the configured model's price in this region,
-    // as its model card states it (see BedrockModelCard.pricePer1M), and this exchange
-    // costed at it. Nothing at all when the card states no price for it - an unknown
-    // model, a region the card has no row for, a model whose card points elsewhere for
-    // its prices - because a figure in dollars is read as a bill, and a guess is not one.
+    // The cost line of the stats block: what this one exchange cost, at the price the
+    // configured model's card states for this region (see BedrockModelCard.pricePer1M).
     //
-    // No counts from the API means nothing to multiply: the price line still goes out,
-    // the cost line does not.
-    private static String priceLines(long inputTokens, long outputTokens) {
+    // Nothing at all when that cost cannot be worked out - a card with no price for the
+    // model, a region it has no row for, an unknown model, or a reply that came back
+    // without token counts to multiply. A figure in dollars is read as a bill, and a
+    // guess is not one; the rates themselves are the card's to state, and a line
+    // repeating them per request is one line more than the question "what did that
+    // cost?" needs.
+    private static String costLine(long inputTokens, long outputTokens) {
+        if (inputTokens < 0 || outputTokens < 0) return "";
         BedrockModelCard card = exactCard(MODEL_ID);   // a vendor's generic card has none
         // No region, no price. The cards price per AWS region, so an endpoint that names
         // none has no row to read - and a card that answers a price for any region it is
@@ -14803,16 +14805,13 @@ public class JRock {
         double[] price = (card == null || REGION == null)
                 ? null : card.pricePer1M(REGION, inputTokens);
         if (price == null) return "";
-        String lines = "\nPrice (model card, " + REGION + "): $" + rate(price[0])
-                + " per 1M input tokens, $" + rate(price[1]) + " per 1M output";
-        if (inputTokens < 0 || outputTokens < 0) return lines;
         double in = inputTokens * price[0] / 1000000.0;
         double out = outputTokens * price[1] / 1000000.0;
         // One shape for all three figures, chosen from the total: a sum whose parts are
         // written to different precisions is harder to check than one that is simply
         // too precise at the low end.
         String shape = shapeFor(in + out);
-        return lines + "\n" + COST_PREFIX + "in $" + usd(in, shape) + " + out $"
+        return "\n" + COST_PREFIX + "in $" + usd(in, shape) + " + out $"
                 + usd(out, shape) + " = $" + usd(in + out, shape);
     }
 
@@ -14844,12 +14843,6 @@ public class JRock {
             }
         }
         return new double[] { sum, count };
-    }
-
-    // A rate per million as the card writes it, without the trailing zeros that make
-    // a round number look measured: 2.5, 1.25, 0.103.
-    private static String rate(double perMillion) {
-        return java.math.BigDecimal.valueOf(perMillion).stripTrailingZeros().toPlainString();
     }
 
     // How many digits an amount of this size deserves: cents at a dollar, hundredths of

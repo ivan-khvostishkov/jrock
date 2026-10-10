@@ -433,7 +433,7 @@ Built-in cards include:
 The prices are the Standard-tier, In-Region rates the model cards state — Voxtral's card points
 to the Bedrock pricing page, whose regional rows are copied instead — and they are what the
 [stats block](#conversation-log) costs a request at. A card without a price, a region it has no
-row for, or a model with no card at all gets **no price line**: a figure in dollars reads as a
+row for, or a model with no card at all gets **no cost line**: a figure in dollars reads as a
 bill, and a guess is not one.
 
 > Anthropic Claude models are served on mantle via the Anthropic **Messages API**
@@ -482,15 +482,19 @@ bill, and a guess is not one.
   can come back empty — and a key that silently does nothing is the one thing this checkbox
   exists to rule out.
 - **Stats** per response: input/output text symbols, and input/output tokens (from the API's
-  `usage`) — and, when the model's [card](#models) states a price for the region, that
-  price and this exchange costed at it:
+  `usage`) — and **what the request cost**, when that can be worked out: the token counts at
+  the price the model's [card](#models) states for the region.
 
   ```
-  Price (model card, us-west-2): $1.25 per 1M input tokens, $2.5 per 1M output
   Cost (model card): in $0.0031 + out $0.0018 = $0.0049
   ```
 
-  Nothing about price otherwise. Without `usage` counts the cost line is left out.
+  One line, and **nothing at all** when the cost is unknown — a card with no price for the
+  model, a region it has no row for, a model there is no card for, or a reply that came back
+  without `usage` counts to multiply. The rates themselves are not reprinted per request:
+  they belong to the card, and the question a stats block answers is what this one cost. The
+  smaller the amount, the more digits it gets — down to a hundredth of a cent — so a cheap
+  request never reads as $0.00.
 - **Past costs at startup.** The session report adds up every cost line already in
   `JRock/jrock-log.txt` and says so in one line — `Past costs in this log: $1.2345 over 87
   priced requests` — which is every session since the log was last cleared. **Clear log**
@@ -2004,7 +2008,7 @@ the one they are looking for.
   `endpoint$`, so it survives a restart. The model list is read from `/models` beside it, and a
   [model card](#models) that states its own path — the `/openai/v1` models — keeps that path on
   this host. Prices come from the card for the **region named in the host**, so a host that
-  names none simply has no price line, the same silence a card gives for a region it has no
+  names none simply has no cost line, the same silence a card gives for a region it has no
   row for.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
   `JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
@@ -2839,13 +2843,15 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   replaced by its length with the fields beside it intact, every blob in one response and not
   just the first, prose and short values and field names left alone, a truncated response kept
   whole, and the whole pass together — reply out, blobs out, id shortened. No window.
-- **`JRockPricingTest`** checks the stats block's price lines against the cards: Grok 4.3 at
+- **`JRockPricingTest`** checks the stats block's cost line against the cards, at token counts
+  that divide exactly, so the dollars it asserts are each card's rate scaled: Grok 4.3 at
   $1.25 / $2.50 (and GovCloud's own rate), GPT-6 Astra doubling past 272K input tokens and
   unpriced outside its two mantle regions, GPT-5.4 the same way with GovCloud priced only up to
-  272K, Voxtral Small by region and unpriced where the
-  pricing page has no row, and **no line at all** for a model whose card states no price. Then
-  the startup total: every cost line in a log added up, and a line that only looks like one
-  left out. No window.
+  272K, Voxtral Small by region — a tenth of a cent apart, which is where the extra digits a
+  small amount gets earn their keep — and unpriced where the pricing page has no row. Then
+  **no line at all** for a model whose card states no price, for one there is no card for, and
+  for a reply that reported no token counts. And the startup total: every cost line in a log
+  added up, and a line that only looks like one left out. No window.
 - **`JRockNarrationTextTest`** checks what [**Narrate selected text**](#narrate-windows) would
   hand the voice: headings, emphasis, list and quote markers, table pipes and include tokens
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
