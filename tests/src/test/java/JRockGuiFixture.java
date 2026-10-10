@@ -93,7 +93,7 @@ abstract class JRockGuiFixture {
             "workingDir", "promptsDir", "promptsDirNote", "apiKey", "REGION",
             "regionSource", "MODEL_ID", "availableModels", "imagesDpi", "autoBackupLog",
             "pdfIncludeMode", "rtfIncludeMode", "includeMarkdownRefs", "includeProcessedCopies",
-            "promptCacheOn");
+            "missingIncludeStopsSend", "promptCacheOn");
 
     private final Map<String, Object> savedConfig = new LinkedHashMap<>();
 

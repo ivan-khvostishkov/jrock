@@ -1015,7 +1015,7 @@ newest thing there is, and after a restart its recovered tokens are usually the 
 doing this. The session report gets one line for it, and none when nothing refers to an include:
 
 ```
-Includes reloaded from the log: 1 of 3 referred to, 1 with a missing file, 1 not recorded in the log - a send warns about each one and sends its token as text
+Includes reloaded from the log: 1 of 3 referred to, 1 with a missing file, 1 not recorded in the log - a send stops until each one is included again
 ```
 
 **Nothing is hashed here**, deliberately. Whether each file is still the file it was is exactly
@@ -1023,14 +1023,24 @@ what the send checks, one hash per token, and the answer can change between the 
 anyway — so starting is cheap on a folder of large attachments, and a file that has been edited
 since is caught at the only moment that matters.
 
-**A file that is still missing does not stop the send.** A token whose file is gone, cannot be
-read, or has no include line in the log is a `Warning:` in the log, one per file, right after your
-message, and goes to the model as the text it is — `@img 1f3a9c0b7e42` rather than the picture —
-while everything else is sent as usual:
+**A file that is still missing stops the send**, with **Stop a send on a missing include** on in
+[Configure](#configure-dialog-top-left-button) — the default. A token whose file is gone, cannot be
+read, or has no include line in the log is named in the log, one line per file, right after your
+message, and nothing goes to Bedrock:
+
+```
+Missing include: included file is missing: C:\demo\JRock\includes\rtf-md\quarterly.rtf.md (@txt 8b52e0ad91cc).
+Missing include: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the log.
+Not sent: 2 included files are missing. Include them again with Ctrl+I, or turn off "Stop a send on a missing include" in Configure to send their tokens as text.
+```
+
+Turned **off**, the same files are a `Warning:` each and the send goes on: each token goes to the
+model as the text it is — `@img 1f3a9c0b7e42` rather than the picture — while everything else is
+sent as usual:
 
 ```
 Warning: included file is missing: C:\demo\JRock\includes\rtf-md\quarterly.rtf.md (@txt 8b52e0ad91cc); sent as text.
-Warning: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the log; sent as text. Re-include the file with Ctrl+I to send the file itself.
+Warning: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the log; sent as text.
 ```
 
 A file that is there but has **changed** since it was included still stops the send: it is a
@@ -1188,9 +1198,9 @@ XML parser, so this works with nothing installed and in the browser too.
   included.
 
 On send, every referenced include is verified (known hash **and** the file still hashes the
-same, i.e. unchanged). A file that has changed stops the send, with the reason logged; one that is
-missing or unknown is a warning, and its token is sent as text
-([details](#includes-that-outlive-the-session)). Valid includes are expanded into a **multi-part message**: text segments become text parts, `@img`
+same, i.e. unchanged). A file that has changed stops the send, with the reason logged, and so
+does one that is missing or unknown — or, with **Stop a send on a missing include** off, that one
+is a warning and its token is sent as text ([details](#includes-that-outlive-the-session)). Valid includes are expanded into a **multi-part message**: text segments become text parts, `@img`
 becomes a base64 image part, `@txt` becomes a text part with the file's contents, `@audio`
 becomes a base64 [`input_audio` part](#what-an-audio-include-is-sent-as). In Extend mode,
 includes in prior turns are expanded too.
@@ -1857,6 +1867,10 @@ browser.
   from a copy under `JRock/includes/`, an image downscaled to **Images DPI** on the way; off, a
   conversion that has to write under `JRock/includes/` is refused (see
   [Includes that outlive the session](#includes-that-outlive-the-session)).
+- **Stop a send on a missing include** — on by default: an included file that is gone, cannot be
+  read or is not recorded in the log stops the send, each one named in the log; off, the send goes
+  with a warning, and that file's token is sent as text (see
+  [Includes that outlive the session](#includes-that-outlive-the-session)).
 - **Local prompt cache** — on by default: a prompt identical to one answered before is
   answered from that answer, and Bedrock is not called (see
   [**Local prompt cache**](#local-prompt-cache)).
@@ -1880,9 +1894,9 @@ browser.
   [Multimodal includes](#multimodal-includes-ctrli)). The browser offers page images only.
 - **Include RTF as** — *Markdown (converted)*, the default, or *Text as is (RTF markup)*.
 
-These two and the three on General above them are kept in `JRock/jrock-config.txt`, per folder,
+These two and the four on General above them are kept in `JRock/jrock-config.txt`, per folder,
 as `include-pdf-as$`, `include-rtf-as$`, `include-markdown-references$`,
-`include-processed-copies$` and `local-prompt-cache$`.
+`include-processed-copies$`, `include-missing-stops-send$` and `local-prompt-cache$`.
 
 **Audio & speech**
 
@@ -2538,8 +2552,10 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   the log as it was just loaded from disk. Three more tests cover what a
   log can say instead: a token no include line accounts for is counted rather than dropped, a file
   deleted since is reloaded *and* counted as missing, and a file included twice from two folders
-  is reloaded from where it was included **last**. One more checks the send: a missing file and
-  an unknown hash are each a warning, and the prompt goes as the one text part it is.
+  is reloaded from where it was included **last**. Two more check the send: by default, pressing
+  Send with an included file deleted stops it, naming the file and the setting, before anything is
+  called; and what a missing file and an unknown hash are reported as, with the prompt built as the
+  one text part it is when the setting is off.
 - **`JRockMarkdownExportTest`** takes the other direction, without a window: it exports a
   Markdown selection and checks each format against something other than itself. The RTF must be
   all ASCII, must read back through the JDK's **own `RTFEditorKit`** with its bold run, bullet
