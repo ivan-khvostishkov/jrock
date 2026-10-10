@@ -2276,10 +2276,24 @@ Three things are different in a tab, and the window says so rather than pretendi
 - **No audio file.** The browser renders the speech itself and hands back nothing but the name
   of the voice that read it, so there is no `JRock/wav/narration-...wav` to keep — and the
   dialog does not name one.
-- **A browser may refuse the first one.** Speech synthesis needs the page to have been
-  interacted with, and the tap that reached the menu is long over by the time Java calls back.
-  The page spends your first touch or key press on an empty utterance to open the door; if a
-  browser still refuses, the log says what it said — tap the page and press Narrate again.
+- **A browser speaks only for a page it has been used on**, and the tap that reached the menu
+  is long over by the time Java calls back. So the page opens the door on the way past: every
+  touch and every key press spends one utterance nobody can hear — a **space**, at volume
+  zero — until one of them is seen to *start*. The start event is the only proof a browser
+  gives that it accepts speech from the page; **no error is not proof.** A browser that has
+  not allowed it takes the text, raises the events and makes no sound at all, so JRock waits
+  for the start, and says so when it never comes: *"the browser took the text and said nothing
+  … tap the page once and press Narrate again"*, with `speaking`, `pending` and `paused` in
+  the line when it timed out instead.
+
+  On **iOS — which is every browser there, Safari, Chrome and Edge alike, all of them WebKit**
+  — three things matter. An *empty* utterance is dropped without a sound and without a start
+  event, so it opens nothing (hence the space). A `cancel()` immediately followed by a
+  `speak()` drops the new utterance silently and can leave the queue **paused**, which looks
+  exactly like speaking with no sound — so a cancel is only issued when something is really
+  going, and `resume()` follows every `speak()`. And the device's **silent switch and volume**
+  apply: a browser's own *Read aloud* and a video playing with sound both prove nothing here,
+  since those use the system voice and the media audio path, not the page's speech synthesiser.
 
 What is the same: the Markdown is read and not the markup, the language of the text picks the
 voice, *Stop narrating* stops it mid-word, the log names the voice that read it, and
