@@ -784,6 +784,148 @@
         }
       }
 
+      // --- Narration: the browser's own voice reads the selection out. ---
+      // On the desktop JRock starts PowerShell, plays the PCM it writes back on one
+      // chosen output device, and saves it as a WAV. None of that exists here: the
+      // browser speaks for itself, through whatever it already plays sound on, and hands
+      // back no audio at all. So the bridge is the two questions that are left - which
+      // voices are there, and please read this - plus a stop.
+      //
+      //   voices()                   -> "1\n<name>" per line, or "0\n<reason>"
+      //   narrate(text, lang, names) -> "1\n<the voice that read it>" when it finished,
+      //                                 "1\nstopped" when it was cut short,
+      //                                 "0\n<reason>" when nothing was said.
+      //   stop()                     -> "1\n"
+      //
+      // narrate() does not return until the voice stops, which is what lets JRock's log
+      // say that it has; it runs on a thread of its own there, as a send does.
+
+      // Chrome answers getVoices() with an empty list until they have loaded and then
+      // fires one event. Asked once, awaited briefly, and not cached here - a phone can
+      // gain a voice while the tab is open, and the list costs nothing.
+      function speechVoices() {
+        return new Promise(function (resolve) {
+          if (!window.speechSynthesis) { resolve([]); return; }
+          var have = speechSynthesis.getVoices();
+          if (have && have.length) { resolve(have); return; }
+          var done = false;
+          var finish = function () {
+            if (done) return;
+            done = true;
+            resolve(speechSynthesis.getVoices() || []);
+          };
+          speechSynthesis.addEventListener("voiceschanged", finish, { once: true });
+          setTimeout(finish, 2000);      // some browsers never fire it at all
+        });
+      }
+
+      // "Narrate with" as JRock means it: a comma-separated list of voices for the
+      // language of the text to pick between. A named voice that speaks the language
+      // wins; then any voice that speaks it, because a voice reading a language it was
+      // not built for makes gibberish; then the first voice named; then null, which
+      // leaves the browser its own default.
+      function pickVoice(voices, lang, names) {
+        var wanted = String(names || "").split(",").map(function (s) {
+          return s.trim().toLowerCase();
+        }).filter(function (s) { return s.length > 0; });
+        var want = String(lang || "").toLowerCase();
+        var speaks = function (v) {
+          return want && v.lang && v.lang.toLowerCase().indexOf(want) === 0;
+        };
+        var named = voices.filter(function (v) {
+          var n = String(v.name || "").toLowerCase();
+          return wanted.some(function (w) { return n === w || n.indexOf(w) >= 0; });
+        });
+        return named.filter(speaks)[0] || voices.filter(speaks)[0] || named[0] || null;
+      }
+
+      // Chrome refuses speechSynthesis until the page has been interacted with, and the
+      // tap that reached JRock's menu is long over by the time Java calls back here. So
+      // the first touch or key on this page spends an empty utterance to open the door,
+      // once, and nothing is heard of it.
+      var speechPrimed = false;
+      function primeSpeech() {
+        if (speechPrimed || !window.speechSynthesis) return;
+        speechPrimed = true;
+        try {
+          speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+          speechSynthesis.resume();
+        } catch (e) {
+          // Nothing to do about it here; narrate() reports what the browser says.
+        }
+      }
+      document.addEventListener("pointerdown", primeSpeech, { once: true, capture: true });
+      document.addEventListener("keydown", primeSpeech, { once: true, capture: true });
+
+      async function Java_JRock_browserNarrateVoices(lib) {
+        try {
+          if (!window.speechSynthesis) return "0\nthis browser has no speech synthesiser";
+          var voices = await speechVoices();
+          if (!voices.length) return "0\nthis browser offers no voices";
+          return "1\n" + voices.map(function (v) {
+            // The shape JRock's own list has: the name, then the language it reads, which
+            // is what tells two voices of one name apart on screen. JRock keeps the name
+            // alone when it stores the setting.
+            return v.name + "  (" + (v.lang || "?") + ")";
+          }).join("\n");
+        } catch (e) {
+          return "0\n" + reason(e);
+        }
+      }
+
+      async function Java_JRock_browserNarrate(lib, text, lang, names) {
+        var said = (text === null || text === undefined) ? "" : String(text);
+        if (!said.trim()) return "0\nthere was nothing to read out";
+        if (!window.speechSynthesis) return "0\nthis browser has no speech synthesiser";
+        try {
+          var voice = pickVoice(await speechVoices(), lang, names);
+          var utterance = new SpeechSynthesisUtterance(said);
+          if (voice) utterance.voice = voice;
+          if (lang) utterance.lang = voice ? voice.lang : String(lang);
+          speechSynthesis.cancel();     // one at a time, as JRock means it
+          var finished = new Promise(function (resolve) {
+            var settled = false;
+            var settle = function (reply) {
+              if (settled) return;
+              settled = true;
+              clearInterval(watchdog);
+              resolve(reply);
+            };
+            // A reading that is cancelled arrives here as an error, and is a stop:
+            // JRock has already said so, and says nothing twice.
+            utterance.onend = function () {
+              settle("1\n" + (voice ? voice.name : "the browser's default voice"));
+            };
+            utterance.onerror = function (e) {
+              var why = (e && e.error) ? String(e.error) : "the browser stopped speaking";
+              settle(why === "interrupted" || why === "canceled"
+                     ? "1\nstopped" : "0\n" + why);
+            };
+            // Chrome has been known to drop onend on a long utterance, and JRock's
+            // narration thread would then wait for a voice that has already finished.
+            // The queue itself is the second opinion: nothing speaking, nothing pending.
+            var watchdog = setInterval(function () {
+              if (!speechSynthesis.speaking && !speechSynthesis.pending) {
+                settle("1\n" + (voice ? voice.name : "the browser's default voice"));
+              }
+            }, 500);
+          });
+          speechSynthesis.speak(utterance);
+          return await finished;
+        } catch (e) {
+          return "0\n" + reason(e);
+        }
+      }
+
+      async function Java_JRock_browserNarrateStop(lib) {
+        try {
+          if (window.speechSynthesis) speechSynthesis.cancel();
+          return "1\n";
+        } catch (e) {
+          return "0\n" + reason(e);
+        }
+      }
+
       // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
       // From the button, or on its own once the jar is loaded when the address names
       // a folder (see autostartDir).
@@ -817,7 +959,10 @@
               Java_JRock_browserScaleImage: Java_JRock_browserScaleImage,
               Java_JRock_browserPdfOpen: Java_JRock_browserPdfOpen,
               Java_JRock_browserPdfRenderPage: Java_JRock_browserPdfRenderPage,
-              Java_JRock_browserPdfClose: Java_JRock_browserPdfClose
+              Java_JRock_browserPdfClose: Java_JRock_browserPdfClose,
+              Java_JRock_browserNarrateVoices: Java_JRock_browserNarrateVoices,
+              Java_JRock_browserNarrate: Java_JRock_browserNarrate,
+              Java_JRock_browserNarrateStop: Java_JRock_browserNarrateStop
             }
           });
 
