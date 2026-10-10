@@ -74,7 +74,8 @@ class JRockAutomationDocTest extends JRockGuiFixture {
                     .using(robot).yesButton());
             assertThat(included.get(60, TimeUnit.SECONDS)).isNull();
 
-            assertThat(workingDirectory().resolve("scan").resolve("page1.html")).isRegularFile();
+            assertThat(workingDirectory().resolve("scan.pdf.html").resolve("page1.html"))
+                    .isRegularFile();
             String prompt = JRock.automationPromptText();
             // Every page image with its reference above its token. Both pages of this PDF
             // have the same blank background, and an image already included is not

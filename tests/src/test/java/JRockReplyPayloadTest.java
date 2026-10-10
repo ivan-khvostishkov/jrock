@@ -91,7 +91,7 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
         reply = chatReply("\"mime_type\":\"image/png\"", png());
 
         send("Generate me an image of a cat");
-        awaitLogLine("Included @img ", REPLY_TIMEOUT_SECONDS);
+        awaitTheWholeExchange();
 
         // Saved where an include's own processed copy is saved, under the extension its
         // media type called for, byte for byte as it arrived.
@@ -102,14 +102,18 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
                 .isEqualTo(png());
 
         String name = saved.getFileName().toString();
-        String hash = hashOf(theLog(), "img");
+        String hash = hashOf(theReply(), "img");
 
         // In the answer: the reference above the token, the same two lines an include
         // puts in the prompt - which is what makes the reply exportable with the
-        // picture in it.
+        // picture in it. Read from the file JRock wrote the reply to, which holds it
+        // verbatim; the pane's own text comes back through an editor kit, with this
+        // platform's line endings put on it.
+        assertThat(theReply()).describedAs("the reply, as written to JRock/messages/")
+                .startsWith("![Image: " + IMAGE_WIDTH + " x " + IMAGE_HEIGHT + ", ")
+                .endsWith("](" + name + ")\n@img " + hash);
+
         assertThat(theLog()).describedAs("the log pane's text")
-                .contains("![Image: " + IMAGE_WIDTH + " x " + IMAGE_HEIGHT + ", ")
-                .contains("](" + name + ")\n@img " + hash)
                 // The include's own lines, which a restart reads the mapping back from.
                 .contains("Included @img " + hash + " from " + saved)
                 .contains("With a Markdown reference above it: ![Image: ")
@@ -133,7 +137,7 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
         reply = chatReply("\"mime_type\":\"image/png\"", png());
 
         send("Generate me an image of a cat");
-        awaitLogLine("Included @img ", REPLY_TIMEOUT_SECONDS);
+        awaitTheWholeExchange();
 
         String hash = hashOf(theLog(), "img");
         assertThat(theLog()).describedAs("the log pane's text")
@@ -152,7 +156,7 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
         reply = chatReply(null, wav());
 
         send("Say something");
-        awaitLogLine("Included @audio ", REPLY_TIMEOUT_SECONDS);
+        awaitTheWholeExchange();
 
         Path saved = onlyFileIn(includesDirectory());
         assertThat(saved.getFileName().toString()).describedAs("the saved file's name")
@@ -162,11 +166,13 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
 
         // A recording is not a picture: the reference has no "!" on it, and the line
         // about the file is the one a WAV header can be read into.
-        String hash = hashOf(theLog(), "audio");
+        String hash = hashOf(theReply(), "audio");
+        assertThat(theReply()).describedAs("the reply, as written to JRock/messages/")
+                .startsWith("[Audio: ")
+                .endsWith("](" + saved.getFileName() + ")\n@audio " + hash);
         assertThat(theLog()).describedAs("the log pane's text")
                 .contains("[Audio: ")
                 .doesNotContain("![Audio: ")
-                .contains("](" + saved.getFileName() + ")\n@audio " + hash)
                 .contains("8 kHz");
     }
 
@@ -179,9 +185,24 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
                 + "\"usage\":{\"total_tokens\":3}}").getBytes(StandardCharsets.UTF_8);
 
         send("Anything?");
-        awaitLogLine("(no text in the reply; see the raw response below)", REPLY_TIMEOUT_SECONDS);
+        awaitTheWholeExchange();
 
+        assertThat(theReply()).describedAs("the reply, as written to JRock/messages/")
+                .isEqualTo("(no text in the reply; see the raw response below)");
         assertThat(includesDirectory()).describedAs("JRock/includes/").doesNotExist();
+    }
+
+    /**
+     * Waits for the end of the exchange, which is the stats block: the last thing a send
+     * logs.
+     * <p>
+     * Not the include's own line, however much more to the point it reads. That one is
+     * written while the reply is still being assembled, on the send's worker thread - so
+     * a test that waited for it could look at the answer before there was one, and did:
+     * it found no reply file at all on a loaded machine.
+     */
+    private void awaitTheWholeExchange() {
+        awaitLogLine("--- stats ---", REPLY_TIMEOUT_SECONDS);
     }
 
     /** Puts the prompt in the window and presses Send, which is what Ctrl+Enter does. */
@@ -224,6 +245,25 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
 
     private Path includesDirectory() {
         return workingDirectory().resolve("JRock").resolve("includes");
+    }
+
+    /**
+     * The reply as JRock wrote it, read from its own file under {@code JRock/messages/}.
+     * <p>
+     * That file holds the answer verbatim - the same string the log pane was given, in
+     * UTF-8, with nothing normalized - which is what makes it the thing to assert two
+     * adjacent lines against.
+     */
+    private String theReply() throws IOException {
+        Path messages = workingDirectory().resolve("JRock").resolve("messages");
+        try (java.util.stream.Stream<Path> files = Files.list(messages)) {
+            Path assistant = files
+                    .filter(p -> p.getFileName().toString().endsWith("-assistant.txt"))
+                    .max(java.util.Comparator.naturalOrder())   // newest: the name is its time
+                    .orElseThrow(() -> new AssertionError(
+                            "no -assistant.txt under " + messages + ", so no reply was logged"));
+            return new String(Files.readAllBytes(assistant), StandardCharsets.UTF_8);
+        }
     }
 
     /** The one file the reply saved, the directory having held nothing before it. */

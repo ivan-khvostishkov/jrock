@@ -33,7 +33,7 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;
 
     @Test
-    @DisplayName("a DOCX included as Markdown is converted, written to docx-md/ and tagged @txt")
+    @DisplayName("a DOCX included as Markdown is converted, written beside the copies and tagged @txt")
     void convertsADocxToMarkdownAndIncludesTheMarkdown() throws Exception {
         awaitReadyCount(1);
 
@@ -49,9 +49,9 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
                 .contains("Inserted 1 new @txt token(s) for quarterly.docx.");
 
         // 2. The Markdown landed where the README says it does, named after the document.
-        Path markdown = workingDirectory().resolve("JRock").resolve("includes").resolve("docx-md")
+        Path markdown = workingDirectory().resolve("JRock").resolve("includes")
                 .resolve("quarterly.docx.md");
-        assertThat(markdown).describedAs("the Markdown under JRock/includes/docx-md/").exists();
+        assertThat(markdown).describedAs("the Markdown under JRock/includes/").exists();
 
         // 3. And it is the Markdown the document means: headings from the styles, bold
         //    and italic as markup, the numbered list as a list, the table as a table,
@@ -88,8 +88,9 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .contains("Could not read DOCX renamed.docx: no word/document.xml inside it");
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
-        assertThat(workingDirectory().resolve("JRock").resolve("includes").resolve("docx-md"))
-                .describedAs("JRock/includes/docx-md/, which nothing should have created").doesNotExist();
+        assertThat(workingDirectory().resolve("JRock").resolve("includes")
+                .resolve("renamed.docx.md"))
+                .describedAs("the Markdown, which nothing should have written").doesNotExist();
     }
 
     @Test
@@ -98,7 +99,7 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
         awaitReadyCount(1);
         Path docx = FormattedDocx.write(workingDirectory().resolve("quarterly.docx"));
 
-        // Converting means writing the Markdown under JRock/includes/docx-md/, which is exactly
+        // Converting means writing the Markdown under JRock/includes/, which is exactly
         // what "Include from processed copies in JRock/includes/" off rules out.
         chooseInTheIncludeDialog(DOCX_FILTER, false, docx);
         press(JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot)
@@ -109,7 +110,8 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
                 .contains("\"Include from processed copies in JRock/includes/\" is off. Turn it on "
                         + "in Configure to include it.");
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
-        assertThat(workingDirectory().resolve("JRock").resolve("includes").resolve("docx-md")).doesNotExist();
+        assertThat(workingDirectory().resolve("JRock").resolve("includes")
+                .resolve("quarterly.docx.md")).doesNotExist();
     }
 
     /** The paths JRock currently has registered as includes. */

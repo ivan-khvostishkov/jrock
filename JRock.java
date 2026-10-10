@@ -9967,8 +9967,9 @@ public class JRock {
         PdfEngine engine = pdf();
         if (!engine.ready(frame, log, "convert PDFs")) return;
 
-        // One folder per engine, and the PDF's whole name kept as the prefix, so pages
-        // from different PDFs - or from the two engines - don't collide.
+        // Beside the copies, with the PDF's whole name and the engine's tag kept in each
+        // page's name, so pages from different PDFs - or from the two engines - can't
+        // collide in the one flat folder.
         Path outDir = includesDir();
         try {
             Files.createDirectories(outDir);

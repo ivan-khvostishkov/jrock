@@ -35,7 +35,7 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
     private static final long CONVERSION_TIMEOUT_SECONDS = 30;
 
     @Test
-    @DisplayName("an RTF included as Markdown is converted, written to rtf-md/ and tagged @txt")
+    @DisplayName("an RTF included as Markdown is converted, written beside the copies and tagged @txt")
     void convertsAnRtfToMarkdownAndIncludesTheMarkdown() throws Exception {
         awaitReadyCount(1);
 
@@ -51,9 +51,9 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
                 .contains("Inserted 1 new @txt token(s) for quarterly.rtf.");
 
         // 2. The Markdown landed where the README says it does, named after the RTF.
-        Path markdown = workingDirectory().resolve("JRock").resolve("includes").resolve("rtf-md")
+        Path markdown = workingDirectory().resolve("JRock").resolve("includes")
                 .resolve("quarterly.rtf.md");
-        assertThat(markdown).describedAs("the Markdown under JRock/includes/rtf-md/").exists();
+        assertThat(markdown).describedAs("the Markdown under JRock/includes/").exists();
 
         // 3. And it is the Markdown the document means: headings from the font sizes,
         //    bold and italic as markup, the Word bullets as a list, the asterisks
@@ -93,8 +93,9 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
                 .describedAs("the log pane's text")
                 .contains("No text found in renamed.rtf; nothing included.");
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
-        assertThat(workingDirectory().resolve("JRock").resolve("includes").resolve("rtf-md"))
-                .describedAs("JRock/includes/rtf-md/, which nothing should have created").doesNotExist();
+        assertThat(workingDirectory().resolve("JRock").resolve("includes")
+                .resolve("renamed.rtf.md"))
+                .describedAs("the Markdown, which nothing should have written").doesNotExist();
     }
 
     @Test
@@ -119,8 +120,9 @@ class JRockRtfIncludeTest extends JRockGuiFixture {
         //    and nothing was written.
         assertThat(includedPaths()).describedAs("the files registered as includes")
                 .containsExactly(rtf);
-        assertThat(workingDirectory().resolve("JRock").resolve("includes").resolve("rtf-md"))
-                .describedAs("JRock/includes/rtf-md/, which converting nothing should not create")
+        assertThat(workingDirectory().resolve("JRock").resolve("includes")
+                .resolve("quarterly.rtf.md"))
+                .describedAs("the Markdown, which converting nothing should not write")
                 .doesNotExist();
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .doesNotContain("Converting RTF to Markdown");

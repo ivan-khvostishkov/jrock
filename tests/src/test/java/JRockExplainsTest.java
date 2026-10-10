@@ -49,9 +49,6 @@ class JRockExplainsTest extends JRockGuiFixture {
     /** The first words of the folder list, which is how it is found on screen. */
     private static final String FOLDER_LIST_OPENING = "Everything JRock keeps";
 
-    /** The two PDF subfolders, one per engine, which are named by their engine's tag. */
-    private static final String[] PDF_SUBFOLDERS = { "gs-pdf", "pdfjs-pdf" };
-
     @Test
     @DisplayName("the Help window names every file and folder JRock/ can hold")
     void namesEveryFileTheJRockFolderCanHold() throws Exception {
@@ -135,9 +132,6 @@ class JRockExplainsTest extends JRockGuiFixture {
             }
             names.add(resolved.getFileName().toString());
         }
-        // The PDF page images go in one subfolder per engine, which takes the engine as
-        // an argument and so is not among the methods above.
-        for (String subfolder : PDF_SUBFOLDERS) names.add(subfolder);
         assertThat(names).describedAs("what JRock/ can hold").isNotEmpty();
         return names;
     }
