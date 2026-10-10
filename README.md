@@ -2329,7 +2329,7 @@ log says the recording is done: it is a toggle, so you can talk with your hands 
 The prompt's right-click menu has the same toggle, **Start recording** / **Stop recording**, as
 the log's has Narrate selected text / Stop narrating. The recording is saved as `JRock/wav/recording-<date>-<time>.wav` and included as `@audio` at the
 prompt cursor, as if you had picked that file with Ctrl+I. It works on any desktop, not just
-Windows, but not in the browser.
+Windows, and in the browser (see [**recording in the browser**](#recording-in-the-browser)).
 
 - **The microphone is set like the speaker.** A first run has none set. Ctrl+Space then records
   nothing, asks you to set up the microphone, and lists the microphones into **Configure → Record
@@ -2369,6 +2369,38 @@ Windows, but not in the browser.
   Voxtral transcribes it if the `@audio` token comes first and the text after it asks for
   exactly that, e.g. *"Transcribe this audio verbatim in its original language. Output only the
   transcript."*
+
+### Recording in the browser
+
+[JRock Web](#jrock-web-in-the-browser) records too, over the same [page
+bridge](#http-transport) the HTTP client, the clipboard, the PDF engine and
+[narration](#narrating-in-the-browser) use: Ctrl+Space, again to stop, and the recording lands in
+`JRock/wav/` and goes into the prompt as `@audio`, exactly as on the desktop.
+
+What the page had to do differently is the audio itself. A browser's `MediaRecorder` hands back
+**WebM or MP4**, and the chat API's `input_audio` format is an enum of **`wav` and `mp3`** and
+nothing else — so a recording made the easy way could not be sent at all. Instead the page takes
+the raw samples through an **`AudioWorklet`** and frames the WAV itself: 16-bit PCM mono at
+**16 kHz**, which is the first format the desktop asks its own microphone for, so what arrives in
+Java is a file JRock already knows. An `AudioContext` that insists on its own rate — Safari does
+— is resampled on the way out by averaging the samples that fall inside each output one, which
+does not alias the way picking every Nth sample would.
+
+Three things are different in a tab, and the window says so rather than pretending otherwise:
+
+- **No microphone to pick**, so there is no *Record from* row: the browser chooses it, and its
+  own site settings are where that is changed. The startup report says as much.
+- **The browser asks the first time.** The permission prompt belongs to the page, and the
+  recording thread waits on your answer for as long as you take; a refusal is a line in the log
+  (*"the microphone was not allowed for this page…"*), not a dialog. Once allowed for the page,
+  it stays allowed.
+- **No *Mic always on***, and no transcription. Listening for speech between recordings needs a
+  line to watch the level on, and the page hands over a finished recording instead; transcribing
+  would mean the browser's own `webkitSpeechRecognition`, which sends your audio to somebody
+  else's server — the opposite of what a working folder promises.
+
+The **Mic** indicator still lights while the page holds the microphone, since a recording running
+*is* the microphone being open there.
 
 ### Mic always on
 

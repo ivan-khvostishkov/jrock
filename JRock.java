@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.14.0";
+    private static final String VERSION = "2.15.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -1181,7 +1181,7 @@ public class JRock {
         if (transcribeAvailable()) {
             appendSetting(text, CONFIG_RECORD_TRANSCRIBE, String.valueOf(recordTranscribe));
         }
-        if (recordAvailable()) {
+        if (micAlwaysOnAvailable()) {
             appendSetting(text, CONFIG_RECORD_ALWAYS_ON, String.valueOf(micAlwaysOn));
         }
         appendSetting(text, CONFIG_CLOCK, String.valueOf(clockOn));
@@ -2234,7 +2234,12 @@ public class JRock {
                     // default, and a report line per default is a report nobody reads.
                     + (narrateVoice.isEmpty() ? "" : ", in " + narrateVoice));
         }
-        if (recordAvailable()) {
+        if (isCheerpJ()) {
+            // No device to name, and nothing of ours to find connected: the page holds
+            // the microphone, and the browser's own permission decides whether it will.
+            log.gray("Record from: the browser's own microphone, on Ctrl+Space (it asks "
+                    + "for permission the first time)");
+        } else if (recordAvailable()) {
             log.gray("Record from: " + (recordDevice.isEmpty()
                     ? "no microphone set yet (Ctrl+Space lists them, Configure picks one)"
                     : recordDevice + (inputMixer(recordDevice) != null
@@ -3131,7 +3136,7 @@ public class JRock {
         // And the listening that starts one by itself, ticked or not; per folder, so it
         // is written to the config as Configure's checkbox would.
         javax.swing.JCheckBoxMenuItem alwaysOnItem = null;
-        if (recordAvailable()) {
+        if (micAlwaysOnAvailable()) {
             javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem("Mic always on");
             item.addActionListener(e -> {
                 setMicAlwaysOn(item.isSelected(), log);
@@ -3877,7 +3882,9 @@ public class JRock {
         if (problem != null) return problem;
         if (!recordAvailable()) return "recording is not available here.";
         if (recording != null) return "a recording is already running.";
-        if (recordDevice.isEmpty()) {
+        // The device is the desktop path's business; in the browser the page picks the
+        // microphone and the browser's permission decides (see recordInBrowser).
+        if (recordDeviceChoosable() && recordDevice.isEmpty()) {
             return "no microphone is set. Press Ctrl+Space in JRock to list them, pick one "
                     + "in Configure > Record from, and run this again.";
         }
@@ -4012,6 +4019,10 @@ public class JRock {
             return null;
         }
         if (!recordAvailable()) return "recording is not available here.";
+        if (!micAlwaysOnAvailable()) {
+            return "mic always on is not available here - in the browser the page hands "
+                    + "over a finished recording, with no line to listen on between them.";
+        }
         if (!micAlwaysOn) {
             return "Mic always on is off - tick it in JRock's prompt menu or in Configure, "
                     + "and try again.";
@@ -4582,7 +4593,7 @@ public class JRock {
         // The microphone Ctrl+Space records from, the same way: listed only by Ctrl+Space
         // pressed with none set (see startRecording), empty by default.
         javax.swing.JComboBox<String> micF = null;
-        if (recordAvailable()) {
+        if (recordDeviceChoosable()) {
             micF = new javax.swing.JComboBox<>(inputDevices.toArray(new String[0]));
             micF.setName("recordDevice");
             micF.setEditable(true);
@@ -4612,7 +4623,7 @@ public class JRock {
         }
         // Under both, since it is about when the microphone records, not what from.
         javax.swing.JCheckBox alwaysOnF = null;
-        if (micF != null) {
+        if (micAlwaysOnAvailable() && micF != null) {
             alwaysOnF = new javax.swing.JCheckBox(
                     "Mic always on: record when speech is heard", micAlwaysOn);
             alwaysOnF.setName("recordAlwaysOn");
@@ -5504,7 +5515,17 @@ public class JRock {
                + "type in or clear; Add, beside it, puts a voice on the end of it and goes "
                + "back to blank, so what it shows is never mistaken for the setting.\n\n"
                : "")
-            + (recordAvailable()
+            + (isCheerpJ()
+               ? "Ctrl+Space records from the browser's own microphone: press it to start "
+               + "and again to stop, and the browser asks for the microphone the first "
+               + "time - once allowed for this page, it stays allowed. There is no device "
+               + "to pick here, the browser choosing it and its own site settings being "
+               + "where that is changed, and no \"mic always on\": the page hands over a "
+               + "finished recording rather than a line to listen on. The recording is "
+               + "saved as JRock/wav/recording-<date>-<time>.wav, 16 kHz mono, and "
+               + "included as @audio, exactly as it is on the desktop.\n\n"
+               : "")
+            + (recordDeviceChoosable()
                ? "Record from is the one microphone Ctrl+Space records from, kept there "
                + "too and set the same way: it starts empty, Ctrl+Space lists the "
                + "microphones here, and a disconnected one fails rather than falling back. "
@@ -7538,8 +7559,21 @@ public class JRock {
     // microphone is looked for every two seconds (see watchMicrophone), and the log says
     // when it comes and goes.
 
-    // Anywhere but the browser: Java Sound captures on every desktop.
+    // Everywhere: Java Sound captures on every desktop, and in a tab the page records
+    // and hands back a WAV (see recordInBrowser).
     private static boolean recordAvailable() {
+        return true;
+    }
+
+    // Whether this runtime lets the microphone be chosen, and whether it can listen for
+    // speech by itself. Both belong to the desktop path, which holds the input line and
+    // can watch its level: the browser is handed a finished recording and has no line to
+    // read, so there is no device to pick and nothing to listen with between recordings.
+    private static boolean recordDeviceChoosable() {
+        return !isCheerpJ();
+    }
+
+    private static boolean micAlwaysOnAvailable() {
         return !isCheerpJ();
     }
 
@@ -7581,6 +7615,9 @@ public class JRock {
     // line exists; stop is set at the release, and the recording thread does the rest.
     private static final class Recording {
         volatile boolean stop;
+        // The page's: there is no line of ours to read or to close, only a microphone
+        // somebody else is holding until we ask for what it heard (see recordInBrowser).
+        volatile boolean inBrowser;
         volatile javax.sound.sampled.TargetDataLine line;
         volatile Thread thread;
     }
@@ -7637,6 +7674,9 @@ public class JRock {
     // Whether the microphone is open right now - listening or recording, however it was
     // started. What the red dot beside Clock shows.
     private static boolean micOpen() {
+        // In the browser there is no line of ours to look at: the page is holding the
+        // microphone for exactly as long as a recording is running (see recordInBrowser).
+        if (isCheerpJ()) return recording != null;
         return listenLine != null || recordLine != null;
     }
 
@@ -8030,6 +8070,10 @@ public class JRock {
     private static void startRecording(JFrame frame, JTextArea input, LogView log,
                                        boolean extend,
                                        javax.sound.sampled.TargetDataLine heardOn, Ears ears) {
+        if (isCheerpJ()) {
+            recordInBrowser(input, log, extend);
+            return;
+        }
         String device = recordDevice;
         Recording mine = new Recording();
         recording = mine;
@@ -8214,6 +8258,96 @@ public class JRock {
                     // gone: closed as far as it can be
                 }
                 if (line != null && recordLine == line) recordLine = null;
+                if (recording == mine) recording = null;
+            }
+        }, "jrock-record");
+        mine.thread = t;
+        t.setDaemon(true);
+        t.start();
+    }
+
+    // In the browser: the page holds the microphone, and hands back a finished WAV.
+    //
+    // Almost nothing of the desktop path applies. There is no line to open in one of
+    // RECORD_FORMATS, no level to watch, no device to have been unplugged mid-read - the
+    // page records, and this thread has nothing to do but wait to be told to stop and
+    // then ask for what was heard. What IS the same is everything after the audio: the
+    // file goes to JRock/wav/recording-<date>-<time>.wav, under its own stamped name,
+    // and is included as an @audio like any other recording (see includeOne), so a
+    // spoken question is sent in a tab exactly as it is on the desktop.
+    //
+    // Transcribing it is not offered here: that is Windows' recognizer, and the browser's
+    // own - webkitSpeechRecognition - sends the audio to a server of somebody else's,
+    // which is not what JRock promises about a working folder (see transcribeAvailable).
+    //
+    // The first recording raises the browser's permission prompt, which is the user's to
+    // answer and may take as long as they like: this thread is waiting on it, not the
+    // window, and a refusal is a line in the log like any other failure.
+    private static void recordInBrowser(JTextArea input, LogView log, boolean extend) {
+        Recording mine = new Recording();
+        mine.inBrowser = true;
+        recording = mine;
+
+        Thread t = new Thread(() -> {
+            boolean holding = false;
+            try {
+                String[] started = bridgeReply(browserMicStart());
+                if (!"1".equals(started[0])) {
+                    log.gray("Nothing was recorded: " + started[1].trim());
+                    return;
+                }
+                holding = true;
+                log.gray("Recording from " + started[1].trim()
+                        + " - Ctrl+Space again to stop.");
+
+                // The page is holding the microphone; there is nothing to read here, so
+                // this waits for the stop (Ctrl+Space, the menu item, or a window about
+                // to close) rather than for audio.
+                while (recording == mine && !mine.stop) Thread.sleep(100);
+
+                String[] got = bridgeReply(browserMicStop());
+                holding = false;
+                if (!"1".equals(got[0])) {
+                    log.gray("Nothing was recorded: " + got[1].trim());
+                    return;
+                }
+                int nl = got[1].indexOf('\n');
+                String seconds = nl < 0 ? "" : got[1].substring(0, nl).trim();
+                String base64 = nl < 0 ? got[1] : got[1].substring(nl + 1);
+                byte[] wav;
+                try {
+                    wav = java.util.Base64.getMimeDecoder().decode(base64.trim());
+                } catch (IllegalArgumentException ex) {
+                    log.gray("The recording did not come back as base64: " + ex.getMessage());
+                    return;
+                }
+                log.gray("Recording done: " + seconds + " s.");
+
+                Path file = stampedWav("recording");
+                Files.createDirectories(file.getParent());
+                Files.write(file, wav);
+                log.gray("Recording saved to " + file);
+                onEdt(() -> includeOne(input, log, extend, file, "audio", false));
+            } catch (IOException ex) {
+                log.gray("Recording failed: " + ex.getMessage());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            } catch (Throwable ex) {
+                // No microphone bridge on this page at all: an older jrock-web, or some
+                // other host. Reported like any other refusal, and nothing else happens.
+                log.gray("This page provides no microphone bridge ("
+                        + ex.getClass().getSimpleName() + "), so nothing was recorded.");
+            } finally {
+                // A failure after the microphone was opened must still let go of it:
+                // a page left recording would keep the browser's indicator on and the
+                // next Ctrl+Space would be refused as "already recording".
+                if (holding) {
+                    try {
+                        browserMicStop();
+                    } catch (Throwable ignored) {
+                        // No bridge, so nothing is holding it either.
+                    }
+                }
                 if (recording == mine) recording = null;
             }
         }, "jrock-record");
@@ -14838,6 +14972,21 @@ public class JRock {
     static native String browserNarrateVoices();
     static native String browserNarrate(String text, String lang, String voices);
     static native String browserNarrateStop();
+
+    // The microphone, over the same bridge. The browser owns it, and what it would hand
+    // over of its own accord is MediaRecorder's WebM or MP4 - neither of which an
+    // input_audio part takes, that field being an enum of "wav" and "mp3". So the page
+    // takes the raw samples through an AudioWorklet and frames the WAV itself, at the
+    // 16 kHz mono the desktop asks its own microphone for first (see RECORD_FORMATS), so
+    // what comes back here is a file JRock already knows what to do with.
+    //   browserMicStart() -> "1\n<what it is recording from>", or "0\n<reason>"
+    //   browserMicStop()  -> "1\n<seconds>\n<base64 wav>", or "0\n<reason>"
+    // Base64 for the reason browserHttpFetch has it: the bridge carries Java Strings,
+    // and a WAV put through one is a WAV no longer. There is no device to choose, as
+    // there is no output device for narration: the browser picks the microphone, and its
+    // own site settings are where that is changed.
+    static native String browserMicStart();
+    static native String browserMicStop();
 
     // The browser transport: hands each request to the page's JavaScript client.
     private static final class BrowserHttpTransport implements HttpTransport {

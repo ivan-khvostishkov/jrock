@@ -990,6 +990,172 @@
         }
       }
 
+      // --- The microphone: the page records, and hands back a WAV. ---
+      // On the desktop JRock opens one chosen input line with Java Sound and reads 16 kHz
+      // mono PCM out of it. Here the browser owns the microphone, and what it will hand
+      // over is MediaRecorder's WebM or MP4 - neither of which the chat API takes: its
+      // input_audio format is an enum of "wav" and "mp3" and nothing else. So the page
+      // takes the raw samples instead, through an AudioWorklet, and frames the WAV
+      // itself: 16-bit PCM mono at WAV_RATE, which is the first format the desktop asks
+      // its own microphone for, so what JRock receives is the file it already knows.
+      //
+      //   start() -> "1\n<what it is recording from>", or "0\n<reason>"
+      //   stop()  -> "1\n<seconds>\n<base64 wav>", or "0\n<reason>"
+      //
+      // There is no device to choose, as there is no output device for narration: the
+      // browser picks the microphone and lets its own permission UI change it, and
+      // nothing here overrides that.
+      var WAV_RATE = 16000;
+
+      // The worklet, as source: it is loaded from a blob rather than a file, so the
+      // page stays one file to deploy. Each block of 128 frames goes to the page as it
+      // comes, which is the only way to keep the samples - a MediaRecorder would give
+      // us an encoded stream instead.
+      var MIC_WORKLET = "class Tap extends AudioWorkletProcessor {"
+        + "  process(inputs) {"
+        + "    const input = inputs[0];"
+        + "    if (input && input[0]) this.port.postMessage(new Float32Array(input[0]));"
+        + "    return true;"
+        + "  }"
+        + "}"
+        + "registerProcessor('jrock-tap', Tap);";
+
+      var mic = null;        // { stream, context, node, blocks, rate } while recording
+
+      async function Java_JRock_browserMicStart(lib) {
+        if (mic) return "0\nthis page is already recording";
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          return "0\nthis browser does not let a page use the microphone (it needs HTTPS)";
+        }
+        var stream = null;
+        try {
+          // Mono, and the browser's own cleanup left on: this is speech going to a
+          // model, not a recording session.
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+            video: false
+          });
+          var Context = window.AudioContext || window.webkitAudioContext;
+          if (!Context) throw new Error("this browser has no AudioContext");
+          // Asked for at the rate the WAV wants; a browser that insists on its own
+          // (Safari does) is resampled on the way out instead.
+          var context = null;
+          try {
+            context = new Context({ sampleRate: WAV_RATE });
+          } catch (fixedRate) {
+            context = new Context();
+          }
+          if (context.state === "suspended") await context.resume();
+          await context.audioWorklet.addModule(
+            URL.createObjectURL(new Blob([MIC_WORKLET], { type: "text/javascript" })));
+          var node = new AudioWorkletNode(context, "jrock-tap");
+          var blocks = [];
+          node.port.onmessage = function (e) { blocks.push(e.data); };
+          context.createMediaStreamSource(stream).connect(node);
+          // Connected to the destination through a silent gain: without a path to it
+          // some browsers never run the graph at all, and with a loud one the microphone
+          // would come back out of the speakers.
+          var mute = context.createGain();
+          mute.gain.value = 0;
+          node.connect(mute).connect(context.destination);
+
+          mic = { stream: stream, context: context, node: node, blocks: blocks,
+                  rate: context.sampleRate };
+          var track = stream.getAudioTracks()[0];
+          var label = (track && track.label) ? track.label : "the browser's microphone";
+          return "1\n" + label + " at " + Math.round(context.sampleRate) + " Hz";
+        } catch (e) {
+          if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+          mic = null;
+          // NotAllowedError is the permission refused or dismissed, which is worth
+          // saying in those words rather than as a class name.
+          var why = (e && e.name === "NotAllowedError")
+                  ? "the microphone was not allowed for this page - allow it in the "
+                    + "browser's site settings and try again"
+                  : (e && e.name === "NotFoundError")
+                  ? "this device has no microphone the browser can see"
+                  : reason(e);
+          return "0\n" + why;
+        }
+      }
+
+      async function Java_JRock_browserMicStop(lib) {
+        if (!mic) return "0\nthis page was not recording";
+        var held = mic;
+        mic = null;
+        try {
+          // The microphone goes first, so nothing arrives after the last block counted.
+          held.stream.getTracks().forEach(function (t) { t.stop(); });
+          try { held.node.disconnect(); } catch (ignored) { /* already down */ }
+          var samples = joinBlocks(held.blocks);
+          await held.context.close();
+          if (!samples.length) return "0\nthe microphone gave no audio at all";
+          var pcm = resample(samples, held.rate, WAV_RATE);
+          var wav = wavOf(pcm, WAV_RATE);
+          return "1\n" + (pcm.length / WAV_RATE).toFixed(1) + "\n" + base64OfBytes(wav);
+        } catch (e) {
+          return "0\n" + reason(e);
+        }
+      }
+
+      // The blocks the worklet posted, in one array of samples.
+      function joinBlocks(blocks) {
+        var total = 0;
+        for (var i = 0; i < blocks.length; i++) total += blocks[i].length;
+        var all = new Float32Array(total);
+        for (var j = 0, at = 0; j < blocks.length; j++) {
+          all.set(blocks[j], at);
+          at += blocks[j].length;
+        }
+        return all;
+      }
+
+      // To WAV_RATE, by averaging every input sample that falls inside an output one:
+      // a box filter, which is cheap and does not alias the way picking every Nth
+      // sample does. Already at the rate asked for - the usual case - it is returned as
+      // it is.
+      function resample(samples, from, to) {
+        if (!from || Math.abs(from - to) < 1) return samples;
+        var ratio = from / to;
+        var out = new Float32Array(Math.floor(samples.length / ratio));
+        for (var i = 0; i < out.length; i++) {
+          var start = Math.floor(i * ratio);
+          var end = Math.min(samples.length, Math.floor((i + 1) * ratio));
+          var sum = 0;
+          for (var j = start; j < end; j++) sum += samples[j];
+          out[i] = end > start ? sum / (end - start) : 0;
+        }
+        return out;
+      }
+
+      // 16-bit PCM mono in a 44-byte RIFF header: the file the chat API takes as
+      // "wav", and the one JRock's own AudioHeader reads a recording's details out of.
+      function wavOf(samples, rate) {
+        var bytes = new Uint8Array(44 + samples.length * 2);
+        var view = new DataView(bytes.buffer);
+        var ascii = function (at, text) {
+          for (var i = 0; i < text.length; i++) view.setUint8(at + i, text.charCodeAt(i));
+        };
+        ascii(0, "RIFF");
+        view.setUint32(4, 36 + samples.length * 2, true);
+        ascii(8, "WAVE");
+        ascii(12, "fmt ");
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);              // PCM
+        view.setUint16(22, 1, true);              // mono
+        view.setUint32(24, rate, true);
+        view.setUint32(28, rate * 2, true);       // bytes per second
+        view.setUint16(32, 2, true);              // block align
+        view.setUint16(34, 16, true);             // bits
+        ascii(36, "data");
+        view.setUint32(40, samples.length * 2, true);
+        for (var i = 0; i < samples.length; i++) {
+          var s = Math.max(-1, Math.min(1, samples[i]));
+          view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+        return bytes;
+      }
+
       // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
       // From the button, or on its own once the jar is loaded when the address names
       // a folder (see autostartDir).
@@ -1026,7 +1192,9 @@
               Java_JRock_browserPdfClose: Java_JRock_browserPdfClose,
               Java_JRock_browserNarrateVoices: Java_JRock_browserNarrateVoices,
               Java_JRock_browserNarrate: Java_JRock_browserNarrate,
-              Java_JRock_browserNarrateStop: Java_JRock_browserNarrateStop
+              Java_JRock_browserNarrateStop: Java_JRock_browserNarrateStop,
+              Java_JRock_browserMicStart: Java_JRock_browserMicStart,
+              Java_JRock_browserMicStop: Java_JRock_browserMicStop
             }
           });
 
