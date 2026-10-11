@@ -9,6 +9,13 @@ keeps every prompt and conversation only on your local disk, as plain, visible f
 > session is saved to disk so nothing is ever lost, and your credentials stay put with no
 > repeated sign-ins, so it keeps out of your way and lets you focus on the models.
 
+**A Swiss army knife rather than a chat box — and ahead of time.** One file that unfolds into a
+workbench for documents, pictures and speech, in and out; and as with the knife, the carrying is
+the point, since it all folds back into `JRock.java`. Ahead, because a picture or a recording
+that comes *back* from a model is handled here already, while **not one model card on
+`bedrock-mantle` lists an image or an audio output modality**: every model it serves answers in
+text. The day one of them doesn't, nothing here will need to change.
+
 ![A fresh JRock session: the startup report, one prompt, and one reply from xai.grok-4.3](images/simple-request.png)
 
 *A fresh session in `C:\demo\bedrock-api-lab`, which is also where the window title and its `BAL`
