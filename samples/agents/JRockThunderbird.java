@@ -145,8 +145,9 @@ public final class JRockThunderbird {
     // How long this agent's own JRock gets to come up.
     private static final long READY_TIMEOUT_MS = 120_000;
 
-    // Where this agent keeps the profile it was last pointed at, and the calendars left
-    // out - beside this file, so the window remembers them and nothing of JRock's own
+    // Where this agent keeps what the window was told: the profile it was last pointed
+    // at, the address new events are mailed from, and the calendars left out - beside this
+    // file, so the window comes back as it was left and nothing of JRock's own
     // configuration is touched.
     private static final String SETTINGS = "jrock-thunderbird.txt";
 
@@ -253,6 +254,11 @@ public final class JRockThunderbird {
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField profileField;
     private static javax.swing.JComboBox<String> emailBox;
+    // True while the address dropdown is being refilled. Swing fires the same event for
+    // a person picking an address and for the list being rebuilt underneath them, and
+    // the two mean opposite things: one is a choice to remember, the other must change
+    // nothing. Both happen on the event thread, so a plain flag tells them apart.
+    private static boolean fillingEmails;
     private static javax.swing.JTextArea briefing;
     private static javax.swing.JPanel calendarBox;
     private static javax.swing.JLabel status;
@@ -1565,6 +1571,7 @@ public final class JRockThunderbird {
         emailBox.setToolTipText("New events are mailed from this address to the same "
                 + "address, with the invitation attached - so nothing can reach anybody else");
         emailBox.addActionListener(e -> {
+            if (fillingEmails) return;   // the list is being rebuilt, nobody chose anything
             Object picked = emailBox.getSelectedItem();
             String chosen = picked == null ? "" : addressIn(picked.toString());
             if (chosen.equals(eventEmail)) return;
@@ -1701,24 +1708,35 @@ public final class JRockThunderbird {
     // when it is not: a profile that no longer sends from an address cannot mail from it,
     // and finding that out when an event is asked for would be finding out too late.
     private static void showEmails() {
+        // Read BEFORE the box is touched. Adding the empty first item makes it the
+        // selection, which fires the listener, which until this was fixed took it for the
+        // operator clearing the address - so the address remembered from the last run was
+        // wiped out of the settings file, and out of this field, a line before it was
+        // read. The profile survived because nothing refills a text field.
+        String keep = eventEmail;
         List<String[]> addresses;
         try {
             addresses = identities();
         } catch (Stop stop) {
             addresses = new ArrayList<>();
         }
-        emailBox.removeAllItems();
-        emailBox.addItem("");
-        String keep = eventEmail;
         String select = null;
-        for (String[] one : addresses) {
-            String shown = one[2].isEmpty() ? one[1] : one[2] + " <" + one[1] + ">";
-            emailBox.addItem(shown);
-            if (one[1].equalsIgnoreCase(keep)) select = shown;
+        fillingEmails = true;
+        try {
+            emailBox.removeAllItems();
+            emailBox.addItem("");
+            for (String[] one : addresses) {
+                String shown = one[2].isEmpty() ? one[1] : one[2] + " <" + one[1] + ">";
+                emailBox.addItem(shown);
+                if (one[1].equalsIgnoreCase(keep)) select = shown;
+            }
+            emailBox.setSelectedItem(select == null ? "" : select);
+        } finally {
+            fillingEmails = false;
         }
-        // Set directly, so the listener does not read this as the operator choosing.
+        // The address stands only while the profile still sends from it; the settings file
+        // keeps it either way, so pointing the agent back at that profile brings it back.
         eventEmail = select == null ? "" : keep;
-        emailBox.setSelectedItem(select == null ? "" : select);
         if (addresses.isEmpty()) {
             say("No addresses in this profile's prefs.js, so no event can be mailed yet.");
         } else if (select == null && !keep.isEmpty()) {
@@ -3279,8 +3297,11 @@ public final class JRockThunderbird {
     }
 
     // ---- Settings --------------------------------------------------------------
-    // The profile and the calendars left out, in one small text file beside this agent:
-    // two lines of its own, rather than anything of JRock's, which belongs to JRock.
+    // The profile, the address for new events and the calendars left out, in one small
+    // text file beside this agent: three lines of its own, rather than anything of
+    // JRock's, which belongs to JRock. An address is only written while it is one the
+    // profile sends from (see showEmails), so what is in here is always something that
+    // can actually send.
     private static void readSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
         if (!Files.isRegularFile(file)) {
