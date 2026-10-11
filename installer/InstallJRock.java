@@ -33,7 +33,9 @@
 //   3. looks for Ghostscript and xpdf on PATH, and says where to get them;
 //   4. offers Start menu and Desktop shortcuts called "JRock Assistant";
 //   5. installs the agents and flows you tick, each with the prompt files its own source
-//      names, and - if you want them - the prompts that belong to no sample at all;
+//      names, and - if you want them - the prompts that belong to no sample at all. With
+//      something installed already it offers THAT and nothing else: a second run is
+//      normally a new jar, not a new argument about which agents;
 //   6. opens the new jrock-config.txt for review, then bedrock-key.txt for the key;
 //   7. offers to copy those settings into each agent's folder and into Flows\;
 //   8. installs the Explorer right-click entries - "JRock here!", one per agent, one per
@@ -204,6 +206,10 @@ public final class InstallJRock {
     private static boolean desktop = true;
     private static boolean withSamples = true;
     private static boolean customise;
+    // Something is installed already, so this run is an UPDATE of it: the page offers
+    // what is there and not the whole catalogue. Turned off by the operator asking for
+    // the full list, which is the only way to add something that is not installed yet.
+    private static boolean updating;
     private static boolean orphanPrompts = true;
     private static boolean copySettings = true;
     private static boolean copyKey = true;
@@ -285,7 +291,18 @@ public final class InstallJRock {
         System.out.println("javaw/java:          " + or(launcher(), "NOT found"));
         System.out.println("Previous install:    "
                 + (previouslyInstalled.isEmpty() && home == null ? "none found"
-                   : "folder " + home + ", installed " + previouslyInstalled.keySet()));
+                   : "folder " + home));
+        if (!previouslyInstalled.isEmpty()) {
+            System.out.println("  installed already: " + previouslyInstalled.size()
+                    + " (page 5 would offer these, and only these)");
+            for (Map.Entry<String, Path> one : previouslyInstalled.entrySet()) {
+                System.out.println("    " + one.getKey()
+                        + (one.getValue() == null ? "" : "  working in " + one.getValue()));
+            }
+            for (String stem : missingFromArtifact()) {
+                System.out.println("    " + stem + "  NOT in this artifact");
+            }
+        }
         if (isWindows()) {
             List<String[]> entries = existingEntries();
             System.out.println("JRock entries now:   " + entries.size()
@@ -401,6 +418,27 @@ public final class InstallJRock {
         return chosen;
     }
 
+    // What the Explorer entries say is installed, in the order the samples come in.
+    private static List<Sample> installed() {
+        List<Sample> some = new ArrayList<>();
+        for (Sample s : found) if (previouslyInstalled.containsKey(s.stem)) some.add(s);
+        return some;
+    }
+
+    // Installed, and not in this artifact at all: an agent from an older release, or one
+    // that was renamed. Named on the page rather than passed over, because page 8 clears
+    // every JRock entry and this one has nothing to write back - its files are left
+    // exactly where they are, as everything of yours is.
+    private static List<String> missingFromArtifact() {
+        Set<String> here = new LinkedHashSet<>();
+        for (Sample s : found) here.add(s.stem);
+        List<String> gone = new ArrayList<>();
+        for (String stem : previouslyInstalled.keySet()) {
+            if (!here.contains(stem)) gone.add(stem);
+        }
+        return gone;
+    }
+
     // Every folder an installed sample works in, each once: the agents' own folders, and
     // Flows once however many flows there are.
     private static List<Path> sampleFolders() {
@@ -413,6 +451,13 @@ public final class InstallJRock {
     // The Explorer entries hold everything this installer would otherwise have to ask
     // twice: the folder the jar is in, which samples are installed, and where each one
     // works. Read with reg.exe - there is no registry API in the JDK.
+    //
+    // EVERY shell root is read, not the one this installer writes an agent's file verb
+    // to. An entry can be in any of them - an older release wrote the same agent to
+    // three, JRock's own window menu wrote them before that, and a hand-made one can be
+    // anywhere - and an installed agent that was looked for in one place and missed would
+    // come back as "not installed", which is how you end up offering somebody a fresh
+    // install of what they already have.
     private static void previousInstall() {
         if (!isWindows()) return;
         String here = regDefault("HKCU\\" + CTX_SHELL_ROOTS[0] + "\\" + CTX_KEY + "\\command");
@@ -420,18 +465,26 @@ public final class InstallJRock {
             Path jar = jarIn(here);
             if (jar != null && jar.getParent() != null) home = jar.getParent();
         }
-        for (String key : regKeys("HKCU\\" + FILE_SHELL_ROOT)) {
-            if (!key.startsWith(AGENT_KEY_PREFIX) && !key.startsWith(FLOW_KEY_PREFIX)) continue;
-            String command = regDefault("HKCU\\" + FILE_SHELL_ROOT + "\\" + key + "\\command");
-            if (command == null) continue;
-            Matcher m = Pattern.compile("\"([^\"]*JRock[A-Za-z0-9]*\\.java)\"").matcher(command);
-            if (m.find()) {
-                previouslyInstalled.put(Paths.get(m.group(1)).getFileName().toString()
-                        .replaceAll("\\.java$", ""), flagIn(command, "--working-dir"));
-            }
-            if (home == null) {
-                Path jar = jarIn(command);
-                if (jar != null && jar.getParent() != null) home = jar.getParent();
+        Pattern java = Pattern.compile("\"([^\"]*JRock[A-Za-z0-9]*\\.java)\"");
+        for (String root : ALL_SHELL_ROOTS) {
+            for (String key : regKeys(root)) {
+                if (!key.startsWith(AGENT_KEY_PREFIX) && !key.startsWith(FLOW_KEY_PREFIX)) {
+                    continue;
+                }
+                String command = regDefault(root + "\\" + key + "\\command");
+                if (command == null) continue;
+                Matcher m = java.matcher(command);
+                if (m.find()) {
+                    String stem = Paths.get(m.group(1)).getFileName().toString()
+                            .replaceAll("\\.java$", "");
+                    // First entry found wins the folder: the same agent in two roots is
+                    // one install written twice, with the same command in both.
+                    previouslyInstalled.putIfAbsent(stem, flagIn(command, "--working-dir"));
+                }
+                if (home == null) {
+                    Path jar = jarIn(command);
+                    if (jar != null && jar.getParent() != null) home = jar.getParent();
+                }
             }
         }
     }
@@ -483,14 +536,17 @@ public final class InstallJRock {
                 ? userHome.resolve("Documents") : userHome;
         if (home == null) home = documents.resolve(ASSISTANT);
         if (!previouslyInstalled.isEmpty()) {
-            // Installing again: what was there is what is ticked, and the rest is there
-            // to be added rather than quietly installed behind the user. An agent's
-            // folder is offered back to it as it was.
+            // Installing again is UPDATING: what is installed is what is ticked, each
+            // agent in the folder it was given, and the rest of the catalogue is not
+            // offered at all. Somebody who has chosen their agents once has chosen; the
+            // second run is for the new jar, not for a fresh argument about which
+            // agents. The full list is one radio button away when it is wanted.
             for (Sample s : found) {
                 s.selected = previouslyInstalled.containsKey(s.stem);
                 Path was = previouslyInstalled.get(s.stem);
                 if (s.loops() && was != null) s.own = was;
             }
+            updating = true;
             customise = true;
         }
     }
@@ -516,9 +572,14 @@ public final class InstallJRock {
                         + "unpacked into - the one holding jrock.jar and samples/. Press "
                         + "Retry when it is."));
             } else if (!previouslyInstalled.isEmpty()) {
-                panel.add(note("A previous install was found, and its folder and its "
-                        + "agents and flows are the defaults below. Nothing of your work "
-                        + "will be removed."));
+                panel.add(found(true, previouslyInstalled.size() + " agent(s) and flow(s) "
+                        + "already installed: " + String.join(", ",
+                        previouslyInstalled.keySet())));
+                panel.add(note("So this run is an UPDATE of that install: its folder is "
+                        + "the folder below, and page 5 offers what is installed rather "
+                        + "than the whole catalogue - the full list is one radio button "
+                        + "away if you want to change the set. Nothing of your work will "
+                        + "be removed."));
             }
         }, () -> {
             findSamples();
@@ -640,15 +701,41 @@ public final class InstallJRock {
                         + "and run this installer again to give it a right-click entry."));
                 return;
             }
-            panel.add(radio("Install all " + found.size() + " of them", !customise, v -> {
-                customise = !v;
-                redraw();
-            }));
-            panel.add(radio("Choose which, and where each agent works", customise, v -> {
-                customise = v;
-                redraw();
-            }));
-            if (customise) panel.add(sampleTable());
+            // Already installed: this is an update of exactly that, and the rest of the
+            // catalogue is not on the page. Offering it would be offering to install
+            // what somebody has already decided about - and the usual reason for running
+            // this installer twice is a new release of the same jar, not a new agent.
+            if (updating) {
+                List<Sample> installed = installed();
+                panel.add(text(installed.size() + " of them " + (installed.size() == 1
+                        ? "is" : "are") + " installed already, which the Explorer entries "
+                        + "say rather than this installer guessing. This updates those, "
+                        + "and only those:"));
+                panel.add(sampleTable(installed));
+                for (String stem : missingFromArtifact()) {
+                    panel.add(alarm("Installed, but not in this artifact: " + stem
+                            + " - its right-click entry goes, and its files stay where "
+                            + "they are."));
+                }
+                panel.add(radio("Update these " + installed.size(), true, v -> { }));
+                panel.add(radio("Show all " + found.size() + " and let me change the set",
+                        false, v -> {
+                            updating = false;
+                            redraw();
+                        }));
+            } else {
+                panel.add(radio("Install all " + found.size() + " of them", !customise,
+                        v -> {
+                            customise = !v;
+                            redraw();
+                        }));
+                panel.add(radio("Choose which, and where each agent works", customise,
+                        v -> {
+                            customise = v;
+                            redraw();
+                        }));
+                if (customise) panel.add(sampleTable(found));
+            }
             int spare = orphans().size();
             if (spare > 0) {
                 panel.add(check("Also copy the " + spare + " prompt file(s) that no agent "
@@ -664,7 +751,7 @@ public final class InstallJRock {
                     + "is where it looks for them."));
         }, () -> {
             if (!withSamples) return null;
-            if (!customise) {
+            if (!updating && !customise) {
                 for (Sample s : found) s.selected = true;
             }
             if (selected().isEmpty()) return "Nothing is ticked.";
@@ -1698,7 +1785,7 @@ public final class InstallJRock {
     // Agents\<its name> - which is the answer almost everybody wants. A flow shares
     // Flows\ with the others, so its cell says so and nothing more. No dropdown offering
     // a choice that is not a choice.
-    private static javax.swing.JComponent sampleTable() {
+    private static javax.swing.JComponent sampleTable(List<Sample> shown) {
         javax.swing.JPanel table = new javax.swing.JPanel(new java.awt.GridBagLayout());
         table.setOpaque(false);
         table.setAlignmentX(0f);
@@ -1706,7 +1793,7 @@ public final class InstallJRock {
         at.anchor = java.awt.GridBagConstraints.WEST;
         at.insets = new java.awt.Insets(1, 2, 1, 6);
         int row = 0;
-        for (Sample s : found) {
+        for (Sample s : shown) {
             javax.swing.JCheckBox box = new javax.swing.JCheckBox(s.words(), s.selected);
             box.setOpaque(false);
             box.addActionListener(e -> s.selected = box.isSelected());
@@ -1742,7 +1829,7 @@ public final class InstallJRock {
         scroll.getVerticalScrollBar().setUnitIncrement(16);
         // As tall as it needs, up to nine rows, and never taller: a fixed height that
         // showed four and a half rows was most of what made this page a maze.
-        int height = Math.min(found.size(), 9) * 30 + 18;
+        int height = Math.min(Math.max(shown.size(), 1), 9) * 30 + 18;
         scroll.setPreferredSize(new java.awt.Dimension(TEXT_WIDTH, height));
         scroll.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, height));
         scroll.setAlignmentX(0f);

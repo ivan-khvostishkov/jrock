@@ -3311,7 +3311,15 @@ Nine pages, in this order:
    in that folder. A real `.lnk` on Windows (written through `WScript.Shell`, the only way
    without a native library), a `.desktop` file on Linux, a `.command` script on macOS.
    **Unticking one that is already there removes it**, and the page says which file will go.
-5. **Agents and flows** — all of them, or pick them one by one. The table says of each one
+5. **Agents and flows** — all of them, or pick them one by one. **Unless something is
+   installed already**, in which case this page offers *that* and nothing else: the agents and
+   flows the Explorer entries name, each in the folder they name, ticked. Running the installer
+   again is normally a new jar rather than a new argument about which agents, and offering the
+   whole catalogue to somebody who has already chosen is offering to undo their choice. The
+   full list is one radio button away — *Show all 12 and let me change the set* — which is how
+   something new is added. An agent that is installed but **not in this artifact** (one from an
+   older release, or renamed since) is named on the page: its right-click entry goes with the
+   rest, and its files stay exactly where they are. The table says of each one
    whether it loops or runs once, how many prompt files it brings, and the folder it works in:
    editable for an agent (filled in with `Agents\<its name>`), and `Flows\` for a flow, which
    is not a choice and so is not offered as one. Each one is copied **with the prompt files its
@@ -3343,8 +3351,14 @@ Nine pages, in this order:
 
 **A previous install is read, not guessed.** The Explorer entries already hold the folder the
 jar is in, which agents and flows are installed and where each one works, so those become the
-defaults and the ticks — installing again **extends** what is there instead of asking everything
-twice.
+folder, the ticks and the folder of each agent — installing again **updates** what is there
+instead of asking everything twice.
+
+It reads **every** shell root for them, including the two under `HKEY_LOCAL_MACHINE` it never
+writes to itself. An entry can be in any of them — an older release wrote the same agent to
+three, JRock's own window menu wrote them before that — and an agent that was looked for in one
+place and missed would come back as *not installed*, which is how you end up being offered a
+fresh install of what you already have.
 
 `--check` prints every one of those detections — including every JRock registry entry it would
 clear — and writes nothing, which is what CI runs on all three platforms so the installer
