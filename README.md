@@ -1788,6 +1788,19 @@ the voice, so the microphone doesn't record the last answer as the next question
   window, goes into **JRock's log** to be read afterwards (an agent started by `javaw` has no
   console to print it to), and when the phrase itself cannot be read aloud — no speaker set —
   that is shown too. A missing microphone is **not** one of these: see the mute button above.
+- **While the model thinks, the room is not silent.** From the moment the recording stops to
+  the moment something is said, the speaker JRock narrates on carries a **very quiet machine
+  working** — a fan, and a disk that seeks every few seconds — at a level you notice only when
+  it stops. Those seconds are otherwise ambiguous in the one way that matters: hands-free you
+  are not looking at the window, and silence says nothing about whether the microphone heard the
+  end of your sentence, whether anything was sent, or whether this is the pause before *"Error.
+  Should I try again?"*. Deliberately **not a beep**: a notification sound is a program
+  announcing itself in the middle of a conversation, while a machine quietly working is a sound
+  everybody has heard all their lives and already reads as *it is doing something*. It fades in
+  over a third of a second, fades out in under two tenths, and is gone before the first word
+  rather than under it. Made as it plays — noise needs no sound files and no licence — and if no
+  speaker is set, or the one set is not there, there is simply no noise: one line in JRock's log
+  and the turn carries on, because nobody is owed a fan.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
@@ -1823,11 +1836,27 @@ the voice, so the microphone doesn't record the last answer as the next question
   hear the sentence before anything is prepared, so no appointment is touched that you did not
   hear named, and anything with another participant on it comes back refused with who they
   are.
+- **One question, as many fetches as it takes.** The model only finds out what it needs by
+  reading what it has just been given: *"I need your mail: 7 days"*, and then one message off
+  that list **by the id on its line** — an id it could not have known before the list arrived;
+  a site's front page, and then *follow* the section that was actually asked about. So a turn
+  goes round as often as it has to — fetch, send, read the reply — until the reply is an answer
+  instead of another request, **five fetches at the most**. The calendar, the mail, the post and
+  the web all work this way; the location and the weather stay once a turn, because neither
+  changes between two sends.
+
+  Two things end a turn early, and both end it the same way. **The same request twice** is a
+  model going in circles: the second fetch hands back exactly what the first one did, so it
+  cannot be the thing that unsticks it. And the **sixth** fetch is where a question asked across
+  a room has to be answered with what there is. Either way the operator hears the usual
+  **"Error. Should I try again?"** and the window shows what the model kept asking for — because
+  *"I need your mail: message 0d613e"*, read out to somebody who asked what their post says, is
+  the machine talking to itself while they are still waiting.
 - **The web.** When the whole answer is *"I need the web: …"* — `site zdnet.com`,
   `search <words>`, `follow <what to open> on <address>`, `links on <address>` — the agent asks
   the [browser agent](#a-sixth-agent-the-web-by-looking-at-it-jrockbrowserjava) on
-  `127.0.0.1:47474` and puts the Markdown it gets back into the next prompt. Once a turn, and
-  the slowest of them: a browser, a render, six photographs and a model. **Two layers, carrying
+  `127.0.0.1:47474` and puts the Markdown it gets back into the next prompt. The slowest of
+  them: a browser, a render, six photographs and a model. **Two layers, carrying
   different things** — addresses and Markdown between the two agents, and between the operator
   and the model only a site's name and plain words. If what comes back is a consent dialogue or
   a sign-in rather than the page, the appendix tells the model to say so and to mention that
@@ -1836,18 +1865,18 @@ the voice, so the microphone doesn't record the last answer as the next question
   show it or read it aloud. It sends `#here` to the
   [location agent](#a-third-agent-location-jrocklocationjava) and gives the model the line that
   comes back, unchanged, as the next prompt, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`.
-  The reply to that is the turn's answer. This happens at most once a turn. The model knows
+  The reply to that is the turn's answer. Once a turn: a place does not change between two
+  sends, so a model that asks twice has its turn ended rather than answered. The model knows
   which question the location answers only with History on.
 - **Calendar.** When the whole answer is *"I need your calendar for today"* — or *"… for this
   week"*, or *"… for 2026-12-24 to 2026-12-26"* — the agent asks the [calendar
   agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) on `127.0.0.1:47473`, puts the
-  briefing into the next prompt and sends it. Once a turn. Each line carries the calendar it came
-  from, so the model can say which calendar something is in. *"… for tentative"* asks for the
+  briefing into the next prompt and sends it. Each line carries the calendar it came from, so the model can say which calendar something is in. *"… for tentative"* asks for the
   maybes, which the other answers leave out on purpose.
 - **Mail.** When the whole answer is *"I need your mail: …"* — `today`, `3 days`, `unanswered`,
   `senders 5 days`, `with <somebody>`, `mailboxes` — the agent asks the [Thunderbird
   agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) on
-  `127.0.0.1:47473` and puts what comes back into the next prompt. Once a turn. So *"have I had
+  `127.0.0.1:47473` and puts what comes back into the next prompt. So *"have I had
   anything today?"*, *"who wrote this week?"*, *"when did I last hear from them?"* and *"what
   have I not answered?"* are questions with answers, read off Thunderbird's own index without a
   server being asked or a message being touched. The words the model may use are mapped to the

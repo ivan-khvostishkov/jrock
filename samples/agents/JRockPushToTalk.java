@@ -123,6 +123,13 @@ public final class JRockPushToTalk {
     // a while first. The failure this guards against is a reply that never comes.
     private static final long REPLY_TIMEOUT_MS = 10 * 60_000;
 
+    // How many times one turn may fetch something before the model has to answer with
+    // what it has. A list and then one thing off it is two; a site, a section of it and a
+    // message beside it is three; five leaves room for a question nobody has asked yet
+    // without letting one turn run on for minutes. Every fetch is a program and a model
+    // round trip, so the ceiling is the operator's patience rather than the cost.
+    private static final int FETCHES_MAX = 5;
+
     // What the status line says between turns, and while listening, lever off and on.
     // No middle dots as separators: next to "Ctrl" one reads as a full stop.
     private static final String READY =
@@ -412,12 +419,27 @@ public final class JRockPushToTalk {
         });
     }
 
+    // A turn, with the room noise underneath it: the microphone has stopped, so from
+    // here on the waiting is audible (see the room, below) until something is said out
+    // loud. Every path out of a turn goes through here, which is why the fan goes off in
+    // a finally rather than at the end of the answer: a turn that throws is a turn where
+    // the operator is about to hear "Error. Should I try again?", and hearing it over a
+    // fan that never stopped is worse than the error.
+    private static String answer(boolean handsFreeTurn) {
+        roomOn();
+        try {
+            return answering(handsFreeTurn);
+        } finally {
+            roomOff();
+        }
+    }
+
     // Sends the prompt as it stands, shows the reply in place of the last one and reads
     // it aloud, while the button is free again - unless it is a hands-free turn and
     // hands-free has ended while the reply was on its way. On the worker. Returns null,
     // or what to say about a narration that could not play - the turn has succeeded all
     // the same.
-    private static String answer(boolean handsFreeTurn) {
+    private static String answering(boolean handsFreeTurn) {
         String prompt = JRock.automationPromptText();
         if (prompt == null) throw new Stop("the prompt could not be read.");
         String after = read(appendix.toString());
@@ -427,11 +449,21 @@ public final class JRockPushToTalk {
         String answer = sendAndRead("Waiting for the reply\u2026");
         // A request for the location or the weather is not shown or read aloud: the
         // operator did not ask for it, and what it asks for goes to the model instead.
-        // Each once a turn - the location, then the weather for it, is a turn that goes
-        // well - so a model that asks again is heard rather than asked forever.
+        // Those two are once a turn - the location, then the weather for it, is a turn
+        // that goes well - so a model that asks again is heard rather than asked forever.
+        //
+        // The calendar, the mail, the post and the web are not. One question is often
+        // two or three requests deep, and the model only finds out what it needs by
+        // reading what it has just been given: the mail of the last week, then one
+        // message out of that list; a site's front page, then the section of it the
+        // operator asked about. So the loop goes round and fetches again - see refuse for
+        // the two things it will not do - and what reaches the operator is an answer
+        // rather than the model's next instruction read out loud.
         String note = null;
-        boolean askedLocation = false, askedWeather = false, askedCalendar = false;
-        boolean askedMail = false, askedWeb = false, askedPost = false;
+        String stuck = null;   // a request that could not be served, and why (see refuse)
+        boolean askedLocation = false, askedWeather = false;
+        int fetched = 0;
+        java.util.Set<String> served = new java.util.LinkedHashSet<>();
         while (note == null) {
             java.util.regex.Matcher weather = WEATHER_REQUEST.matcher(answer.trim());
             java.util.regex.Matcher calendar = CALENDAR_REQUEST.matcher(answer.trim());
@@ -449,12 +481,13 @@ public final class JRockPushToTalk {
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(here[0]));
                 answer = sendAndRead("Sent the location, waiting for the reply\u2026");
-            } else if (!askedCalendar && calendar.matches()) {
+            } else if (calendar.matches()) {
                 // What is in the calendar is read off this machine by the calendar agent
                 // (JRockThunderbird.java), out of Thunderbird's own offline copy -
                 // nothing is fetched and nothing is asked of a server.
-                askedCalendar = true;
                 String span = calendar.group(1).trim();
+                stuck = refuse(served, fetched++, "calendar", span);
+                if (stuck != null) break;
                 later(() -> setState(State.ANSWERING, "Reading the calendar\u2026"));
                 String[] events = askAgent(CALENDAR_PORT, calendarRequest(span), "calendar",
                         "JRockThunderbird.java");
@@ -465,12 +498,17 @@ public final class JRockPushToTalk {
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(events[0]));
                 answer = sendAndRead("Sent the calendar, waiting for the reply\u2026");
-            } else if (!askedMail && mail.matches()) {
+            } else if (mail.matches()) {
                 // The mail is read off this machine by the Thunderbird agent, out of
                 // Thunderbird's own search index. Nothing is fetched, no server is
                 // asked, and no message is opened, moved or marked.
-                askedMail = true;
+                //
+                // Twice a turn is the normal way round here: a list first - "I need your
+                // mail: 7 days" - and then one message off that list by the id on its
+                // line, which is an id the model cannot know until it has the list.
                 String about = mail.group(1).trim();
+                stuck = refuse(served, fetched++, "mail", about);
+                if (stuck != null) break;
                 later(() -> setState(State.ANSWERING, "Reading the mail\u2026"));
                 String[] mailbox = askAgent(CALENDAR_PORT, mailRequest(about), "Thunderbird",
                         "JRockThunderbird.java");
@@ -491,12 +529,13 @@ public final class JRockPushToTalk {
                     check(JRock.automationSetPrompt(mailbox[0]));
                 }
                 answer = sendAndRead("Sent the mail, waiting for the reply\u2026");
-            } else if (!askedPost && post.matches()) {
+            } else if (post.matches()) {
                 // The paper post, off the letters agent - which has no model of its own:
                 // it looks in the scanner's folder, and drives the doc inventory flow
                 // when a letter has to be filed.
-                askedPost = true;
                 String about = post.group(1).trim();
+                stuck = refuse(served, fetched++, "post", about);
+                if (stuck != null) break;
                 later(() -> setState(State.ANSWERING, "Looking at the post\u2026"));
                 String[] letters = askAgent(LETTERS_PORT, postRequest(about), "letters",
                         "JRockLetters.java");
@@ -516,13 +555,18 @@ public final class JRockPushToTalk {
                     check(JRock.automationSetPrompt(letters[0]));
                     answer = sendAndRead("Sent the post, waiting for the reply\u2026");
                 }
-            } else if (!askedWeb && web.matches()) {
+            } else if (web.matches()) {
                 // A page off the web, read by the browser agent: it photographs the page
                 // and has its own JRock turn the picture into Markdown, so what arrives
                 // here is a page as text. Slow - a browser, a render and a model - so the
                 // status line says what is happening.
-                askedWeb = true;
+                //
+                // More than once a turn is what the appendix already asks for: a site's
+                // front page, then "follow the AI section on <that page's address>" - an
+                // address the model can only have from the page it was just given.
                 String about = web.group(1).trim();
+                stuck = refuse(served, fetched++, "web", about);
+                if (stuck != null) break;
                 later(() -> setState(State.ANSWERING, "Reading the web\u2026"));
                 String[] page = askAgent(BROWSER_PORT, webRequest(about), "browser",
                         "JRockBrowser.java");
@@ -541,6 +585,14 @@ public final class JRockPushToTalk {
                     break;
                 }
                 answer = report[0];
+            } else if (weather.matches() || LOCATION_REQUEST.matcher(answer.trim()).matches()) {
+                // Asked again for one of the two things that are once a turn. Neither
+                // the operator's location nor the weather there changes between two
+                // sends, so a second fetch would hand back the first one's answer word
+                // for word - the same dead end as asking for the same page twice, and it
+                // ends the same way.
+                stuck = "the model asked again for the location or the weather";
+                break;
             } else {
                 break;
             }
@@ -561,10 +613,19 @@ public final class JRockPushToTalk {
         // An answer of nothing at all - a reply that arrived empty - is a failed turn to
         // anyone listening, however well the request itself went: reading it out loud
         // would be silence, which is the one thing a spoken answer cannot be.
-        if (reply.isBlank()) {
-            return join(note, alarm, event, moved, drafted, saved, "The reply was empty.",
+        //
+        // A reply that is STILL a request is the same kind of failure. "I need your mail:
+        // message 0d613e" read out to somebody who asked what their post says is the
+        // machine talking to itself, and they are still waiting for the answer. So it is
+        // shown, because it says what the model wanted, and the fixed phrase is what they
+        // hear - the one they already know means "say it again".
+        if (reply.isBlank() || stuck != null) {
+            if (stuck != null) report("that turn ended without an answer: " + stuck + ".");
+            return join(note, alarm, event, moved, drafted, saved,
+                    reply.isBlank() ? "The reply was empty." : "No answer: " + stuck + ".",
                     sayFailed());
         }
+        roomOff();   // the fan stops, and then the answer is read - not both at once
         String silent = JRock.automationNarrate(reply);
         return join(note, alarm, event, moved, drafted, saved,
                 silent == null ? null : "Not read aloud: " + silent);
@@ -764,6 +825,28 @@ public final class JRockPushToTalk {
         return answer;
     }
 
+    // Whether a request the model has just made can be served, and why not when it
+    // cannot - the sentence the operator gets in place of an answer. Serving one writes
+    // it into served, so the next round knows it has been asked.
+    //
+    // Two things are refused. A turn that has fetched FETCHES_MAX times already has to
+    // answer with what it has: somebody asked a question across a room, and at some
+    // point the answer matters more than its completeness. And the same request twice is
+    // a model going round in circles - the second fetch hands back exactly what the first
+    // one did, so it cannot be the thing that unsticks it, and all another round would
+    // spend is the waiting.
+    private static String refuse(java.util.Set<String> served, int fetched, String kind,
+            String about) {
+        if (fetched >= FETCHES_MAX) {
+            return "the model asked to fetch more than " + FETCHES_MAX + " times in one turn";
+        }
+        String asked = about.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
+        if (!served.add(kind + " " + asked)) {
+            return "the model asked for the same thing twice (" + kind + ": " + asked + ")";
+        }
+        return null;
+    }
+
     // Says FAILED_ALOUD out loud, and returns what the status line should add about
     // saying it - null when it was said, the reason when it could not be (no speaker set
     // on this JRock, or the one set is not connected).
@@ -773,6 +856,7 @@ public final class JRockPushToTalk {
     // the moment it happens. A narration already playing is stopped first by
     // automationNarrate, so the phrase never queues behind half an old answer.
     private static String sayFailed() {
+        roomOff();   // whatever brought us here, the waiting is over
         String silent = JRock.automationNarrate(FAILED_ALOUD);
         return silent == null ? null : "Not read aloud: " + silent;
     }
@@ -1117,6 +1201,208 @@ public final class JRockPushToTalk {
             // Offset 0 of an empty document.
         }
         answerArea.setCaretPosition(0);
+    }
+
+    // ---- The room ----------------------------------------------------------
+    // A machine quietly working, while the model thinks.
+    //
+    // A spoken question takes seconds to answer - a send, sometimes a fetch and another
+    // send - and hands-free the operator is not looking at the window. Silence over
+    // those seconds says nothing: whether the microphone heard the end of the sentence,
+    // whether anything was sent, whether this is the pause before "Error. Should I try
+    // again?". So the room gets a sound for exactly as long as the answer is on its way:
+    // a fan, and a disk that seeks now and then, at a level somebody notices only when
+    // it stops.
+    //
+    // Deliberately not a beep or a chime. Whoever is talking should go on feeling they
+    // are talking to somebody, and a notification sound is a program announcing itself
+    // in the middle of a conversation. A quiet machine in the background is a sound
+    // people have heard all their lives and already read as "it is doing something",
+    // which is the one thing the pause has to say.
+    //
+    // Made here, a slice at a time, rather than shipped as a file: noise needs no files
+    // and no licence, and an endless wait needs an endless sound.
+    private static final float ROOM_RATE = 22050f;
+    private static final javax.sound.sampled.AudioFormat ROOM_FORMAT =
+            new javax.sound.sampled.AudioFormat(ROOM_RATE, 16, 1, true, false);
+
+    // Quiet, and quiet in the way a room is: well under a tenth of the scale, so it sits
+    // beneath a voice rather than beside one. Loud enough to be missed when it goes.
+    private static final double ROOM_GAIN = 0.045;
+
+    // The fan: white noise through two one-pole low passes, which is what turns a hiss
+    // into moving air. 0.08 of the way to the input each sample puts the corner near
+    // 280 Hz at this rate, and twice is the difference between a fan and a radio between
+    // stations. A little of the unfiltered noise is added back for the air in it.
+    private static final double ROOM_CUTOFF = 0.08;
+    private static final double ROOM_BODY = 3.2;    // the filtered part, back to full scale
+    private static final double ROOM_AIR = 0.03;    // the unfiltered part, a trace
+
+    // And it breathes: a fan that holds one exact level is a tone, and a tone is a
+    // machine. Once every six seconds, a fifth of the level.
+    private static final double ROOM_BREATH_HZ = 0.17;
+    private static final double ROOM_BREATH = 0.18;
+
+    // The disk, seeking: two to five clicks, each a few milliseconds and gone, with
+    // seconds of nothing between the bursts. This is the part that reads as WORK rather
+    // than as a fan left on, so it is worth the dozen lines it takes.
+    private static final double ROOM_SEEK_GAIN = 0.35;
+    private static final long ROOM_SEEK_GAP_MIN_MS = 1_200;
+    private static final long ROOM_SEEK_GAP_MAX_MS = 5_000;
+
+    // On and off over a quarter of a second: anything faster is a click, and a click is
+    // the artificial thing this is trying not to be.
+    private static final double ROOM_FADE_IN_MS = 300;
+    private static final double ROOM_FADE_OUT_MS = 180;
+    private static final long ROOM_SLICE_MS = 50;      // one write, and how often stop is seen
+
+    // How much sound the line may hold ahead of itself - three slices, where Java Sound's
+    // own default here is half a second. Everything already in that buffer still has to
+    // play before the room is quiet, so the default would leave the fan running for half
+    // a second INTO the answer; measured, a turn ended 682 ms after it was told to stop
+    // and now ends in about 350. Too small would risk the fan stuttering whenever the
+    // machine is busy, which it always is at exactly this moment.
+    private static final int ROOM_BUFFER_BYTES = (int) (ROOM_RATE * ROOM_SLICE_MS * 3 / 1000) * 2;
+
+    private static volatile Thread room;
+    private static volatile boolean roomStop;
+
+    // Why there is no room sound, as last reported: said once in the log and then only
+    // when the reason changes, the same way the missing microphone is. A turn that
+    // cannot make the noise is not a turn that failed - nobody is owed a fan - so it is
+    // never said out loud and never reaches the status line.
+    private static volatile String roomSilent;
+
+    // Starts the room, if it is not already going. Returns at once: the sound is made on
+    // a thread of its own, because the turn has a model to wait for.
+    private static synchronized void roomOn() {
+        if (room != null) return;
+        roomStop = false;
+        Thread playing = new Thread(JRockPushToTalk::roomPlay, "ptt-room");
+        playing.setDaemon(true);
+        room = playing;
+        playing.start();
+    }
+
+    // Stops it, and waits for the fade out - a tenth of a second or two, so the fan is
+    // gone before the first word rather than under it. Called before anything is said
+    // out loud, and again when the turn ends, whichever comes first; doing it twice does
+    // nothing the second time.
+    private static synchronized void roomOff() {
+        Thread playing = room;
+        if (playing == null) return;
+        roomStop = true;
+        try {
+            playing.join((long) ROOM_FADE_OUT_MS + 500);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+        room = null;
+    }
+
+    // The sound itself, on the ptt-room thread: generated and written in 50 ms slices
+    // until roomStop, then faded out and the line closed.
+    private static void roomPlay() {
+        String device = JRock.automationNarrateDevice();
+        if (device == null || device.isEmpty()) {
+            roomQuiet("no speaker is set in JRock's Configure > Narrate on");
+            return;
+        }
+        javax.sound.sampled.Mixer mixer = outputMixer(device);
+        if (mixer == null) {
+            roomQuiet("the speaker \"" + device + "\" is not connected");
+            return;
+        }
+        javax.sound.sampled.SourceDataLine line = null;
+        try {
+            line = (javax.sound.sampled.SourceDataLine) mixer.getLine(
+                    new javax.sound.sampled.DataLine.Info(
+                            javax.sound.sampled.SourceDataLine.class, ROOM_FORMAT));
+            try {
+                line.open(ROOM_FORMAT, ROOM_BUFFER_BYTES);
+            } catch (IllegalArgumentException tooSmall) {
+                line.open(ROOM_FORMAT);   // a device with a mind of its own about buffers
+            }
+            line.start();
+            roomSilent = null;
+            java.util.Random rnd = new java.util.Random();
+            int frames = (int) (ROOM_RATE * ROOM_SLICE_MS / 1000);
+            byte[] pcm = new byte[frames * 2];
+            double low = 0, lower = 0;          // the two filter stages
+            double level = 0;                   // the fade, 0 to 1 and back
+            double up = 1000 / (ROOM_RATE * ROOM_FADE_IN_MS);
+            double down = 1000 / (ROOM_RATE * ROOM_FADE_OUT_MS);
+            long i = 0;                         // frames played, for the breath
+            long click = -1;                    // the frame the click being played began on
+            int clickFor = 0;                   // and how many frames it lasts
+            int clicksLeft = 0;                 // how many are left in this burst
+            long nextClick = (long) (ROOM_RATE * seekGap(rnd) / 1000);
+            while (true) {
+                for (int s = 0; s < frames; s++, i++) {
+                    level = roomStop ? Math.max(0, level - down) : Math.min(1, level + up);
+                    double white = rnd.nextDouble() * 2 - 1;
+                    low += (white - low) * ROOM_CUTOFF;
+                    lower += (low - lower) * ROOM_CUTOFF;
+                    double breath = 1 - ROOM_BREATH
+                            + ROOM_BREATH * Math.sin(2 * Math.PI * ROOM_BREATH_HZ * i / ROOM_RATE);
+                    if (i >= nextClick) {
+                        if (clicksLeft <= 0) clicksLeft = 2 + rnd.nextInt(4);
+                        click = i;
+                        clickFor = (int) (ROOM_RATE * (0.002 + rnd.nextDouble() * 0.004));
+                        clicksLeft--;
+                        nextClick = i + (clicksLeft > 0
+                                ? (long) (ROOM_RATE * (0.02 + rnd.nextDouble() * 0.05))
+                                : (long) (ROOM_RATE * seekGap(rnd) / 1000));
+                    }
+                    double seek = 0;
+                    if (click >= 0 && i - click < clickFor) {
+                        // A click decays rather than stops: squared, so it is a tick and
+                        // not a tap.
+                        double left = 1 - (i - click) / (double) clickFor;
+                        seek = (rnd.nextDouble() * 2 - 1) * left * left * ROOM_SEEK_GAIN;
+                    }
+                    double v = (lower * ROOM_BODY + white * ROOM_AIR) * breath + seek;
+                    int sample = (int) (Math.max(-1, Math.min(1, v)) * level
+                            * ROOM_GAIN * Short.MAX_VALUE);
+                    pcm[2 * s] = (byte) sample;
+                    pcm[2 * s + 1] = (byte) (sample >> 8);
+                }
+                line.write(pcm, 0, pcm.length);
+                if (roomStop && level <= 0) break;
+            }
+            line.drain();
+        } catch (javax.sound.sampled.LineUnavailableException | RuntimeException ex) {
+            roomQuiet("could not play on " + device + " (" + ex.getMessage() + ")");
+        } finally {
+            if (line != null) line.close();
+        }
+    }
+
+    // Seconds between one burst of seeking and the next.
+    private static double seekGap(java.util.Random rnd) {
+        return ROOM_SEEK_GAP_MIN_MS
+                + rnd.nextDouble() * (ROOM_SEEK_GAP_MAX_MS - ROOM_SEEK_GAP_MIN_MS);
+    }
+
+    // One log line the first time the room cannot be played, and again only if the
+    // reason changes - a turn still works without it.
+    private static void roomQuiet(String why) {
+        if (why.equals(roomSilent)) return;
+        roomSilent = why;
+        report("no sound while the model thinks: " + why + ".");
+    }
+
+    // The output mixer of exactly that name, as JRock looks it up for Narrate: no near
+    // matches, and never the "Primary Sound Driver" alias for the Windows default.
+    private static javax.sound.sampled.Mixer outputMixer(String name) {
+        javax.sound.sampled.Line.Info playback =
+                new javax.sound.sampled.Line.Info(javax.sound.sampled.SourceDataLine.class);
+        for (javax.sound.sampled.Mixer.Info info : javax.sound.sampled.AudioSystem.getMixerInfo()) {
+            if (!info.getName().equals(name) || name.equals("Primary Sound Driver")) continue;
+            javax.sound.sampled.Mixer mixer = javax.sound.sampled.AudioSystem.getMixer(info);
+            if (mixer.isLineSupported(playback)) return mixer;
+        }
+        return null;
     }
 
     // ---- The look ----------------------------------------------------------
