@@ -1745,6 +1745,11 @@ the voice, so the microphone doesn't record the last answer as the next question
   comes back, unchanged, as the next prompt, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`.
   The reply to that is the turn's answer. This happens at most once a turn. The model knows
   which question the location answers only with History on.
+- **Calendar.** When the whole answer is *"I need your calendar for today"* — or *"… for this
+  week"*, or *"… for 2026-12-24 to 2026-12-26"* — the agent asks the [calendar
+  agent](#a-seventh-agent-your-calendar-jrockcalendareventsjava) on `127.0.0.1:47473`, puts the
+  briefing into the next prompt and sends it. Once a turn. Each line carries the calendar it came
+  from, so the model can say which calendar something is in.
 - **Weather.** When the whole answer is *"I need weather for this location: …"*, the agent
   does not show it or read it aloud either. If the location has no coordinates, the location
   agent is asked for them first. If the model already has them from `#here`, they are used as
@@ -1793,7 +1798,7 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   Then close the connection. [Push-to-talk](#a-third-agent-push-to-talk-jrockpushtotalkjava)
   does this.
 - **JRock's agents' ports** are **47470–47479**. The timer has the first, the location agent
-  47471, and the weather agent 47472. The range is
+  47471, the weather agent 47472, and the calendar agent 47473. The range is
   below Windows' dynamic range (49152 and up, where the system hands out ports and Hyper-V
   reserves blocks of them), and no well-known service uses it. Another timer already running
   on the port is reported in the window. Alarms can still be set there by hand.
@@ -1864,6 +1869,75 @@ java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
 - The window lists the lines asked for and the addresses given, and has a field and **Get
   address** to try one by hand.
 - It needs a key. **Run it in a folder of its own**, with History off there.
+
+### A seventh agent: your calendar (`JRockCalendarEvents.java`)
+
+What is in your calendar, read out of **Thunderbird's own offline copy** — today, this week,
+any span of days — for the push-to-talk agent to ask about and for you to read. The first agent
+here that needs **no model, no Bedrock key and no JRock automation**: it answers out of files
+rather than by asking anybody.
+
+**Events, and that is the name.** Thunderbird keeps tasks (VTODO) in a table of their own, and a
+calendar served over CalDAV by Google has none — the cached table is empty. If your "tasks for
+today" are the things in your calendar, this is them.
+
+```sh
+java -cp jrock.jar JRockCalendarEvents.java --profile K:\Thunderbird\Profiles\xxxx.default-release
+java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no window
+```
+
+- **Where it reads.** `<profile>/calendar-data/cache.sqlite` is Thunderbird's cache of every
+  calendar on a server; `local.sqlite` is the one it keeps itself. Both are read, **read-only,
+  never written and never moved**, and the names come from `<profile>/prefs.js`, where
+  Thunderbird keeps them as `calendar.registry.<uuid>.name`.
+- **One profile, named in full.** The window has the folder as a field with a *Browse…* button,
+  and remembers it in `jrock-calendar-events.txt` beside the agent. No wildcards and no guessing:
+  which profile is read is not a thing to be inferred when a machine has several.
+- **It needs `sqlite3`** — the command-line tool from [sqlite.org](https://sqlite.org/download.html),
+  the one outside thing it wants, as Ghostscript and xpdf are for PDFs. Looked for **on `PATH`,
+  then beside the agent, then in the working directory**, and when it is nowhere the window says
+  exactly that and where to get it. Every query runs with `-readonly`, and nothing a client sends
+  reaches a query: a range is parsed into two dates and rendered back as numbers.
+- **What it answers**, over TCP on `127.0.0.1:47473`, loopback only — one line in, the briefing
+  out, read until the connection closes:
+
+  | | |
+  |---|---|
+  | `#today` | what is on today |
+  | `#week` | today and the six days after it |
+  | `#next [n]` | the next *n* events from now (default 5) |
+  | `#range 2026-12-24 2026-12-26` | any span of days |
+  | `#calendars` | the calendars, and how many events each holds |
+
+  ```
+  This week, Sun 11 Oct to Sat 17 Oct 2026 (Europe/Berlin):
+  Mon 12 Oct:
+    14:10-15:10  Dentist  [Family]
+    16:00-17:30  Physiotherapy  [Calendar]  (repeats weekly)
+  ```
+
+- **Every line names its calendar**, in square brackets, and `#calendars` lists them with their
+  sizes — so "which calendar is that in?" is a question the model can actually answer, and a
+  noisy feed can be recognised for what it is. Each calendar also has a **checkbox** in the
+  window: *Holidays in Germany* is 546 entries and would drown a week.
+- **Repeats are expanded**: `FREQ=DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY`, with `INTERVAL`,
+  `COUNT`, `UNTIL`, `BYDAY` (weekly), `BYMONTH`, `BYMONTHDAY`, plus `EXDATE`, `RDATE` and the
+  modified instances Thunderbird stores as rows of their own (a moved one says so, a cancelled
+  one disappears). A rule it cannot work out is **still listed**, with a note saying so, because
+  an appointment quietly dropped is an appointment missed.
+- **All-day events keep their day.** A time with no zone of its own is stored as the wall clock it
+  shows, counted as if it were UTC; read in any other zone it slides by hours and lands on the
+  wrong date, which is the one thing a date must not do.
+- **The schema is Thunderbird's own** (version 23 as this was written, read from
+  `cal_calendar_schema_version`). A different one is **reported, not refused** — the tables this
+  reads have been stable for years, and a bare refusal would be worse than a warning on a version
+  that still works.
+- **Hands-free**, the [push-to-talk agent](#a-third-agent-push-to-talk-jrockpushtotalkjava) asks it
+  when the model's whole answer is *"I need your calendar for today"*, *"… for this week"* or
+  *"… for 2026-12-24 to 2026-12-26"*, exactly as it asks for a location or the weather: the
+  briefing goes into the next prompt and the model answers out loud from it. Your event titles do
+  go to Bedrock that way — that is the point of asking — and the per-calendar checkboxes are how
+  you decide which ones.
 
 ### Multi-agent collaboration
 
@@ -2727,6 +2801,14 @@ entry with two commands** for the automation you pick:
   flag carries that, the process working directory already is it.
 - **on a file of any type, in any folder** — the agent gets **that file's full path** as its
   single argument, and works on it.
+
+**jrock.jar is the prerequisite, and installing checks for it.** With no jar anywhere — not
+beside the agent, and not under the JRock that is running — nothing is written to the registry
+and the dialog says to copy one in. With no jar *beside the agent* but one under this JRock, you
+are **asked first**: the entry would work, carrying an absolute path, but the agent's own folder
+would not be a folder it can be run from by hand (`java -cp jrock.jar Agent.java` needs the jar
+there), and the entry breaks if this JRock's jar is later moved or replaced. Answer no, copy the
+jar in, install again — or say yes and the log records which jar the entry points at.
 
 Both commands are `javaw -cp jrock.jar <agent>.java --working-dir <the folder you installed
 from>`, plus `--prompts-dir` when one is set. The `--working-dir` flag is the whole trick:
