@@ -502,13 +502,26 @@ bill, and a guess is not one.
   inserted directly rather than delegated to the editor kit's action, which is a look-up that
   can come back empty — and a key that silently does nothing is the one thing this checkbox
   exists to rule out.
-- **Stats** per response: input/output text symbols, and input/output tokens (from the API's
-  `usage`) — and **what the request cost**, when that can be worked out: the token counts at
-  the price the model's [card](#models) states for the region.
+- **Stats** per response: the **round trip**, input/output text symbols, and input/output tokens
+  (from the API's `usage`) — and **what the request cost**, when that can be worked out: the
+  token counts at the price the model's [card](#models) states for the region.
 
   ```
+  --- stats ---
+  Round trip (RTT): 1,842 ms
+  Input text symbols:  33
+  Output text symbols: 128
+  Input tokens:   8
+  Output tokens:  1120
   Cost (model card): in $0.0031 + out $0.0018 = $0.0049
   ```
+
+  **Round trip** is the call itself, end to end: from opening the connection to the last byte of
+  the answer being read. It is the first line because it is the first thing anyone wonders about
+  a send that felt slow — a reasoning model thinking, a cold connection, a network gone treacly —
+  and it is measured on a monotonic clock, so a wall clock stepping sideways mid-request cannot
+  turn it negative. A **failed** send gets this one line too, and nothing else: a refusal that
+  came back at once and one that took the whole timeout are different problems.
 
   One line, and **nothing at all** when the cost is unknown — a card with no price for the
   model, a region it has no row for, a model there is no card for, or a reply that came back
@@ -2185,9 +2198,12 @@ IntelliJ IDEA. That line wraps on a screen too narrow for it, such as a phone's.
 ### Help (the button on the first line)
 
 Which JRock this is — the title and version, repeated at the top — what it is, where to write
-about it — **jrock@nosocial.net** — and where the source is, both as links that open the mail
-program and the browser; then the whole **Shortcuts** list, **The JRock folder** — every file and
-subfolder JRock can keep in the working folder, each with the line that says what it holds (see
+about it — **jrock@nosocial.net** — and *Source, releases, donate*, which is this repository:
+both as links that open the mail program and the browser, each **address on its own line** under
+its caption, since on a phone a caption and an address never fit together and one label wrapping
+while the other did not looked like two different kinds of line. Then the whole **Shortcuts**
+list, **The JRock folder** — every file and subfolder JRock can keep in the working folder, each
+with the line that says what it holds (see
 [**Persistence**](#persistence-crash-recovery--full-local-history)) — and the **Notes** on what
 every setting does and which file keeps it. All of it in one scrolling window that opens *on top
 of* Configure and centred on it, so anything already typed into the form is still there when it

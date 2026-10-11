@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.16.0";
+    private static final String VERSION = "2.17.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -5210,7 +5210,7 @@ public class JRock {
 
         javax.swing.JLabel mail = linkLabel("Questions, bugs and wishes:", CONTACT_EMAIL,
                 "mailto:" + CONTACT_EMAIL, plainFont, contentW);
-        javax.swing.JLabel home = linkLabel("Source code and releases:", GITHUB_URL,
+        javax.swing.JLabel home = linkLabel("Source, releases, donate:", GITHUB_URL,
                 GITHUB_URL, plainFont, contentW);
 
         javax.swing.JTextArea notes = wrapped(configNotes(), plainFont, contentW);
@@ -5325,11 +5325,16 @@ public class JRock {
 
     // A caption and a link after it, wrapped to width, which opens url when clicked.
     // Swing draws the link but opens nothing by itself, hence the click handler.
+    // Caption on one line, the address on the next - deliberately, rather than letting
+    // it fall there. On a phone the window is narrow enough that a caption and an address
+    // never fit together, so one of these labels wrapped and the other did not, and two
+    // lines that mean the same thing looked like two different kinds of line. Broken on
+    // purpose, they match at every width.
     private static javax.swing.JLabel linkLabel(String caption, String text, String url,
                                                 java.awt.Font font, int width) {
         javax.swing.JLabel label = new javax.swing.JLabel(
                 "<html><body style='width:" + (width - browserTextSlack(width)) + "px'>"
-                + caption + " <a href=\"" + url + "\">" + text + "</a></body></html>");
+                + caption + "<br><a href=\"" + url + "\">" + text + "</a></body></html>");
         label.setFont(font);
         addTextSlack(label, width);
         label.setToolTipText(url);
@@ -15368,7 +15373,17 @@ public class JRock {
             headers.add(new String[] { "Authorization", "Bearer " + apiKey.trim() });
         }
 
+        // The round trip, measured around the one call that makes it: everything from
+        // opening the connection to the last byte of the answer being read, since
+        // HttpTransport.send does not return until the body is in hand. It is the number
+        // to look at when a send felt slow - a reasoning model thinking, a network gone
+        // treacly, a cold connection - and the only one in the stats block that says
+        // anything about the service rather than about the text. nanoTime, because the
+        // wall clock can step sideways mid-request and a negative duration would be
+        // worse than none.
+        long sentAt = System.nanoTime();
         HttpReply resp = http.send("POST", endpoint(), headers, body, CHAT_TIMEOUT_SECONDS);
+        long rtt = (System.nanoTime() - sentAt) / 1_000_000L;
 
         if (resp.status != 200) {
             return new String[] {
@@ -15376,7 +15391,10 @@ public class JRock {
                 "HTTP " + resp.status,
                 // No reply to mask out of the body, only an error - which is shown
                 // whole, bar any blob the service echoed back at us (see maskLongBlobs).
+                // The round trip is worth having here too: a refusal that came back at
+                // once and one that took the whole timeout are different problems.
                 rawDump(maskedRequestBody, maskLongBlobs(resp.body))
+                        + "\n\n--- stats ---" + rttLine(rtt)
             };
         }
 
@@ -15418,6 +15436,7 @@ public class JRock {
 
         String details = rawDump(maskedRequestBody, maskedResponse)
                 + "\n\n--- stats ---"
+                + rttLine(rtt)
                 + "\nInput text symbols:  " + inputSymbols
                 + "\nOutput text symbols: " + outputSymbols
                 + "\nInput tokens:   " + tokenStr(inputTokens)
@@ -15436,7 +15455,8 @@ public class JRock {
     // The raw request/response dump logged after a call, for either outcome. How much
     // of the response body is masked is the caller's choice: the reply too on success
     // (it is already shown above), blobs alone on failure, where the body is the whole
-    // of what there is to report. A success then appends its stats block.
+    // of what there is to report. The caller then appends its stats block: everything on
+    // success, the round trip alone on failure, there being no reply to count.
     private static String rawDump(String maskedRequestBody, String responseBody) {
         return RAW_REQUEST_HEADER + "\nPOST " + pathOf(endpoint()) + "\n" + maskedRequestBody
                 + "\n\n" + RAW_RESPONSE_HEADER + "\n" + responseBody;
@@ -15444,6 +15464,14 @@ public class JRock {
 
     private static String tokenStr(long v) {
         return v < 0 ? "(not reported)" : Long.toString(v);
+    }
+
+    // The round trip, first in the stats block because it is the first thing anybody
+    // wonders about a send that felt slow. Grouped like every other number there, and in
+    // milliseconds: a request measured in minutes still reads, and one that came back
+    // inside a millisecond says 0 ms, which is itself the answer.
+    private static String rttLine(long millis) {
+        return "\nRound trip (RTT): " + fmtNum(millis) + " ms";
     }
 
     // The cost line of the stats block: what this one exchange cost, at the price the
