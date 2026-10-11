@@ -1989,19 +1989,23 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
     16:00-17:30  Physiotherapy  [Calendar]  (repeats weekly)
   ```
 
-- **A maybe is not a plan, and is kept out of every briefing.** Two different things mean
-  "not necessarily happening", and neither belongs in an answer to *"what is on today?"*:
+- **A maybe is not a plan, and is kept out of every briefing.** Four things mean "not
+  necessarily happening", and none of them belongs in an answer to *"what is on today?"*:
   `STATUS:TENTATIVE` on the event itself (244 of 1,569 events in the profile this was written
   against), and an `ATTENDEE` line for one of **your own** addresses saying
-  `PARTSTAT=TENTATIVE` — you answered *maybe* — or `ROLE=OPT-PARTICIPANT` — you were invited
-  optionally. Reading either out as settled is how somebody turns up to something that was
-  never arranged.
+  `PARTSTAT=TENTATIVE` (you answered *maybe*), `PARTSTAT=NEEDS-ACTION` (**nobody has answered
+  it** — so it is not arranged with you, however arranged it looks in somebody else's
+  calendar) or `ROLE=OPT-PARTICIPANT` (you were invited optionally). Reading any of them out
+  as settled is how somebody turns up to something that was never arranged.
 
-  Nothing is hidden, though: a briefing that left any out **says how many**, and
-  `#tentative` lists them with the reason on each line. `NEEDS-ACTION` is deliberately *not*
-  one of them — an invitation nobody has answered yet is a thing happening that wants an
-  answer, and hiding it would hide the appointments most worth being reminded of. Cancelled
-  events were already dropped and still are.
+  Nothing is hidden, though: a briefing that left any out **says how many**, and `#tentative`
+  lists them with the reason on each line — *tentative*, *you said maybe*, *you have not
+  answered it*, *optional for you*. Cancelled events were already dropped and still are.
+
+  ```
+  Sat 4 Apr:
+    10:00-11:00  Legal review (confidential)  [me@…]  (you have not answered it)
+  ```
 - **A new event goes by post, to you from yourself.** `#new` is the one thing here that is not
   read-only, and it still writes nothing to a calendar: it writes a temporary `.ics` file and has
   **Thunderbird** compose a mail with that invitation attached, **from** the address picked in the

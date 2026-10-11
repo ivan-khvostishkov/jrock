@@ -41,7 +41,7 @@
 //          #week                          today and the six days after it
 //          #next [n]                      the next n events from now (default 5)
 //          #range 2026-10-12 2026-10-19   any span of days
-//          #tentative [days]              the maybes, which the others leave out
+//          #tentative [days]              the maybes (tentative, unanswered, optional)
 //          #tentative 2026-12-01 2026-12-31  the same over a span
 //          #calendars                     the calendars, and how many events each holds
 //          #new 2026-10-15 14:00 Dentist  a new event, by post (see below)
@@ -393,22 +393,23 @@ public final class JRockThunderbird {
         }
         if (maybes > 0) {
             out.append("\n").append(maybes).append(maybes == 1
-                    ? " tentative or optional event is not listed above"
-                    : " tentative or optional events are not listed above")
-                    .append(" - ask for the tentative ones to see ")
+                    ? " event is not listed above because it is a maybe"
+                    : " events are not listed above because they are maybes")
+                    .append(" - tentative, unanswered, or one you were invited to "
+                            + "optionally. Ask for the tentative ones to see ")
                     .append(maybes == 1 ? "it." : "them.");
         }
         return out.append('\n').append(footer()).toString();
     }
 
-    // The maybes themselves, for when they are what was asked for: an event somebody has
-    // marked TENTATIVE, or one this operator is an optional attendee of, with the reason
-    // beside each. Nothing is hidden anywhere - it is only kept out of the answer to a
+    // The maybes themselves, for when they are what was asked for: marked tentative,
+    // answered "maybe", not answered at all, or invited to optionally - with the reason
+    // beside each. Nothing is hidden anywhere; it is only kept out of the answer to a
     // question it does not answer.
     private static String tentative(LocalDate from, LocalDate to, ZoneId zone) {
         Instant lo = from.atStartOfDay(zone).toInstant();
         Instant hi = to.plusDays(1).atStartOfDay(zone).toInstant();
-        StringBuilder out = new StringBuilder("Tentative and optional events, "
+        StringBuilder out = new StringBuilder("Tentative, unanswered and optional events, "
                 + from.format(DAY) + " to " + to.format(DAY) + " " + to.getYear()
                 + " (" + zone + "):");
         int shown = 0;
@@ -423,7 +424,7 @@ public final class JRockThunderbird {
             }
             out.append('\n').append(line(o, zone));
         }
-        if (shown == 0) out.append("\nNothing tentative or optional in that span.");
+        if (shown == 0) out.append("\nNothing tentative, unanswered or optional in that span.");
         return out.append('\n').append(footer()).toString();
     }
 
@@ -531,13 +532,13 @@ public final class JRockThunderbird {
 
             // 1. The plain ones: they overlap the window, and they are not an instance of
             //    a repeat (those come with their master, below).
-            Set<String> optional = optionalFor(db);
+            Map<String, String> maybes = maybesFor(db);
             for (String[] row : query(db, "SELECT " + columns + " FROM cal_events"
                     + " WHERE recurrence_id IS NULL AND event_start < " + hiUs
                     + " AND event_end > " + loUs)) {
                 if (cancelled(row[7])) continue;
                 if (repeats(db, row[0], row[1])) continue;   // a master: expanded below
-                Occurrence o = occurrence(row, names, start(row), end(row), "", optional);
+                Occurrence o = occurrence(row, names, start(row), end(row), "", maybes);
                 if (o != null) found.add(o);
             }
 
@@ -569,7 +570,7 @@ public final class JRockThunderbird {
                 String[] master = e.getValue();
                 if (cancelled(master[7])) continue;
                 expand(master, rules.getOrDefault(e.getKey(), List.of()), changed,
-                        e.getKey(), lo, hi, names, found, optional);
+                        e.getKey(), lo, hi, names, found, maybes);
             }
         }
         java.util.Collections.sort(found);
@@ -582,49 +583,61 @@ public final class JRockThunderbird {
                 + " AND item_id = " + text(id) + " LIMIT 1").isEmpty();
     }
 
-    // WHY AN EVENT IS A MAYBE, in Thunderbird's own words - and "" when it is not one.
+    // WHY AN EVENT IS A MAYBE, in a few words - and "" when it is not one.
     //
-    // Two different things both mean "not necessarily happening", and a briefing should
-    // keep neither:
+    // Four things mean "not necessarily happening", and a briefing keeps none of them:
     //
     //   - STATUS:TENTATIVE on the event itself: whoever made it has not settled it. 244
     //     of 1,569 events in the profile this was written against.
-    //   - my own ATTENDEE line saying PARTSTAT=TENTATIVE (I answered "maybe") or
-    //     ROLE=OPT-PARTICIPANT (I was invited optionally).
+    //   - my own ATTENDEE line saying PARTSTAT=TENTATIVE: I answered "maybe".
+    //   - PARTSTAT=NEEDS-ACTION: nobody has answered it yet, so it is not arranged with
+    //     me however arranged it looks in somebody else's calendar.
+    //   - ROLE=OPT-PARTICIPANT: I was invited optionally.
     //
-    // NEEDS-ACTION is deliberately NOT one of them. An invitation nobody has answered
-    // yet is not a maybe - it is a thing happening that wants an answer - and hiding it
-    // would be hiding the appointments most worth being reminded of.
-    private static String maybeWhy(String icalStatus, Set<String> optionalFor, String key) {
+    // All four are left out of "what is on today" and listed by #tentative with the
+    // reason on each line, so an unanswered invitation is found by asking for the maybes
+    // rather than by being read out as a plan.
+    private static String maybeWhy(String icalStatus, Map<String, String> maybes, String key) {
         if ("TENTATIVE".equalsIgnoreCase(icalStatus == null ? "" : icalStatus.trim())) {
             return "tentative";
         }
-        return optionalFor.contains(key) ? "optional for you" : "";
+        return maybes.getOrDefault(key, "");
     }
 
-    // Every event this profile's own addresses are a maybe on, in one query per database
-    // rather than one per event: the attendee rows are read whole, and the ones naming an
-    // address this Thunderbird sends from are kept.
-    private static Set<String> optionalFor(Path db) {
+    // Every event one of this profile's own addresses is a maybe on, and which kind -
+    // read in one query per database rather than one per event: the attendee rows that
+    // say any of the three things are read whole, and the ones naming an address this
+    // Thunderbird sends from are kept.
+    private static Map<String, String> maybesFor(Path db) {
         Set<String> mine = new LinkedHashSet<>();
         try {
             for (String[] one : identities()) mine.add(one[1].toLowerCase(Locale.ROOT));
         } catch (Stop ignored) {
             // No prefs.js to read: then nothing can be known to be mine.
         }
-        Set<String> maybes = new LinkedHashSet<>();
+        Map<String, String> maybes = new LinkedHashMap<>();
         if (mine.isEmpty()) return maybes;
         for (String[] row : query(db, "SELECT cal_id, item_id, icalString FROM cal_attendees"
                 + " WHERE icalString LIKE '%PARTSTAT=TENTATIVE%'"
+                + " OR icalString LIKE '%PARTSTAT=NEEDS-ACTION%'"
                 + " OR icalString LIKE '%ROLE=OPT-PARTICIPANT%'")) {
             if (row.length < 3) continue;
             String line = row[2] == null ? "" : row[2].toLowerCase(Locale.ROOT);
+            boolean ours = false;
             for (String address : mine) {
                 if (line.contains(address)) {
-                    maybes.add(key(row[0], row[1]));
+                    ours = true;
                     break;
                 }
             }
+            if (!ours) continue;
+            // What I said about it first, what nobody has said second, how I was asked
+            // last: "maybe" is a decision, NEEDS-ACTION is the absence of one, and being
+            // an optional guest is the weakest of the three.
+            String why = line.contains("partstat=tentative") ? "you said maybe"
+                    : line.contains("partstat=needs-action") ? "you have not answered it"
+                    : "optional for you";
+            maybes.put(key(row[0], row[1]), why);
         }
         return maybes;
     }
@@ -649,18 +662,18 @@ public final class JRockThunderbird {
     // event and the expansion's for a repeat.
     private static Occurrence occurrence(String[] row, Map<String, String> names,
                                          Instant from, Instant to, String note) {
-        return occurrence(row, names, from, to, note, java.util.Collections.emptySet());
+        return occurrence(row, names, from, to, note, java.util.Collections.emptyMap());
     }
 
     private static Occurrence occurrence(String[] row, Map<String, String> names,
                                          Instant from, Instant to, String note,
-                                         Set<String> optionalFor) {
+                                         Map<String, String> maybesFor) {
         String calendar = names.getOrDefault(row[0], "(unnamed)");
         if (excluded.contains(calendar)) return null;
         String title = row[2] == null || row[2].isBlank() ? "(no title)" : row[2].trim();
         boolean allDay = FLOATING.equalsIgnoreCase(row[5] == null ? "" : row[5].trim());
         return new Occurrence(from, to, allDay, title, calendar, "", note,
-                maybeWhy(row[7], optionalFor, key(row[0], row[1])));
+                maybeWhy(row[7], maybesFor, key(row[0], row[1])));
     }
 
     // ---- Repeats ---------------------------------------------------------------
@@ -673,7 +686,7 @@ public final class JRockThunderbird {
     private static void expand(String[] master, List<String> icalStrings,
                                Map<String, String[]> changed, String masterKey,
                                Instant lo, Instant hi, Map<String, String> names,
-                               List<Occurrence> found, Set<String> optionalFor) {
+                               List<Occurrence> found, Map<String, String> maybesFor) {
         Instant first = start(master);
         Duration length = Duration.between(first, end(master));
         boolean floating = FLOATING.equalsIgnoreCase(master[5] == null ? "" : master[5].trim());
@@ -708,7 +721,7 @@ public final class JRockThunderbird {
                     : "repeats, " + unknown + " not understood";
             if (first.isBefore(hi) && first.plus(length).isAfter(lo)) {
                 add(found, occurrence(master, names, first, first.plus(length), why,
-                        optionalFor));
+                        maybesFor));
             }
             return;
         }
@@ -734,7 +747,7 @@ public final class JRockThunderbird {
         if (!walked) {
             add(found, occurrence(master, names, first, first.plus(length),
                     "repeats too often to work out - check it in Thunderbird",
-                    optionalFor));
+                    maybesFor));
             return;
         }
 
@@ -745,11 +758,11 @@ public final class JRockThunderbird {
                 if (cancelled(instead[7])) continue;           // this one was called off
                 add(found, lo, hi, occurrence(instead, names, start(instead), end(instead),
                         "moved from " + ZonedDateTime.ofInstant(when, zone).format(DAY),
-                        optionalFor));
+                        maybesFor));
                 continue;
             }
             add(found, lo, hi, occurrence(master, names, when, when.plus(length),
-                    rule.describe(), optionalFor));
+                    rule.describe(), maybesFor));
         }
     }
 
