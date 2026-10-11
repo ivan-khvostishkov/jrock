@@ -3221,7 +3221,7 @@ public final class JRockThunderbird {
                 throw new Stop("the message could not be written for including: "
                         + ex.getMessage());
             }
-            // THREE AT THE MOST, and the biggest left out first. A DHL order
+            // THREE AT THE MOST, and the biggest left out first. A shop's order
             // confirmation carries the invoice (75 kB) and the terms and conditions
             // (355 kB): one of those is what the operator asked about and the other is
             // twenty pages of boilerplate that would be rasterised, sent and paid for.

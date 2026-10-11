@@ -2169,8 +2169,8 @@ Sun 11 Oct:
   message 194837261.51842…@mta-7.sender.example…:
     …\cur\1760212800.M247000P3456Q12.MACHINE.eml  (found in 1122 ms)
   attachments: 2
-    Rechnung_R0000000X.pdf   [application/pdf]  77134 bytes   starts: %PDF-1.4
-    AGB_Online_Shop.pdf [application/pdf] 363849 bytes  starts: %PDF-1.7
+    Rechnung_R0000000X.pdf  [application/pdf]  77134 bytes   starts: %PDF-1.4
+    AGB_Online_Shop.pdf     [application/pdf]  363849 bytes  starts: %PDF-1.7
   ```
 - **Nothing raw ever leaves.** Whatever is asked about one message — its text out of the index,
   and whatever came attached — goes through **this agent's own JRock** first, and the model's
@@ -2180,7 +2180,7 @@ Sun 11 Oct:
   operator asked for is the letter, not the plumbing it arrived in. One pass turns all three
   into a page of Markdown that can be read aloud, by
   `jrock-prompt-mail-to-markdown.txt` beside the agent.
-- **Three attachments at the most, the biggest left out first.** That DHL order
+- **Three attachments at the most, the biggest left out first.** That order
   confirmation carries the invoice (75 kB) and the shop's terms and conditions (355 kB): one of
   those is what was asked about, the other is twenty pages of boilerplate that would be
   rasterised, sent and paid for. The ones left out are **named in the answer**, not dropped
@@ -2427,9 +2427,9 @@ sequenceDiagram
         PTT->>PM: that answer as the next prompt
     end
     rect rgb(255, 245, 200)
-        PM-->>PTT: "Filed as the Shipping confirmation from DHL."
+        PM-->>PTT: "Filed as the shipping confirmation from DHL."
         PTT->>Op: reads it aloud
-        Op->>PTT: speaks: "What does the Shipping confirmation say?"
+        Op->>PTT: speaks: "What does the shipping confirmation say?"
     end
     rect rgb(220, 235, 255)
         PM-->>PTT: "I need the post: Shipping Confirmation"
