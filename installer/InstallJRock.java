@@ -237,12 +237,67 @@ public final class InstallJRock {
     private static final int TEXT_WIDTH = 700;
 
     private static javax.swing.JFrame window;
-    private static javax.swing.JPanel content;
+    private static Page content;
     private static javax.swing.JLabel heading;
     private static javax.swing.JTextArea log;
     private static javax.swing.JButton back, next, cancel;
     private static final List<Step> steps = new ArrayList<>();
     private static int at;
+
+    // THE PAGE ITSELF, and the two things about it that have to be true.
+    //
+    // It tracks the viewport's WIDTH instead of keeping a preferred width of its own. A
+    // plain JPanel in a scroll pane keeps its own preferred width, and when that is wider
+    // than the window the right-hand side is simply cut off - with no horizontal
+    // scrollbar, which this wizard deliberately has none of, there is no way to reach it.
+    // That is where the Browse... button went: off the right edge of a row that was wider
+    // than the window it was in.
+    //
+    // It does NOT track the height: a long page is meant to scroll.
+    private static final class Page extends javax.swing.JPanel
+            implements javax.swing.Scrollable {
+        Page() {
+            setLayout(new javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS));
+            setOpaque(false);
+        }
+
+        @Override public java.awt.Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override public int getScrollableUnitIncrement(java.awt.Rectangle visible,
+                                                        int orientation, int direction) {
+            return 16;
+        }
+
+        @Override public int getScrollableBlockIncrement(java.awt.Rectangle visible,
+                                                         int orientation, int direction) {
+            return orientation == javax.swing.SwingConstants.VERTICAL
+                    ? visible.height : visible.width;
+        }
+
+        @Override public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
+    }
+
+    // One row of a page, at its natural height and aligned to the left margin.
+    //
+    // BoxLayout hands leftover vertical space to whatever will take it, and every Swing
+    // component will: a one-line text field stretched to four times its height, with the
+    // glue at the end of the page getting a fraction of what was going spare, is what
+    // that looks like. Capping the maximum height at the preferred one sends all of the
+    // slack to the glue, which is what it is for.
+    private static <T extends javax.swing.JComponent> T row(T component) {
+        component.setAlignmentX(0f);
+        component.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
+                component.getPreferredSize().height));
+        return component;
+    }
 
     // One page of the wizard: what it is called, what it shows, and what it does when
     // Next is pressed - returning the reason to stay on the page, or null to go on.
@@ -1509,9 +1564,7 @@ public final class InstallJRock {
         heading.setForeground(BRAND);
         heading.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 0, 10, 0));
 
-        content = new javax.swing.JPanel();
-        content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
-        content.setOpaque(false);
+        content = new Page();
         // Vertical only. A page that scrolls sideways as well has to be steered in two
         // directions to be read, and every line on these pages is written to fit.
         javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(content,
@@ -1645,9 +1698,8 @@ public final class InstallJRock {
         javax.swing.JLabel label = new javax.swing.JLabel("<html><div style='width:"
                 + TEXT_WIDTH + "px'>" + escape(words) + "</div></html>");
         if (colour != null) label.setForeground(colour);
-        label.setAlignmentX(0f);
         label.setBorder(javax.swing.BorderFactory.createEmptyBorder(above, 0, below, 0));
-        return label;
+        return row(label);
     }
 
     // A path, a label, a command: monospaced, and broken onto further lines when it is
@@ -1656,9 +1708,8 @@ public final class InstallJRock {
     private static javax.swing.JComponent value(String words) {
         javax.swing.JLabel label = new javax.swing.JLabel(broken(words, 94));
         label.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));
-        label.setAlignmentX(0f);
         label.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 10, 1, 0));
-        return label;
+        return row(label);
     }
 
     // Breaks at a separator where there is one near the end of the line, and anywhere
@@ -1686,32 +1737,28 @@ public final class InstallJRock {
         javax.swing.JLabel label = new javax.swing.JLabel((yes ? "\u2713  " : "\u2717  ")
                 + escape(what));
         label.setForeground(yes ? BRAND : ALARM);
-        label.setAlignmentX(0f);
         label.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 4, 2, 0));
-        return label;
+        return row(label);
     }
 
     private static javax.swing.JComponent check(String label, boolean on,
                                                 java.util.function.Consumer<Boolean> set) {
         javax.swing.JCheckBox box = new javax.swing.JCheckBox(label, on);
         box.setOpaque(false);
-        box.setAlignmentX(0f);
         box.addActionListener(e -> set.accept(box.isSelected()));
-        return box;
+        return row(box);
     }
 
     private static javax.swing.JComponent radio(String label, boolean on,
                                                 java.util.function.Consumer<Boolean> set) {
         javax.swing.JRadioButton button = new javax.swing.JRadioButton(label, on);
         button.setOpaque(false);
-        button.setAlignmentX(0f);
         button.addActionListener(e -> set.accept(true));
-        return button;
+        return row(button);
     }
 
     private static javax.swing.JComponent link(String label, String url) {
         javax.swing.JButton button = new javax.swing.JButton(label + " - " + url);
-        button.setAlignmentX(0f);
         button.addActionListener(e -> {
             try {
                 if (java.awt.Desktop.isDesktopSupported()) {
@@ -1725,7 +1772,7 @@ public final class InstallJRock {
             else if (isMac()) run("open", url);
             else run("xdg-open", url);
         });
-        return button;
+        return row(button);
     }
 
     // What the install folder will hold, as a folder tree - the one picture that answers
@@ -1744,9 +1791,8 @@ public final class InstallJRock {
         area.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));
         area.setForeground(MUTED);
         area.setOpaque(false);
-        area.setAlignmentX(0f);
         area.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 10, 8, 0));
-        return area;
+        return row(area);
     }
 
     // A folder, typed or browsed to.
@@ -1776,13 +1822,12 @@ public final class InstallJRock {
                 redraw();
             }
         });
-        javax.swing.JPanel row = new javax.swing.JPanel(new java.awt.BorderLayout(8, 0));
-        row.setOpaque(false);
-        row.setAlignmentX(0f);
-        row.add(field, java.awt.BorderLayout.CENTER);
-        row.add(browse, java.awt.BorderLayout.EAST);
-        row.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 0, 8, 0));
-        return row;
+        javax.swing.JPanel line = new javax.swing.JPanel(new java.awt.BorderLayout(8, 0));
+        line.setOpaque(false);
+        line.add(field, java.awt.BorderLayout.CENTER);
+        line.add(browse, java.awt.BorderLayout.EAST);
+        line.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 0, 8, 0));
+        return row(line);
     }
 
     // One row per sample, in four columns that line up: install it or not, which kind it
@@ -1839,9 +1884,7 @@ public final class InstallJRock {
         // showed four and a half rows was most of what made this page a maze.
         int height = Math.min(Math.max(shown.size(), 1), 9) * 30 + 18;
         scroll.setPreferredSize(new java.awt.Dimension(TEXT_WIDTH, height));
-        scroll.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, height));
-        scroll.setAlignmentX(0f);
-        return scroll;
+        return row(scroll);
     }
 
     // An agent's own folder: editable, defaulted, and browsable.
