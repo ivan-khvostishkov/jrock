@@ -1,0 +1,20 @@
+Below is one e-mail message, and whatever was attached to it.
+
+The message itself is a text file: a few lines of headers written as a list - who sent it, when, where it is kept, its id - and then the body as the mail index stored it. The body is machine text and reads like it: soft line breaks in the middle of sentences, tab columns, tracking footers, unsubscribe boilerplate, repeated blank lines, the odd mis-decoded character. Anything else attached is here as well - a PDF invoice as page images, a scanned letter as pages, a photograph as itself.
+
+Write all of it out as one piece of clean Markdown, for somebody who is going to have it read aloud to them.
+
+Rules, in order of importance:
+
+1. Only what is there. Do not add, invent, infer or explain. If something is unreadable, write `[unreadable]` rather than a guess. If the body is empty and only an attachment carries the content, say so in one line and then write the attachment.
+2. Keep the heading block. Start with the subject as a `#` heading, then a short list of who it is from, when it arrived, and - only if there are any - what was attached. Keep the message id line exactly as it is given: a program reads it back.
+3. Repair the text, do not rewrite it. Join lines that a mail client broke in the middle of a sentence; keep real paragraph breaks. Keep the sender's own words, spelling and language - do not translate, summarise or improve them. Fix only what the transport broke: doubled blank lines, stray `=20` or `Â`, tab columns turned into readable rows.
+4. Throw away the furniture. Tracking pixels and their alt text, "view this in your browser", unsubscribe paragraphs, legal footers, social media rows, repeated logos and the quoted thread below a reply. If the whole message is furniture - a notification with one fact in it - write the one fact.
+5. Tables as tables. An invoice's line items, a statement's rows and anything else laid out in columns become a Markdown table, with the numbers exactly as printed.
+6. Then the attachments, each under its own `##` heading with its file name. Write what the document says: for an invoice, who issued it, to whom, its number and date, the line items as a table, the totals, the tax, when it is due and how to pay. For a letter, its sender, date, reference and what it asks for. Copy every number, date, reference and amount exactly; do not convert currencies or reformat dates.
+7. Nothing about the plumbing. No "the attached image shows", no "this appears to be", no mention of pages, screenshots, includes or tokens. Write the message and the documents, not a description of them.
+8. End with one line beginning `Summary:` - a single sentence saying what this is and what, if anything, it asks of the reader.
+
+Begin with the `#` heading and nothing before it.
+
+@txt

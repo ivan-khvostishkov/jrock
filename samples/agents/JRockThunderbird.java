@@ -113,6 +113,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.Base64;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -140,6 +141,9 @@ public final class JRockThunderbird {
     // How long sqlite3 may take over one query. Generous: a cold 7 MB file on a network
     // drive is slower than the same file read twice on an SSD.
     private static final int QUERY_TIMEOUT_MS = 20_000;
+
+    // How long this agent's own JRock gets to come up.
+    private static final long READY_TIMEOUT_MS = 120_000;
 
     // Where this agent keeps the profile it was last pointed at, and the calendars left
     // out - beside this file, so the window remembers them and nothing of JRock's own
@@ -231,6 +235,11 @@ public final class JRockThunderbird {
             java.util.concurrent.Executors.newSingleThreadExecutor(
                     r -> daemon(r, "jrock-calendar-reader"));
 
+    // Why this agent's own JRock cannot ask a model, or null when it can. Only reading
+    // ONE MESSAGE needs it - the calendar and the mail listings are files and nothing
+    // else - so a missing key is a reason to refuse that and nothing more.
+    private static volatile String noModel = "its JRock has not been started.";
+
     private static volatile Path profile;          // the one Thunderbird profile to read
     private static volatile Path sqlite;           // the tool, once found
     // The address a new event is mailed FROM and TO. One address, both ways, chosen in
@@ -273,6 +282,19 @@ public final class JRockThunderbird {
             }
             return;
         }
+
+        // A JROCK OF ITS OWN, because a message is never handed over raw: its text and
+        // its attachments go through a model first (see refine). Started before the
+        // window so the window can sit beside it, and started even when there is no key -
+        // everything except reading one message works without one.
+        JRock.main(args);
+        noModel = JRock.automationAwaitReady(READY_TIMEOUT_MS);
+        if (JRock.automationWindow() == null) {
+            System.out.println("Stopped: " + noModel);
+            return;
+        }
+        String taken = JRock.automationBegin("Thunderbird agent");
+        if (taken != null) noModel = taken;
 
         onEdt(JRockThunderbird::showWindow);
         String said = listen();
@@ -1484,7 +1506,7 @@ public final class JRockThunderbird {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        window = new javax.swing.JFrame("JRock - Thunderbird: calendar and mail (read-only)");
+        window = new javax.swing.JFrame("JRock - Thunderbird: calendar and mail");
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
@@ -2144,6 +2166,9 @@ public final class JRockThunderbird {
     // read in that light.
     private static final String MAIL_DB = "global-messages-db.sqlite";
 
+    // JRock's own folder, where this agent writes what it hands to a model.
+    private static final String PRODUCT = "JRock";
+
     // Gloda attribute ids inside messages.jsonAttributes.
     private static final String FROM = "43";          // the sender's identity id
     private static final String FROM_ME = "54";       // set when I sent it
@@ -2255,6 +2280,16 @@ public final class JRockThunderbird {
             out.append(f.id);
         }
         return out.length() == 0 ? "-1" : out.toString();
+    }
+
+    // One folder's own URI, by its id - read again because MailFolder keeps the name
+    // and the account rather than the URI it was made from.
+    private static String folderUri(String folderId, List<MailFolder> folders) {
+        for (String[] row : query(mailDatabase(),
+                "SELECT folderURI FROM folderLocations WHERE id = " + number(folderId))) {
+            if (row.length > 0 && !row[0].isBlank()) return row[0];
+        }
+        return null;
     }
 
     private static Map<Integer, MailFolder> byId(List<MailFolder> folders) {
@@ -2633,11 +2668,29 @@ public final class JRockThunderbird {
                 }
             }
         }
-        // CONTENT, then the kind, then a file name: the same hand-over the letters agent
-        // uses, so whatever is asking writes it to a file and INCLUDES it rather than
-        // pasting a whole message into a prompt.
-        return "CONTENT message message-" + messageId(found[3]) + ".md\n"
-                + oneMessage(found, folders, zone) + others;
+        // The message as the index has it, and then - if anything came with it - the
+        // attachments themselves off the disk.
+        String raw = oneMessage(found, folders, zone) + others;
+        List<Attached> attachments = new ArrayList<>();
+        List<String> named = attachments(found[9]);
+        if (!named.isEmpty()) {
+            MailFolder folder = byId(folders).get(number(found[2]));
+            String uri = folder == null ? null : folderUri(found[2], folders);
+            Path file = uri == null ? null : messageFile(uri, found[3]);
+            if (file == null) {
+                raw += "\n\n*The message file itself could not be found, so what is in "
+                        + "the attachment could not be read - only its name is known.*";
+            } else {
+                Path into = Paths.get("").toAbsolutePath().resolve(PRODUCT)
+                        .resolve("attachments");
+                attachments.addAll(attachmentsIn(file, into));
+                later(() -> say(attachments.size() + " attachment(s) taken out of the "
+                        + "message."));
+            }
+        }
+        // NOTHING RAW LEAVES: the model's version of all of it is the answer.
+        String refined = refine(raw, attachments);
+        return "CONTENT message message-" + messageId(found[3]) + ".md\n" + refined;
     }
 
     // One message as Markdown: who, when, to whom, what it is about, what came with it,
@@ -2813,6 +2866,416 @@ public final class JRockThunderbird {
         if (angled.find()) return angled.group(1).trim();
         Matcher bare = Pattern.compile("([^<>@\\s,;]+@[^<>@\\s,;]+)").matcher(text);
         return bare.find() ? bare.group(1).trim() : "";
+    }
+
+    // ---- The message on disk, and what came with it -----------------------------
+    // THE INDEX KNOWS WHAT AN ATTACHMENT IS CALLED; ONLY THE MESSAGE ITSELF HAS IT. So to
+    // read an invoice that arrived as a PDF, the message file has to be found and its
+    // MIME walked - which is the one piece of real mail plumbing in this agent, and it is
+    // here rather than anywhere else because nothing else needs it.
+    //
+    // Finding the file is the awkward part. Thunderbird stores each message as a file in
+    // a maildir, and the file's name is a maildir unique name - a timestamp, a process
+    // id and a counter - with no relation to anything the index holds. There is a map
+    // from one to the other, in the folder's .msf, and it is in Mork, which is a format
+    // nobody should have to read twice.
+    //
+    // So the folder is scanned NEWEST FIRST and each file's Message-ID header is compared
+    // with the one the index gave. A message from this morning is found in the first
+    // handful of files; an old one in a folder of thousands may not be found before the
+    // cap, and then the answer says so rather than pretending the attachment is not
+    // there. Which is the right trade for an assistant that is asked about this morning's
+    // post, and an honest limit the moment it is not.
+    private static final int MESSAGE_SCAN_MAX = 3_000;
+    private static final long MESSAGE_SCAN_MS = 25_000;
+    private static final int HEADER_READ = 8_192;
+    private static final long ATTACHMENT_MAX = 25L * 1024 * 1024;
+
+    // Where one folder's messages are, worked out of the folder's own URI and the server
+    // prefs: hostname and user name identify the account, directory-rel says where it
+    // keeps its mail, and a nested folder is <parent>.sbd/<child> as every Thunderbird
+    // store has been since Netscape.
+    private static Path folderStore(String folderUri) {
+        Matcher m = Pattern.compile("^([a-z]+)://([^@/]*)@([^/]+)(?:/(.*))?$")
+                .matcher(folderUri);
+        if (!m.matches()) return null;
+        String user = decode(m.group(2));
+        String host = decode(m.group(3));
+        String path = m.group(4) == null ? "" : m.group(4);
+
+        Path base = null;
+        Map<String, String> prefs = serverPrefs();
+        for (int i = 1; i <= 64; i++) {
+            String id = "server" + i;
+            String prefHost = prefs.get(id + ".hostname");
+            if (prefHost == null) continue;
+            String prefUser = prefs.get(id + ".userName");
+            boolean sameUser = user.equalsIgnoreCase(prefUser == null ? "" : prefUser)
+                    || user.equalsIgnoreCase("nobody");
+            if (!prefHost.equalsIgnoreCase(host) || !sameUser) continue;
+            String dir = prefs.get(id + ".directory-rel");
+            if (dir == null) dir = prefs.get(id + ".directory");
+            if (dir == null) continue;
+            base = dir.startsWith("[ProfD]") ? profile.resolve(dir.substring(7)
+                    .replace('/', java.io.File.separatorChar)) : Paths.get(dir);
+            break;
+        }
+        if (base == null || !Files.isDirectory(base)) return null;
+
+        Path at = base;
+        String[] parts = path.isEmpty() ? new String[0] : path.split("/");
+        for (int i = 0; i < parts.length; i++) {
+            String name = decode(parts[i]);
+            at = i == parts.length - 1 ? at.resolve(name)
+                    : at.resolve(name + ".sbd");
+        }
+        // maildir keeps the messages in cur/; an mbox store is one file with this name,
+        // which this agent does not read - said where it matters rather than here.
+        Path cur = at.resolve("cur");
+        return Files.isDirectory(cur) ? cur : null;
+    }
+
+    // mail.server.serverN.* out of prefs.js, read once per request like everything else
+    // here: an account added in Thunderbird should need no restart.
+    private static Map<String, String> serverPrefs() {
+        Map<String, String> prefs = new LinkedHashMap<>();
+        Path file = profile == null ? null : profile.resolve("prefs.js");
+        if (file == null || !Files.isRegularFile(file)) return prefs;
+        Pattern pref = Pattern.compile(
+                "user_pref\\(\"mail\\.server\\.(server\\d+\\.[A-Za-z-]+)\",\\s*\"(.*)\"\\);");
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                Matcher m = pref.matcher(line.trim());
+                if (m.matches()) prefs.put(m.group(1), unescape(m.group(2)));
+            }
+        } catch (IOException ex) {
+            // No prefs: then no store can be found, and the caller says so.
+        }
+        return prefs;
+    }
+
+    // The file one message is in, by its Message-ID. Newest first, headers only, capped.
+    private static Path messageFile(String folderUri, String messageId) {
+        if (messageId == null || messageId.isBlank()) return null;
+        Path cur = folderStore(folderUri);
+        if (cur == null) return null;
+        String wanted = messageId.replaceAll("^<|>$", "").trim();
+        List<Path> files = new ArrayList<>();
+        try (java.util.stream.Stream<Path> all = Files.list(cur)) {
+            all.filter(Files::isRegularFile).forEach(files::add);
+        } catch (IOException ex) {
+            return null;
+        }
+        files.sort((a, b) -> Long.compare(modified(b), modified(a)));
+        long deadline = System.currentTimeMillis() + MESSAGE_SCAN_MS;
+        int looked = 0;
+        for (Path file : files) {
+            if (looked++ >= MESSAGE_SCAN_MAX || System.currentTimeMillis() > deadline) break;
+            String id = messageIdIn(file);
+            if (id != null && id.equalsIgnoreCase(wanted)) return file;
+        }
+        return null;
+    }
+
+    private static long modified(Path file) {
+        try {
+            return Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException ex) {
+            return 0;
+        }
+    }
+
+    // The Message-ID out of a file's headers, reading only as far as it has to.
+    private static String messageIdIn(Path file) {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            byte[] buffer = new byte[HEADER_READ];
+            int read = in.readNBytes(buffer, 0, buffer.length);
+            String head = new String(buffer, 0, Math.max(0, read), StandardCharsets.ISO_8859_1);
+            int blank = head.indexOf("\r\n\r\n");
+            if (blank < 0) blank = head.indexOf("\n\n");
+            if (blank > 0) head = head.substring(0, blank);
+            Matcher m = Pattern.compile("(?im)^message-id:\\s*<?([^>\\s]+)>?\\s*$")
+                    .matcher(head);
+            return m.find() ? m.group(1).trim() : null;
+        } catch (IOException ex) {
+            return null;
+        }
+    }
+
+    // ---- MIME, as far as the attachments ----------------------------------------
+    // One attachment, saved beside this agent's own files.
+    private static final class Attached {
+        final String name;
+        final String type;
+        final Path file;
+
+        Attached(String name, String type, Path file) {
+            this.name = name; this.type = type; this.file = file;
+        }
+    }
+
+    // Every attachment in one message file, written out as files. Nothing else of the
+    // message is taken: the TEXT comes from the index, which already has it, so this walk
+    // only has to find the parts that carry a file name - and never has to decide what a
+    // message says.
+    private static List<Attached> attachmentsIn(Path eml, Path into) {
+        List<Attached> saved = new ArrayList<>();
+        byte[] whole;
+        try {
+            if (Files.size(eml) > ATTACHMENT_MAX * 4) return saved;   // a mailbox, not a mail
+            whole = Files.readAllBytes(eml);
+        } catch (IOException ex) {
+            return saved;
+        }
+        // ISO-8859-1 keeps every byte as itself, which is what matters: the base64 of an
+        // attachment has to survive being read as text and turned back into bytes.
+        String text = new String(whole, StandardCharsets.ISO_8859_1);
+        walkParts(text, into, saved, 0);
+        return saved;
+    }
+
+    private static void walkParts(String part, Path into, List<Attached> saved, int depth) {
+        if (depth > 8 || saved.size() >= 10) return;
+        int blank = part.indexOf("\r\n\r\n");
+        int gap = 4;
+        if (blank < 0) {
+            blank = part.indexOf("\n\n");
+            gap = 2;
+        }
+        if (blank < 0) return;
+        String headers = unfold(part.substring(0, blank));
+        String body = part.substring(blank + gap);
+
+        String contentType = header(headers, "content-type");
+        String boundary = parameter(contentType, "boundary");
+        if (boundary != null && !boundary.isEmpty()) {
+            // A multipart: every piece between the boundaries, each walked on its own.
+            String[] pieces = body.split(Pattern.quote("--" + boundary));
+            for (int i = 1; i < pieces.length; i++) {
+                String piece = pieces[i];
+                if (piece.startsWith("--")) break;          // the closing boundary
+                walkParts(piece.replaceFirst("^\r?\n", ""), into, saved, depth + 1);
+            }
+            return;
+        }
+
+        String disposition = header(headers, "content-disposition");
+        String name = parameter(disposition, "filename");
+        if (name == null) name = parameter(contentType, "name");
+        if (name == null || name.isBlank()) return;         // not an attachment
+        String encoding = header(headers, "content-transfer-encoding")
+                .toLowerCase(Locale.ROOT).trim();
+        byte[] bytes;
+        if (encoding.contains("base64")) {
+            try {
+                bytes = Base64.getMimeDecoder().decode(
+                        body.replaceAll("[^A-Za-z0-9+/=]", ""));
+            } catch (IllegalArgumentException ex) {
+                return;
+            }
+        } else if (encoding.contains("quoted-printable")) {
+            bytes = unQuoted(body).getBytes(StandardCharsets.ISO_8859_1);
+        } else {
+            bytes = body.getBytes(StandardCharsets.ISO_8859_1);
+        }
+        if (bytes.length == 0 || bytes.length > ATTACHMENT_MAX) return;
+        try {
+            Files.createDirectories(into);
+            String safe = decodeHeader(name).replaceAll("[^A-Za-z0-9._ -]", "-").trim();
+            if (safe.isEmpty()) safe = "attachment-" + (saved.size() + 1);
+            Path file = into.resolve(safe);
+            Files.write(file, bytes);
+            saved.add(new Attached(decodeHeader(name), contentType.split(";")[0].trim(),
+                    file));
+        } catch (IOException ex) {
+            // One attachment that would not be written is not a reason to drop the rest.
+        }
+    }
+
+    // Header folding undone: a long Content-Type runs over several lines, and every one
+    // after the first starts with a space.
+    private static String unfold(String headers) {
+        return headers.replace("\r\n", "\n").replaceAll("\n[ \t]+", " ");
+    }
+
+    private static String header(String headers, String name) {
+        Matcher m = Pattern.compile("(?im)^" + Pattern.quote(name) + ":\\s*(.*)$")
+                .matcher(headers);
+        return m.find() ? m.group(1).trim() : "";
+    }
+
+    // One parameter of a header, quoted or not - and the RFC 2231 "name*0", "name*1"
+    // continuations some senders split a long file name over.
+    private static String parameter(String header, String name) {
+        Matcher quoted = Pattern.compile("(?i)" + Pattern.quote(name) + "\\s*=\\s*\"([^\"]*)\"")
+                .matcher(header);
+        if (quoted.find()) return quoted.group(1);
+        Matcher bare = Pattern.compile("(?i)" + Pattern.quote(name) + "\\s*=\\s*([^;\\s]+)")
+                .matcher(header);
+        if (bare.find()) return bare.group(1);
+        Matcher split = Pattern.compile("(?i)" + Pattern.quote(name)
+                + "\\*\\d+\\*?\\s*=\\s*\"?([^\";]*)\"?").matcher(header);
+        StringBuilder joined = new StringBuilder();
+        while (split.find()) joined.append(split.group(1));
+        return joined.length() == 0 ? null : joined.toString();
+    }
+
+    private static String unQuoted(String text) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '=' && i + 2 < text.length()) {
+                String hex = text.substring(i + 1, i + 3);
+                if (hex.equals("\r\n") || hex.startsWith("\n")) {
+                    i += hex.startsWith("\n") ? 1 : 2;
+                    continue;
+                }
+                try {
+                    out.append((char) Integer.parseInt(hex, 16));
+                    i += 2;
+                    continue;
+                } catch (NumberFormatException ex) {
+                    // Not an escape after all.
+                }
+            }
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    // A file name as a header may carry it: =?UTF-8?B?...?= or =?UTF-8?Q?...?=.
+    private static String decodeHeader(String text) {
+        Matcher m = Pattern.compile("=\\?([^?]+)\\?([bBqQ])\\?([^?]*)\\?=").matcher(text);
+        StringBuilder out = new StringBuilder();
+        int at = 0;
+        while (m.find()) {
+            out.append(text, at, m.start());
+            String charset = m.group(1);
+            String body = m.group(3);
+            try {
+                byte[] bytes = m.group(2).equalsIgnoreCase("b")
+                        ? Base64.getMimeDecoder().decode(body)
+                        : unQuoted(body.replace('_', ' ')).getBytes(StandardCharsets.ISO_8859_1);
+                out.append(new String(bytes, java.nio.charset.Charset.forName(charset)));
+            } catch (RuntimeException ex) {
+                out.append(body);
+            }
+            at = m.end();
+        }
+        out.append(text.substring(at));
+        return out.toString();
+    }
+
+    // ---- Through this agent's own JRock -----------------------------------------
+    // NOTHING RAW GOES BACK. Whatever is asked about one message - its text out of the
+    // index, and whatever came attached to it - is put in front of this agent's own JRock
+    // and the MODEL's version of it is what leaves here.
+    //
+    // Which is worth the wait for three reasons. A mail body as it arrives is a mess of
+    // soft line breaks, tracking footers, unsubscribe boilerplate and =?UTF-8?B? wreckage;
+    // a scanned invoice is a picture and says nothing at all until something reads it; and
+    // what the operator asked for is the letter, not the plumbing it arrived in. One pass
+    // through a model turns all three into a page of Markdown that can be read aloud.
+    //
+    // The prompt is a file beside this agent, like every other prompt here, so it can be
+    // changed without changing any of this.
+    private static final String MAIL_PROMPT = "jrock-prompt-mail-to-markdown.txt";
+    private static final long MAIL_SEND_TIMEOUT_MS = 10 * 60_000;
+
+    // How many of a message's attachments are sent to the model, smallest first.
+    private static final int ATTACHMENTS_SENT = 3;
+
+    private static String refine(String markdown, List<Attached> attachments) {
+        String why = noModel;
+        if (why != null) {
+            throw new Stop("this agent's own JRock cannot ask a model (" + why + "), and a "
+                    + "message is only given out after a model has read it.");
+        }
+        Path prompt = ownDirectory().resolve(MAIL_PROMPT);
+        if (!Files.isRegularFile(prompt)) {
+            throw new Stop("there is no " + prompt + ", and that prompt is what turns a "
+                    + "message into something readable.");
+        }
+        synchronized (MODEL_LOCK) {
+            check(JRock.automationClearPrompt());
+            check(JRock.automationLoadPrompt(prompt.toString()));
+            String text = JRock.automationPromptText();
+            if (text == null) throw new Stop("the prompt could not be read.");
+            StringBuilder without = new StringBuilder();
+            for (String line : text.split("\n", -1)) {
+                String bare = line.trim();
+                if (bare.equals("@txt") || bare.equals("@img")) continue;
+                without.append(line).append('\n');
+            }
+            check(JRock.automationSetPrompt(without.toString().replaceAll("\\s+$", "")
+                    + "\n\n"));
+            // The message itself as a file, not as prompt text: the same reason a letter
+            // goes in as a file - the transcript keeps a token and the document beside it.
+            Path mailDir = Paths.get("").toAbsolutePath().resolve(PRODUCT).resolve("mail");
+            try {
+                Files.createDirectories(mailDir);
+                Path body = mailDir.resolve("message.md");
+                Files.write(body, markdown.getBytes(StandardCharsets.UTF_8));
+                check(JRock.automationInclude(body.toString(), "txt"));
+            } catch (IOException ex) {
+                throw new Stop("the message could not be written for including: "
+                        + ex.getMessage());
+            }
+            // THREE AT THE MOST, and the biggest left out first. A DHL order
+            // confirmation carries the invoice (75 kB) and the terms and conditions
+            // (355 kB): one of those is what the operator asked about and the other is
+            // twenty pages of boilerplate that would be rasterised, sent and paid for.
+            // The ones left out are named in the answer rather than dropped silently.
+            List<Attached> going = new ArrayList<>(attachments);
+            going.sort(java.util.Comparator.comparingLong(one -> {
+                try {
+                    return Files.size(one.file);
+                } catch (IOException ex) {
+                    return Long.MAX_VALUE;
+                }
+            }));
+            List<String> leftOut = new ArrayList<>();
+            for (int i = 0; i < going.size(); i++) {
+                Attached one = going.get(i);
+                if (i >= ATTACHMENTS_SENT) {
+                    leftOut.add(one.name);
+                    continue;
+                }
+                // "auto" so each kind goes in the way this folder's settings say: a PDF as
+                // page images or as text, a photograph as itself.
+                String problem = JRock.automationInclude(one.file.toString(), "auto");
+                if (problem != null) {
+                    later(() -> say("Could not include " + one.name + ": " + problem));
+                }
+            }
+            if (!leftOut.isEmpty()) {
+                check(JRock.automationSetPrompt(JRock.automationPromptText()
+                        + "\n\nNot included, being the largest of several attachments: "
+                        + String.join(", ", leftOut) + ". Say at the end that they were "
+                        + "not read.\n"));
+            }
+            String[] sent = JRock.automationSend(MAIL_SEND_TIMEOUT_MS);
+            if (!"1".equals(sent[0])) {
+                throw new Stop("the message was not read: "
+                        + (sent[3] == null ? "no reason given" : sent[3]));
+            }
+            String file = JRock.automationMessageFile("assistant", sent[2]);
+            if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
+            try {
+                String refined = new String(Files.readAllBytes(Paths.get(file)),
+                        StandardCharsets.UTF_8).trim();
+                if (refined.isEmpty()) throw new Stop("the reply was empty.");
+                return refined;
+            } catch (IOException ex) {
+                throw new Stop("the reply could not be read: " + ex.getMessage());
+            }
+        }
+    }
+
+    private static final Object MODEL_LOCK = new Object();
+
+    private static void check(String problem) {
+        if (problem != null) throw new Stop(problem);
     }
 
     // ---- Settings --------------------------------------------------------------

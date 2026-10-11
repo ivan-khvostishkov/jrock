@@ -1982,9 +1982,12 @@ java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
 ### A fifth agent: Thunderbird, your calendar and your mail (`JRockThunderbird.java`)
 
 What **Thunderbird already knows**, read out of its own files — your **calendar** and your
-**mail** — for the push-to-talk agent to ask about and for you to read. And one thing it puts
-back: a calendar event, posted to you by yourself. The first agent here that needs **no model,
-no Bedrock key and no JRock automation**: it answers out of files rather than by asking anybody.
+**mail** — for the push-to-talk agent to ask about and for you to read. And two things it puts
+back: a calendar event, posted to you by yourself, and a drafted reply in a compose window.
+
+The calendar and the mail listings need **no model and no key**: they are files, read and
+reported. Reading **one message** is the exception, and it has a JRock of its own for it — see
+below, because the reason is the interesting part.
 
 Neither half is ever the authority on anything — Thunderbird is. What is here is what
 Thunderbird has already written down, which is why **every answer says how fresh that is**.
@@ -2151,10 +2154,37 @@ Sun 11 Oct:
   because that is what it searches — so no MIME is parsed, no HTML is rendered, and **no raw
   message leaves the agent**. A model asked what somebody wrote gets what they wrote, laid out
   as Markdown with the sender, the date, the folder and the message's own short id.
-- **Attachments are named, not read.** The index knows their names, types and sizes, and those
-  go in the answer. What is *inside* one is a different job with different tools — the
-  [inventory flow](#automating-the-chain-jrockdocinventoryjava), Ghostscript, xpdf — and
-  guessing at an invoice's contents from its file name is exactly the kind of help nobody wants.
+- **Attachments are read, and that needs the message itself.** The index knows what an
+  attachment is *called*; only the message carries it. So the agent finds the message file and
+  walks its MIME: a folder's URI gives the store through `mail.server.*` in `prefs.js`, and the
+  file inside it is found by scanning the maildir **newest first** and comparing each
+  `Message-ID` with the one the index gave. There is a map from message key to file name — in
+  the folder's `.msf`, in Mork, a format nobody should have to read twice — so this scans
+  instead, which finds this morning's post in about a second and has an honest limit for an old
+  message in a folder of thousands.
+
+  ```
+  folder store for imap://me%40gmail.com@imap.gmail.com/INBOX:
+    …\ImapMail\imap.gmail.com-maildir\INBOX\cur
+  message 194837261.51842…@mta-7.sender.example…:
+    …\cur\1760212800.M247000P3456Q12.MACHINE.eml  (found in 1122 ms)
+  attachments: 2
+    Rechnung_R0000000X.pdf   [application/pdf]  77134 bytes   starts: %PDF-1.4
+    AGB_Online_Shop.pdf [application/pdf] 363849 bytes  starts: %PDF-1.7
+  ```
+- **Nothing raw ever leaves.** Whatever is asked about one message — its text out of the index,
+  and whatever came attached — goes through **this agent's own JRock** first, and the model's
+  version of it is the answer. Worth the wait for three reasons: a mail body as it arrives is
+  soft line breaks, tracking footers, unsubscribe boilerplate and `=?UTF-8?B?` wreckage; a
+  scanned invoice is a *picture* and says nothing at all until something reads it; and what the
+  operator asked for is the letter, not the plumbing it arrived in. One pass turns all three
+  into a page of Markdown that can be read aloud, by
+  `jrock-prompt-mail-to-markdown.txt` beside the agent.
+- **Three attachments at the most, the biggest left out first.** That DHL order
+  confirmation carries the invoice (75 kB) and the shop's terms and conditions (355 kB): one of
+  those is what was asked about, the other is twenty pages of boilerplate that would be
+  rasterised, sent and paid for. The ones left out are **named in the answer**, not dropped
+  silently.
 - **Short ids, like the calendar's.** Every line of every mail answer ends with `id 0a6a15`:
   six hex characters of the message's own `Message-ID`, which reads
   `<CAHk-=wi8rPqY4nF2xvQ…@mail.gmail.com>` and is unsayable, unrepeatable and forty characters
