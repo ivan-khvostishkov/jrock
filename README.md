@@ -1806,7 +1806,8 @@ the voice, so the microphone doesn't record the last answer as the next question
   week"*, or *"… for 2026-12-24 to 2026-12-26"* — the agent asks the [calendar
   agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) on `127.0.0.1:47473`, puts the
   briefing into the next prompt and sends it. Once a turn. Each line carries the calendar it came
-  from, so the model can say which calendar something is in.
+  from, so the model can say which calendar something is in. *"… for tentative"* asks for the
+  maybes, which the other answers leave out on purpose.
 - **Mail.** When the whole answer is *"I need your mail: …"* — `today`, `3 days`, `unanswered`,
   `senders 5 days`, `with <somebody>`, `mailboxes` — the agent asks the [Thunderbird
   agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) on
@@ -1976,6 +1977,7 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   | `#week` | today and the six days after it |
   | `#next [n]` | the next *n* events from now (default 5) |
   | `#range 2026-12-24 2026-12-26` | any span of days |
+  | `#tentative [days]` | the maybes, which every other answer leaves out — `#tentative 2026-12-01 2026-12-31` for a span |
   | `#calendars` | the calendars, and how many events each holds |
   | `#new 2026-10-15 14:00 Dentist` | a new event, by post (below) — an hour long unless the calendar says otherwise |
   | `#new 2026-12-24 Christmas Eve` | the same with no time given, which makes it an event for the whole day |
@@ -1987,6 +1989,19 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
     16:00-17:30  Physiotherapy  [Calendar]  (repeats weekly)
   ```
 
+- **A maybe is not a plan, and is kept out of every briefing.** Two different things mean
+  "not necessarily happening", and neither belongs in an answer to *"what is on today?"*:
+  `STATUS:TENTATIVE` on the event itself (244 of 1,569 events in the profile this was written
+  against), and an `ATTENDEE` line for one of **your own** addresses saying
+  `PARTSTAT=TENTATIVE` — you answered *maybe* — or `ROLE=OPT-PARTICIPANT` — you were invited
+  optionally. Reading either out as settled is how somebody turns up to something that was
+  never arranged.
+
+  Nothing is hidden, though: a briefing that left any out **says how many**, and
+  `#tentative` lists them with the reason on each line. `NEEDS-ACTION` is deliberately *not*
+  one of them — an invitation nobody has answered yet is a thing happening that wants an
+  answer, and hiding it would hide the appointments most worth being reminded of. Cancelled
+  events were already dropped and still are.
 - **A new event goes by post, to you from yourself.** `#new` is the one thing here that is not
   read-only, and it still writes nothing to a calendar: it writes a temporary `.ics` file and has
   **Thunderbird** compose a mail with that invitation attached, **from** the address picked in the

@@ -456,6 +456,12 @@ public final class JRockPushToTalk {
         java.util.regex.Matcher dates = java.util.regex.Pattern
                 .compile("(\\d{4}-\\d{2}-\\d{2}).*?(\\d{4}-\\d{2}-\\d{2})").matcher(asked);
         if (dates.find()) return "#range " + dates.group(1) + " " + dates.group(2);
+        // The maybes are kept out of every other answer, so asking for them is a
+        // question of its own rather than a flag on another one.
+        if (asked.contains("tentative") || asked.contains("optional")
+                || asked.contains("maybe")) {
+            return "#tentative";
+        }
         if (asked.contains("week")) return "#week";
         if (asked.contains("next")) return "#next 5";
         return "#today";
