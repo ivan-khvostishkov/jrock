@@ -2272,10 +2272,12 @@ public class JRock {
             log.gray("Record from: the browser's own microphone, on Ctrl+Space (it asks "
                     + "for permission the first time)");
         } else if (recordAvailable()) {
+            // The first look, before watchMicrophone's own: what it finds is both this
+            // line and the answer automationMicReady gives until the watcher looks again.
+            if (!recordDevice.isEmpty()) micPresent = inputMixer(recordDevice) != null;
             log.gray("Record from: " + (recordDevice.isEmpty()
                     ? "no microphone set yet (Ctrl+Space lists them, Configure picks one)"
-                    : recordDevice + (inputMixer(recordDevice) != null
-                                      ? ", connected" : ", NOT connected"))
+                    : recordDevice + (micPresent ? ", connected" : ", NOT connected"))
                     + (recordTranscribe && transcribeAvailable()
                        ? " - transcribed into the prompt" : "")
                     + (micAlwaysOn ? " - mic always on" : ""));
@@ -4055,18 +4057,35 @@ public class JRock {
             return "mic always on is not available here - in the browser the page hands "
                     + "over a finished recording, with no line to listen on between them.";
         }
-        if (!micAlwaysOn) {
-            return "Mic always on is off - tick it in JRock's prompt menu or in Configure, "
-                    + "and try again.";
-        }
         if (recordDevice.isEmpty()) {
             return "no microphone is set. Press Ctrl+Space in JRock to list them, pick one "
                     + "in Configure > Record from, and try again.";
         }
+        // Mic always on is TURNED ON if it is off, rather than being a reason to refuse.
+        // An agent asking to listen was told to by the operator - the hands-free lever,
+        // pulled a moment ago - and a checkbox in another window is not a second opinion
+        // worth having about that. Refusing left the agent with nothing it could do but
+        // say "error" and ask to be told again, which is no answer for somebody who is
+        // not at the keyboard.
+        //
+        // Remembered and put back by automationEnd, and deliberately NOT written to the
+        // config: the automation asked for this, the operator did not, and the tick they
+        // left in that folder is theirs.
         heardRecording = null;   // only what is heard from now on
+        // Unmuted first, so that when Mic always on is turned on below it says it is
+        // listening rather than that it is waiting for the automation to let it.
         setMicMuted(false);
+        Ui live = ui;
+        if (!micAlwaysOn && live != null) {
+            alwaysOnBeforeAutomation = Boolean.FALSE;
+            setMicAlwaysOn(true, live.log);
+        }
         return null;
     }
+
+    // What Mic always on was before an automation turned it on, or null when it was
+    // already on - and so nothing to put back.
+    private static Boolean alwaysOnBeforeAutomation;
 
     // Whether there is a microphone to listen on right now: null when there is, and
     // otherwise why not, in a sentence.
@@ -4077,6 +4096,11 @@ public class JRock {
     // button is muted by unplugging it - which is how you keep a narrated answer from
     // being recorded back as the next question - so hands-free has to read an absent
     // microphone as "be quiet for now", not as an error to announce every few seconds.
+    //
+    // Nothing here goes near the audio devices: it reports what watchMicrophone last saw
+    // (micPresent). An agent may ask several times a second, and enumerating the devices
+    // that often is one more thing poking a Bluetooth headset that is already busy
+    // switching profiles - which is exactly the headset this matters on.
     //
     // Mic always on's own listener takes the same view: with no device to open it waits,
     // a quarter of a second at a time, and opens whichever one is there when it is back
@@ -4090,9 +4114,6 @@ public class JRock {
             return "mic always on is not available here - in the browser the page hands "
                     + "over a finished recording, with no line to listen on between them.";
         }
-        if (!micAlwaysOn) {
-            return "Mic always on is off - tick it in JRock's prompt menu or in Configure.";
-        }
         if (recordDevice.isEmpty()) {
             return "no microphone is set. Press Ctrl+Space in JRock to list them, and pick "
                     + "one in Configure > Record from.";
@@ -4101,14 +4122,7 @@ public class JRock {
             return "\"" + recordDevice + "\" is whatever the system default is rather than "
                     + "a microphone, and listening needs the device itself.";
         }
-        try {
-            if (inputMixer(recordDevice) == null) {
-                return "the microphone is not connected: " + recordDevice;
-            }
-        } catch (RuntimeException ex) {
-            // Asked in the middle of a device change, which Java Sound can throw on.
-            return "the microphone could not be looked up: " + ex.getMessage();
-        }
+        if (!micPresent) return "the microphone is not connected: " + recordDevice;
         return null;
     }
 
@@ -4209,6 +4223,12 @@ public class JRock {
         });
         automating = false;
         setMicMuted(false);
+        // Mic always on back as the operator left it, if an automation turned it on to
+        // listen (see automationListen): what the tick in this folder says is theirs.
+        if (alwaysOnBeforeAutomation != null) {
+            setMicAlwaysOn(alwaysOnBeforeAutomation, live.log);
+            alwaysOnBeforeAutomation = null;
+        }
         live.log.gray(note == null ? "Automation finished."
                                   : "Automation finished: " + note);
         live.log.gray("The prompt is editable again - carry on from here.");
@@ -7711,6 +7731,14 @@ public class JRock {
     // own device list every five, so a change shows up within about seven. The state at
     // the moment a microphone is set is the session report's to say ("Record from: ...,
     // connected"), so only a change after that is a line here.
+    // Whether the configured microphone was there the last time anything looked: every
+    // two seconds in watchMicrophone, and once in the session report before that.
+    //
+    // One place looks, everything else reads what it saw - so an agent asking
+    // automationMicReady() several times a second costs nothing, and what it is told is
+    // exactly what the log said.
+    private static volatile boolean micPresent;
+
     private static void watchMicrophone(LogView log) {
         Thread t = new Thread(() -> {
             String watched = null;
@@ -7730,6 +7758,7 @@ public class JRock {
                 } catch (RuntimeException ex) {
                     continue;   // asked mid-change: the next look will tell
                 }
+                micPresent = now;   // what automationMicReady answers with
                 if (present != null && now != present) {
                     log.gray((now ? "Microphone connected: " : "Microphone disconnected: ")
                             + device);
@@ -7780,16 +7809,34 @@ public class JRock {
     // with half a second of buffer; null when it offers none of them.
     private static javax.sound.sampled.TargetDataLine openMicLine(javax.sound.sampled.Mixer mixer)
             throws javax.sound.sampled.LineUnavailableException {
+        javax.sound.sampled.LineUnavailableException refused = null;
         for (javax.sound.sampled.AudioFormat f : RECORD_FORMATS) {
             javax.sound.sampled.DataLine.Info info = new javax.sound.sampled.DataLine.Info(
                     javax.sound.sampled.TargetDataLine.class, f);
             if (!mixer.isLineSupported(info)) continue;
-            javax.sound.sampled.TargetDataLine line =
-                    (javax.sound.sampled.TargetDataLine) mixer.getLine(info);
-            line.open(f, (int) f.getSampleRate() * f.getFrameSize() / 2);
-            line.start();
-            return line;
+            try {
+                javax.sound.sampled.TargetDataLine line =
+                        (javax.sound.sampled.TargetDataLine) mixer.getLine(info);
+                line.open(f, (int) f.getSampleRate() * f.getFrameSize() / 2);
+                line.start();
+                return line;
+            } catch (javax.sound.sampled.LineUnavailableException
+                     | IllegalArgumentException ex) {
+                // The mixer said it supported this format and the driver then refused
+                // it, which a Bluetooth headset says both of within a second of
+                // switching profiles. The next format is tried rather than the device
+                // given up on: the one that opens is the one to record at, and these
+                // are listed best first for exactly that reason.
+                if (refused == null) {
+                    refused = ex instanceof javax.sound.sampled.LineUnavailableException
+                            ? (javax.sound.sampled.LineUnavailableException) ex
+                            : new javax.sound.sampled.LineUnavailableException(ex.getMessage());
+                }
+            }
         }
+        // Nothing opened: the first refusal is the useful one to report, since the
+        // formats are tried in the order they are wanted.
+        if (refused != null) throw refused;
         return null;
     }
 

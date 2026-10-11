@@ -654,20 +654,16 @@ public final class JRockPushToTalk {
                             : note + " " + LISTENING_HANDS_FREE;
                     later(() -> setState(State.RECORDING, listening));
                     String[] heard;
-                    long looked = System.currentTimeMillis();
                     do {
                         heard = JRock.automationAwaitHeard(LISTEN_POLL_MS);
                         // A microphone goes while nobody is speaking, which is exactly
                         // when it is unplugged - and a quiet room looks the same to
                         // awaitHeard either way, so this is the one place that can tell
-                        // the two apart. Looked for once a second rather than on every
-                        // poll: enumerating the devices is not free, and JRock's own
-                        // watcher looks every two.
-                        if (System.currentTimeMillis() - looked >= MIC_WAIT_MS) {
-                            looked = System.currentTimeMillis();
-                            if (JRock.automationMicReady() != null) break;
-                        }
-                    } while (handsFree && !"1".equals(heard[0]) && heard[1] == null);
+                        // the two apart. Asked on every poll: automationMicReady reports
+                        // what JRock's own watcher last saw and goes nowhere near the
+                        // devices, so asking costs nothing.
+                    } while (handsFree && !"1".equals(heard[0]) && heard[1] == null
+                             && JRock.automationMicReady() == null);
                     // Muted while the answer is on its way, so the question is not asked twice.
                     JRock.automationListen(false);
                     if (!handsFree) break;   // ended: what was being said is not sent
