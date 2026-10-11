@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "3.4.0";
+    private static final String VERSION = "3.5.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -4184,6 +4184,64 @@ public class JRock {
         }
         return new String[] { "1", null };
     }
+
+    // Merge two-sided (duplex) scans, for an automation: the same interleave the window
+    // menu does, with the two dialogs replaced by three arguments.
+    //
+    // The front pass is the one whose page 1 is the document's page 1; the back pass came
+    // out of the feeder in REVERSE, which is what a one-sided scanner does with the stack
+    // turned over, and is the whole reason this is not a concatenation. Both passes have
+    // to have the same number of pages, or one of them is not the file it was taken for -
+    // refused rather than guessed at, because the mistake it makes is every back page
+    // against the wrong front.
+    //
+    // Returns null when out holds the merged document, and otherwise why it does not. No
+    // dialog either way: an automation that cannot press OK must not be shown one.
+    //
+    // The two scans are left exactly as they were. Whoever asked for this has the merge
+    // to check before anything is deleted - and nothing here deletes anything.
+    public static String automationMergeDuplex(String frontFile, String backFile,
+                                               String outFile) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        PdfEngine engine = pdf();
+        if (!engine.writesPdf()) {
+            return "merging duplex scans needs a PDF writer, and this build's PDF engine ("
+                    + engine.name() + ") reads PDFs only.";
+        }
+        if (findGhostscript() == null) {
+            return "Ghostscript is what interleaves the two passes, and it is not on PATH.";
+        }
+        Path front = Paths.get(frontFile).toAbsolutePath().normalize();
+        Path back = Paths.get(backFile).toAbsolutePath().normalize();
+        Path out = Paths.get(outFile).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(front)) return "no such file: " + front;
+        if (!Files.isRegularFile(back)) return "no such file: " + back;
+        if (front.equals(back)) return "the front pass and the back pass are the same file.";
+        if (out.equals(front) || out.equals(back)) {
+            return "the merge would write over one of the two scans it reads.";
+        }
+        synchronized (DUPLEX_LOCK) {
+            duplexProblem = null;
+            duplexSilent = true;
+            try {
+                live.log.gray("Duplex merge for an automation, front pass: " + front);
+                live.log.gray("Duplex merge, back pass (in reverse): " + back);
+                runDuplexMerge(live.frame, live.log, engine, front, back, out);
+            } catch (RuntimeException ex) {
+                return "the merge failed: " + ex;
+            } finally {
+                duplexSilent = false;
+                live.log.gray("");
+            }
+            if (duplexProblem != null) return duplexProblem;
+        }
+        if (!Files.isRegularFile(out)) return "the merge wrote no file.";
+        return null;
+    }
+
+    private static final Object DUPLEX_LOCK = new Object();
 
     // One line in JRock's log, from whatever is driving it.
     //
@@ -11172,10 +11230,21 @@ public class JRock {
 
     // Says why a merge did not happen, in the log and in a dialog. Called from the
     // worker, so the dialog goes through onEdt.
+    //
+    // Except when an automation is doing the merging: then the reason is RETURNED to
+    // whatever asked for it (see automationMergeDuplex) and the dialog is not shown. A
+    // dialog in front of a program that cannot press OK is a merge that never ends.
     private static void duplexNote(JFrame frame, LogView log, String message) {
         log.gray(message);
+        if (duplexSilent) {
+            duplexProblem = message;
+            return;
+        }
         onEdt(() -> duplexWarn(frame, message));
     }
+
+    private static volatile boolean duplexSilent;
+    private static volatile String duplexProblem;
 
     // The same dialog on its own, for the two dialogs' own refusals: those happen on
     // the EDT, before there is anything in the log worth a line.

@@ -351,6 +351,21 @@ public final class JRockBrowser {
         { "arstechnica.com", "arstechnica", "ars technica", "ars" },
     };
 
+    // THE FRONT PAGE OF A SITE, where asking for it plainly does not work.
+    //
+    // businessinsider.com sends a reader in Germany to businessinsider.de, which is not
+    // on the list and so comes back refused - the right answer to a redirect off the
+    // list, and a useless one to somebody who asked for Business Insider. A trailing
+    // question mark is enough to stop it: the redirect is decided for the bare path and
+    // not for one carrying a query, so "/?" lands on the English front page. Every link
+    // from there stays on .com, so this is needed for the front page only.
+    //
+    // One line per site that needs one, with the reason, rather than a rule nobody could
+    // guess at. Everything else is https://<domain>/.
+    private static final String[][] FRONT = {
+        { "businessinsider.com", "https://www.businessinsider.com/?" },
+    };
+
     private static String address(String given) {
         String asked = given.trim();
         if (asked.toLowerCase(Locale.ROOT).startsWith("http")) return asked;
@@ -358,14 +373,25 @@ public final class JRockBrowser {
                 .replaceAll("\\s+", " ").trim();
         for (String[] site : NAMES) {
             for (int i = 1; i < site.length; i++) {
-                if (spoken.equals(site[i])) return "https://" + site[0] + "/";
+                if (spoken.equals(site[i])) return front(site[0]);
             }
         }
         // A bare host, with or without a path after it.
         String host = asked.split("[/?#\\s]", 2)[0];
         String rest = asked.length() > host.length() ? asked.substring(host.length()) : "/";
         if (!rest.startsWith("/")) rest = "/" + rest;
+        // A bare host IS the front page, however it was spelled.
+        if (rest.equals("/")) return front(host);
         return "https://" + host + rest;
+    }
+
+    // The front page of one site: its own, where it has one, and the plain one otherwise.
+    private static String front(String host) {
+        String bare = host.toLowerCase(Locale.ROOT).replaceFirst("^www\\.", "");
+        for (String[] site : FRONT) {
+            if (bare.equals(site[0])) return site[1];
+        }
+        return "https://" + host + "/";
     }
 
     private static String hosts() {

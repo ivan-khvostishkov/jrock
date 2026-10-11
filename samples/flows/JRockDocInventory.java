@@ -108,6 +108,20 @@ public final class JRockDocInventory {
 
     // JRock's own flags, spelled out here because this automation both reads them and
     // passes them on (see parseArgs).
+    // --auto: nobody is watching, so nothing is asked.
+    //
+    // The flow is the same flow; what changes is that every question answers itself the
+    // way the person at the keyboard almost always answers it - yes, rename them - and
+    // that the result is PRINTED in a line a program can read instead of shown in a
+    // dialog a program cannot dismiss. It is how the letters agent files a scan the
+    // moment it arrives, with the operator three rooms away.
+    //
+    // Two documents are allowed with it, and only with it: the two passes of a
+    // two-sided batch, which are merged into one PDF first (see mergeDuplex) because
+    // they are one document and filing them separately would file half of it twice.
+    private static final String AUTO_FLAG = "--auto";
+    private static final String AUTO_RESULT = "AUTO-RESULT";
+
     private static final String WORKING_DIR_FLAG = "--working-dir";
     private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
 
@@ -198,6 +212,8 @@ public final class JRockDocInventory {
         Path ascii = mustExist(here.resolve(PROMPT_ASCII));
         Path inventory = mustExist(here.resolve(PROMPT_NAME));
 
+        asking = !told.auto;
+
         // The document. Asked for before JRock is started, so a cancelled chooser
         // leaves nothing behind at all.
         Path chosen = (told.document != null)
@@ -207,6 +223,14 @@ public final class JRockDocInventory {
             return null;
         }
         if (!Files.isRegularFile(chosen)) throw new Stop("not a file:\n\n    " + chosen);
+
+        // Two passes of a two-sided batch: one document in two files, merged into one
+        // PDF before anything is read, named after the front pass. JRock does the
+        // interleave - its own duplex merge, through the automation API - because that
+        // is where Ghostscript and the page pairing already live.
+        if (told.second != null) {
+            chosen = mergeDuplex(chosen, told.second, told);
+        }
 
         // Checked here and not left to the include: the chooser only offers these
         // extensions, but the right-click menu hands over whatever was clicked, and a
@@ -229,12 +253,7 @@ public final class JRockDocInventory {
         System.out.println("Document: " + document + " (from pass " + pass + ")");
 
         // ---- Start JRock and wait for it to be usable ----------------------
-        // The real entry point, which shows the window on the event dispatch thread and
-        // returns at once. Everything after this runs on THIS thread, which is what the
-        // automation API asks for - every one of its methods blocks.
-        JRock.main(told.forJRock.toArray(new String[0]));
-        check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
-        check(JRock.automationBegin("doc inventory of " + document.getFileName()));
+        startJRock(told, "doc inventory of " + document.getFileName());
 
         // Everything written here goes beside the document and is named after it, which
         // is what makes the set findable before it is renamed - and what each pass reads
@@ -360,6 +379,11 @@ public final class JRockDocInventory {
         java.util.List<Path> renamed = new java.util.ArrayList<>();
         for (Path file : files) renamed.add(renameTo(file, base));
         System.out.println("Renamed to " + named(renamed));
+        if (!asking) {
+            // The one line the letters agent reads out of all this output.
+            System.out.println(autoResult(base, renamed.isEmpty() ? document
+                    : renamed.get(0), renamed.size()));
+        }
         return new Result("renamed to " + named(renamed) + folderPart,
                 "Renamed to\n\n" + listed(renamed) + "\nin " + dir + "." + "\n" + folderLine);
     }
@@ -377,6 +401,8 @@ public final class JRockDocInventory {
         private final java.util.List<String> forJRock = new java.util.ArrayList<>();
         private Path workingDir = STARTED_IN;
         private Path document = null;
+        private Path second = null;      // the back pass, with --auto only
+        private boolean auto = false;
 
         // Where the file chooser opens: the folder this process was started in (see
         // STARTED_IN), falling back to the working directory if that folder has since
@@ -412,16 +438,100 @@ public final class JRockDocInventory {
                     Path dir = dirOrNull(value);
                     if (dir != null) parsed.workingDir = dir;
                 }
+            } else if (flag.equals(AUTO_FLAG)) {
+                parsed.auto = true;
             } else if (arg.startsWith("-")) {
                 parsed.forJRock.add(arg);
             } else if (parsed.document == null) {
                 parsed.document = documentPath(arg);
+            } else if (parsed.second == null) {
+                parsed.second = documentPath(arg);
             } else {
-                throw new Stop("one document at a time, and two were given:\n\n"
-                        + parsed.document + "\n" + arg);
+                throw new Stop("two documents at the most - the two passes of one "
+                        + "two-sided batch - and three were given:\n\n"
+                        + parsed.document + "\n" + parsed.second + "\n" + arg);
             }
         }
+        if (parsed.second != null && !parsed.auto) {
+            throw new Stop("two documents are only taken with " + AUTO_FLAG + ", where "
+                    + "they mean the two passes of one two-sided batch.");
+        }
         return parsed;
+    }
+
+    // JRock, started once however many times this is called.
+    //
+    // Once, because the duplex merge needs the window before the rest of the flow does -
+    // it is JRock's own merge, through the automation API - and a second JRock.main would
+    // be a second window driving the same folder.
+    //
+    // The real entry point shows the window on the event dispatch thread and returns at
+    // once. Everything after it runs on THIS thread, which is what the automation API
+    // asks for: every one of its methods blocks.
+    private static boolean started;
+
+    private static void startJRock(Args told, String what) {
+        if (started) return;
+        started = true;
+        JRock.main(told.forJRock.toArray(new String[0]));
+        check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
+        check(JRock.automationBegin(what));
+    }
+
+    // The two passes into one PDF, through JRock's own duplex merge.
+    //
+    // The front pass is the one whose name comes first: a scanner writes the first pass
+    // before the second, so the earlier name holds the fronts and the later one holds
+    // the backs in reverse. That is the same rule JRock's own merge uses, and the reason
+    // it is a rule rather than a guess is that getting it wrong puts every back page
+    // against the wrong front.
+    private static Path mergeDuplex(Path one, Path two, Args told) {
+        Path[] passes = frontThenBack(one, two);
+        Path front = passes[0];
+        Path back = passes[1];
+        String name = front.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        Path merged = front.resolveSibling((dot > 0 ? name.substring(0, dot) : name)
+                + ".Merged.pdf");
+        System.out.println("Two passes: front " + front.getFileName() + ", back "
+                + back.getFileName() + " (in reverse), into " + merged.getFileName());
+        startJRock(told, "duplex merge of " + front.getFileName() + " and "
+                + back.getFileName());
+        String problem = JRock.automationMergeDuplex(front.toString(), back.toString(),
+                merged.toString());
+        if (problem != null) throw new Stop("the two passes would not merge: " + problem);
+        return merged;
+    }
+
+    // The pair in the order their names put them, which is front first.
+    private static Path[] frontThenBack(Path a, Path b) {
+        String one = a.getFileName().toString();
+        String two = b.getFileName().toString();
+        int by = stemOf(one).compareToIgnoreCase(stemOf(two));
+        if (by == 0) by = one.compareToIgnoreCase(two);
+        if (by == 0) by = a.toString().compareTo(b.toString());
+        return by <= 0 ? new Path[] { a, b } : new Path[] { b, a };
+    }
+
+    private static String stemOf(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    // The one line a program reads out of all this: what the document was called, when
+    // it was scanned, and how many files now carry that name.
+    private static String autoResult(String base, Path document, int files) {
+        String scanned = "";
+        try {
+            scanned = java.time.ZonedDateTime.ofInstant(
+                    Files.getLastModifiedTime(document).toInstant(),
+                    java.time.ZoneId.systemDefault())
+                    .format(java.time.format.DateTimeFormatter.ofPattern(
+                            "yyyy-MM-dd HH:mm:ss"));
+        } catch (IOException ex) {
+            scanned = "unknown";
+        }
+        return AUTO_RESULT + " name=" + base + " scanned=" + scanned + " files=" + files;
     }
 
     // The document argument as a path, or a stop saying why that text is not one.
@@ -993,7 +1103,18 @@ public final class JRockDocInventory {
     // behind it. automationWindow() is null until that window exists, which JOptionPane
     // reads as "centre it on the screen" - right for the dialogs that come that early,
     // the offer to read an export instead among them.
+    // Whether anything may be asked at all. Set from the flags before the first
+    // question, and false only with --auto: a dialog nobody can see is a flow that has
+    // stopped without saying so.
+    private static volatile boolean asking = true;
+
     private static boolean ask(String message, String title) {
+        if (!asking) {
+            // Said in the log instead, so the answer is on the record either way.
+            System.out.println("Auto: yes - " + title + " ("
+                    + message.replaceAll("\\s+", " ").trim() + ")");
+            return true;
+        }
         boolean[] yes = { false };
         onEdt(() -> yes[0] = javax.swing.JOptionPane.showConfirmDialog(
                 JRock.automationWindow(), message, title,
@@ -1004,6 +1125,10 @@ public final class JRockDocInventory {
     }
 
     private static void tell(String message, String title, int kind) {
+        if (!asking) {
+            System.out.println(title + ": " + message.replaceAll("\\s+", " ").trim());
+            return;
+        }
         onEdt(() -> javax.swing.JOptionPane.showMessageDialog(
                 JRock.automationWindow(), message, title, kind));
     }

@@ -1619,6 +1619,15 @@ file to JRock, so the two are told apart on the way in. That is what the install
 `--working-dir` and no document (so the chooser asks, in that folder), one with the clicked file
 appended.
 
+**`--auto` files a letter with nobody watching.** One PDF, or **two** — the two passes of a
+two-sided batch, which are merged into one document first through JRock's own duplex merge
+(`automationMergeDuplex`) because they are one letter and filing them separately would file half
+of it twice. Every question answers itself the way the person at the keyboard almost always
+answers it — yes, rename them — and the result is **printed in a line a program can read**
+(`AUTO-RESULT name=… scanned=… files=…`) instead of shown in a dialog a program cannot dismiss.
+It is how the [letters agent](#a-seventh-agent-the-paper-post-jrocklettersjava) files a scan the
+moment it arrives, with the operator three rooms away.
+
 **`-cp jrock.jar` has to name a jar that is there.** Nothing downloads it: the
 [installer](#the-installer-installerinstalljrockjava) puts one in the folder it installs into
 (one level up from `Flows\`, two up from an agent's own folder), or take it from a
@@ -1932,6 +1941,12 @@ It starts JRock and takes it as an automation, like the timer, and opens a small
 - **Run it in a folder of its own**, with History off there. A key is needed only for the
   openstreetmap.org lookups; GPS and typed values work without one.
 
+- **Two choices are remembered**, in `jrock-location.txt` beside the agent: **Determine
+  automatically** and **Round to**. Not the place, not the coordinates and not the refresh
+  interval — a place is where somebody is *now*, and an agent that started up insisting it was
+  still in last month's city would be worse than one that asks. Those two are preferences about
+  how to work rather than facts about the world, and typing them in again every morning is the
+  kind of small insult software should not offer.
 ### A fourth agent: weather (`JRockWeather.java`)
 
 It turns a location into a checked address for the weather on open-meteo.com. It does not fetch
@@ -2210,6 +2225,119 @@ and its own JRock log.
 Protocol is JSON over a WebSocket, and a WebSocket client has been in the JDK since 11
 (`java.net.http.WebSocket`), so this is one file with no dependencies like everything else here.
 
+### A seventh agent: the paper post (`JRockLetters.java`)
+
+The letters that come through the door — what the scanner has put in its folder, what arrived
+when, and once a letter has been filed, what it says.
+
+**Letters, and that is the name.** The [Thunderbird
+agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) reads
+e-mail; this one reads the post. "Mail" would have meant both and so neither.
+
+```sh
+java -cp jrock.jar JRockLetters.java --folder D:\HPNetworkScan
+java -cp jrock.jar JRockLetters.java --folder D:\HPNetworkScan --print recent
+```
+
+**A new shape: an agent with no JRock of its own, that drives a flow.** Every other agent here
+starts a JRock and holds it. This one starts none — looking at a folder needs no model, and a
+window that did nothing but sit there would be a window to close. When a letter has to be
+*filed*, it starts the **doc inventory flow** with `--auto`, as a process of its own: that flow
+starts a JRock, merges the two passes if there are two, reads the letter, names it, renames
+every file of it, prints one line saying what it did, and exits. Its window closes with it.
+
+So the long-running thing has no model and no key, and the thing with the model lives for one
+letter — an agent for what is always true, a flow for what happens once, which is exactly the
+distinction those two words have carried all along.
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    box Push-to-talk
+        participant PTT as JRockPushToTalk
+        participant PM as its JRock (model)
+    end
+    participant Let as JRockLetters, 127.0.0.1:47475
+    box One letter, one lifetime
+        participant Flow as JRockDocInventory #45;#45;auto
+        participant FM as its own JRock (model)
+    end
+
+    rect rgb(255, 245, 200)
+        Op->>PTT: speaks: "What has just been scanned?"
+    end
+    rect rgb(220, 235, 255)
+        PTT->>PM: recording + appendix
+        PM-->>PTT: "I need the post: recent"
+        PTT->>Let: #35;recent
+        Note over Let: lists the folder - no model, no key
+        Let-->>PTT: 1 document, 2 files - one letter in two passes
+        PTT->>PM: that answer as the next prompt
+    end
+    rect rgb(255, 245, 200)
+        PM-->>PTT: "Two pages of one letter, scanned a minute ago."
+        PTT->>Op: reads it aloud
+        Op->>PTT: speaks: "File it."
+    end
+    rect rgb(220, 235, 255)
+        PM-->>PTT: "I need the post: file it"
+        PTT->>Let: #35;inventory
+        Let->>Flow: java -cp jrock.jar JRockDocInventory.java #45;#45;auto front.pdf back.pdf
+        Flow->>FM: starts it, takes it as an automation
+        FM-->>Flow: duplex merge (automationMergeDuplex)
+        Note over Flow,FM: pass 1 Markdown + DOCX, pass 2 plain text, pass 3 the name
+        Flow->>Flow: renames every file of the document
+        Flow-->>Let: AUTO-RESULT name=... scanned=... files=3
+        Note over FM: its window closes with the flow
+        Let-->>PTT: Filed: 2026-10-02-DHL-Shipping...-1234567890
+        PTT->>PM: that answer as the next prompt
+    end
+    rect rgb(255, 245, 200)
+        PM-->>PTT: "Filed as the Shipping confirmation from DHL."
+        PTT->>Op: reads it aloud
+        Op->>PTT: speaks: "What does the Shipping confirmation say?"
+    end
+    rect rgb(220, 235, 255)
+        PM-->>PTT: "I need the post: Shipping Confirmation"
+        PTT->>Let: #35;file Shipping Confirmation
+        Let-->>PTT: CONTENT <name>.txt + the letter's text
+        Note over PTT: written into JRock/letters/ and INCLUDED as a document
+        PTT->>PM: "say what this letter is about" + the .txt
+    end
+    rect rgb(255, 245, 200)
+        PM-->>PTT: what the letter is about
+        PTT->>Op: reads it aloud
+    end
+```
+
+- **Two files in five minutes is one letter.** A one-sided scanner given a two-sided letter is
+  run twice — the stack, then the stack turned over — and writes two PDFs a minute apart. So
+  `#recent` counts **documents**, not files: two scans close together *and* adjacent in name
+  (`scan0166.pdf`, `scan0167.pdf`) are reported as one letter in two passes, which is what
+  filing then merges. Three or more together are reported as what they are, with their times,
+  because at that point only the operator knows what happened.
+- **Only `.txt` for content.** Asked what a letter says, it reads the `.txt` beside it and
+  nothing else. It converts nothing: turning a PDF into text is the inventory flow's job — with
+  Ghostscript, xpdf and a model — and doing it a second way here would be a second answer to
+  the same question. A letter that has not been filed has no `.txt`, and the answer says so.
+- **Names as they are spoken.** *"Shipping Confirmation"* finds
+  `2026-10-02-DHL-ShippingConfirmation-1234567890.txt`: punctuation and case are
+  ignored on both sides, and every word of the question has to be somewhere in the name, in any
+  order. Several matches is a question back, not a guess.
+- **The letter goes into the prompt as a file.** Push-to-talk writes what comes back into
+  `JRock/letters/` and **includes** it, exactly as a person would with Ctrl+I — so the
+  transcript holds a token and a file beside it rather than ten thousand characters of letter,
+  and the model is reading a document rather than a quotation of one.
+
+| | |
+|---|---|
+| `#recent [minutes]` | what the scanner has put there lately, counted as documents (10 minutes by default) |
+| `#scans [n]` | the last *n* scans, newest first, with their times and whether they are filed |
+| `#filed [n]` | the letters that have been filed and named |
+| `#file <name>` | the text of a filed letter, by any part of its name |
+| `#inventory [name]` | file it: the named scan, or the newest, through the inventory flow |
+| `#folder` | where it is looking, and whether that folder is there |
+
 ### Multi-agent collaboration
 
 The agents are separate programs, each with a JRock of its own, and they talk over loopback TCP
@@ -2398,6 +2526,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![...](<name>)` (or `![](<hash>)`) placed as the image that include names. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationNarrateDevice()` | The **Narrate on** speaker's name, or `""` when none is set — for an agent that plays sounds of its own on it. Needs no `automationBegin`. |
+| `automationMergeDuplex(front, back, out)` | **Merge two-sided scans**: the same interleave as the window menu — front 1, back N, front 2, back N−1 — with the two dialogs replaced by three arguments. Both passes must have the same page count, or one of them is not the file it was taken for; refused rather than guessed at, since the mistake it makes is every back page against the wrong front. No dialog either way: an automation that cannot press OK must not be shown one. The two scans are left exactly as they were. |
 | `automationNote(String line)` | One line in JRock's log, from the agent driving it. An agent is started by `javaw` and **has no standard output at all**, and its own window has one status line the next turn overwrites — so this is the only place a reason can still be read an hour later. Needs no `automationBegin`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
 

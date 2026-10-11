@@ -277,6 +277,16 @@ public final class JRockPushToTalk {
             "^\\W*I need the web:\\s*(.*\\S)\\W*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
+    // The answer that asks about the PAPER post: what the scanner has put in its folder,
+    // what arrived when, filing one, and what a filed letter says.
+    private static final java.util.regex.Pattern POST_REQUEST = java.util.regex.Pattern.compile(
+            "^\\W*I need the post:\\s*(.*\\S)\\W*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
+    // The answer the letters agent gives when it is handing over a letter's TEXT rather
+    // than a sentence about one: the marker, the file name, and then the letter.
+    private static final String CONTENT = "CONTENT ";
+
     // Coordinates in a location line, as the location agent writes them - which the model
     // may already have from it, and then they are used as they are.
     private static final java.util.regex.Pattern COORDINATES = java.util.regex.Pattern.compile(
@@ -294,6 +304,7 @@ public final class JRockPushToTalk {
     private static final int WEATHER_PORT = 47472;
     private static final int CALENDAR_PORT = 47473;
     private static final int BROWSER_PORT = 47474;
+    private static final int LETTERS_PORT = 47475;
     private static final int AGENT_CONNECT_MS = 3000;
     private static final int AGENT_TIMEOUT_MS = 180_000;
 
@@ -398,12 +409,13 @@ public final class JRockPushToTalk {
         // well - so a model that asks again is heard rather than asked forever.
         String note = null;
         boolean askedLocation = false, askedWeather = false, askedCalendar = false;
-        boolean askedMail = false, askedWeb = false;
+        boolean askedMail = false, askedWeb = false, askedPost = false;
         while (note == null) {
             java.util.regex.Matcher weather = WEATHER_REQUEST.matcher(answer.trim());
             java.util.regex.Matcher calendar = CALENDAR_REQUEST.matcher(answer.trim());
             java.util.regex.Matcher mail = MAIL_REQUEST.matcher(answer.trim());
             java.util.regex.Matcher web = WEB_REQUEST.matcher(answer.trim());
+            java.util.regex.Matcher post = POST_REQUEST.matcher(answer.trim());
             if (!askedLocation && LOCATION_REQUEST.matcher(answer.trim()).matches()) {
                 askedLocation = true;
                 later(() -> setState(State.ANSWERING, "Looking up the location\u2026"));
@@ -447,6 +459,39 @@ public final class JRockPushToTalk {
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(mailbox[0]));
                 answer = sendAndRead("Sent the mail, waiting for the reply\u2026");
+            } else if (!askedPost && post.matches()) {
+                // The paper post, off the letters agent - which has no model of its own:
+                // it looks in the scanner's folder, and drives the doc inventory flow
+                // when a letter has to be filed.
+                askedPost = true;
+                String about = post.group(1).trim();
+                later(() -> setState(State.ANSWERING, "Looking at the post\u2026"));
+                String[] letters = askAgent(LETTERS_PORT, postRequest(about), "letters",
+                        "JRockLetters.java");
+                if (letters[0] == null) {
+                    note = "Post not read: " + letters[1];
+                    break;
+                }
+                check(JRock.automationClearPrompt());
+                if (letters[0].startsWith(CONTENT)) {
+                    // A LETTER'S TEXT, which goes in as a file rather than as a wall of
+                    // prompt: written to a temp .txt and INCLUDED, exactly as a person
+                    // would include it with Ctrl+I. The transcript then holds a token and
+                    // a file beside it rather than ten thousand characters of letter, and
+                    // the model is reading a document rather than a quotation of one.
+                    String[] split = letters[0].split("\n", 2);
+                    String name = split[0].substring(CONTENT.length()).trim();
+                    String body = split.length > 1 ? split[1] : "";
+                    String problem = includeLetter(name, body);
+                    if (problem != null) {
+                        note = "Letter not included: " + problem;
+                        break;
+                    }
+                    answer = sendAndRead("Sent the letter, waiting for the reply\u2026");
+                } else {
+                    check(JRock.automationSetPrompt(letters[0]));
+                    answer = sendAndRead("Sent the post, waiting for the reply\u2026");
+                }
             } else if (!askedWeb && web.matches()) {
                 // A page off the web, read by the browser agent: it photographs the page
                 // and has its own JRock turn the picture into Markdown, so what arrives
@@ -561,6 +606,54 @@ public final class JRockPushToTalk {
         }
         // Anything else is the name of a site, which is what an operator says.
         return "#page " + asked;
+    }
+
+    // What the model asked of the post, as the letters agent's own request. The leading
+    // word decides and the rest is passed through as written - a letter's name as the
+    // operator said it, which the letters agent matches against the file names itself.
+    private static String postRequest(String about) {
+        String asked = about.trim();
+        String lower = asked.toLowerCase(java.util.Locale.ROOT);
+        for (String[] shape : new String[][] {
+                { "recent", "#recent" }, { "new", "#recent" }, { "arrived", "#recent" },
+                { "scans", "#scans" }, { "all", "#scans" },
+                { "filed", "#filed" },
+                { "file it", "#inventory" }, { "inventory", "#inventory" },
+                { "file", "#file" }, { "read", "#file" }, { "what", "#file" },
+                { "folder", "#folder" } }) {
+            if (lower.equals(shape[0])) return shape[1];
+            if (lower.startsWith(shape[0] + " ")) {
+                return shape[1] + " " + asked.substring(shape[0].length()).trim();
+            }
+        }
+        // Anything else is a letter's name, which is what the operator says.
+        return "#file " + asked;
+    }
+
+    // A letter's text as a file in the prompt. Written where JRock's own files are, so it
+    // is beside the transcript that refers to it rather than in a temp folder somebody
+    // would have to go looking for.
+    private static String includeLetter(String name, String body) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Paths.get("")
+                    .toAbsolutePath().resolve("JRock").resolve("letters");
+            java.nio.file.Files.createDirectories(dir);
+            String safe = name.replaceAll("[^A-Za-z0-9._-]", "-");
+            if (!safe.toLowerCase(java.util.Locale.ROOT).endsWith(".txt")) safe += ".txt";
+            java.nio.file.Path file = dir.resolve(safe);
+            java.nio.file.Files.write(file, body.getBytes(StandardCharsets.UTF_8));
+            String problem = JRock.automationSetPrompt(
+                    "The operator asked about this letter. It is the text of a scanned "
+                    + "letter, filed as \"" + name + "\". Say what it is about and what "
+                    + "it asks of them, in a few spoken sentences, in the operator's own "
+                    + "language. Name any date, amount or reference number that matters. "
+                    + "Do not read out the file name.\n\n");
+            if (problem != null) return problem;
+            return JRock.automationInclude(file.toString(), "txt");
+        } catch (IOException ex) {
+            return "the letter could not be written beside the transcript: "
+                    + ex.getMessage();
+        }
     }
 
     // The weather for a location the model named: its coordinates from the location

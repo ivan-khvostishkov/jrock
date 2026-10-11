@@ -142,6 +142,16 @@ public final class JRockLocation {
     private static final int MANUAL = 0, GPS = 1, FROM_PLACE = 2;
 
     // Round to: null for every digit, else that many after the point.
+    // THE TWO CHOICES WORTH REMEMBERING, in a file of its own beside this agent.
+    //
+    // Not the place, not the coordinates and not the refresh interval: a place is where
+    // somebody is now, and an agent that started up insisting it was still in last
+    // month's city would be worse than one that asks. These two are preferences about
+    // how to work rather than facts about the world - whether to look the place up, and
+    // how many digits anybody else gets - and typing them in again every morning is the
+    // kind of small insult software should not offer.
+    private static final String SETTINGS = "jrock-location.txt";
+
     private static final String[] ROUNDINGS = {
             "Don't", "2 digits", "3 digits", "4 digits", "5 digits", "6 digits" };
     private static final Integer[] DIGITS = { null, 2, 3, 4, 5, 6 };
@@ -235,6 +245,9 @@ public final class JRockLocation {
     private static javax.swing.JTextField latField;
     private static javax.swing.JTextField lonField;
     private static javax.swing.JComboBox<String> roundTo;
+    // What the settings file said, until the window exists to hold it.
+    private static volatile boolean savedPlaceAuto;
+    private static volatile int savedRoundTo = -1;
     private static javax.swing.JComboBox<String> refresh;
     private static javax.swing.JButton locateButton;
     private static javax.swing.JLabel preview;
@@ -249,6 +262,8 @@ public final class JRockLocation {
         String problem;
         try {
             prompts = ownDirectory();
+            // Before the window, because the window comes up as these say.
+            readSettings();
             for (String name : new String[] { PLACE_TO_GPS_URL, PLACE_TO_GPS, GPS_TO_PLACE_URL, GPS_TO_PLACE_NAME }) {
                 if (!Files.isRegularFile(prompts.resolve(name))) {
                     throw new Stop("there is no " + prompts.resolve(name) + ".");
@@ -651,6 +666,7 @@ public final class JRockLocation {
         placeAuto = new javax.swing.JCheckBox("Determine automatically");
         placeAuto.setOpaque(false);
         placeAuto.setToolTipText("Finds the place from the coordinates, on " + SITE);
+        placeAuto.setSelected(savedPlaceAuto);
 
         source = new javax.swing.JComboBox<>(SOURCES);
         source.setSelectedIndex(GPS);
@@ -666,6 +682,9 @@ public final class JRockLocation {
 
         roundTo = new javax.swing.JComboBox<>(ROUNDINGS);
         roundTo.setToolTipText("Digits after the point other agents get - the fields keep them all");
+        if (savedRoundTo >= 0 && savedRoundTo < ROUNDINGS.length) {
+            roundTo.setSelectedIndex(savedRoundTo);
+        }
         refresh = new javax.swing.JComboBox<>(REFRESHES);
         refresh.setToolTipText("Asks GPS again this often, and keeps #here ready for other agents");
 
@@ -676,6 +695,7 @@ public final class JRockLocation {
                         + "that are found from the place.");
             }
             changed();
+            writeSettings();
         });
         source.addActionListener(e -> {
             if (source.getSelectedIndex() == FROM_PLACE && placeAuto.isSelected()) {
@@ -686,7 +706,10 @@ public final class JRockLocation {
             changed();
             if (source.getSelectedIndex() == GPS) locateNow();
         });
-        roundTo.addActionListener(e -> showPreview());
+        roundTo.addActionListener(e -> {
+            showPreview();
+            writeSettings();
+        });
         refresh.addActionListener(e -> {
             changed();
             if (REFRESH_MINUTES[refresh.getSelectedIndex()] > 0) locateNow();
@@ -897,6 +920,43 @@ public final class JRockLocation {
     }
 
     // The directory this source file sits in, which is where the prompts are looked for
+    // ---- Settings --------------------------------------------------------------
+    // Two lines beside this agent, read at startup and written whenever either changes.
+    // Nothing of JRock's own configuration is touched: that belongs to JRock.
+    private static void readSettings() {
+        Path file = ownDirectory().resolve(SETTINGS);
+        if (!Files.isRegularFile(file)) return;
+        try {
+            for (String line : Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8)) {
+                String text = line.trim();
+                if (text.startsWith("place-auto=")) {
+                    savedPlaceAuto = Boolean.parseBoolean(
+                            text.substring("place-auto=".length()).trim());
+                } else if (text.startsWith("round-to=")) {
+                    String want = text.substring("round-to=".length()).trim();
+                    for (int i = 0; i < ROUNDINGS.length; i++) {
+                        if (ROUNDINGS[i].equalsIgnoreCase(want)) savedRoundTo = i;
+                    }
+                }
+            }
+        } catch (IOException ex) {
+            System.out.println("Could not read " + file + ": " + ex.getMessage());
+        }
+    }
+
+    private static void writeSettings() {
+        if (placeAuto == null || roundTo == null) return;
+        Path file = ownDirectory().resolve(SETTINGS);
+        String out = "' JRock location agent\n"
+                + "place-auto=" + placeAuto.isSelected() + "\n"
+                + "round-to=" + ROUNDINGS[Math.max(0, roundTo.getSelectedIndex())] + "\n";
+        try {
+            Files.write(file, out.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            say("Could not remember these settings in " + file + ": " + ex.getMessage());
+        }
+    }
+
     // (see JRockPushToTalk.ownDirectory).
     private static Path ownDirectory() {
         String source = System.getProperty("jdk.launcher.sourcefile");
