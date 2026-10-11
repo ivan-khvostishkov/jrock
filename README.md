@@ -69,6 +69,10 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   machine, so you watch it work and carry on the conversation when it's done
   ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
 - **Keyboard-driven**, with a Configure dialog for API key, endpoint, model and working directory.
+- **An installer**, one Swing wizard in one Java file, shipped beside the jar in every
+  release: program folder, working folder, shortcuts, the agents you pick with a folder
+  each, the settings and the key, the Explorer entries — and it never removes anything
+  ([**the installer**](#the-installer-installerinstalljrockjava)).
 - **Paper is the unit**, in and out: what arrives is a scan or a PDF in a standard page size,
   and what leaves is a document ready for a printer — or for **Adobe InDesign**, by its style
   names ([**paper in, paper out**](#paper-in-paper-out)).
@@ -3150,6 +3154,74 @@ Markdown. It uses nothing but the JDK and needs no third-party action, the same 
 ```sh
 java .github/build/TestSummary.java tests/target/surefire-reports
 ```
+
+## The installer (`installer/InstallJRock.java`)
+
+One Swing wizard, one Java source file, no build step — shipped **at the root of every
+release artifact**, beside `jrock.jar`. Unpack a release, and from that folder:
+
+```sh
+java InstallJRock.java            # the wizard
+java InstallJRock.java --check    # what it would find, printed; changes nothing
+```
+
+**It never removes anything.** A `jrock.jar` already in the program folder is replaced, which is
+what installing a release means; a `jrock-config.txt` or a `bedrock-key.txt` already in a working
+folder is **kept**, and the log says so, because those are yours. Uninstalling is a separate
+program and not this one.
+
+Ten pages, in this order:
+
+1. **What was unpacked** — `jrock.jar` and `agentic-samples/` have to be in the folder it was
+   started from, which is where a release unpacks to. Missing, it says so and waits for Retry.
+2. **Where the program goes** — default `C:\Program Files\NoSocial.Net\JRock` on Windows,
+   `~/Applications/NoSocial.Net/JRock` on macOS, `~/.local/share/nosocial.net/jrock` on Linux.
+   The jar is copied there with its **SHA-256 and MD5** written beside it, computed from the copy
+   that just landed. Program Files needs an elevated installer; refused, it says so and you pick
+   a folder of your own.
+3. **Ghostscript and xpdf** — looked for on `PATH`, with
+   [where to get them](#pdf-conversion-ghostscript) and a **Retry** when you have. Or continue
+   without: everything else works, and JRock names the missing tool if you ever ask it for that
+   conversion.
+4. **Where JRock keeps your work** — default `~/Documents/JRockAssistant`. The page says why the
+   **folder name** matters: it is what every Explorer entry is labelled with.
+5. **Shortcuts** — Start menu and Desktop, both called **JRock Assistant**, both opening JRock in
+   that folder. A real `.lnk` on Windows (written through `WScript.Shell`, the only way without a
+   native library), a `.desktop` file on Linux, a `.command` script on macOS.
+6. **Agents** — all of them, or pick them one by one. Each picked agent gets a **working folder**:
+   *with JRock* (the primary one), *its own* (`JRockAgents/Weather`, `JRockAgents/PushToTalk`, …),
+   or one you name — so an agent can have its own model, DPI and key. The `.java` files go beside
+   the jar, and **only the prompt files each chosen agent actually reads** go into the prompts
+   folder — read out of each agent's own source, where the file names are string constants, rather
+   than from a list in the installer that would be a second place to keep right. An agent working
+   in a folder of its own gets its prompts in there too. Picking *all* also copies the prompts that
+   belong to no agent, which would otherwise be left behind.
+7. **Settings and the key** — opens the new `jrock-config.txt` in whatever opens a `.txt`, waits
+   while you edit and save it, then opens `bedrock-key.txt` the same way. Still empty afterwards,
+   it says the key can go in later and what already works without one: merging duplex scans,
+   converting and including documents, fetching a URL, exporting to DOCX or RTF, printing. Only
+   asking a model needs the key.
+8. **Settings for the agents** — when agents work in folders of their own, offers to copy
+   `jrock-config.txt` into each, and the key as a **separate tick**: an agent cannot ask a model
+   without one, and JRock itself never copies a key into a folder it was not typed for, so this is
+   a choice rather than a given. An existing file in any of those folders is left alone.
+9. **Right-click entries** — "JRock here!", "Open as prompt with JRock", and one per installed
+   agent, with **exactly the key names, labels and command lines JRock writes itself**, so what
+   this installs is what JRock's own *Uninstall agent* removes. Under `HKEY_CURRENT_USER`, no
+   administrator, and the applied `.reg` is kept in the working folder to be read. Skippable —
+   JRock's own Window menu installs them later.
+10. **Installed** — checks for **anything of JRock still running** (a JVM with the jar or an agent
+    on its command line, which is not a shell whose folder is named after JRock nor an editor with
+    `jrock-config.txt` open), names what it found with the folder each one works in, and waits for
+    Retry. Then it starts JRock in the primary folder and every agent in its own.
+
+**A previous install is read, not guessed.** The Explorer entries already hold the program folder,
+the working folder, the prompts folder and which agents are installed, so those become the
+defaults and the agents found become the ticks — installing again **extends** what is there
+instead of asking everything twice.
+
+`--check` prints every one of those detections and writes nothing, which is what CI runs on all
+three platforms so the installer cannot rot unnoticed.
 
 ## Reproducible builds
 

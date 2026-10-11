@@ -42,6 +42,12 @@ local.properties
 # Classes from the CI step that compiles agentic-samples/*.java against the jar
 out-automation/
 
+# Classes from the CI step that compiles the installer, and the copy of it the build
+# puts beside the jar for the release artifact: the root keeps one Java file, and
+# InstallJRock.java lives in installer/.
+out-installer/
+/InstallJRock.java
+
 # Checksums BuildJar writes beside the jar (the jar itself is covered by *.jar)
 jrock.jar.sha256
 jrock.jar.md5
