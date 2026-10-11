@@ -1744,8 +1744,11 @@ the voice, so the microphone doesn't record the last answer as the next question
   went, and that is all. Plug it back in and it listens again by itself, within a second or
   two — no lever, no button, no dialog. Which is what makes it usable as a mute: keep the
   narrated answer out of the next recording, or say something to somebody in the room without
-  saying it to a model. A turn the microphone was pulled out of the middle of is dropped the
-  same silent way, because that is the same gesture arriving as a failure. (The agent asks
+  saying it to a model. **Say it, then unplug** is the usual order, so a recording that already
+  reached the prompt is still sent — the microphone is not needed to send it, and an answer you
+  waited for while the question sat unsent would be the worst of both. Only a recording the
+  unplugging cut short, with nothing in the prompt to show for it, is dropped — silently, because
+  that is the same gesture arriving as a failure. (The agent asks
   `automationMicReady()` for this: a quiet room and an unplugged microphone are
   indistinguishable to the listening call itself, and they mean opposite things.)
 - **History is JRock's.** The prompt is cleared before every recording; whether the model also

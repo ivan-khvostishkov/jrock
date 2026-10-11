@@ -667,19 +667,30 @@ public final class JRockPushToTalk {
                     // Muted while the answer is on its way, so the question is not asked twice.
                     JRock.automationListen(false);
                     if (!handsFree) break;   // ended: what was being said is not sent
-                    // Unplugged while listening: nothing was heard, nothing is said, and
-                    // the top of the loop does the waiting.
-                    if (JRock.automationMicReady() != null) continue;
-                    if (!"1".equals(heard[0])) throw new Stop(heard[1]);
-                    note = answer(true);
+                    if ("1".equals(heard[0])) {
+                        // What was said HAS reached the prompt, so it is sent - whether
+                        // the microphone is still there or not. That is the usual way
+                        // round, not the exception: say it, then unplug so the answer
+                        // being read out is not recorded back as the next question. A
+                        // recording that was asked for and then thrown away would be the
+                        // worst of both - the operator waits for an answer to something
+                        // that is sitting in the prompt unsent.
+                        note = answer(true);
+                    } else if (JRock.automationMicReady() != null) {
+                        // Nothing was heard and there is nothing to listen on: the
+                        // gesture, not a failure. The top of the loop does the waiting.
+                        continue;
+                    } else {
+                        throw new Stop(heard[1]);
+                    }
                 } catch (Stop failed) {
                     JRock.automationListen(false);
-                    // A turn the microphone was pulled out of the middle of is the same
-                    // gesture arriving as a failure: whatever was half-heard is dropped
-                    // without a word, and the top of the loop waits for it to come back.
-                    // Only a turn that failed with a microphone still there is an error
-                    // to report and read out.
-                    if (JRock.automationMicReady() != null) continue;
+                    // Everything that gets here is a real failure, and every one of them
+                    // is said out loud and written down. The quiet cases - no microphone,
+                    // and nothing heard because of it - are taken above and never throw,
+                    // which is what keeps an operator who has unplugged on purpose from
+                    // being told off for it. A send that failed WHILE they were unplugged
+                    // still has to be heard: that is the whole reason for the phrase.
                     report("that turn failed: " + failed.getMessage());
                     note = join("That did not work: " + failed.getMessage() + " Say it again.",
                             sayFailed());
