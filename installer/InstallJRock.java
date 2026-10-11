@@ -47,7 +47,10 @@
 // IT REMOVES NO FOLDER, NO DOCUMENT AND NO SETTINGS FILE. Not one, ever. A jrock.jar in
 // the folder is replaced, which is what installing a release means; a jrock-config.txt, a
 // bedrock-key.txt or a prompt file already there is KEPT and said so, because those are
-// yours. Nothing is deleted when you install somewhere else, and nothing is deleted when
+// yours - with one exception that is not a loss: an EMPTY jrock-config.txt or
+// bedrock-key.txt in an agent's folder is written over, a blank file being nobody's
+// setting and exactly what an install done before the key was typed leaves behind.
+// Nothing is deleted when you install somewhere else, and nothing is deleted when
 // you install again.
 //
 // What it MAY remove is two kinds of pointer, and only when you say so: its own Explorer
@@ -849,7 +852,7 @@ public final class InstallJRock {
                         "Paste your Bedrock API key into\n" + key + "\n\nOne line, nothing "
                         + "else. Save and close it, then press OK.", "Bedrock API key",
                         javax.swing.JOptionPane.INFORMATION_MESSAGE);
-                if (isBlank(key)) {
+                if (isBlank(key, true)) {
                     say("No key in " + key + " yet.");
                     javax.swing.JOptionPane.showMessageDialog(window,
                             "The key file is still empty.\n\nPut the key in there whenever "
@@ -885,16 +888,19 @@ public final class InstallJRock {
             panel.add(check("Copy bedrock-key.txt too", copyKey, v -> copyKey = v));
             panel.add(note("An agent cannot ask a model without a key in its own folder. "
                     + "JRock itself never copies a key into a folder it was not typed for, "
-                    + "which is why this is a tick and not a given - and why an existing "
-                    + "key in one of these folders is left alone."));
+                    + "which is why this is a tick and not a given - and why a key "
+                    + "already in one of these folders is left alone. An EMPTY "
+                    + "jrock-config.txt or bedrock-key.txt is not left alone: a blank file "
+                    + "is nobody's setting, and is what an install done before the key was "
+                    + "typed leaves behind."));
         }, () -> {
             for (Path dir : sampleFolders()) {
                 Path jrock = dir.resolve(PRODUCT);
                 try {
                     Files.createDirectories(jrock);
-                    if (copySettings) copyIfAbsent(home.resolve(PRODUCT)
+                    if (copySettings) copyIfUnset(home.resolve(PRODUCT)
                             .resolve("jrock-config.txt"), jrock.resolve("jrock-config.txt"));
-                    if (copyKey) copyIfAbsent(home.resolve(PRODUCT)
+                    if (copyKey) copyIfUnset(home.resolve(PRODUCT)
                             .resolve("bedrock-key.txt"), jrock.resolve("bedrock-key.txt"));
                 } catch (IOException ex) {
                     return "Could not write into " + jrock + ": " + ex.getMessage();
@@ -1032,16 +1038,30 @@ public final class InstallJRock {
         Files.copy(from, to, StandardCopyOption.REPLACE_EXISTING);
     }
 
-    // Yours stays yours: a settings file already in a folder is never written over.
-    private static void copyIfAbsent(Path from, Path to) throws IOException {
-        if (!Files.isRegularFile(from)) return;
-        if (Files.exists(to)) {
+    // Yours stays yours: a settings file that already says something is never written
+    // over. An EMPTY one says nothing, and is replaced.
+    //
+    // That is not a detail. The home folder's own bedrock-key.txt starts empty (see
+    // starterKey), so an install done before the key was typed leaves an empty key in
+    // every agent folder - and keeping those for ever would mean seven agents that
+    // cannot ask a model, a tick that looked as if it had worked, and a key that is
+    // now sitting in the home folder being copied nowhere. The same goes for a
+    // jrock-config.txt that was never written to.
+    //
+    // Nothing is copied FROM a blank file either: handing an empty key on achieves
+    // nothing, and would write over a key that somebody had typed into that folder
+    // themselves. A file that cannot be READ counts as one with something in it, because
+    // the only thing worse than leaving an empty config in place is replacing a real one.
+    private static void copyIfUnset(Path from, Path to) throws IOException {
+        if (!Files.isRegularFile(from) || isBlank(from, true)) return;
+        boolean there = Files.exists(to);
+        if (there && !isBlank(to, false)) {
             say("Kept " + to + " as it is.");
             return;
         }
         Files.createDirectories(to.getParent());
-        Files.copy(from, to);
-        say("Copied " + to);
+        Files.copy(from, to, StandardCopyOption.REPLACE_EXISTING);
+        say(there ? "Copied " + to + ", where the file was empty." : "Copied " + to);
     }
 
     // The hash files the release publishes beside the jar, written from the copy that was
@@ -1103,11 +1123,15 @@ public final class InstallJRock {
         return key;
     }
 
-    private static boolean isBlank(Path file) {
+    // Whether a file holds nothing but whitespace. whenUnreadable is the answer for a
+    // file that cannot be read at all, because the two callers want opposite ones: a key
+    // file nobody can read is no key to go on with, while a settings file nobody can read
+    // is one to leave exactly where it is.
+    private static boolean isBlank(Path file, boolean whenUnreadable) {
         try {
             return new String(Files.readAllBytes(file), StandardCharsets.UTF_8).isBlank();
-        } catch (IOException ex) {
-            return true;
+        } catch (IOException cannotRead) {
+            return whenUnreadable;
         }
     }
 

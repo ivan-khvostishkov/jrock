@@ -3793,7 +3793,8 @@ shipped in — `samples/agents/` or `samples/flows/`.
 
 **It removes no folder, no document and no settings file. Not one, ever.** A `jrock.jar` in the
 folder is replaced, which is what installing a release means; a `jrock-config.txt`, a
-`bedrock-key.txt` or a prompt file already there is **kept**, and the log says so, because those
+`bedrock-key.txt` or a prompt file already there is **kept** — unless it is **empty**, which is
+nobody's setting — and the log says so, because those
 are yours. Nothing is deleted when you install somewhere else, and nothing is deleted when you
 install again.
 
@@ -3843,7 +3844,13 @@ Nine pages, in this order:
 7. **Settings for the agents and flows** — every folder that runs a JRock of its own is offered
    a copy of `jrock-config.txt`, and the key as a **separate tick**: an agent cannot ask a model
    without one, and JRock itself never copies a key into a folder it was not typed for, so this
-   is a choice rather than a given. An existing file in any of those folders is left alone.
+   is a choice rather than a given. A file already in one of those folders is left alone, with
+   one exception that cannot lose anything: an **empty** `jrock-config.txt` or `bedrock-key.txt`
+   is written over. That is not a corner case — the home folder's own key file starts empty, so
+   an install done before the key was typed leaves an empty key in every agent folder, and
+   keeping those for ever would mean agents that cannot ask a model and a tick that looked as
+   though it had worked. Nothing is copied **from** an empty file either, so a key you typed
+   into one agent's folder yourself is never overwritten by a blank one.
 8. **Right-click entries** — "JRock here!", "Open as prompt with JRock", and one per installed
    agent and flow, [as described above](#windows-explorer-right-click-integration). Every JRock
    entry already on the machine is removed first and written out to a `.reg` that restores it;
