@@ -1802,6 +1802,15 @@ the voice, so the microphone doesn't record the last answer as the next question
   hear the sentence before anything is prepared, so no appointment is touched that you did not
   hear named, and anything with another participant on it comes back refused with who they
   are.
+- **The web.** When the whole answer is *"I need the web: …"* — `site zdnet.com`,
+  `search <words>`, `follow <what to open> on <address>`, `links on <address>` — the agent asks
+  the [browser agent](#a-sixth-agent-the-web-by-looking-at-it-jrockbrowserjava) on
+  `127.0.0.1:47474` and puts the Markdown it gets back into the next prompt. Once a turn, and
+  the slowest of them: a browser, a render, six photographs and a model. **Two layers, carrying
+  different things** — addresses and Markdown between the two agents, and between the operator
+  and the model only a site's name and plain words. If what comes back is a consent dialogue or
+  a sign-in rather than the page, the appendix tells the model to say so and to mention that
+  the browser's own window is open on it.
 - **Location.** When the whole answer is *"I need to know your location"*, the agent does not
   show it or read it aloud. It sends `#here` to the
   [location agent](#a-third-agent-location-jrocklocationjava) and gives the model the line that
@@ -2131,6 +2140,75 @@ Sun 11 Oct:
   briefing goes into the next prompt and the model answers out loud from it. Your event titles do
   go to Bedrock that way — that is the point of asking — and the per-calendar checkboxes are how
   you decide which ones.
+
+### A sixth agent: the web, by looking at it (`JRockBrowser.java`)
+
+A page off the web, read the way a person reads one: by **looking at it**. The agent drives a
+browser of its own through the **Chrome DevTools Protocol**, photographs the whole page, and
+asks **its own JRock** to turn that photograph into Markdown — which is what the push-to-talk
+agent gets back.
+
+```sh
+java -cp jrock.jar JRockBrowser.java                     # the agent, with its window
+java -cp jrock.jar JRockBrowser.java --shot zdnet.com    # the photographs, and nothing else
+java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation section"
+```
+
+- **Six hosts, and nothing else, ever.** `duckduckgo.com`, `businessinsider.com`, `zdnet.com`,
+  `techcrunch.com`, `scmp.com`, `arstechnica.com` — a list in the agent's own source, not a
+  setting, not a line in a request, and not something a model can add to. The web is the one
+  thing an agent reaches that nobody in the room controls, so what it may reach is written down
+  where it can be read.
+- **Checked twice, and the second time is the one that matters.** Once on the address as given,
+  and again on **the address the browser actually ended on** — which is not the same thing,
+  because a redirect is something a site may do at any moment. Off the list, the page is
+  abandoned unphotographed and the answer says where it went. That is a browser's own thought
+  about origins: trust what you ended up with, not what you asked for.
+- **A screenshot for reading, the DOM for navigating.** Two jobs, two mechanisms. The model
+  reads the page off a picture, which is what a person does — and a news page's HTML is mostly
+  not the news, so a picture is both smaller and more honest. But a picture cannot be clicked:
+  when the next request is *"the AI news section"*, the agent reads the **anchors out of the
+  live DOM**, matches the words against their text, and navigates to the one that matches. The
+  model never needs an address to follow a link.
+- **A4 pieces, overlapping.** A page is as long as it likes, and one enormous image is both
+  unreadable and beyond what a browser will render (about 16,000 pixels). So the page is cut
+  into pieces the proportions of a sheet of paper (1:1.414), each a clip of its own, overlapping
+  by a tenth so a headline cut in half by one piece is whole in the next. zdnet.com's front page
+  comes out as **6 pieces of 1531×2165** and arstechnica.com's as 5.
+- **Ten seconds, and settled.** `readyState` complete **and** the same measurements twice — a
+  page still filling itself in keeps changing size, and that is the difference between loaded
+  and finished. Ten seconds at the most, whatever state it is in by then.
+- **It clicks nothing.** Not a consent wall, not a cookie banner, not a sign-in — those are the
+  operator's to answer, and an agent answering them is an agent agreeing to things in their
+  name. So the first read of a site may come back as a picture of a consent wall, **and the
+  browser's window is still sitting on it**: answer it once, by hand, and ask again. The
+  profile is kept between runs, so the second attempt is the page itself. A paywall or a login
+  works the same way — whatever the operator can reach in that window, the agent can then read.
+- **One tab per site**, kept. A second page on a site reuses its tab, and since the only sites
+  there are are the six, there can never be a seventh tab. Per site rather than one in total
+  because a consent answered on one and a sign-in on another are both worth keeping.
+- **Its browser is not yours.** A profile of the agent's own, beside its working folder. What is
+  signed in there is what was signed in there, deliberately, in that window.
+
+| | |
+|---|---|
+| `#page zdnet.com` | a site's front page — by domain, or by name: `#page South China Morning Post` |
+| `#search quantum computing` | a DuckDuckGo search |
+| `#follow the AI link on https://www.zdnet.com/news/` | the matching link on that page, found in its DOM |
+| `#links on https://www.zdnet.com/` | what else can be opened there, in words |
+| `#hosts` | the list |
+
+**Addresses are for programs, not for saying out loud.** The answer carries the address the
+browser ended on — the agent asking is a program, and it needs it to say *"the AI link on
+https://www.zdnet.com/news/"* next time. What it must not do is **read one to the operator**:
+between the operator and the model there are only site names and plain words, because a URL
+spoken aloud is a sentence nobody can check, remember or correct. The appendix says so in as
+many words, and the whole address otherwise stays between the two programs, the agent's window,
+and its own JRock log.
+
+**What it needs:** a Chromium — Edge, Chrome, Brave or Vivaldi — and nothing else. The DevTools
+Protocol is JSON over a WebSocket, and a WebSocket client has been in the JDK since 11
+(`java.net.http.WebSocket`), so this is one file with no dependencies like everything else here.
 
 ### Multi-agent collaboration
 

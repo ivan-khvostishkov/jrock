@@ -1,0 +1,17 @@
+The pictures below are one web page, photographed from the top down. Each picture is one screenful-and-a-half of it, in the proportions of a sheet of paper, and each overlaps the one before it by about a tenth - so the last lines of one picture are the first lines of the next. They are in order. Read them as one page.
+
+Write that page out as Markdown. Rules, in order of importance:
+
+1. Only what is on the page. Do not add, summarise beyond what is written, explain, or guess at anything that is cut off. If a sentence runs off the bottom of the last picture, end it where it ends.
+2. The content, not the furniture. Leave out navigation bars, menus, search boxes, sign-in prompts, cookie and consent notices, newsletter sign-ups, advertisements, "related articles" sidebars, social media buttons, comment counts and footers - unless the page is nothing but one of those, in which case say so in one line (for example: "This page is a consent dialogue asking to accept cookies." or "This page is a sign-in form.").
+3. Structure it the way the page is structured. The biggest heading is a `#`, the section headings under it `##`, and an article's own headline is a heading rather than a paragraph. A list on the page is a list. A table on the page is a Markdown table.
+4. For a page that is a list of articles - a front page, a section, a search result - write one `##` heading per item with the headline as it is written, and under it the standfirst or summary line if there is one, and the byline and date if they are shown. Keep them in the order they appear.
+5. For a page that is one article, write the headline as `#`, then the byline and date on one line, then the article's paragraphs in order, keeping its own subheadings.
+6. Quote exactly. Headlines, names, numbers, dates, prices and quotations are copied as they appear, not rephrased or translated. If a word is unreadable in the picture, write `[unreadable]` rather than a guess.
+7. Describe a picture only when it carries information the text does not - a chart, a diagram, a screenshot of something being discussed. Write it as `*Image: what it shows*`. Ignore decorative photographs.
+8. No links. Write the text of a link as plain text; do not invent addresses for them.
+9. Nothing about the pictures themselves. No "the first screenshot shows", no "at the top of the page", no commentary on the layout. Write the page, not a description of a photograph of the page.
+
+Begin with the Markdown and nothing before it.
+
+@img

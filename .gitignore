@@ -53,3 +53,6 @@ out-installer/
 jrock.jar.sha256
 jrock.jar.md5
 
+# The browser profile the web agent keeps beside its working folder: cookies, and
+# whatever the operator signed in to in that window. Never ours to commit.
+jrock-browser-profile/

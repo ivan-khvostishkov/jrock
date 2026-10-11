@@ -265,6 +265,18 @@ public final class JRockPushToTalk {
             "^\\W*I need your mail:\\s*(.*\\S)\\W*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
+    // The answer that asks for something off the web. Six hosts, and the browser agent
+    // refuses anything else - twice, before and after the page loads.
+    //
+    // TWO LAYERS, AND THEY CARRY DIFFERENT THINGS. Between this agent and the browser
+    // agent: addresses, Markdown, and what to open said in words. Between the operator
+    // and the model: the NAME of a site - "zdnet", "zdnet.com", "South China Morning
+    // Post" - and what they want in their own words. An address is never read out: the
+    // appendix says so, because a URL spoken aloud is a sentence nobody can check.
+    private static final java.util.regex.Pattern WEB_REQUEST = java.util.regex.Pattern.compile(
+            "^\\W*I need the web:\\s*(.*\\S)\\W*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
     // Coordinates in a location line, as the location agent writes them - which the model
     // may already have from it, and then they are used as they are.
     private static final java.util.regex.Pattern COORDINATES = java.util.regex.Pattern.compile(
@@ -281,6 +293,7 @@ public final class JRockPushToTalk {
     private static final int LOCATION_PORT = 47471;
     private static final int WEATHER_PORT = 47472;
     private static final int CALENDAR_PORT = 47473;
+    private static final int BROWSER_PORT = 47474;
     private static final int AGENT_CONNECT_MS = 3000;
     private static final int AGENT_TIMEOUT_MS = 180_000;
 
@@ -385,11 +398,12 @@ public final class JRockPushToTalk {
         // well - so a model that asks again is heard rather than asked forever.
         String note = null;
         boolean askedLocation = false, askedWeather = false, askedCalendar = false;
-        boolean askedMail = false;
+        boolean askedMail = false, askedWeb = false;
         while (note == null) {
             java.util.regex.Matcher weather = WEATHER_REQUEST.matcher(answer.trim());
             java.util.regex.Matcher calendar = CALENDAR_REQUEST.matcher(answer.trim());
             java.util.regex.Matcher mail = MAIL_REQUEST.matcher(answer.trim());
+            java.util.regex.Matcher web = WEB_REQUEST.matcher(answer.trim());
             if (!askedLocation && LOCATION_REQUEST.matcher(answer.trim()).matches()) {
                 askedLocation = true;
                 later(() -> setState(State.ANSWERING, "Looking up the location\u2026"));
@@ -433,6 +447,23 @@ public final class JRockPushToTalk {
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(mailbox[0]));
                 answer = sendAndRead("Sent the mail, waiting for the reply\u2026");
+            } else if (!askedWeb && web.matches()) {
+                // A page off the web, read by the browser agent: it photographs the page
+                // and has its own JRock turn the picture into Markdown, so what arrives
+                // here is a page as text. Slow - a browser, a render and a model - so the
+                // status line says what is happening.
+                askedWeb = true;
+                String about = web.group(1).trim();
+                later(() -> setState(State.ANSWERING, "Reading the web\u2026"));
+                String[] page = askAgent(BROWSER_PORT, webRequest(about), "browser",
+                        "JRockBrowser.java");
+                if (page[0] == null) {
+                    note = "Web page not fetched: " + page[1];
+                    break;
+                }
+                check(JRock.automationClearPrompt());
+                check(JRock.automationSetPrompt(page[0]));
+                answer = sendAndRead("Sent the page, waiting for the reply\u2026");
             } else if (!askedWeather && weather.matches()) {
                 askedWeather = true;
                 String[] report = weather(weather.group(1));
@@ -509,6 +540,27 @@ public final class JRockPushToTalk {
         if (asked.contains("today")) return "#mail";
         if (days.find()) return "#mail " + days.group(1);
         return "#mail";
+    }
+
+    // What the model asked of the web, as the browser agent's own request. The leading
+    // word decides, and everything after it is passed through AS WRITTEN - a description
+    // of what to open, or an address the model got from an earlier answer, and this agent
+    // does not try to understand either. The browser agent resolves a description against
+    // the page's own links, which is the one place that can.
+    private static String webRequest(String about) {
+        String asked = about.trim();
+        String lower = asked.toLowerCase(java.util.Locale.ROOT);
+        for (String[] shape : new String[][] {
+                { "follow", "#follow" }, { "open", "#follow" }, { "click", "#follow" },
+                { "search", "#search" }, { "links", "#links" }, { "site", "#page" },
+                { "page", "#page" }, { "hosts", "#hosts" } }) {
+            if (lower.equals(shape[0])) return shape[1];
+            if (lower.startsWith(shape[0] + " ")) {
+                return shape[1] + " " + asked.substring(shape[0].length()).trim();
+            }
+        }
+        // Anything else is the name of a site, which is what an operator says.
+        return "#page " + asked;
     }
 
     // The weather for a location the model named: its coordinates from the location
