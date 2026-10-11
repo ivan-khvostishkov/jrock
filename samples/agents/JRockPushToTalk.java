@@ -205,6 +205,19 @@ public final class JRockPushToTalk {
     // time a reply takes, and then some.
     private static final long ALARM_CLOCK_SLACK_S = 120;
 
+    // The sentence an answer puts something in the calendar with: a date, a time if the
+    // operator gave one, and the name of the event. Asked for in the appendix, in this
+    // exact shape and in English whatever the conversation is in, for the same reason the
+    // alarm sentence is - a sentence read off the answer is one the operator HEARD, so
+    // nothing is put in a calendar that was not also said out loud.
+    //
+    // "at HH:MM" is optional because "the 15th" is a thing people say and an all-day
+    // event is what they mean by it.
+    private static final java.util.regex.Pattern EVENT = java.util.regex.Pattern.compile(
+            "I(?:['’]m| am) putting (?:it|this|that)? ?in the calendar(?: on|:)? "
+            + "(\\d{4}-\\d{2}-\\d{2})(?: at (\\d{1,2}:\\d{2}))?,? (?:named|called) (.+)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
     // The timer agent's port - JRockTimer.PORT, the first of JRock's agents' ports - and
     // how long it has to answer, on the same machine.
     private static final int TIMER_PORT = 47470;
@@ -396,15 +409,16 @@ public final class JRockPushToTalk {
         String reply = answer;
         later(() -> showAnswer(reply));
         String alarm = alarmIn(reply);
-        if (handsFreeTurn && !handsFree) return join(note, alarm);
+        String event = eventIn(reply);
+        if (handsFreeTurn && !handsFree) return join(note, alarm, event);
         // An answer of nothing at all - a reply that arrived empty - is a failed turn to
         // anyone listening, however well the request itself went: reading it out loud
         // would be silence, which is the one thing a spoken answer cannot be.
         if (reply.isBlank()) {
-            return join(note, alarm, "The reply was empty.", sayFailed());
+            return join(note, alarm, event, "The reply was empty.", sayFailed());
         }
         String silent = JRock.automationNarrate(reply);
-        return join(note, alarm, silent == null ? null : "Not read aloud: " + silent);
+        return join(note, alarm, event, silent == null ? null : "Not read aloud: " + silent);
     }
 
     // What the model asked for, as the calendar agent's own request: "today" and "this
@@ -570,6 +584,34 @@ public final class JRockPushToTalk {
     // 7:30:00 as 07:30:00, which is what LocalTime.parse takes.
     private static String pad(String time) {
         return time.length() == 7 ? "0" + time : time;
+    }
+
+    // Puts in the calendar what an answer says it is putting there, if it says so.
+    // Returns null when it does not, and otherwise what became of it.
+    //
+    // The calendar agent does the work, and what it does is write an .ics file and have
+    // Thunderbird compose a mail from the configured address to that same address with
+    // the invitation attached. Nothing here names an address and nothing here sends
+    // anything: this hands over a date, a time and a name, and the last keystroke -
+    // Ctrl+Enter in Thunderbird's own window - is the operator's.
+    private static String eventIn(String answer) {
+        java.util.regex.Matcher m = EVENT.matcher(answer);
+        if (!m.find()) return null;
+        String day = m.group(1);
+        String at = m.group(2);
+        // The name as the model wrote it, without the full stop that ends the sentence
+        // and without quotes around it, which a model puts there about half the time.
+        String name = m.group(3).trim().replaceAll("[.\\s]+$", "")
+                .replaceAll("^[\"'“‘]|[\"'”’]$", "").trim();
+        if (name.isEmpty()) return "Event not created: the answer named no event.";
+        String request = "#new " + day + (at == null ? "" : " " + at) + " " + name;
+        String[] made = askAgent(CALENDAR_PORT, request, "calendar", "JRockCalendarEvents.java");
+        if (made[0] == null) return "Event not created: " + made[1];
+        // The agent's first line is the one worth a status line; the rest tells the
+        // operator what to press, and JRock's log has all of it.
+        String first = made[0].split("\n", 2)[0].trim();
+        report("calendar: " + made[0].replace("\n", " "));
+        return first.isEmpty() ? "Event created." : first;
     }
 
     // The button or Ctrl let go of, or this window left: the end of a turn only when it

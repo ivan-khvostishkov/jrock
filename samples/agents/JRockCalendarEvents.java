@@ -1,6 +1,7 @@
 // A JRock agent (it loops, and is started with JRock): what is in your calendar, read
 // out of Thunderbird's own offline copy - today, this week, any range - for other
-// agents to ask about and for you to read.
+// agents to ask about and for you to read, and one thing it puts INTO the calendar: an
+// event, by posting an invitation to you from yourself.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
@@ -35,9 +36,30 @@
 //          #next [n]                      the next n events from now (default 5)
 //          #range 2026-10-12 2026-10-19   any span of days
 //          #calendars                     the calendars, and how many events each holds
+//          #new 2026-10-15 14:00 Dentist  a new event, by post (see below)
+//          #new 2026-12-24 Christmas Eve  the same, for a whole day
 //
 //      The push-to-talk agent asks when the model's answer is "I need your calendar for
-//      today" or "... for this week", and puts what comes back into its next prompt.
+//      today" or "... for this week", and puts what comes back into its next prompt. It
+//      sends #new when the answer is "I'm putting it in the calendar on ...", which is a
+//      sentence the operator has HEARD before anything happens.
+//   4. #new is the one thing here that is not read-only, and it still does not write to
+//      a calendar. It writes a temporary .ics file and has Thunderbird compose a mail
+//      with it attached, FROM the address chosen in the window TO that same address.
+//      Thunderbird is the only thing in this chain that touches a calendar, through its
+//      own account and its own server, when you accept the invitation that arrives.
+//
+//      Two reasons it is done by post. A cache is a cache: a row written into
+//      cache.sqlite would be an event no server has heard of, and the next sync would
+//      wipe it. And an agent takes its instructions from a model, which takes them from
+//      whatever was said out loud in a noisy room - so the address is picked from a
+//      dropdown of the addresses this profile sends from, the same one is used for both
+//      ends, and no address said out loud can reach this code. The worst a mistake can
+//      do is send you a mail you did not want.
+//
+//      THE LAST KEYSTROKE IS YOURS: Thunderbird's command line can compose a message
+//      but has no switch that sends one, so the window comes up filled in and Ctrl+Enter
+//      is the operator's. Which is where the one irreversible step belongs anyway.
 //
 // Reading SQLite needs sqlite3, the command-line tool from sqlite.org - the one outside
 // thing this agent wants, as Ghostscript and xpdf are for PDFs. It is looked for on
@@ -71,6 +93,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -83,6 +106,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -119,6 +143,11 @@ public final class JRockCalendarEvents {
 
     // Thunderbird stores times as PRTime: microseconds since the epoch, UTC.
     private static final long MICROS = 1000L;
+
+    // How long an event lasts when nobody says: an hour, which is what a calendar
+    // application assumes too. Said out loud, "half past two" is a time and not a span,
+    // and an event with no end at all is one a calendar draws as a line.
+    private static final long EVENT_MINUTES = 60;
 
     // A time with no zone of its own - an all-day event, a birthday - is stored as the
     // wall clock it shows, counted as if it were UTC. Read in any other zone it slides
@@ -173,11 +202,17 @@ public final class JRockCalendarEvents {
 
     private static volatile Path profile;          // the one Thunderbird profile to read
     private static volatile Path sqlite;           // the tool, once found
+    // The address a new event is mailed FROM and TO. One address, both ways, chosen in
+    // the window from the ones this profile is set up to send from - which is what makes
+    // #new incapable of mailing anybody else, whatever it is asked for. Nothing in a
+    // request line can name an address; this field is the only one there is.
+    private static volatile String eventEmail = "";
     private static final Set<String> excluded =    // calendar names left out, by name
             java.util.Collections.synchronizedSet(new LinkedHashSet<>());
 
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField profileField;
+    private static javax.swing.JComboBox<String> emailBox;
     private static javax.swing.JTextArea briefing;
     private static javax.swing.JPanel calendarBox;
     private static javax.swing.JLabel status;
@@ -258,9 +293,12 @@ public final class JRockCalendarEvents {
             }
             case "#calendars":
                 return calendars();
+            case "#new":
+                return newEvent(line.substring(what.length()).trim());
             default:
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
-                        + "#today, #week, #next [n], #range <from> <to> or #calendars.");
+                        + "#today, #week, #next [n], #range <from> <to>, #calendars, or "
+                        + "#new <date> [time] <name>.");
         }
     }
 
@@ -721,6 +759,235 @@ public final class JRockCalendarEvents {
         return found;
     }
 
+    // ---- A new event, by post ---------------------------------------------------
+    // READING is this agent's whole job everywhere else, and this is the one thing it
+    // writes - and it does not write it to the calendar. It writes an .ics file and hands
+    // it to Thunderbird as an attachment to a mail FROM the configured address TO the
+    // same configured address. Thunderbird is the only thing here that touches a
+    // calendar, through its own account, its own server and its own rules.
+    //
+    // Why by post rather than into the database: cache.sqlite is a CACHE of a calendar
+    // that lives on a server. Writing a row into it would put an event on this screen
+    // that no server has ever heard of, and the next sync would wipe it. An invitation
+    // mailed to yourself goes the way every other invitation goes - Thunderbird reads it,
+    // you accept it, and the server has it.
+    //
+    // Why from and to the same address, read from a dropdown and never from the request:
+    // an agent takes its instructions from a model, which takes them from whatever was
+    // said out loud in a noisy room. No address said out loud can reach this code, and
+    // the worst a mistake can do is send you a mail you did not want.
+    //
+    // THE LAST KEYSTROKE IS YOURS. Thunderbird's command line can open a composed
+    // message but has no switch that sends one - there is no -send, and there never has
+    // been. So the compose window comes up with everything in it, and Ctrl+Enter is the
+    // operator's. Which is the right place for the one irreversible step anyway.
+    private static String newEvent(String spec) {
+        if (spec.isEmpty()) {
+            throw new Stop("#new wants a date, an optional time and a name, as "
+                    + "#new 2026-10-15 14:00 Dentist.");
+        }
+        String[] bits = spec.split("\\s+", 2);
+        LocalDate day = date(bits[0]);
+        String rest = bits.length > 1 ? bits[1].trim() : "";
+        // A time if there is one, and an all-day event if there is not: "the 15th" is a
+        // thing people say, and an all-day event is what they mean by it.
+        LocalTime at = null;
+        Matcher clock = Pattern.compile("^(\\d{1,2}):(\\d{2})(?::\\d{2})?(?=\\s|$)").matcher(rest);
+        if (clock.find()) {
+            int hour = Integer.parseInt(clock.group(1));
+            int minute = Integer.parseInt(clock.group(2));
+            if (hour > 23 || minute > 59) throw new Stop("\"" + clock.group() + "\" is not a time.");
+            at = LocalTime.of(hour, minute);
+            rest = rest.substring(clock.end()).trim();
+        }
+        if (rest.isEmpty()) throw new Stop("#new wants a name for the event.");
+        String summary = rest.length() > 200 ? rest.substring(0, 200).trim() : rest;
+
+        String email = eventEmail.trim();
+        if (email.isEmpty()) {
+            throw new Stop("no address is set for new events. Pick one in the agent's "
+                    + "window - the list is what this Thunderbird profile sends from.");
+        }
+        Path thunderbird = thunderbird();
+        if (thunderbird == null) {
+            throw new Stop("Thunderbird was not found. It is what sends the invitation, so "
+                    + "there is nothing to send it with.");
+        }
+
+        Path file;
+        try {
+            file = Files.createTempFile("jrock-event-", ".ics");
+            Files.write(file, ics(day, at, summary, email).getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new Stop("the .ics file could not be written: " + ex.getMessage());
+        }
+
+        // One argument, Thunderbird's own compose syntax, with every value percent-encoded
+        // because the fields are separated by commas and a name with a comma in it would
+        // otherwise become two fields. preselectid names the identity, so the message
+        // leaves as the account that owns the address rather than as the default one.
+        String identity = identityOf(email);
+        String when = at == null ? day.format(LONG_DAY)
+                : day.format(LONG_DAY) + " at " + at.format(CLOCK);
+        String compose = "from=" + encode(email)
+                + ",to=" + encode(email)
+                + (identity == null ? "" : ",preselectid=" + identity)
+                + ",subject=" + encode(summary)
+                + ",body=" + encode("Calendar event: " + summary + "\r\n" + when
+                        + "\r\n\r\nSent by the JRock calendar events agent, to itself. The "
+                        + "attached invitation is what puts it in the calendar.")
+                + ",attachment=" + file.toUri();
+        try {
+            new ProcessBuilder(thunderbird.toString(), "-compose", compose)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+        } catch (IOException ex) {
+            throw new Stop("Thunderbird would not start: " + ex.getMessage());
+        }
+        return "Event prepared: \"" + summary + "\", " + when + "."
+                + "\nThunderbird is composing it from " + email + " to " + email
+                + ", with the invitation attached (" + file + ")."
+                + "\nPress Ctrl+Enter in that window to send it, then accept the invitation "
+                + "when it arrives - that is what puts it in the calendar.";
+    }
+
+    // The event as an iCalendar invitation. UTC throughout for a timed event, so no
+    // VTIMEZONE has to be written and nothing can be read an hour out; a plain date for
+    // an all-day one, which is the one case that must not be converted at all.
+    private static String ics(LocalDate day, LocalTime at, String summary, String email) {
+        DateTimeFormatter utc = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
+        DateTimeFormatter date = DateTimeFormatter.ofPattern("yyyyMMdd");
+        String stamp = ZonedDateTime.now(ZoneOffset.UTC).format(utc);
+        String start;
+        String end;
+        if (at == null) {
+            start = "DTSTART;VALUE=DATE:" + day.format(date);
+            end = "DTEND;VALUE=DATE:" + day.plusDays(1).format(date);
+        } else {
+            ZonedDateTime from = day.atTime(at).atZone(ZoneId.systemDefault());
+            start = "DTSTART:" + from.withZoneSameInstant(ZoneOffset.UTC).format(utc);
+            end = "DTEND:" + from.plusMinutes(EVENT_MINUTES)
+                    .withZoneSameInstant(ZoneOffset.UTC).format(utc);
+        }
+        return String.join("\r\n",
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "PRODID:-//NoSocial.Net//JRock Calendar Events//EN",
+                "METHOD:REQUEST",
+                "BEGIN:VEVENT",
+                "UID:" + UUID.randomUUID() + "@jrock",
+                "DTSTAMP:" + stamp,
+                start,
+                end,
+                "SUMMARY:" + icsText(summary),
+                "ORGANIZER:mailto:" + email,
+                "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:" + email,
+                "SEQUENCE:0",
+                "STATUS:CONFIRMED",
+                "END:VEVENT",
+                "END:VCALENDAR",
+                "");
+    }
+
+    // A text value in an iCalendar file: backslash, semicolon, comma and newline are the
+    // four characters that mean something there (RFC 5545).
+    private static String icsText(String text) {
+        return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+                .replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\n");
+    }
+
+    private static String encode(String value) {
+        try {
+            // A space as %20 rather than +: this is a URL field, not a form post.
+            return java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20");
+        } catch (java.io.UnsupportedEncodingException impossible) {
+            return value;
+        }
+    }
+
+    // The addresses this profile sends from: mail.identity.idN.useremail in prefs.js,
+    // with the name beside it. Read every time, like the calendar names are - an address
+    // added in Thunderbird should appear in the dropdown without restarting anything.
+    // Each entry is {identity key, address, name}.
+    private static List<String[]> identities() {
+        Map<String, String[]> found = new LinkedHashMap<>();
+        Path prefs = profile == null ? null : profile.resolve("prefs.js");
+        if (prefs == null || !Files.isRegularFile(prefs)) return new ArrayList<>();
+        Pattern pref = Pattern.compile(
+                "user_pref\\(\"mail\\.identity\\.(id\\d+)\\.(useremail|fullName)\",\\s*\"(.*)\"\\);");
+        try {
+            for (String line : Files.readAllLines(prefs, StandardCharsets.UTF_8)) {
+                Matcher m = pref.matcher(line.trim());
+                if (!m.matches()) continue;
+                String[] one = found.computeIfAbsent(m.group(1),
+                        key -> new String[] { key, "", "" });
+                one[m.group(2).equals("useremail") ? 1 : 2] = unescape(m.group(3));
+            }
+        } catch (IOException ex) {
+            throw new Stop("could not read " + prefs + ": " + ex.getMessage());
+        }
+        List<String[]> addresses = new ArrayList<>();
+        for (String[] one : found.values()) {
+            if (!one[1].isEmpty()) addresses.add(one);
+        }
+        return addresses;
+    }
+
+    // Which identity owns an address, for preselectid - or null, which leaves Thunderbird
+    // to pick, as it would for a mail composed by hand.
+    private static String identityOf(String email) {
+        try {
+            for (String[] one : identities()) {
+                if (one[1].equalsIgnoreCase(email)) return one[0];
+            }
+        } catch (Stop ignored) {
+            // No prefs.js to read: Thunderbird's own default identity will do.
+        }
+        return null;
+    }
+
+    // Thunderbird itself: on PATH, where Windows records its mail client, or where each
+    // platform installs it. Looked for when it is needed rather than kept, so installing
+    // Thunderbird after this agent started is enough.
+    private static Path thunderbird() {
+        String[] names = isWindows() ? new String[] { "thunderbird.exe" }
+                                     : new String[] { "thunderbird" };
+        String path = System.getenv("PATH");
+        if (path != null) {
+            for (String dir : path.split(Pattern.quote(java.io.File.pathSeparator))) {
+                if (dir.isBlank()) continue;
+                for (String name : names) {
+                    Path at = Paths.get(dir).resolve(name);
+                    if (Files.isRegularFile(at)) return at;
+                }
+            }
+        }
+        if (isWindows()) {
+            // Where Windows records the mail client, which is where it actually is.
+            for (String line : run(QUERY_TIMEOUT_MS, "reg.exe", "query",
+                    "HKLM\\SOFTWARE\\Clients\\Mail\\Mozilla Thunderbird\\shell\\open\\command",
+                    "/ve")) {
+                Matcher m = Pattern.compile("\"([^\"]+thunderbird\\.exe)\"",
+                        Pattern.CASE_INSENSITIVE).matcher(line);
+                if (m.find()) {
+                    Path at = Paths.get(m.group(1));
+                    if (Files.isRegularFile(at)) return at;
+                }
+            }
+        }
+        for (String at : new String[] {
+                "C:\\Program Files\\Mozilla Thunderbird\\thunderbird.exe",
+                "C:\\Program Files (x86)\\Mozilla Thunderbird\\thunderbird.exe",
+                "/Applications/Thunderbird.app/Contents/MacOS/thunderbird",
+                "/usr/bin/thunderbird", "/usr/local/bin/thunderbird",
+                "/snap/bin/thunderbird" }) {
+            Path candidate = Paths.get(at);
+            if (Files.isRegularFile(candidate)) return candidate;
+        }
+        return null;
+    }
+
     // The calendars' names, as Thunderbird keeps them in prefs.js. Read every time: a
     // calendar renamed in Thunderbird should be renamed here without a restart.
     private static Map<String, String> calendarNames() {
@@ -762,6 +1029,29 @@ public final class JRockCalendarEvents {
             }
         }
         return out.toString();
+    }
+
+    // A short-lived program whose output is wanted, for the one lookup that is not a
+    // query: where Windows says Thunderbird is. Nothing on an empty answer, which is
+    // what "not there" looks like to the caller.
+    private static List<String> run(int timeoutMs, String... command) {
+        List<String> out = new ArrayList<>();
+        try {
+            Process p = new ProcessBuilder(command).redirectErrorStream(true).start();
+            p.getOutputStream().close();
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                for (String line; (line = r.readLine()) != null; ) out.add(line);
+            }
+            if (!p.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                p.destroyForcibly();
+            }
+        } catch (IOException ex) {
+            // Not there, which an empty answer says.
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+        return out;
     }
 
     // One query, read-only, through sqlite3. Rows and columns come back separated by
@@ -967,6 +1257,28 @@ public final class JRockCalendarEvents {
         profileRow.add(profileField, java.awt.BorderLayout.CENTER);
         profileRow.add(buttons, java.awt.BorderLayout.EAST);
 
+        // The address a new event is mailed from and to - both, the same one. The list is
+        // what this profile is set up to send from, so there is nothing to type and no
+        // address to get wrong; an address that is not in it cannot be chosen at all.
+        emailBox = new javax.swing.JComboBox<>();
+        emailBox.setFont(small);
+        emailBox.setToolTipText("New events are mailed from this address to the same "
+                + "address, with the invitation attached - so nothing can reach anybody else");
+        emailBox.addActionListener(e -> {
+            Object picked = emailBox.getSelectedItem();
+            String chosen = picked == null ? "" : addressIn(picked.toString());
+            if (chosen.equals(eventEmail)) return;
+            eventEmail = chosen;
+            writeSettings();
+            say(eventEmail.isEmpty() ? "No address set for new events."
+                    : "New events will be mailed from " + eventEmail + " to itself.");
+        });
+        javax.swing.JPanel emailRow = new javax.swing.JPanel(new java.awt.BorderLayout(8, 0));
+        emailRow.setOpaque(false);
+        emailRow.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 0, 0, 0));
+        emailRow.add(new javax.swing.JLabel("New events from/to:"), java.awt.BorderLayout.WEST);
+        emailRow.add(emailBox, java.awt.BorderLayout.CENTER);
+
         // What to ask, which is also what an agent can ask.
         javax.swing.JPanel asks = new javax.swing.JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.LEFT, 6, 0));
@@ -1004,10 +1316,18 @@ public final class JRockCalendarEvents {
         listening.setForeground(MUTED);
         listening.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 2, 0, 2));
 
+        javax.swing.JPanel rows = new javax.swing.JPanel();
+        rows.setLayout(new javax.swing.BoxLayout(rows, javax.swing.BoxLayout.Y_AXIS));
+        rows.setOpaque(false);
+        for (javax.swing.JComponent row : new javax.swing.JComponent[] {
+                profileRow, emailRow, asks }) {
+            row.setAlignmentX(0f);
+            rows.add(row);
+        }
+
         javax.swing.JPanel north = new javax.swing.JPanel(new java.awt.BorderLayout());
         north.setOpaque(false);
-        north.add(profileRow, java.awt.BorderLayout.NORTH);
-        north.add(asks, java.awt.BorderLayout.CENTER);
+        north.add(rows, java.awt.BorderLayout.NORTH);
         north.add(status, java.awt.BorderLayout.SOUTH);
 
         javax.swing.JPanel middle = new javax.swing.JPanel(new java.awt.BorderLayout(10, 0));
@@ -1036,8 +1356,48 @@ public final class JRockCalendarEvents {
         if (profile == null) {
             say("Set the Thunderbird profile folder above, then press Use.");
         } else {
+            showEmails();
             showCalendars();
         }
+    }
+
+    // The dropdown of addresses, filled from whichever profile is in use. The one
+    // remembered in the settings file is selected when it is still there, and said so
+    // when it is not: a profile that no longer sends from an address cannot mail from it,
+    // and finding that out when an event is asked for would be finding out too late.
+    private static void showEmails() {
+        List<String[]> addresses;
+        try {
+            addresses = identities();
+        } catch (Stop stop) {
+            addresses = new ArrayList<>();
+        }
+        emailBox.removeAllItems();
+        emailBox.addItem("");
+        String keep = eventEmail;
+        String select = null;
+        for (String[] one : addresses) {
+            String shown = one[2].isEmpty() ? one[1] : one[2] + " <" + one[1] + ">";
+            emailBox.addItem(shown);
+            if (one[1].equalsIgnoreCase(keep)) select = shown;
+        }
+        // Set directly, so the listener does not read this as the operator choosing.
+        eventEmail = select == null ? "" : keep;
+        emailBox.setSelectedItem(select == null ? "" : select);
+        if (addresses.isEmpty()) {
+            say("No addresses in this profile's prefs.js, so no event can be mailed yet.");
+        } else if (select == null && !keep.isEmpty()) {
+            say("This profile does not send from " + keep + " any more - pick an address "
+                    + "for new events.");
+        }
+    }
+
+    // The address out of what the dropdown shows, which is "Name <address>".
+    private static String addressIn(String shown) {
+        int open = shown.lastIndexOf('<');
+        int close = shown.lastIndexOf('>');
+        String address = open >= 0 && close > open ? shown.substring(open + 1, close) : shown;
+        return address.trim();
     }
 
     // The profile as typed, taken and remembered.
@@ -1050,6 +1410,7 @@ public final class JRockCalendarEvents {
         profile = Paths.get(typed).toAbsolutePath().normalize();
         profileField.setText(profile.toString());
         writeSettings();
+        showEmails();
         showCalendars();
         refresh("#week");
     }
@@ -1138,6 +1499,8 @@ public final class JRockCalendarEvents {
                 if (text.startsWith("profile=")) {
                     String at = text.substring("profile=".length()).trim();
                     if (!at.isEmpty()) profile = Paths.get(at);
+                } else if (text.startsWith("email=")) {
+                    eventEmail = text.substring("email=".length()).trim();
                 } else if (text.startsWith("exclude=")) {
                     for (String name : text.substring("exclude=".length()).split("\\|")) {
                         if (!name.trim().isEmpty()) excluded.add(name.trim());
@@ -1153,6 +1516,7 @@ public final class JRockCalendarEvents {
         Path file = ownDirectory().resolve(SETTINGS);
         StringBuilder out = new StringBuilder("' JRock calendar events agent\n");
         if (profile != null) out.append("profile=").append(profile).append('\n');
+        if (!eventEmail.isEmpty()) out.append("email=").append(eventEmail).append('\n');
         if (!excluded.isEmpty()) {
             out.append("exclude=").append(String.join("|", excluded)).append('\n');
         }

@@ -1786,6 +1786,16 @@ the voice, so the microphone doesn't record the last answer as the next question
   The first time is checked against the computer's clock first, and a model more than two
   minutes off sets nothing. The status line says what became of the alarm: set, refused, or
   not set because the timer agent isn't running.
+- **A new event in the calendar.** An answer that says *"I'm putting it in the calendar on
+  YYYY-MM-DD at HH:MM, named …"* — the appendix asks the model for this sentence too, in English
+  whatever the language — sends `#new` to the [calendar
+  agent](#a-fifth-agent-your-calendar-jrockcalendareventsjava), which posts the invitation to you
+  from yourself for you to send with **Ctrl+Enter**. Leave the time out and it is an event for
+  the whole day. Two things make this safe to drive by voice: the sentence is **read aloud
+  before anything happens**, so nothing reaches a calendar that the operator did not also hear,
+  and the address is the one picked in the agent's window at both ends, so it **cannot reach
+  anybody else**. The status line says what became of it, and JRock's log has the whole of what
+  the agent said back, including where the `.ics` file is.
 - **Location.** When the whole answer is *"I need to know your location"*, the agent does not
   show it or read it aloud. It sends `#here` to the
   [location agent](#a-third-agent-location-jrocklocationjava) and gives the model the line that
@@ -1920,9 +1930,10 @@ java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
 ### A fifth agent: your calendar (`JRockCalendarEvents.java`)
 
 What is in your calendar, read out of **Thunderbird's own offline copy** — today, this week,
-any span of days — for the push-to-talk agent to ask about and for you to read. The first agent
-here that needs **no model, no Bedrock key and no JRock automation**: it answers out of files
-rather than by asking anybody.
+any span of days — for the push-to-talk agent to ask about and for you to read, and one thing it
+puts **into** the calendar: a new event, posted to you by yourself. The first agent here that
+needs **no model, no Bedrock key and no JRock automation**: it answers out of files rather than
+by asking anybody.
 
 **Events, and that is the name.** Thunderbird keeps tasks (VTODO) in a table of their own, and a
 calendar served over CalDAV by Google has none — the cached table is empty. If your "tasks for
@@ -1955,6 +1966,8 @@ java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no
   | `#next [n]` | the next *n* events from now (default 5) |
   | `#range 2026-12-24 2026-12-26` | any span of days |
   | `#calendars` | the calendars, and how many events each holds |
+  | `#new 2026-10-15 14:00 Dentist` | a new event, by post (below) — an hour long unless the calendar says otherwise |
+  | `#new 2026-12-24 Christmas Eve` | the same with no time given, which makes it an event for the whole day |
 
   ```
   This week, Sun 11 Oct to Sat 17 Oct 2026 (Europe/Berlin):
@@ -1963,6 +1976,24 @@ java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no
     16:00-17:30  Physiotherapy  [Calendar]  (repeats weekly)
   ```
 
+- **A new event goes by post, to you from yourself.** `#new` is the one thing here that is not
+  read-only, and it still writes nothing to a calendar: it writes a temporary `.ics` file and has
+  **Thunderbird** compose a mail with that invitation attached, **from** the address picked in the
+  window **to that same address**. Accept the invitation when it arrives and Thunderbird puts it in
+  the calendar — through its own account, its own server and its own rules, which is the only way
+  an event can be there and still be there after the next sync. A row written into `cache.sqlite`
+  would be an event no server had heard of, and the sync would wipe it.
+- **The address is picked from a list, never said out loud.** The window's **New events from/to**
+  dropdown is filled with the addresses that Thunderbird profile is set up to send from
+  (`mail.identity.*.useremail` in `prefs.js`), and the chosen one is remembered in
+  `jrock-calendar-events.txt`. The same address is used at **both** ends, and nothing in a request
+  line can name an address — so an agent taking its instructions from a model, which took them
+  from whatever was said in a noisy room, **cannot mail anybody but you**. The worst a mistake can
+  do is send you a mail you did not want.
+- **The last keystroke is yours.** Thunderbird's command line can compose a message but has no
+  switch that sends one — there is no `-send` — so the compose window comes up with the address,
+  the subject, the body and the attachment all filled in, and **Ctrl+Enter** is the operator's.
+  Which is where the one irreversible step belongs anyway.
 - **Every line names its calendar**, in square brackets, and `#calendars` lists them with their
   sizes — so "which calendar is that in?" is a question the model can actually answer, and a
   noisy feed can be recognised for what it is. Each calendar also has a **checkbox** in the
@@ -2096,6 +2127,44 @@ sequenceDiagram
         Tm->>Op: four quick beeps, once
     end
 ```
+
+**Putting something in the calendar.** The same shape as the alarm — a sentence the operator
+hears, recognised by a program — and then the one step no agent takes by itself:
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    box Push-to-talk
+        participant PTT as JRockPushToTalk
+        participant PM as its JRock (model)
+    end
+    participant Cal as JRockCalendarEvents, 127.0.0.1:47473
+    participant Tb as Thunderbird
+
+    rect rgb(255, 245, 200)
+        Op->>PTT: speaks: "Put the dentist in my calendar, Thursday at two"
+    end
+    rect rgb(220, 235, 255)
+        PTT->>PM: recording + appendix (#35;now = Tue 13 Oct 2026, 10:01:34 ...)
+        PM-->>PTT: "I'm putting it in the calendar on 2026-10-15 at 14:00, named Dentist"
+        Note over PTT: recognised: a date, a time and a name - no address anywhere
+        PTT->>Cal: #35;new 2026-10-15 14:00 Dentist
+        Note over Cal: writes jrock-event-nnn.ics (one hour, UTC)
+        Cal->>Tb: -compose from=you, to=you, attachment=the .ics
+        Cal-->>PTT: Event prepared: "Dentist", Thursday 15 October 2026 at 14:00
+        Note over PTT: status line: what became of it
+    end
+    rect rgb(255, 245, 200)
+        PTT->>Op: reads aloud: "I'm putting it in the calendar on 2026-10-15 at 14:00, named Dentist"
+        Tb->>Op: a compose window, filled in
+        Op->>Tb: Ctrl+Enter
+        Tb->>Op: the invitation arrives - accept it, and it is in the calendar
+    end
+```
+
+The address is not in any of those lines. It is chosen once in the calendar agent's window,
+from the addresses that Thunderbird profile sends from, and used at both ends — so the whole
+chain, from a noisy room through a model to a mail, **cannot reach anybody but the operator**.
 
 The agents find each other only by port, with nothing to configure. One that isn't running is
 a *connection refused*: push-to-talk says so on its status line, and reads the model's own
