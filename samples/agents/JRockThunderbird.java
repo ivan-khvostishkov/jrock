@@ -46,6 +46,8 @@
 //          #calendars                     the calendars, and how many events each holds
 //          #new 2026-10-15 14:00 Dentist  a new event, by post (see below)
 //          #new 2026-12-24 Christmas Eve  the same, for a whole day
+//          #move a3f91c 2026-10-20 14:30  propose a new time for somebody else's
+//                                         meeting, by the id its line carries
 //          #mail [days]                   what arrived today, or over that many days
 //          #unanswered [days]             received, with no reply sent (default 14)
 //          #with <name or address>        the last each way, and how much there has been
@@ -101,6 +103,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
@@ -197,17 +200,22 @@ public final class JRockThunderbird {
         final Instant start, end;
         final boolean allDay;
         final String title, calendar, location, note;
+        // The short id of the event this is an occurrence of: what a briefing prints on
+        // every line, and what naming one in a request means (see handle).
+        final String id;
         // Why this one is a maybe rather than a plan - "tentative", "optional", "you
         // said maybe" - or "" when it is simply happening. Kept as the words rather than
         // a flag, because a list of maybes is worth reading with the reason beside each.
         final String maybe;
 
         Occurrence(Instant start, Instant end, boolean allDay, String title,
-                   String calendar, String location, String note, String maybe) {
+                   String calendar, String location, String note, String maybe,
+                   String id) {
             this.start = start; this.end = end; this.allDay = allDay;
             this.title = title; this.calendar = calendar;
             this.location = location; this.note = note;
             this.maybe = maybe == null ? "" : maybe;
+            this.id = id == null ? "" : id;
         }
 
         @Override public int compareTo(Occurrence other) {
@@ -331,6 +339,9 @@ public final class JRockThunderbird {
             }
             case "#new":
                 return newEvent(line.substring(what.length()).trim());
+            case "#move":
+            case "#propose":
+                return moveEvent(line.substring(what.length()).trim(), zone);
             case "#mail":
                 return mail(daysIn(parts, 1, 0), zone);
             case "#unanswered":
@@ -345,7 +356,8 @@ public final class JRockThunderbird {
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
                         + "#today, #week, #next [n], #range <from> <to>, #calendars, "
                         + "#tentative [days] or "
-                        + "#new <date> [time] <name> about the calendar, or #mail [days], "
+                        + "#new <date> [time] <name> or #move <id> <date> [time] about "
+                        + "the calendar, or #mail [days], "
                         + "#unanswered [days], #with <somebody>, #senders [days] or "
                         + "#mailboxes about the mail.");
         }
@@ -497,6 +509,9 @@ public final class JRockThunderbird {
         StringBuilder out = new StringBuilder("  ").append(pad(time, 13)).append(o.title);
         if (!o.location.isEmpty()) out.append(", at ").append(o.location);
         out.append("  [").append(o.calendar).append(']');
+        // The id last, after everything a person reads: it is for naming this event in
+        // the next request, and nobody needs it until they do.
+        if (!o.id.isEmpty()) out.append("  id ").append(o.id);
         // Said on the line itself, because a list of maybes is read one line at a time
         // and "tentative" is the whole of what matters about one of them.
         if (!o.maybe.isEmpty()) out.append("  (").append(o.maybe).append(')');
@@ -673,7 +688,8 @@ public final class JRockThunderbird {
         String title = row[2] == null || row[2].isBlank() ? "(no title)" : row[2].trim();
         boolean allDay = FLOATING.equalsIgnoreCase(row[5] == null ? "" : row[5].trim());
         return new Occurrence(from, to, allDay, title, calendar, "", note,
-                maybeWhy(row[7], maybesFor, key(row[0], row[1])));
+                maybeWhy(row[7], maybesFor, key(row[0], row[1])),
+                handle(row[0], row[1]));
     }
 
     // ---- Repeats ---------------------------------------------------------------
@@ -1807,6 +1823,271 @@ public final class JRockThunderbird {
     private static void say(String text) {
         String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
         status.setText("<html><div style='width:700px'>" + safe + "</div></html>");
+    }
+
+    // ---- Moving somebody else's meeting: a counter-proposal ---------------------
+    // What an attendee is allowed to do about a time that does not suit them, in the
+    // calendar standard's own terms: METHOD:COUNTER, sent to the ORGANIZER, naming the
+    // same UID and a different DTSTART (RFC 5546). The organizer's own calendar then
+    // offers them a button to accept or decline the new time. Nothing here changes the
+    // event: only the organizer can, and this asks them to.
+    //
+    // THIS IS THE ONE THING IN THIS AGENT THAT ADDRESSES A MAIL TO SOMEBODY ELSE, and
+    // every other line of it still cannot. Four things hold it in:
+    //
+    //   - the address is READ OFF THE EVENT, out of its own ORGANIZER property. Nothing
+    //     said out loud, and nothing a model wrote, can put an address here: the only
+    //     people reachable are the organizers of meetings already in this calendar.
+    //   - an event whose organizer is one of the operator's OWN addresses is refused.
+    //     A counter-proposal to yourself means nothing; that event is theirs to edit.
+    //   - the mail is COMPOSED, never sent. Thunderbird's window opens with everything
+    //     in it and Ctrl+Enter is the operator's, exactly as #new is.
+    //   - who it is addressed to is said on the status line and written into the log,
+    //     before anybody presses anything.
+    private static String moveEvent(String spec, ZoneId zone) {
+        String[] parts = spec.trim().split("\\s+");
+        if (parts.length < 2) {
+            throw new Stop("#move wants an event and a new time, as "
+                    + "#move a3f91c 2026-10-20 14:30.");
+        }
+        LocalDate day = date(parts[1]);
+        LocalTime at = null;
+        if (parts.length > 2) {
+            Matcher clock = Pattern.compile("^(\\d{1,2}):(\\d{2})$").matcher(parts[2]);
+            if (!clock.matches()) throw new Stop("\"" + parts[2] + "\" is not a time.");
+            int hour = Integer.parseInt(clock.group(1));
+            int minute = Integer.parseInt(clock.group(2));
+            if (hour > 23 || minute > 59) throw new Stop("\"" + parts[2] + "\" is not a time.");
+            at = LocalTime.of(hour, minute);
+        }
+
+        // The event, by the short handle a briefing prints or by its whole UID.
+        String asked = parts[0].trim();
+        Path where = null;
+        String[] event = null;
+        for (Path db : databases()) {
+            for (String[] row : query(db, "SELECT cal_id, id, title, event_start, event_end,"
+                    + " event_start_tz, recurrence_id, ical_status FROM cal_events"
+                    + " WHERE recurrence_id IS NULL")) {
+                if (row.length < 8) continue;
+                if (!asked.equalsIgnoreCase(handle(row[0], row[1]))
+                        && !asked.equalsIgnoreCase(row[1])) {
+                    continue;
+                }
+                where = db;
+                event = row;
+                break;
+            }
+            if (event != null) break;
+        }
+        if (event == null) {
+            throw new Stop("no event has the id \"" + asked + "\". Ask for the calendar "
+                    + "again - every line carries its id - and use the one on the line.");
+        }
+
+        String[] organizer = organizerOf(where, event[0], event[1]);
+        if (organizer == null) {
+            throw new Stop("\"" + event[2] + "\" has no organizer, so there is nobody to "
+                    + "propose a new time to. An event of your own is yours to move in "
+                    + "Thunderbird.");
+        }
+        Set<String> mine = new LinkedHashSet<>();
+        try {
+            for (String[] one : identities()) mine.add(one[1].toLowerCase(Locale.ROOT));
+        } catch (Stop ignored) {
+            // No prefs.js: then nothing is known to be the operator's own.
+        }
+        if (mine.contains(organizer[0].toLowerCase(Locale.ROOT))) {
+            throw new Stop("you are the organizer of \"" + event[2] + "\", so a "
+                    + "counter-proposal would be to yourself. Move it in Thunderbird and "
+                    + "everybody invited is told.");
+        }
+        String from = attendeeAddress(where, event[0], event[1], mine);
+        if (from == null) from = eventEmail.trim();
+        if (from.isEmpty()) {
+            throw new Stop("no address of yours is on \"" + event[2] + "\" and none is set "
+                    + "in this window, so there is nothing to send a counter-proposal "
+                    + "from.");
+        }
+
+        // The new time, the old length. A meeting moved is the same meeting: nothing here
+        // shortens or stretches it, which is not what was asked for.
+        Instant was = start(event);
+        Duration length = Duration.between(was, end(event));
+        boolean allDay = FLOATING.equalsIgnoreCase(event[5] == null ? "" : event[5].trim());
+        if (at == null && !allDay) {
+            at = ZonedDateTime.ofInstant(was, zone).toLocalTime();
+        }
+        ZonedDateTime now = allDay && at == null ? day.atStartOfDay(ZoneOffset.UTC)
+                : day.atTime(at).atZone(zone);
+
+        Path file;
+        try {
+            file = Files.createTempFile("jrock-counter-", ".ics");
+            Files.write(file, counterIcs(event, organizer, from, now, length, allDay,
+                    sequenceOf(where, event[0], event[1]))
+                    .getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new Stop("the .ics file could not be written: " + ex.getMessage());
+        }
+
+        Path thunderbird = thunderbird();
+        if (thunderbird == null) {
+            throw new Stop("Thunderbird was not found, and it is what sends the "
+                    + "counter-proposal.");
+        }
+        String when = allDay && at == null ? day.format(LONG_DAY)
+                : day.format(LONG_DAY) + " at " + now.format(CLOCK);
+        String wasWhen = ZonedDateTime.ofInstant(was, allDay ? ZoneOffset.UTC : zone)
+                .format(LONG_DAY) + (allDay ? ""
+                : " at " + ZonedDateTime.ofInstant(was, zone).format(CLOCK));
+        String identity = identityOf(from);
+        String compose = "from=" + encode(from)
+                + ",to=" + encode(organizer[0])
+                + (identity == null ? "" : ",preselectid=" + identity)
+                + ",subject=" + encode("New time proposed: " + event[2])
+                + ",body=" + encode("This is a proposal for a new time, not a change.\r\n\r\n"
+                        + event[2] + "\r\nWas: " + wasWhen + "\r\nProposed: " + when
+                        + "\r\n\r\nYour calendar should offer you the new time to accept or "
+                        + "decline. Sent by the JRock Thunderbird agent.")
+                + ",attachment=" + file.toUri();
+        try {
+            new ProcessBuilder(thunderbird.toString(), "-compose", compose)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+        } catch (IOException ex) {
+            throw new Stop("Thunderbird would not start: " + ex.getMessage());
+        }
+        return "New time proposed for \"" + event[2] + "\": " + wasWhen + " becomes " + when
+                + ".\nThunderbird is composing it from " + from + " TO THE ORGANIZER, "
+                + (organizer[1].isEmpty() ? organizer[0] : organizer[1] + " <" + organizer[0] + ">")
+                + ", as a counter-proposal (" + file + ")."
+                + "\nPress Ctrl+Enter in that window to send it. The event does not move "
+                + "until the organizer accepts - only they can move it.";
+    }
+
+    // The counter-proposal itself. The same UID and the organizer's own SEQUENCE, so the
+    // organizer's calendar knows which meeting is meant and that this is not stale; the
+    // new time; and the operator as the attendee it comes from.
+    private static String counterIcs(String[] event, String[] organizer, String from,
+                                     ZonedDateTime when, Duration length, boolean allDay,
+                                     int sequence) {
+        DateTimeFormatter utc = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
+        DateTimeFormatter date = DateTimeFormatter.ofPattern("yyyyMMdd");
+        String stamp = ZonedDateTime.now(ZoneOffset.UTC).format(utc);
+        String start;
+        String end;
+        if (allDay) {
+            start = "DTSTART;VALUE=DATE:" + when.toLocalDate().format(date);
+            end = "DTEND;VALUE=DATE:" + when.toLocalDate()
+                    .plusDays(Math.max(1, length.toDays())).format(date);
+        } else {
+            start = "DTSTART:" + when.withZoneSameInstant(ZoneOffset.UTC).format(utc);
+            end = "DTEND:" + when.plus(length).withZoneSameInstant(ZoneOffset.UTC).format(utc);
+        }
+        String organiser = "ORGANIZER" + (organizer[1].isEmpty() ? ""
+                : ";CN=" + icsText(organizer[1])) + ":mailto:" + organizer[0];
+        return String.join("\r\n",
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "PRODID:-//NoSocial.Net//JRock Thunderbird Agent//EN",
+                "METHOD:COUNTER",
+                "BEGIN:VEVENT",
+                "UID:" + event[1],
+                "DTSTAMP:" + stamp,
+                start,
+                end,
+                "SUMMARY:" + icsText(event[2] == null ? "(no title)" : event[2]),
+                organiser,
+                "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE;RSVP=TRUE:mailto:" + from,
+                "SEQUENCE:" + sequence,
+                "COMMENT:A new time is proposed. The event has not been changed.",
+                "END:VEVENT",
+                "END:VCALENDAR",
+                "");
+    }
+
+    // The ORGANIZER of an event, as {address, name} - or null when it has none, which is
+    // what an event somebody made for themselves looks like.
+    //
+    // Two shapes, because two kinds of server write it two ways: the value may be a
+    // mailto: URI, or a principal URL with the address in an EMAIL parameter beside it,
+    // which is what iCloud does.
+    private static String[] organizerOf(Path db, String calId, String id) {
+        for (String[] row : query(db, "SELECT icalString FROM cal_attendees"
+                + " WHERE cal_id = " + text(calId) + " AND item_id = " + text(id)
+                + " AND icalString LIKE 'ORGANIZER%'")) {
+            String line = row.length == 0 ? "" : row[0];
+            String address = icalAddress(line);
+            if (address.isEmpty()) continue;
+            Matcher cn = Pattern.compile("(?i)CN=([^;:]*)").matcher(line);
+            return new String[] { address, cn.find() ? cn.group(1).trim() : "" };
+        }
+        return null;
+    }
+
+    // Which of the operator's own addresses is an attendee of this event - the one the
+    // invitation came to, and so the one a counter-proposal has to come from.
+    private static String attendeeAddress(Path db, String calId, String id, Set<String> mine) {
+        if (mine.isEmpty()) return null;
+        for (String[] row : query(db, "SELECT icalString FROM cal_attendees"
+                + " WHERE cal_id = " + text(calId) + " AND item_id = " + text(id)
+                + " AND icalString LIKE 'ATTENDEE%'")) {
+            String line = (row.length == 0 ? "" : row[0]).toLowerCase(Locale.ROOT);
+            for (String address : mine) {
+                if (line.contains(address)) return address;
+            }
+        }
+        return null;
+    }
+
+    // The address out of one ORGANIZER or ATTENDEE line: the mailto: value, or the EMAIL
+    // parameter when the value is a principal URL.
+    private static String icalAddress(String icalLine) {
+        Matcher mailto = Pattern.compile("(?i)mailto:([^\\s;:,]+)").matcher(icalLine);
+        if (mailto.find()) return mailto.group(1).trim();
+        Matcher email = Pattern.compile("(?i)EMAIL=([^;:]+)").matcher(icalLine);
+        return email.find() ? email.group(1).trim() : "";
+    }
+
+    // The organizer's own SEQUENCE for this event, which a counter-proposal has to carry
+    // for the organizer's calendar to read it as an answer to the current invitation
+    // rather than to an old one. Absent means 0, which is what absent means in a .ics.
+    private static int sequenceOf(Path db, String calId, String id) {
+        for (String[] row : query(db, "SELECT value FROM cal_properties"
+                + " WHERE cal_id = " + text(calId) + " AND item_id = " + text(id)
+                + " AND key = 'SEQUENCE' LIMIT 1")) {
+            try {
+                return Integer.parseInt(row[0].trim());
+            } catch (NumberFormatException | ArrayIndexOutOfBoundsException ex) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    // THE SHORT ID EVERY EVENT LINE CARRIES, and what #move takes.
+    //
+    // Six hex characters of a hash of the calendar and the event's UID - not the UID
+    // itself, which is the thing it stands for. A real one reads
+    // "20311231_q4m7x2vk9hs3nd8pt5wzr1bjyc@google.com": forty-five characters of
+    // somebody else's bookkeeping, on every line of a briefing that has to be read out
+    // loud, and repeated back through a model without a character going astray. Six are
+    // enough to tell 1,569 events apart, short enough to say, and derived rather than
+    // stored, so the same event has the same id in every answer and after a restart.
+    //
+    // The whole UID still works wherever the short one does, for anybody who has it.
+    private static String handle(String calId, String id) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] sum = digest.digest((calId + "\u0000" + id).getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 3; i++) hex.append(String.format("%02x", sum[i]));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            return "------";
+        }
     }
 
     // ---- Mail ------------------------------------------------------------------

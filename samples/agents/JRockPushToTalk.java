@@ -244,6 +244,19 @@ public final class JRockPushToTalk {
             "^\\W*I need your calendar for\\s*(.*\\S)\\W*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
+    // The sentence an answer proposes a new time with: the id of the meeting, which the
+    // calendar briefing printed on its line, and the time to propose. Asked for in the
+    // appendix in this exact shape, like the alarm and the new event are, and for the
+    // same reason - it is read out before anything happens, so no meeting is touched
+    // that the operator did not hear named.
+    //
+    // The id is six hex characters, or a whole UID for anybody who has one.
+    private static final java.util.regex.Pattern MOVE = java.util.regex.Pattern.compile(
+            "I(?:['\u2019]m| am) proposing to move (?:the )?(?:event|meeting) "
+            + "([0-9a-fA-F]{6}|\\S+@\\S+) to (\\d{4}-\\d{2}-\\d{2})"
+            + "(?: at (\\d{1,2}:\\d{2}))?",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
     // The answer that asks about the operator's mail, and what about it: "today", "the
     // last 3 days", "unanswered", "senders", "mail with somebody". The whole of the
     // answer, as the others are, and the words after it are handed to the Thunderbird
@@ -436,15 +449,17 @@ public final class JRockPushToTalk {
         later(() -> showAnswer(reply));
         String alarm = alarmIn(reply);
         String event = eventIn(reply);
-        if (handsFreeTurn && !handsFree) return join(note, alarm, event);
+        String moved = movedIn(reply);
+        if (handsFreeTurn && !handsFree) return join(note, alarm, event, moved);
         // An answer of nothing at all - a reply that arrived empty - is a failed turn to
         // anyone listening, however well the request itself went: reading it out loud
         // would be silence, which is the one thing a spoken answer cannot be.
         if (reply.isBlank()) {
-            return join(note, alarm, event, "The reply was empty.", sayFailed());
+            return join(note, alarm, event, moved, "The reply was empty.", sayFailed());
         }
         String silent = JRock.automationNarrate(reply);
-        return join(note, alarm, event, silent == null ? null : "Not read aloud: " + silent);
+        return join(note, alarm, event, moved,
+                silent == null ? null : "Not read aloud: " + silent);
     }
 
     // What the model asked for, as the calendar agent's own request: "today" and "this
@@ -645,6 +660,27 @@ public final class JRockPushToTalk {
     // 7:30:00 as 07:30:00, which is what LocalTime.parse takes.
     private static String pad(String time) {
         return time.length() == 7 ? "0" + time : time;
+    }
+
+    // Proposes the new time an answer proposes, if it proposes one. Returns null when it
+    // does not, and otherwise what became of it.
+    //
+    // This is the one request in this agent that ends in a mail to somebody who is not
+    // the operator - the organizer of the meeting - and nothing here knows who that is:
+    // the Thunderbird agent reads the address off the event itself, refuses when the
+    // operator is the organizer, and leaves the sending to them. What goes over the wire
+    // from here is an id, a date and a time.
+    private static String movedIn(String answer) {
+        java.util.regex.Matcher m = MOVE.matcher(answer);
+        if (!m.find()) return null;
+        String request = "#move " + m.group(1) + " " + m.group(2)
+                + (m.group(3) == null ? "" : " " + m.group(3));
+        String[] proposed = askAgent(CALENDAR_PORT, request, "Thunderbird",
+                "JRockThunderbird.java");
+        if (proposed[0] == null) return "New time not proposed: " + proposed[1];
+        report("calendar: " + proposed[0].replace("\n", " "));
+        String first = proposed[0].split("\n", 2)[0].trim();
+        return first.isEmpty() ? "New time proposed." : first;
     }
 
     // Puts in the calendar what an answer says it is putting there, if it says so.

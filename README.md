@@ -1796,6 +1796,12 @@ the voice, so the microphone doesn't record the last answer as the next question
   and the address is the one picked in the agent's window at both ends, so it **cannot reach
   anybody else**. The status line says what became of it, and JRock's log has the whole of what
   the agent said back, including where the `.ics` file is.
+- **A new time for somebody else's meeting.** An answer that says *"I'm proposing to move
+  event a3f91c to 2026-10-20 at 14:30"* — the id being the one the calendar answer printed —
+  sends `#move` to the Thunderbird agent, which composes the counter-proposal to that meeting's
+  organizer for you to send. The operator hears the sentence before anything is prepared, so no
+  meeting is touched that they did not hear named; and the appendix tells the model to say, in
+  its own words, that this is a proposal the organizer has to accept.
 - **Location.** When the whole answer is *"I need to know your location"*, the agent does not
   show it or read it aloud. It sends `#here` to the
   [location agent](#a-third-agent-location-jrocklocationjava) and gives the model the line that
@@ -1977,6 +1983,7 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   | `#week` | today and the six days after it |
   | `#next [n]` | the next *n* events from now (default 5) |
   | `#range 2026-12-24 2026-12-26` | any span of days |
+  | `#move a3f91c 2026-10-20 14:30` | propose a new time for a meeting somebody else arranged, by the id on its line |
   | `#tentative [days]` | the maybes, which every other answer leaves out — `#tentative 2026-12-01 2026-12-31` for a span |
   | `#calendars` | the calendars, and how many events each holds |
   | `#new 2026-10-15 14:00 Dentist` | a new event, by post (below) — an hour long unless the calendar says otherwise |
@@ -2006,6 +2013,28 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   Sat 4 Apr:
     10:00-11:00  Legal review (confidential)  [me@…]  (you have not answered it)
   ```
+- **Every event line ends with a short id**, like `id a3f91c`, which is how a particular
+  meeting is named in the next request. It is six hex characters of a hash of the calendar and
+  the event's UID — not the UID itself, which reads
+  `20311231_q4m7x2vk9hs3nd8pt5wzr1bjyc@google.com`: forty-five characters of somebody else's
+  bookkeeping, on every line of a briefing that has to be read aloud and repeated back through
+  a model without a character going astray. Six tell 1,569 events apart, are short enough to
+  say, and are **derived rather than stored**, so the same event has the same id in every answer
+  and after a restart. The whole UID works anywhere the short one does, for anybody who has it.
+- **`#move` proposes a new time; it does not move anything.** In the calendar standard's own
+  terms that is `METHOD:COUNTER` — an attendee telling the **organizer** that a different time
+  would suit, with the same UID and the organizer's own `SEQUENCE`, so their calendar offers
+  them a button to accept or decline it (RFC 5546). The meeting moves when they accept, because
+  only they can move it.
+
+  **This is the one thing in this agent that addresses a mail to somebody else**, and four
+  things hold it in: the address is **read off the event's own `ORGANIZER` property**, so
+  nothing said out loud and nothing a model wrote can put an address there — the only people
+  reachable are the organizers of meetings already in your calendar; an event **you** organise
+  is refused, since a counter-proposal to yourself means nothing and that event is yours to
+  edit; the mail is **composed, never sent**, with Ctrl+Enter yours as always; and who it is
+  addressed to is on the status line and in the log before anybody presses anything. The new
+  time keeps the meeting's **original length** — a meeting moved is the same meeting.
 - **A new event goes by post, to you from yourself.** `#new` is the one thing here that is not
   read-only, and it still writes nothing to a calendar: it writes a temporary `.ics` file and has
   **Thunderbird** compose a mail with that invitation attached, **from** the address picked in the
