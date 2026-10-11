@@ -3294,12 +3294,13 @@ For robustness the build runs on **three operating systems** and publishes three
 - `jrock-windows-latest.zip`
 
 Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
-(`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
-`JRock.java`, the sample prompts and the automation scripts) and `samples/` loose
-beside it, so the samples can be read without unpacking anything — and so an
-[automation](#automating-the-chain-jrockdocinventoryjava) is one `cp jrock.jar
-samples/` away from running. Because the build is reproducible, the `jrock.jar`
-inside all three archives is identical.
+(`jrock.jar.sha256`, `jrock.jar.md5`), the
+[installer](#the-installer-installerinstalljrockjava) (`InstallJRock.java`), the zipped
+source (`jrock-src.zip`, which holds `JRock.java` and every sample) and `samples/` loose
+beside it, so the prompts, the agents and the flows can all be read without unpacking
+anything. `java InstallJRock.java` is what puts the jar and each sample in a folder
+where it runs; by hand, `-cp` has to name the jar wherever you keep it. Because the
+build is reproducible, the `jrock.jar` inside all three archives is identical.
 
 To verify and run JRock from a build artifact, unzip it, then:
 
@@ -3315,8 +3316,8 @@ java -jar jrock.jar
 Current build hashes:
 
 ```
-6223b04a3ef234e81149b7be3af838803cf675604f1c3b2347d1dbf78ab47e60  jrock.jar
-bb31a755510a7a04832247b6ad6a7f7b  jrock.jar
+4a7f9c3de1325dd04c6d95bd004667305120ad2b6e50426299c9a03fa6764fa0  jrock.jar
+248b820b932cf729e78eb6b6e250531e  jrock.jar
 ```
 
 Or, if you want to modify the source and run it in place (no build step):
