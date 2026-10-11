@@ -789,7 +789,10 @@ public final class InstallJRock {
                     : "Every one of them goes first, including any left by an older "
                       + "install in a folder you no longer use: a stale entry runs a jar "
                       + "that may not be there any more. What was removed is kept as a "
-                      + ".reg that puts it all back."));
+                      + ".reg that puts it all back. One written under "
+                      + "HKEY_LOCAL_MACHINE by somebody else needs an administrator to "
+                      + "remove - it is named in the log and left alone, and nothing "
+                      + "else waits for it."));
             if (!contextMenus) {
                 panel.add(note("Nothing ticked, so this page only CLEANS UP: the JRock "
                         + "entries above are removed and none are written. Run this "
@@ -1104,12 +1107,13 @@ public final class InstallJRock {
         }
         say("Removed " + gone + " JRock Explorer entr" + (gone == 1 ? "y" : "ies") + ".");
         if (!stuck.isEmpty()) {
-            // An HKLM entry needs an administrator, and this installer deliberately is
-            // not one. Saying which, rather than failing, is the useful answer.
-            say("Could not remove " + stuck.size() + " of them: " + String.join(", ", stuck));
-            return "Could not remove " + stuck.size() + " entr(y/ies) - they are under "
-                    + "HKEY_LOCAL_MACHINE, which needs an installer started as "
-                    + "administrator. Everything else was done.";
+            // An entry under HKEY_LOCAL_MACHINE needs an administrator, and this
+            // installer deliberately is not one. Saying which one and carrying on is the
+            // useful answer: the install is not held up by a row in the registry that
+            // somebody else wrote, and the one place it can be removed from is named.
+            say("Left in place, because removing it needs an administrator - start this "
+                    + "installer as one, or use regedit:");
+            for (String one : stuck) say("  " + one);
         }
         return null;
     }

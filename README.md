@@ -3246,7 +3246,9 @@ Nine pages, in this order:
    agent and flow, [as described above](#windows-explorer-right-click-integration). Every JRock
    entry already on the machine is removed first and written out to a `.reg` that restores it;
    with nothing ticked, the page **only** cleans up, which is how these entries are uninstalled.
-   The whole command line of every entry written goes into the log.
+   An entry under `HKEY_LOCAL_MACHINE` that somebody else wrote needs an administrator to
+   remove: it is named in the log and left alone, and nothing else waits for it. The whole
+   command line of every entry written goes into the log.
 9. **Installed** — checks for **anything of JRock still running** (a JVM with the jar or a
    sample on its command line, which is not a shell whose folder is named after JRock nor an
    editor with `jrock-config.txt` open), names what it found with the folder each one works in,
