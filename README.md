@@ -2593,6 +2593,31 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   out of it opens `https://example.com/` — in the default browser on the desktop, in a new tab of
   the page in the browser. It is greyed out when the selection points at no address, and the log
   says what was opened, or why it could not be.
+
+  *Open local file* is the same idea for the other kind of address in a log: **select a path and
+  it opens with whatever this desktop opens it with** — a `.docx` in the word processor, a `.wav`
+  in the player, a **folder** in the file manager. The log is full of paths JRock wrote itself
+  (every include, every conversion, every recording, every export), and this is how you open one
+  without going to Explorer to find it again.
+
+  **The whole selection is the name.** Unlike the URL item, nothing is hunted for inside it: a
+  path holds spaces — `C:\Program Files\...` — and nothing in running text says where one ends,
+  so select the name, all of it, and nothing else. Surrounding spaces, a trailing newline and a
+  pair of quotation marks around it are forgiven.
+
+  **Two checks, at two moments.** What the selection *looks like* decides whether the item is
+  live, and costs nothing on a right-click: a drive and a separator, a UNC share, or an absolute
+  POSIX path — for *this* machine, so `/usr/share/x` is greyed on Windows and `C:\x` is greyed on
+  Linux — with no newline, no wildcard and none of the characters a name cannot hold. Whether
+  anything is really **there** is asked on the click, and only then does an external process see
+  the name: a file that has moved since is a line in the log and nothing is started. A menu that
+  stats a file every time it opens stutters on a network path, and the answer would be stale by
+  the time anyone clicked.
+
+  The name is yours out of the text in front of you, and the file opens as double-clicking it
+  would. A path a model printed into its answer sits in the log like any other, so it is worth
+  the same glance Explorer would ask for. Not in the browser build: there is no disk of yours
+  there to open anything on.
 - **Prompt area** — Include text, image, audio, PDF, RTF, DOCX or XLSX file... (multi-select), *Include
   with copy...* (the same dialog, keeping a copy of each file under `JRock/includes/` — see
   [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
@@ -2950,6 +2975,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
   English words in it, none for the reverse, `ja` rather than `zh` once there is kana. No
   window, and no speech.
+- **`JRockLocalFileTest`** checks what the log's *Open local file* will take as a name: a path
+  with spaces taken whole, quotes and a trailing newline forgiven, a folder accepted - and
+  greyed out for an address, a relative name, two lines, a path for the other kind of machine,
+  and the characters no name on Windows can hold. Nothing is opened and no file is touched: what
+  is really there is the click's question. No window.
 - **`JRockUrlTextTest`** checks the address cut out of pasted text — dashes, commas and an
   unopened bracket dropped, a bracket the address opened kept — and the address a selection
   points at: one it holds, one it sits inside, none for text that only overlaps one. A third test
