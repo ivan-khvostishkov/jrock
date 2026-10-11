@@ -4068,6 +4068,50 @@ public class JRock {
         return null;
     }
 
+    // Whether there is a microphone to listen on right now: null when there is, and
+    // otherwise why not, in a sentence.
+    //
+    // This is the difference between two things an agent that listens in a loop must not
+    // confuse: a turn that FAILED, which the operator wants to be told about, and a
+    // microphone that is NOT THERE, which is no failure at all. A headset with no mute
+    // button is muted by unplugging it - which is how you keep a narrated answer from
+    // being recorded back as the next question - so hands-free has to read an absent
+    // microphone as "be quiet for now", not as an error to announce every few seconds.
+    //
+    // Mic always on's own listener takes the same view: with no device to open it waits,
+    // a quarter of a second at a time, and opens whichever one is there when it is back
+    // (see listenForVoice, and watchMicrophone for the lines in the log).
+    public static String automationMicReady() {
+        String problem = offEdt();
+        if (problem != null) return problem;
+        if (ui == null) return "JRock has no window yet - call main() and wait for it.";
+        if (!recordAvailable()) return "recording is not available here.";
+        if (!micAlwaysOnAvailable()) {
+            return "mic always on is not available here - in the browser the page hands "
+                    + "over a finished recording, with no line to listen on between them.";
+        }
+        if (!micAlwaysOn) {
+            return "Mic always on is off - tick it in JRock's prompt menu or in Configure.";
+        }
+        if (recordDevice.isEmpty()) {
+            return "no microphone is set. Press Ctrl+Space in JRock to list them, and pick "
+                    + "one in Configure > Record from.";
+        }
+        if (DEFAULT_INPUT_ALIASES.contains(recordDevice)) {
+            return "\"" + recordDevice + "\" is whatever the system default is rather than "
+                    + "a microphone, and listening needs the device itself.";
+        }
+        try {
+            if (inputMixer(recordDevice) == null) {
+                return "the microphone is not connected: " + recordDevice;
+            }
+        } catch (RuntimeException ex) {
+            // Asked in the middle of a device change, which Java Sound can throw on.
+            return "the microphone could not be looked up: " + ex.getMessage();
+        }
+        return null;
+    }
+
     // How long a heard recording gets, from the quiet that ends it, to reach the prompt:
     // a file write for an @audio token, or as long as Windows takes to transcribe it.
     private static final long HEARD_SAVE_TIMEOUT_MS = 120_000;
@@ -4125,6 +4169,28 @@ public class JRock {
                     + "the log says why." };
         }
         return new String[] { "1", null };
+    }
+
+    // One line in JRock's log, from whatever is driving it.
+    //
+    // An agent has nowhere else to say anything. It is started by javaw, from a
+    // right-click entry or by the installer, and a javaw process has NO standard output
+    // at all - every System.out.println in an agent goes into the void the moment it is
+    // not run from a terminal. Its own window has one status line, which the next turn
+    // overwrites. So the window the operator is already looking at is the only place a
+    // reason can be read afterwards, and a turn that failed an hour ago is exactly the
+    // thing worth reading.
+    //
+    // Deliberately not behind requireAutomation: an agent that never takes JRock as an
+    // automation - one that only places its window beside JRock's, like the calendar
+    // reader - has as much to report as one that does.
+    public static String automationNote(String line) {
+        String problem = offEdt();
+        if (problem != null) return problem;
+        Ui live = ui;
+        if (live == null) return "JRock has no window yet - call main() and wait for it.";
+        live.log.gray(line == null ? "" : line);
+        return null;
     }
 
     // Leaves automation mode: the prompt is editable again, Send is released, and Mic

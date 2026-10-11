@@ -1736,8 +1736,18 @@ the voice, so the microphone doesn't record the last answer as the next question
   button, and two seconds later JRock listens again, so you just say it again. The microphone is muted while a
   question is on its way, and listens again while the answer is read aloud: **start talking
   and the reading stops**, and what you say is the next question. On speakers JRock would hear
-  its own voice and stop itself, so use headphones or a microphone with a mute button, muted
-  whenever you are not speaking.
+  its own voice and stop itself, so use headphones — or the mute button below.
+- **Unplugging the microphone is the mute button**, and a headset usually has no other one.
+  Pull it out and hands-free **stays on and goes quiet**: nothing is heard, nothing is sent,
+  nothing is read out, no error is announced and the lever is left where you put it. The
+  agent's window says *"No microphone — waiting for it…"*, JRock's log says which microphone
+  went, and that is all. Plug it back in and it listens again by itself, within a second or
+  two — no lever, no button, no dialog. Which is what makes it usable as a mute: keep the
+  narrated answer out of the next recording, or say something to somebody in the room without
+  saying it to a model. A turn the microphone was pulled out of the middle of is dropped the
+  same silent way, because that is the same gesture arriving as a failure. (The agent asks
+  `automationMicReady()` for this: a quiet room and an unplugged microphone are
+  indistinguishable to the listening call itself, and they mean opposite things.)
 - **History is JRock's.** The prompt is cleared before every recording; whether the model also
   hears the conversation so far is the [**History**](#conversation-log) checkbox, and how much
   of it the [**History limit**](#configure-dialog-top-left-button) in Configure. With History
@@ -1763,7 +1773,9 @@ the voice, so the microphone doesn't record the last answer as the next question
   nothing about whether one is still coming; the phrase is nothing like an answer, so it cannot
   be mistaken for one. Trying again is yours: hands-free listens again by itself after two
   seconds, and a held turn is the button pressed once more. The reason is still shown in the
-  window, and when the phrase itself cannot be read aloud — no speaker set — that is shown too.
+  window, goes into **JRock's log** to be read afterwards (an agent started by `javaw` has no
+  console to print it to), and when the phrase itself cannot be read aloud — no speaker set —
+  that is shown too. A missing microphone is **not** one of these: see the mute button above.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
@@ -2113,6 +2125,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationStopRecording(long millis)` | Stop recording (Ctrl+Space again), and waits until the recording is in the prompt — an `@audio` token, or the transcribed text with **Transcribe** on. Fails when nothing reached the prompt. |
 | `automationListen(boolean on)` | Lifts the mute `automationBegin` put on Mic always on (`true`), or puts it back (`false`). Refuses to listen when Mic always on is off or no microphone is set. |
 | `automationAwaitHeard(long millis)` | Waits for Mic always on to hear someone and for what was said to reach the prompt. Returns `{"1", null}` when it has, `{"0", null}` when nobody spoke in time, `{"0", why not}` when it cannot. A recording under way is waited out, not cut off. |
+| `automationMicReady()` | Whether there is a microphone to listen on **right now** — `null` when there is, and otherwise why not, including the one answer a listening loop cannot work out for itself: the microphone set is **not connected**. A quiet room and an unplugged microphone look identical to `automationAwaitHeard`, and they mean opposite things. |
 | `automationNarrate(String markdown)` | Narrate selected text, for any text: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when no device is set or it isn't connected. (Windows) |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
@@ -2120,6 +2133,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![...](<name>)` (or `![](<hash>)`) placed as the image that include names. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationNarrateDevice()` | The **Narrate on** speaker's name, or `""` when none is set — for an agent that plays sounds of its own on it. Needs no `automationBegin`. |
+| `automationNote(String line)` | One line in JRock's log, from the agent driving it. An agent is started by `javaw` and **has no standard output at all**, and its own window has one status line the next turn overwrites — so this is the only place a reason can still be read an hour later. Needs no `automationBegin`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
 
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the

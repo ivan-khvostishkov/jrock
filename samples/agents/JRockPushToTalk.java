@@ -41,8 +41,17 @@
 //
 // While a request is on its way the microphone is muted. While the answer is read aloud
 // JRock listens again, and speaking stops the reading and starts the next question - so
-// on speakers a microphone with a mute button, or headphones, keeps JRock from hearing
-// its own voice.
+// on speakers, headphones keep JRock from hearing its own voice.
+//
+// UNPLUGGING THE MICROPHONE IS THE MUTE BUTTON, and a headset usually has no other one.
+// Hands-free stays on and goes quiet: nothing heard, nothing sent, nothing read out, no
+// error announced, the lever left where it was. Plug it back in and it listens again by
+// itself, within a second or two. That is what makes it usable as a mute - keep the
+// narrated answer out of the next recording, or say something to somebody in the room
+// without saying it to a model - and it is why an absent microphone is asked about
+// separately (JRock.automationMicReady) rather than being read as a turn that failed: a
+// quiet room and an unplugged microphone look identical to the listening call itself,
+// and they mean opposite things.
 //
 // The prompt is cleared before every recording, and History is as JRock has it: on, the
 // model hears the conversation so far - as much as the History limit in Configure lets
@@ -173,6 +182,18 @@ public final class JRockPushToTalk {
     // RETRY_PAUSE_MS, and a held turn is the button pressed once more.
     private static final String FAILED_ALOUD = "Error. Should I try again?";
 
+    // How often hands-free looks for a microphone that is not there.
+    //
+    // UNPLUGGING THE MICROPHONE IS THE MUTE BUTTON, and a headset usually has no other
+    // one. It is how you keep a narrated answer from being recorded back as the next
+    // question, and how you say something to somebody in the room without saying it to a
+    // model - so it is a gesture, not a fault. Hands-free stays on, says nothing, reads
+    // nothing out, counts no failure and asks nothing: it waits, and listens again the
+    // moment the microphone is back. One line in JRock's log each way is all it is worth,
+    // and that is what JRock's own microphone watcher writes.
+    private static final long MIC_WAIT_MS = 1000;
+    private static final String WAITING_FOR_MIC = "No microphone - waiting for it…";
+
     // The sentence an answer sets an alarm with, the time the model thinks it is and the
     // time to ring. The apostrophe as typed or as typeset, and "I am" too, since a model
     // writes either.
@@ -281,6 +302,7 @@ public final class JRockPushToTalk {
                 recordingStarted = true;
             } catch (Stop stop) {
                 // Still held, or already let go of: either way this turn is over.
+                report("not recording: " + stop.getMessage());
                 later(() -> setState(State.IDLE, "Not recording: " + stop.getMessage()));
             }
         });
@@ -299,6 +321,7 @@ public final class JRockPushToTalk {
                 recordingStarted = false;
                 outcome = answer(false);
             } catch (Stop stop) {
+                report("that turn failed: " + stop.getMessage());
                 outcome = join("That turn failed: " + stop.getMessage(), sayFailed());
             }
             String said = outcome;
@@ -464,6 +487,15 @@ public final class JRockPushToTalk {
         return silent == null ? null : "Not read aloud: " + silent;
     }
 
+    // One line into JRock's own log, which is the only place an agent started by javaw
+    // can be read: System.out goes nowhere there, and this window's status line holds
+    // one sentence until the next turn replaces it. Every turn that fails says why here,
+    // so the reason is still there to read afterwards.
+    private static void report(String line) {
+        System.out.println(line);
+        JRock.automationNote("Push-to-talk: " + line);
+    }
+
     // The notes that are there, in one line; null when there are none.
     private static String join(String... notes) {
         StringBuilder out = new StringBuilder();
@@ -593,24 +625,66 @@ public final class JRockPushToTalk {
                 JRock.automationStopRecording(RECORDING_TIMEOUT_MS);
             }
             String note = null;
+            String waiting = null;   // why there is nothing to listen on, while there is
             while (handsFree) {
                 try {
+                    // No microphone is not a turn and not a failure: the operator has
+                    // unplugged it to be quiet (see MIC_WAIT_MS). Nothing is said, out
+                    // loud or on screen, beyond the status line and one log line - and
+                    // the next look finds it again when it is plugged back in.
+                    String noMic = JRock.automationMicReady();
+                    if (noMic != null) {
+                        if (!noMic.equals(waiting)) {
+                            report("not listening: " + noMic);
+                            waiting = noMic;
+                            later(() -> setState(State.IDLE, WAITING_FOR_MIC));
+                        }
+                        JRock.automationListen(false);
+                        Thread.sleep(MIC_WAIT_MS);
+                        continue;
+                    }
+                    if (waiting != null) {
+                        report("the microphone is back - listening again.");
+                        waiting = null;
+                        note = null;
+                    }
                     check(JRock.automationClearPrompt());
                     check(JRock.automationListen(true));
                     String listening = note == null ? LISTENING_HANDS_FREE
                             : note + " " + LISTENING_HANDS_FREE;
                     later(() -> setState(State.RECORDING, listening));
                     String[] heard;
+                    long looked = System.currentTimeMillis();
                     do {
                         heard = JRock.automationAwaitHeard(LISTEN_POLL_MS);
+                        // A microphone goes while nobody is speaking, which is exactly
+                        // when it is unplugged - and a quiet room looks the same to
+                        // awaitHeard either way, so this is the one place that can tell
+                        // the two apart. Looked for once a second rather than on every
+                        // poll: enumerating the devices is not free, and JRock's own
+                        // watcher looks every two.
+                        if (System.currentTimeMillis() - looked >= MIC_WAIT_MS) {
+                            looked = System.currentTimeMillis();
+                            if (JRock.automationMicReady() != null) break;
+                        }
                     } while (handsFree && !"1".equals(heard[0]) && heard[1] == null);
                     // Muted while the answer is on its way, so the question is not asked twice.
                     JRock.automationListen(false);
                     if (!handsFree) break;   // ended: what was being said is not sent
+                    // Unplugged while listening: nothing was heard, nothing is said, and
+                    // the top of the loop does the waiting.
+                    if (JRock.automationMicReady() != null) continue;
                     if (!"1".equals(heard[0])) throw new Stop(heard[1]);
                     note = answer(true);
                 } catch (Stop failed) {
                     JRock.automationListen(false);
+                    // A turn the microphone was pulled out of the middle of is the same
+                    // gesture arriving as a failure: whatever was half-heard is dropped
+                    // without a word, and the top of the loop waits for it to come back.
+                    // Only a turn that failed with a microphone still there is an error
+                    // to report and read out.
+                    if (JRock.automationMicReady() != null) continue;
+                    report("that turn failed: " + failed.getMessage());
                     note = join("That did not work: " + failed.getMessage() + " Say it again.",
                             sayFailed());
                     String shown = note;
