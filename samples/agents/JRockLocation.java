@@ -1,14 +1,16 @@
-// A JRock automation: where the operator is, for other agents to ask - the place, its
-// coordinates, or both, typed in or found out.
+// A JRock agent (it loops, and is started with JRock): where the operator is, for other
+// agents to ask - the place, its coordinates, or both, typed in or found out.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
 //     java -cp jrock.jar JRockLocation.java [--working-dir <dir>]
 //
-// COPY jrock.jar HERE FIRST, take the flags as JRock's own, and expect a typed static
-// call rather than reflection: all of that is JRockDocInventory.java's opening comment,
-// and it is true of every automation in this directory. Read that file first.
+// The jar is wherever the installer put it - one folder up from samples/flows/,
+// two up from an agent's own folder - and -cp names it. Take the flags as
+// JRock's own and expect a typed static call rather than reflection: all of
+// that is samples/flows/JRockDocInventory.java's opening comment, and it is
+// true of every agent and every flow. Read that file first.
 //
 //   1. JRock is started and taken as an automation: its prompt read-only and Mic always
 //      on muted. This JRock is the agent's own - it asks the model what the agent cannot

@@ -10,8 +10,7 @@
 //     it - so it can be a bare file name. Absolute paths are unaffected. Without
 //     the flag it follows the working directory.
 //     The same setting is in the Configure dialog, which overrides the flag for the
-//     rest of the session; installing the Explorer entries then bakes in whatever
-//     is in effect at that moment.
+//     rest of the session.
 //
 // Persistence (crash recovery + full local history):
 //   Everything lives under a "JRock" subfolder of the working directory.
@@ -115,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.19.0";
+    private static final String VERSION = "2.20.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -241,10 +240,8 @@ public class JRock {
     // NULL means "follow the working directory" - the unset state, and what a plain
     // launch gets. The invariant is that this is non-null ONLY when the prompts
     // directory actually differs from the working one, so a value equal to it is
-    // stored as null instead. Two things read that directly: the session report,
-    // which then has nothing extra to say, and an installed Explorer entry, which
-    // then carries no --prompts-dir - a flag repeating the launch folder would be
-    // noise at best and wrong the moment you launched from elsewhere.
+    // stored as null instead. The session report reads that directly, and then has
+    // nothing extra to say.
     private static Path promptsDir = null;
 
     // The prompts directory in effect: the configured one, or the working directory
@@ -1009,7 +1006,8 @@ public class JRock {
     private static final String CONFIG_MODEL  = "model";
     // Kept per folder for the same reason the model is: one folder holds receipts to
     // read at 203 dpi and another holds drawings that need 300, and an agent installed
-    // from each (see installAgent) is then two agents with two resolutions.
+    // from each (the installer writes one entry per agent per folder) is then two
+    // agents with two resolutions.
     private static final String CONFIG_IMAGES_DPI = "images-dpi";
     // The one output device Narrate plays on, by its exact name - or absent, which is
     // "not set" (see the Narrate section for why there is no default to fall back on).
@@ -1396,9 +1394,8 @@ public class JRock {
     // Which is what an installed agent needs: Explorer starts a right-click command in
     // whichever folder was clicked, and an agent's whole point is the opposite - the
     // document can be anywhere, while the model, the endpoint, the key and the DPI come
-    // from one folder that was set up for this kind of work (see installAgent). The
-    // same flag lets the same agent be installed twice, from two folders, with two sets
-    // of settings.
+    // from one folder that was set up for this kind of work. The same flag lets the same
+    // agent be installed twice, from two folders, with two sets of settings.
     //
     // A path that is not a directory is reported and ignored rather than created: unlike
     // the Configure dialog, where a typed path is a deliberate act, this one is usually
@@ -1466,10 +1463,9 @@ public class JRock {
             promptsDirNote = candidate + " (not a directory - using the working directory)";
         } else if (candidate.equals(workingDir)) {
             // Accepted, and then deliberately not stored: prompts already open here.
-            // Left as null to keep promptsDir's invariant (see its declaration), so
-            // an Explorer entry installed later doesn't carry a --prompts-dir naming
-            // the folder it was launched from. Still reported, because the flag WAS
-            // given and silence would look like it had been dropped.
+            // Left as null to keep promptsDir's invariant (see its declaration). Still
+            // reported, because the flag WAS given and silence would look like it had
+            // been dropped.
             promptsDirNote = candidate + " (same as the working directory)";
         } else {
             promptsDir = candidate;
@@ -2398,7 +2394,7 @@ public class JRock {
         JButton configure = new JButton("Configure");
         configure.setToolTipText("Working directory, API key, endpoint, model");
         explains(configure, "Configure", "The working directory JRock saves into, the "
-                + "prompts & agents directory, the Bedrock API key, the endpoint and the "
+                + "prompts directory, the Bedrock API key, the endpoint and the "
                 + "model, and every setting that applies to a send - on four tabs, with "
                 + "a note on each row behind the Help button in there. What you change is "
                 + "written to JRock/jrock-config.txt in the working directory, so the "
@@ -2408,8 +2404,8 @@ public class JRock {
 
         // The status label beside Configure: it names the folder JRock saves everything
         // into, and the caret beside it says it opens a menu - what that folder holds,
-        // the backup and the restore, the duplex merge, the Explorer entries and the
-        // window's own items (see windowMenu below).
+        // the backup and the restore, the duplex merge and the window's own items (see
+        // windowMenu below).
         javax.swing.JLabel folderStatus = new javax.swing.JLabel("JRock/");
         folderStatus.setFont(folderStatus.getFont().deriveFont(java.awt.Font.PLAIN));
         folderStatus.setForeground(java.awt.Color.GRAY);
@@ -3275,19 +3271,6 @@ public class JRock {
             windowMenu.addSeparator();
             addMenuItem(windowMenu, "Show/hide the page header & footer",
                     () -> toggleBrowserChrome(log));
-        }
-        if (isWindows()) {
-            windowMenu.addSeparator();
-            addMenuItem(windowMenu, "Install \"JRock here!\" (Explorer menu)...",
-                    () -> installContextMenu(frame, log));
-            addMenuItem(windowMenu, "Uninstall \"JRock here!\" (Explorer menu)...",
-                    () -> uninstallContextMenu(frame, log));
-            // The same pair for one automation from the prompts & agents directory,
-            // installed for THIS working directory: see the agent context menu section.
-            addMenuItem(windowMenu, "Install agent (Explorer menu)...",
-                    () -> installAgent(frame, log));
-            addMenuItem(windowMenu, "Uninstall agent (Explorer menu)...",
-                    () -> uninstallAgent(frame, log));
         }
         openOnPress(folderStatus, windowMenu);
 
@@ -4444,7 +4427,7 @@ public class JRock {
 
     // ---- Configure dialog --------------------------------------------------
     // Four tabs, each named in one word so all four fit across a phone's screen:
-    // General (working directory, prompts & agents directory, API key - a write-only
+    // General (working directory, prompts directory, API key - a write-only
     // override - endpoint, model and what applies to every send), Files (Images DPI, how a
     // PDF and an RTF are read), Audio (the speaker and the microphone, where there are
     // any) and Window (its size and where on the screen it sits).
@@ -4471,24 +4454,23 @@ public class JRock {
         cwdF.setName("workingDir");
         javax.swing.JPanel cwdRow = dirRow(frame, cwdF, "Choose working directory");
 
-        // The prompts & agents directory, shown as the path actually in effect rather
-        // than as an empty field meaning "wherever the working directory is": the user
-        // is being asked where their prompts live, and the honest answer is a path.
-        // Which is why what happens on OK depends on whether this was EDITED, not on
-        // what it contains - see the apply block.
+        // The prompts directory, shown as the path actually in effect rather than as
+        // an empty field meaning "wherever the working directory is": the user is being
+        // asked where their prompts live, and the honest answer is a path. Which is why
+        // what happens on OK depends on whether this was EDITED, not on what it contains
+        // - see the apply block.
         //
-        // Called "prompts & agents" because both live here: the prompt files, and the
-        // .java automations that drive JRock through them (Install agent browses this
-        // directory). The field name stays "promptsDir" - it is what the tests address
-        // this row by, and what the flag is called.
+        // The prompt library only: the agents and flows that drive JRock through these
+        // prompts are installed with a copy of the ones they read beside them, each in
+        // its own folder, which is the installer's business and not this field's.
         String promptsShown = promptsDir().toString();
         javax.swing.JTextField promptsF = new javax.swing.JTextField(promptsShown, 30);
         promptsF.setName("promptsDir");
-        promptsF.setToolTipText("Where Load prompt (Ctrl+O), Save prompt copy (Ctrl+S) "
-                + "and Install agent open. Set it to the working directory to have "
-                + "prompts and agents follow that instead.");
+        promptsF.setToolTipText("Where Load prompt (Ctrl+O) and Save prompt copy "
+                + "(Ctrl+S) open. Set it to the working directory to have prompts follow "
+                + "that instead.");
         javax.swing.JPanel promptsRow =
-                dirRow(frame, promptsF, "Choose prompts & agents directory");
+                dirRow(frame, promptsF, "Choose prompts directory");
 
         // The key row: masked on the desktop, and a PLAIN field in the browser. On a
         // phone CheerpJ raises the on-screen keyboard for the endpoint field next to it
@@ -5510,10 +5492,10 @@ public class JRock {
             + "named for the moment it was made: narration-<date>-<time>.wav, "
             + "recording-<date>-<time>.wav, and transcribe-<date>-<time>.wav where a "
             + "recording was transcribed into the prompt rather than included.\n\n"
-            + "jrock-agent-<name>-install.reg, jrock-agent-<name>-uninstall.reg, "
-            + "jrock-context-menu-install.reg, jrock-context-menu-uninstall.reg - on "
-            + "Windows, exactly what the Explorer menu items applied, kept so it can be "
-            + "read, run again or undone by hand.\n\n"
+            + "jrock-context-menus.reg and jrock-context-menus-removed.reg - on "
+            + "Windows, exactly what the installer applied to the registry and exactly "
+            + "what it took away first, kept so both can be read, run again or undone by "
+            + "hand. JRock itself writes no registry entries; InstallJRock.java does.\n\n"
             + "A jrock<digits>.tmp or a scaling-<digits> file is a save or a resize in "
             + "progress and goes by itself; neither is ever included or sent.\n\n"
             + "Backup log, in the menu behind the status label beside Configure, zips the "
@@ -5612,13 +5594,10 @@ public class JRock {
             + "Every button and checkbox in the window has a right-click - or long-press "
             + "- menu of its own saying what it does, and the status label beside "
             + "Configure holds the backup, restore and window items.\n\n"
-            + "The prompts & agents directory is where Load prompt (Ctrl+O) and Save "
-            + "prompt copy (Ctrl+S) always open - they don't drift to wherever you last "
-            + "browsed - and where Install agent looks for the .java automations that "
-            + "drive JRock. Set it to the working directory to have both simply follow "
-            + "that. It overrides " + PROMPTS_DIR_FLAG + " for this session, and "
-            + "installing the Explorer entries writes whichever directory is in effect "
-            + "then.\n\n"
+            + "The prompts directory is where Load prompt (Ctrl+O) and Save prompt "
+            + "copy (Ctrl+S) always open - they don't drift to wherever you last browsed. "
+            + "Set it to the working directory to have them simply follow that. It "
+            + "overrides " + PROMPTS_DIR_FLAG + " for this session.\n\n"
             + "Note: a true OS process chdir isn't possible from Java, so changing the "
             + "working directory reroutes JRock's own files (a JRock/ subfolder holding "
             + "the prompt, log and messages/) to the new directory rather than changing "
@@ -6538,413 +6517,17 @@ public class JRock {
         }
     }
 
-    // ---- Windows "JRock here!" folder context menu -------------------------
-    // A right-click entry in Windows Explorer that launches JRock in the folder
-    // you clicked (Explorer sets the new process's current directory to it), so
-    // JRock's JRock/ folder is created there. Installed per-user (HKCU, no admin,
-    // reversible). Uses javaw (no console), so no cmd window ever appears.
+    // ---- Where this runs ---------------------------------------------------
+    // Explorer's right-click entries - "JRock here!", "Open as prompt with JRock" and one
+    // per agent - are the installer's business, not this window's. They are rows in the
+    // Windows registry, and a registry is the one thing on this machine that has no
+    // counterpart on the other two platforms JRock runs on: keeping reg.exe out of here
+    // leaves every line of this file doing the same thing on Windows, macOS and Linux.
+    // InstallJRock.java writes those entries, logs the whole command line each one
+    // carries, and keeps the .reg it applied where it can be read.
 
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
-    }
-
-    // Distinct key names so uninstall removes exactly what we created.
-    private static final String CTX_KEY = "OpenJRockHere";
-    private static final String CTX_LABEL = "JRock here!";
-    private static final String[] CTX_SHELL_ROOTS = {
-        "Software\\Classes\\Directory\\Background\\shell",  // right-click empty space in a folder
-        "Software\\Classes\\Directory\\shell",              // right-click on a folder icon
-    };
-
-    // Right-click verb on .txt files: "Open as prompt with JRock" (no workdir).
-    private static final String TXT_KEY = "OpenAsJRockPrompt";
-    private static final String TXT_LABEL = "Open as prompt with JRock";
-    // Adds a verb to .txt without changing the default open action.
-    private static final String TXT_SHELL_ROOT =
-        "Software\\Classes\\SystemFileAssociations\\.txt\\shell";
-
-    private static void installContextMenu(JFrame frame, LogView log) {
-        try {
-            String javaw = findJavaw();
-            if (javaw == null) {
-                showCtxError(frame, log, "Could not find javaw.exe next to the running JVM.");
-                return;
-            }
-            String folderLaunch = buildCtxLaunch(javaw);   // "JRock here!" (runs in the clicked folder)
-            String txtLaunch = buildTxtLaunch(javaw);       // .txt verb (%1 -> prompt file)
-            if (folderLaunch == null || txtLaunch == null) {
-                showCtxError(frame, log, "Could not locate jrock.jar or JRock.java to launch. "
-                        + "Run JRock from its own folder, or build jrock.jar first.");
-                return;
-            }
-            StringBuilder reg = new StringBuilder("Windows Registry Editor Version 5.00\r\n\r\n");
-            // Folder verbs: "JRock here!"
-            for (String root : CTX_SHELL_ROOTS) {
-                String base = "HKEY_CURRENT_USER\\" + root + "\\" + CTX_KEY;
-                reg.append('[').append(base).append("]\r\n");
-                reg.append("@=").append(regString(CTX_LABEL)).append("\r\n");
-                reg.append("\"Icon\"=").append(regString(javaw)).append("\r\n\r\n");
-                reg.append('[').append(base).append("\\command]\r\n");
-                reg.append("@=").append(regString(folderLaunch)).append("\r\n\r\n");
-            }
-            // .txt verb: "Open as prompt with JRock" (passes the file as the prompt).
-            String txtBase = "HKEY_CURRENT_USER\\" + TXT_SHELL_ROOT + "\\" + TXT_KEY;
-            reg.append('[').append(txtBase).append("]\r\n");
-            reg.append("@=").append(regString(TXT_LABEL)).append("\r\n");
-            reg.append("\"Icon\"=").append(regString(javaw)).append("\r\n\r\n");
-            reg.append('[').append(txtBase).append("\\command]\r\n");
-            reg.append("@=").append(regString(txtLaunch)).append("\r\n\r\n");
-
-            // Keep the .reg under JRock/ so the user can inspect exactly what was
-            // applied (and re-run or delete it manually).
-            Files.createDirectories(jrockDir());
-            Path regFile = jrockDir().resolve("jrock-context-menu-install.reg");
-            importReg(reg.toString(), regFile);
-            // Record it in the log so there's a visible, persisted trace.
-            log.gray("Installed the \"" + CTX_LABEL + "\" (folders) and \"" + TXT_LABEL
-                    + "\" (.txt) Explorer right-click menus.");
-            log.gray("Folder launch: " + folderLaunch);
-            log.gray(".txt launch:   " + txtLaunch);
-            log.gray("Applied registry file kept at: " + regFile);
-            log.gray("");
-            // Spelled out because it is baked in at install time, not read live: if
-            // the prompts directory is changed in Configure afterwards, these entries
-            // keep the old one until they are installed again.
-            String promptsNote = (promptsDir == null)
-                    ? "Prompts follow the working directory, so the entries carry no "
-                    + PROMPTS_DIR_FLAG + ":\nCtrl+O opens in whichever folder you "
-                    + "launch from. Set a prompts directory\nin Configure and "
-                    + "reinstall to pin it.\n\n"
-                    : "Both entries carry " + PROMPTS_DIR_FLAG + " " + promptsDir + ",\n"
-                    + "so Ctrl+O opens there whichever folder you launch from.\n"
-                    + "Change it in Configure and reinstall to update this.\n\n";
-            javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Installed two Explorer right-click entries:\n"
-                        + "  \u2022 \"" + CTX_LABEL + "\" - inside or on a folder, launches JRock there.\n"
-                        + "  \u2022 \"" + TXT_LABEL + "\" - on a .txt file, opens it as the prompt.\n\n"
-                        + promptsNote
-                        + "(On Windows 11 they may appear under \"Show more options\".)\n\n"
-                        + "The applied registry file was kept for your inspection at:\n"
-                        + regFile,
-                    CTX_LABEL, javax.swing.JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-            showCtxError(frame, log, ex.getMessage());
-        }
-    }
-
-    private static void uninstallContextMenu(JFrame frame, LogView log) {
-        try {
-            StringBuilder reg = new StringBuilder("Windows Registry Editor Version 5.00\r\n\r\n");
-            for (String root : CTX_SHELL_ROOTS) {
-                reg.append("[-HKEY_CURRENT_USER\\").append(root).append('\\').append(CTX_KEY).append("]\r\n\r\n");
-            }
-            reg.append("[-HKEY_CURRENT_USER\\").append(TXT_SHELL_ROOT).append('\\').append(TXT_KEY).append("]\r\n\r\n");
-            Files.createDirectories(jrockDir());
-            Path regFile = jrockDir().resolve("jrock-context-menu-uninstall.reg");
-            importReg(reg.toString(), regFile);
-            log.gray("Removed the \"" + CTX_LABEL + "\" and \"" + TXT_LABEL
-                    + "\" Explorer right-click menus (if present).");
-            log.gray("Applied registry file kept at: " + regFile);
-            log.gray("");
-            javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Removed the \"" + CTX_LABEL + "\" and \"" + TXT_LABEL
-                        + "\" right-click entries (if present).\n\n"
-                        + "The applied registry file was kept for your inspection at:\n"
-                        + regFile,
-                    CTX_LABEL, javax.swing.JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-            showCtxError(frame, log, ex.getMessage());
-        }
-    }
-
-    private static void showCtxError(JFrame frame, LogView log, String msg) {
-        log.gray("Context menu update failed: " + msg);
-        log.gray("");
-        javax.swing.JOptionPane.showMessageDialog(frame,
-                "Could not update the context menu:\n" + msg,
-                CTX_LABEL, javax.swing.JOptionPane.WARNING_MESSAGE);
-    }
-
-    // ---- Windows "run an agent" context menu -------------------------------
-    // The same idea as "JRock here!", for the .java automations that live beside the
-    // prompts (see the Automation API): a right-click entry that runs one of them.
-    //
-    // What it adds is the one thing Explorer gets backwards here. Explorer starts the
-    // process in the folder that was clicked - exactly right for "JRock here!", and
-    // wrong for an agent. An agent is installed FROM a folder whose settings it is
-    // meant to work with (that folder's model, its images DPI, its Bedrock key), and
-    // is then run on a document that may be anywhere on the disk. So the installed
-    // command names that folder itself, with --working-dir, which overrides whatever
-    // directory Explorer starts the process in.
-    //
-    // Hence two commands per agent, written by one install:
-    //   - inside or on a folder: no argument, so the agent asks. Its own file chooser
-    //     opens in the working directory it was handed, which is the folder the agent
-    //     was installed from - not the folder that was clicked.
-    //   - on a file, of any type, in any folder: that file's full path as the single
-    //     argument. This is what lets one agent work on a file anywhere while still
-    //     using one particular folder's settings.
-    //
-    // And hence one entry per (agent, folder) pair rather than per agent: installing
-    // the same automation from two folders gives two entries with two sets of
-    // settings, which is the point - "Doc Inventory (HPScan)" on one model, "Doc
-    // Inventory (Documents)" at another DPI.
-    private static final String AGENT_KEY_PREFIX = "JRockAgent-";
-    private static final String AGENT_TITLE = "JRock agent";
-    // Every file, whatever its type: an agent decides for itself what it can do with
-    // what it was handed, and a filter here could only hide the file it wanted. The
-    // folder verbs reuse CTX_SHELL_ROOTS - the same two places "JRock here!" appears.
-    private static final String AGENT_FILE_SHELL_ROOT = "Software\\Classes\\*\\shell";
-
-    private static void installAgent(JFrame frame, LogView log) {
-        try {
-            Path agent = chooseAgent(frame, "Install agent");
-            if (agent == null) return;
-            String javaw = findJavaw();
-            if (javaw == null) {
-                showAgentError(frame, log, "Could not find javaw.exe next to the running JVM.");
-                return;
-            }
-            Path jar = agentJar(agent);
-            if (jar == null) {
-                showAgentError(frame, log,
-                        "An agent runs as javaw -cp jrock.jar Agent.java, so installing "
-                        + "one needs jrock.jar itself.\n\n"
-                        + "There is none beside " + agent.getFileName() + " in\n"
-                        + agent.getParent() + "\nand this JRock is not running from one "
-                        + "either.\n\n"
-                        + "Copy jrock.jar into the agent's directory - which is what "
-                        + "enables\nautomations there anyway - and install again.");
-                return;
-            }
-
-            // The jar that will be used is not the one beside the agent: the Explorer
-            // entry would still work, carrying an absolute path, but the agent's own
-            // folder is then not a folder the agent can be run from - every automation
-            // here says "copy jrock.jar here first", because by hand that is exactly
-            // what "java -cp jrock.jar Agent.java" needs. Asked before anything reaches
-            // the registry, and left as a choice: the entry is not wrong, only lonely.
-            Path beside = agent.getParent() == null ? null
-                    : agent.getParent().resolve("jrock.jar");
-            if (beside == null || !Files.isRegularFile(beside)) {
-                int answer = javax.swing.JOptionPane.showConfirmDialog(frame,
-                        "There is no jrock.jar in the agent's own folder:\n"
-                            + agent.getParent() + "\n\n"
-                            + "The Explorer entry will use the jar this JRock runs from:\n"
-                            + jar + "\n\n"
-                            + "That entry works, but the agent cannot be run by hand from "
-                            + "its own\nfolder - \"java -cp jrock.jar " + agent.getFileName()
-                            + "\" needs the jar there - and it\nbreaks if this JRock's jar "
-                            + "is moved or replaced.\n\n"
-                            + "Copy jrock.jar into the agent's folder and install again, "
-                            + "or install\nnow with the jar above?",
-                        AGENT_TITLE, javax.swing.JOptionPane.YES_NO_OPTION,
-                        javax.swing.JOptionPane.WARNING_MESSAGE);
-                if (answer != javax.swing.JOptionPane.YES_OPTION) {
-                    log.gray("Agent not installed: there is no jrock.jar in "
-                            + agent.getParent() + " - copy it there and install again.");
-                    log.gray("");
-                    return;
-                }
-                log.gray("No jrock.jar beside " + agent.getFileName() + ": the entry uses "
-                        + jar + " instead.");
-            }
-
-            String label = agentLabel(agent);
-            String key = agentKey(agent);
-            String dirLaunch = buildAgentLaunch(javaw, jar, agent, null);
-            String fileLaunch = buildAgentLaunch(javaw, jar, agent, "\"%1\"");
-
-            StringBuilder reg = new StringBuilder("Windows Registry Editor Version 5.00\r\n\r\n");
-            for (String root : CTX_SHELL_ROOTS) {
-                appendAgentVerb(reg, root, key, label, javaw, dirLaunch);
-            }
-            appendAgentVerb(reg, AGENT_FILE_SHELL_ROOT, key, label, javaw, fileLaunch);
-
-            // Kept under JRock/, named after the agent, for the same reason the
-            // "JRock here!" file is: it is the record of exactly what was applied, and
-            // the thing to open when an entry has to be understood or removed by hand.
-            Files.createDirectories(jrockDir());
-            Path regFile = jrockDir()
-                    .resolve("jrock-agent-" + keyPart(stemOf(agent)) + "-install.reg");
-            importReg(reg.toString(), regFile);
-            log.gray("Installed the \"" + label + "\" Explorer right-click entry.");
-            log.gray("Agent: " + agent);
-            log.gray("Registry key name: " + key);
-            log.gray("In a folder:  " + dirLaunch);
-            log.gray("On a file:    " + fileLaunch);
-            log.gray("Applied registry file kept at: " + regFile);
-            log.gray("");
-            javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Installed the Explorer right-click entry\n"
-                        + "  \"" + label + "\"\n"
-                        + "for " + agent.getFileName() + ", in two places:\n\n"
-                        + "  \u2022 inside or on a folder - the agent runs with no "
-                        + "file, so it asks\n    which one to work on, starting in the "
-                        + "folder Explorer ran it from.\n"
-                        + "  \u2022 on a file of any type, in any folder - the agent "
-                        + "works on THAT\n    file, still using the settings of "
-                        + workingDir + ".\n\n"
-                        + "Both run JRock in that working directory, so the model, the "
-                        + "images DPI\nand the Bedrock key are the ones kept there. "
-                        + "Install the same agent from\nanother folder to get a second "
-                        + "entry with that folder's settings.\n\n"
-                        + "(On Windows 11 it may appear under \"Show more options\".)\n\n"
-                        + "The applied registry file was kept for your inspection at:\n"
-                        + regFile,
-                    AGENT_TITLE, javax.swing.JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-            showAgentError(frame, log, ex.getMessage());
-        }
-    }
-
-    // Removes what the same agent, installed from THIS working directory, wrote: the
-    // key name is derived the same way, so uninstalling means picking the same file
-    // from the same folder. Removing some other folder's entry is a matter of
-    // launching JRock there ("JRock here!") and uninstalling from it - or of reading
-    // the install .reg this wrote, which names the key in full.
-    private static void uninstallAgent(JFrame frame, LogView log) {
-        try {
-            Path agent = chooseAgent(frame, "Uninstall agent");
-            if (agent == null) return;
-            String label = agentLabel(agent);
-            String key = agentKey(agent);
-            StringBuilder reg = new StringBuilder("Windows Registry Editor Version 5.00\r\n\r\n");
-            for (String root : CTX_SHELL_ROOTS) {
-                reg.append("[-HKEY_CURRENT_USER\\").append(root)
-                   .append('\\').append(key).append("]\r\n\r\n");
-            }
-            reg.append("[-HKEY_CURRENT_USER\\").append(AGENT_FILE_SHELL_ROOT)
-               .append('\\').append(key).append("]\r\n\r\n");
-            Files.createDirectories(jrockDir());
-            Path regFile = jrockDir()
-                    .resolve("jrock-agent-" + keyPart(stemOf(agent)) + "-uninstall.reg");
-            importReg(reg.toString(), regFile);
-            log.gray("Removed the \"" + label + "\" Explorer right-click entry (if present).");
-            log.gray("Registry key name: " + key);
-            log.gray("Applied registry file kept at: " + regFile);
-            log.gray("");
-            javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Removed the \"" + label + "\" right-click entry (if present).\n\n"
-                        + "This removes the entry installed for " + agent.getFileName()
-                        + "\nfrom " + workingDir + ". An entry installed from another "
-                        + "folder\nis a separate one, and is removed from there.\n\n"
-                        + "The applied registry file was kept for your inspection at:\n"
-                        + regFile,
-                    AGENT_TITLE, javax.swing.JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-            showAgentError(frame, log, ex.getMessage());
-        }
-    }
-
-    // One verb: the label, an icon, and the command under it.
-    private static void appendAgentVerb(StringBuilder reg, String root, String key,
-                                        String label, String javaw, String launch) {
-        String base = "HKEY_CURRENT_USER\\" + root + "\\" + key;
-        reg.append('[').append(base).append("]\r\n");
-        reg.append("@=").append(regString(label)).append("\r\n");
-        reg.append("\"Icon\"=").append(regString(javaw)).append("\r\n\r\n");
-        reg.append('[').append(base).append("\\command]\r\n");
-        reg.append("@=").append(regString(launch)).append("\r\n\r\n");
-    }
-
-    // Picks the agent, in the prompts & agents directory and among .java files only:
-    // that directory is where both the prompts and the automations that chain them
-    // live, and an agent is a .java file by definition - it is run as one.
-    private static Path chooseAgent(JFrame frame, String title) {
-        javax.swing.JFileChooser chooser =
-                new javax.swing.JFileChooser(promptsDir().toFile());
-        chooser.setDialogTitle(title);
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                "Java agents (*.java)", "java"));
-        chooser.setAcceptAllFileFilterUsed(false);
-        if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION
-                || chooser.getSelectedFile() == null) {
-            return null;
-        }
-        return chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
-    }
-
-    // The jar an agent's installed command will run against: jrock.jar in the AGENT's
-    // own directory first, and only then the jar this JRock is itself running from.
-    //
-    // That order is the one that matches how automations are set up: an automation
-    // directory holds the agent, the prompts it chains and a copy of jrock.jar, put
-    // there by hand (see the samples), and that copy is the one the agent is developed
-    // and run against. It is also the only one there is when JRock itself was started
-    // as `java JRock.java` - an agent needs a class path, and a class path is a jar or
-    // a directory of classes, never a .java file.
-    private static Path agentJar(Path agent) {
-        Path parent = agent.getParent();
-        if (parent != null) {
-            Path beside = parent.resolve("jrock.jar");
-            if (Files.isRegularFile(beside)) return beside.toAbsolutePath().normalize();
-        }
-        Path self = ownJarOrSource();
-        return (self != null && self.toString().toLowerCase().endsWith(".jar"))
-                ? self : null;
-    }
-
-    // The command Explorer runs: this jar on the class path, the agent as the source
-    // file to run (single-file source mode compiles it in memory against that jar),
-    // then the flags that pin the folder whose settings it is to use, and last what was
-    // clicked. No cmd, no console.
-    //
-    // The file verb passes what was clicked (%1); the folder verb passes nothing, and
-    // an agent started with no document asks for one in a file chooser. Where that
-    // chooser opens is the agent's business and needs no flag: Explorer starts a
-    // right-click command IN the folder it was clicked in, so the process working
-    // directory already is that folder - which is what the samples open in. The
-    // command line is the wrong place to look for something the process already knows.
-    private static String buildAgentLaunch(String javaw, Path jar, Path agent,
-                                           String fileArg) {
-        StringBuilder cmd = new StringBuilder();
-        cmd.append('"').append(javaw).append("\" -cp \"").append(jar).append("\" ");
-        cmd.append('"').append(agent).append('"');
-        cmd.append(' ').append(WORKING_DIR_FLAG).append(' ').append(quotedDir(workingDir));
-        cmd.append(ctxPromptsDirArg());
-        if (fileArg != null) cmd.append(' ').append(fileArg);
-        return cmd.toString();
-    }
-
-    // What Explorer shows: "JRockDocInventory.java", installed from a folder called
-    // HPScan, becomes "JRock agent: Doc Inventory (HPScan)...".
-    //
-    //   - the JRock prefix moves to the front of the label, where it groups the agents
-    //     next to "JRock here!" in a context menu full of other applications' entries;
-    //   - the camel case is split into words, because a menu is read, not compiled;
-    //   - the folder in parentheses is what tells two installs of one agent apart, and
-    //     it names the folder whose settings that install uses;
-    //   - the ellipsis promises a window that asks something, as it does everywhere
-    //     else in this application.
-    private static String agentLabel(Path agent) {
-        String stem = stemOf(agent);
-        if (stem.startsWith("JRock") && stem.length() > "JRock".length()) {
-            stem = stem.substring("JRock".length());
-        }
-        // Split at a lower-to-upper boundary, and before the last capital of a run
-        // ("PDFReport" -> "PDF Report"), which is where the words of a camel-case
-        // name actually are.
-        String words = stem
-                .replaceAll("(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ").trim();
-        if (words.isEmpty()) words = stemOf(agent);
-        String folder = titleFolder();
-        return AGENT_TITLE + ": " + words
-                + (folder == null ? "" : " (" + folder + ")") + "...";
-    }
-
-    // The registry key name for this agent in this folder: readable, and unique per
-    // pair. The hash is of the working directory, lower-cased because Windows paths
-    // are not case-sensitive and "C:\HPScan" and "c:\hpscan" are one folder. It is
-    // what keeps two folders whose names both end in "Scans" apart, and what lets
-    // uninstall address exactly the entry install wrote.
-    private static String agentKey(Path agent) {
-        String folder = titleFolder();
-        String hash = hashBytes(workingDir.toString().toLowerCase()
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return AGENT_KEY_PREFIX + keyPart(stemOf(agent))
-                + "-" + keyPart(folder == null ? "root" : folder)
-                + (hash == null ? "" : "-" + hash);
     }
 
     // A file name without its extension.
@@ -6954,130 +6537,6 @@ public class JRock {
         return dot > 0 ? name.substring(0, dot) : name;
     }
 
-    // A registry key name and a file name hold far less than a path can, so anything
-    // that is not a letter, a digit, a dash or an underscore becomes a dash. Only
-    // readability rests on this: what makes an agent key unique is the hash beside it.
-    private static String keyPart(String s) {
-        String clean = s.replaceAll("[^A-Za-z0-9_-]", "-");
-        return clean.isEmpty() ? "x" : clean;
-    }
-
-    private static void showAgentError(JFrame frame, LogView log, String msg) {
-        log.gray("Agent context menu update failed: " + msg);
-        log.gray("");
-        javax.swing.JOptionPane.showMessageDialog(frame,
-                "Could not update the agent context menu:\n" + msg,
-                AGENT_TITLE, javax.swing.JOptionPane.WARNING_MESSAGE);
-    }
-
-    // javaw.exe next to the JVM currently running JRock.
-    private static String findJavaw() {
-        String home = System.getProperty("java.home");
-        if (home == null) return null;
-        Path javaw = Paths.get(home, "bin", "javaw.exe");
-        return Files.isRegularFile(javaw) ? javaw.toAbsolutePath().toString() : null;
-    }
-
-    // The launch command for the folder verb: just javaw + JRock. Explorer starts
-    // the process with its current directory set to the clicked folder, so JRock
-    // roots its files there with no extra flag. No cmd, no console.
-    private static String buildCtxLaunch(String javaw) {
-        return buildLaunch(javaw, null);
-    }
-
-    // The launch command for the .txt verb: javaw passing the clicked file (%1)
-    // as JRock's prompt-source argument. JRock uses whatever current directory
-    // Explorer starts it in (typically the file's folder). No cmd, no console.
-    private static String buildTxtLaunch(String javaw) {
-        return buildLaunch(javaw, "\"%1\"");
-    }
-
-    // Shared shape of both installed commands: javaw, this JRock, the current
-    // --prompts-dir if there is one, then the clicked file for the .txt verb.
-    // Prefers this running jar; falls back to the JRock.java source file.
-    private static String buildLaunch(String javaw, String fileArg) {
-        Path self = ownJarOrSource();
-        if (self == null) return null;
-        StringBuilder cmd = new StringBuilder("\"").append(javaw).append("\" ");
-        if (self.toString().toLowerCase().endsWith(".jar")) {
-            cmd.append("-jar ");
-        }   // else: single-file source launch (JDK 11+), which needs no flag
-        cmd.append('"').append(self).append('"');
-        cmd.append(ctxPromptsDirArg());
-        if (fileArg != null) cmd.append(' ').append(fileArg);
-        return cmd.toString();
-    }
-
-    // The --prompts-dir fragment to bake into an installed command, or "" when the
-    // flag wasn't given.
-    //
-    // This is what makes the context menu carry the prompt library into any folder.
-    // Explorer supplies the working directory - that is the whole point of "JRock
-    // here!" - but nothing would otherwise supply the prompts directory, so without
-    // this the entry would always fall back to opening Ctrl+O in the clicked folder.
-    // Installing records the directory in effect at that moment, whether that came
-    // from the flag or from the Configure dialog since; change it and you reinstall,
-    // which is why the dialog and the log both spell out what was written.
-    //
-    // Nothing is written when prompts simply follow the working directory (promptsDir
-    // null, per its invariant): the flag would then name the folder this instance
-    // happened to be launched from, and bake it into every future launch from
-    // everywhere else - the opposite of what "JRock here!" means.
-    private static String ctxPromptsDirArg() {
-        if (promptsDir == null) return "";
-        return " " + PROMPTS_DIR_FLAG + " " + quotedDir(promptsDir);
-    }
-
-    // A directory as one quoted argument of an installed command line. A trailing
-    // backslash - which only a drive root like "D:\" still has after normalize() -
-    // would escape the closing quote when Windows parses the command line, so it is
-    // doubled, which is the standard fix.
-    private static String quotedDir(Path dir) {
-        String s = dir.toString();
-        if (s.endsWith("\\")) s = s + "\\";
-        return "\"" + s + "\"";
-    }
-
-    // Locates JRock's own artifact: the jar it's running from (via CodeSource),
-    // else a jrock.jar / JRock.java near the current directory.
-    private static Path ownJarOrSource() {
-        try {
-            java.net.URL loc = JRock.class.getProtectionDomain().getCodeSource().getLocation();
-            Path p = Paths.get(loc.toURI());
-            if (Files.isRegularFile(p) && p.toString().toLowerCase().endsWith(".jar")) {
-                return p.toAbsolutePath().normalize();
-            }
-        } catch (Exception ignore) { /* source launch: CodeSource is a temp dir */ }
-        Path[] candidates = {
-            Paths.get("jrock.jar"), Paths.get("..", "jrock.jar"),
-            Paths.get("JRock.java"), Paths.get("..", "JRock.java"),
-        };
-        for (Path c : candidates) {
-            if (Files.isRegularFile(c)) return c.toAbsolutePath().normalize();
-        }
-        return null;
-    }
-
-    // Quotes/escapes a string as a .reg REG_SZ value (backslashes and quotes).
-    private static String regString(String s) {
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
-    }
-
-    // Writes .reg content to regFile (kept for the user to inspect) and applies
-    // it via `reg import`. .reg files must be UTF-16LE with a BOM for reg.exe.
-    private static void importReg(String content, Path regFile) throws IOException, InterruptedException {
-        byte[] text = content.getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
-        byte[] withBom = new byte[text.length + 2];
-        withBom[0] = (byte) 0xFF; withBom[1] = (byte) 0xFE;   // UTF-16LE BOM
-        System.arraycopy(text, 0, withBom, 2, text.length);
-
-        Files.write(regFile, withBom);   // kept on disk (not a temp file)
-        ProcessBuilder pb = new ProcessBuilder("reg.exe", "import", regFile.toString());
-        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-        pb.redirectError(ProcessBuilder.Redirect.DISCARD);
-        int code = pb.start().waitFor();
-        if (code != 0) throw new IOException("reg import failed (exit " + code + ")");
-    }
 
     // ---- Narrate (log menu, Windows) ----------------------------------------
     // Reads the log's selection aloud with the voices Windows already has: SAPI 5,

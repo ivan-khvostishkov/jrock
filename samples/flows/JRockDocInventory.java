@@ -1,5 +1,5 @@
-// A JRock automation: one PDF, image, DOCX, RTF or TXT in; a DOCX with the pictures, a
-// plain-text twin and a file name out.
+// A JRock flow (one run, on something you point it at): one PDF, image, DOCX, RTF or
+// TXT in; a DOCX with the pictures, a plain-text twin and a file name out.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
@@ -7,23 +7,24 @@
 //     java -cp jrock.jar JRockDocInventory.java [--working-dir <dir>] [--prompts-dir <dir>]
 //                                               [document.pdf|.png|.jpg|.docx|.rtf|.txt]
 //
-// Without the document it asks for one in a file chooser, opened in the
-// folder this was started in - which, from the right-click menu, is the folder that was
-// clicked. The three prompts it needs it finds beside itself, in this directory.
+// Without the document it asks for one in a file chooser, opened in the folder this was
+// started in - which, from the right-click menu, is the folder that was clicked. The
+// three prompts it needs it finds BESIDE ITSELF, in whichever folder this file is in,
+// which is why the installer copies a flow and its prompts into one folder and never
+// splits them.
 //
 // The flags are JRock's and are passed straight through (see parseArgs): --working-dir
 // names the folder whose settings it is to use - that folder's model, its images DPI,
-// its Bedrock key - whatever directory the process was started in. JRock's window menu
-// installs an Explorer right-click entry for exactly this ("Install agent"), which is
-// what lets one agent work on a file anywhere on the disk with one folder's settings,
-// and lets the same agent be installed from several folders with settings of their own.
+// its Bedrock key - whatever directory the process was started in. The installer writes
+// an Explorer right-click entry that carries exactly those flags, which is what lets one
+// flow work on a file anywhere on the disk with one folder's settings, and lets the same
+// flow be installed from two folders with settings of their own.
 //
-// COPY jrock.jar HERE FIRST. It is not in the repository - the repository carries no
-// jars - and nothing downloads it: take it from a "Reproducible build" artifact, or
-// build it with .github/build/BuildJar.java, and put it next to this file. That copy is
-// what enables automations, and copying it is deliberately a manual act: an automation
-// directory is a jar, some prompts and the scripts that chain them, all files you put
-// there yourself.
+// THE JAR IS NAMED ON -cp AND HAS TO BE THERE. It is not in the repository - the
+// repository carries no jars - and nothing downloads it: the installer puts it in the
+// folder it installs into, or take it from a "Reproducible build" artifact, or build it
+// with .github/build/BuildJar.java. Installed, this file sits in the Flows\ folder and
+// the jar one level up; in the repository, point -cp at wherever you built it.
 //
 // -cp jrock.jar is not optional, and it is not only about run time. The source-file
 // launcher (JEP 330) compiles this file in memory with exactly that class path, so every

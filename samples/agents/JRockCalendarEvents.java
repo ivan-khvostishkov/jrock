@@ -1,13 +1,14 @@
-// A JRock automation: what is in your calendar, read out of Thunderbird's own offline
-// copy - today, this week, any range - for other agents to ask about and for you to read.
+// A JRock agent (it loops, and is started with JRock): what is in your calendar, read
+// out of Thunderbird's own offline copy - today, this week, any range - for other
+// agents to ask about and for you to read.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
 //     java -cp jrock.jar JRockCalendarEvents.java [--profile <thunderbird profile dir>]
 //     java -cp jrock.jar JRockCalendarEvents.java --profile <dir> --print week
 //
-// COPY jrock.jar HERE FIRST, as with every automation in this directory - this one uses
-// the jar for one thing only, placing its window beside JRock's. What it does NOT need is
+// THE JAR IS NAMED ON -cp, as with every agent and every flow - this one uses it for one
+// thing only, placing its window beside JRock's. What it does NOT need is
 // anything else of JRock's: no model, no Bedrock key, and no JRock taken as an automation,
 // because it answers out of files rather than by asking anybody. It can sit beside a JRock
 // you are already using, or run on its own.

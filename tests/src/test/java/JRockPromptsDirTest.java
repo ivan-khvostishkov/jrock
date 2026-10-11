@@ -113,23 +113,13 @@ class JRockPromptsDirTest extends JRockGuiFixture {
     }
 
     @Test
-    @DisplayName("an installed Explorer entry carries --prompts-dir only when it differs")
-    void installedCommandsCarryThePromptsDirectoryOnlyWhenItDiffers() throws Exception {
-        // What gets baked into the registry. Nothing to say while prompts follow the
-        // working directory: Explorer supplies that itself, and pinning it would make
-        // every future "JRock here!" open Ctrl+O in today's folder.
-        assertThat(ctxPromptsDirArg())
-                .describedAs("the flag baked in when prompts follow the working directory")
-                .isEmpty();
-
-        Path library = Files.createDirectories(workingDirectory().resolve("library"));
-        applyPromptsDir(library.toString());
-        assertThat(ctxPromptsDirArg())
-                .describedAs("the flag baked in once a prompts directory is set")
-                .isEqualTo(" --prompts-dir \"" + library + "\"");
-
-        // Same rule on the command line, so the two ways in agree: --prompts-dir
-        // naming the working directory is accepted, reported, and then not stored.
+    @DisplayName("--prompts-dir naming the working directory is reported, then not stored")
+    void promptsDirectoryEqualToTheWorkingOneIsReportedAndNotStored() throws Exception {
+        // The invariant promptsDir is declared with: non-null ONLY when it actually
+        // differs from the working directory. A flag naming the working directory is
+        // accepted and reported - it WAS given, and silence would look like it had been
+        // dropped - and then deliberately not stored, so the session report has nothing
+        // extra to say about where prompts are.
         field("promptsDir").set(null, null);
         field("promptsDirNote").set(null, null);
         setPromptsDirFromCommandLine(workingDirectory().toString());
@@ -138,7 +128,12 @@ class JRockPromptsDirTest extends JRockGuiFixture {
         assertThat((String) field("promptsDirNote").get(null))
                 .describedAs("what the session report says about it")
                 .contains("same as the working directory");
-        assertThat(ctxPromptsDirArg()).isEmpty();
+
+        // One that differs is stored as given.
+        Path library = Files.createDirectories(workingDirectory().resolve("library"));
+        setPromptsDirFromCommandLine(library.toString());
+        assertThat(field("promptsDir").get(null))
+                .describedAs("--prompts-dir naming a library of its own").isEqualTo(library);
     }
 
     /** Opens Configure, types the directory into the prompts row, and applies it. */
@@ -218,12 +213,5 @@ class JRockPromptsDirTest extends JRockGuiFixture {
         Method m = JRock.class.getDeclaredMethod("setPromptsDir", String.class);
         m.setAccessible(true);
         m.invoke(null, value);
-    }
-
-    /** The {@code --prompts-dir} fragment baked into an installed launch command. */
-    private static String ctxPromptsDirArg() throws Exception {
-        Method m = JRock.class.getDeclaredMethod("ctxPromptsDirArg");
-        m.setAccessible(true);
-        return (String) m.invoke(null);
     }
 }

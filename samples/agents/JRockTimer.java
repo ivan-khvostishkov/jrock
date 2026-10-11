@@ -1,14 +1,16 @@
-// A JRock automation: a timer and alarm clock, and the first agent that other agents
-// talk to.
+// A JRock agent (it loops, and is started with JRock): a timer and alarm clock, and the
+// first agent that other agents talk to.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
 //     java -cp jrock.jar JRockTimer.java [--working-dir <dir>]
 //
-// COPY jrock.jar HERE FIRST, take the flags as JRock's own, and expect a typed static
-// call rather than reflection: all of that is JRockDocInventory.java's opening comment,
-// and it is true of every automation in this directory. Read that file first.
+// The jar is wherever the installer put it - one folder up from samples/flows/,
+// two up from an agent's own folder - and -cp names it. Take the flags as
+// JRock's own and expect a typed static call rather than reflection: all of
+// that is samples/flows/JRockDocInventory.java's opening comment, and it is
+// true of every agent and every flow. Read that file first.
 //
 // It needs no Bedrock API key: nothing here calls a model, which makes it a demo that runs
 // on any machine. What it takes from JRock is one setting, the speaker in Configure >

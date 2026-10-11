@@ -1,4 +1,5 @@
-// A JRock automation: one document in, its translation into Russian out.
+// A JRock flow (one run, on something you point it at): one document in, its
+// translation into Russian out.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
@@ -8,11 +9,13 @@
 //
 // Without the document it asks for one in a file chooser, opened in the folder this was
 // started in - which, from the right-click menu, is the folder that was clicked. The
-// prompt it needs it finds beside itself, in this directory.
+// prompt it needs it finds beside itself, in whichever folder this file is in.
 //
-// COPY jrock.jar HERE FIRST, take the flags as JRock's own, and expect a typed static
-// call rather than reflection: all of that is JRockDocInventory.java's opening comment,
-// and it is true of every automation in this directory. Read that file first.
+// The jar is wherever the installer put it - one folder up from samples/flows/,
+// two up from an agent's own folder - and -cp names it. Take the flags as
+// JRock's own and expect a typed static call rather than reflection: all of
+// that is samples/flows/JRockDocInventory.java's opening comment, and it is
+// true of every agent and every flow. Read that file first.
 //
 // What this one does is one pass, not two:
 //
@@ -27,14 +30,14 @@
 // JRockTranslateToEnglish.java is this same file, and so are the ones for the other
 // official languages of the United Nations: JRockTranslateToArabic, -Chinese, -French and
 // -Spanish. They differ in nothing but the class name, the language, its code and the
-// prompt they load - one file each, because an agent is one file and its right-click
-// entry is named after it. Change one, change them all.
+// prompt they load - one file each, because a flow is one file and its right-click entry
+// is named after it. Change one, change them all.
 //
 // The document can be any kind JRock can include, and the kind is chosen from the
-// extension (see includeKind) - which is what makes this one worth installing as an
-// agent: "Install agent" writes a right-click entry that hands the clicked file's path
-// to the agent whatever type it is, so a PDF, a DOCX, an RTF, a text file or a
-// photograph of a page all translate from the same menu item. A PDF goes as page images,
+// extension (see includeKind) - which is what makes this one worth a right-click entry
+// of its own: the installer writes one that hands the clicked file's path to this flow
+// whatever type it is, so a PDF, a DOCX, an RTF, a text file or a photograph of a page
+// all translate from the same menu item. A PDF goes as page images,
 // because a scan has no text layer to read and a translation wants the layout anyway.
 //
 // Nothing is asked and nothing existing is touched: the translation is a new file next to

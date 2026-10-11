@@ -39,7 +39,8 @@ ios/**/build/
 .gradle/
 local.properties
 
-# Classes from the CI step that compiles agentic-samples/*.java against the jar
+# Classes from the CI step that compiles samples/agents/ and samples/flows/ against
+# the jar
 out-automation/
 
 # Classes from the CI step that compiles the installer, and the copy of it the build

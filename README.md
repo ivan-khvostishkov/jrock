@@ -64,15 +64,15 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   ([**Markdown export**](#markdown-export-rtf-and-docx)).
 - **A prompt library in plain files** — a folder of `.txt` prompts you can chain into a
   workflow, which is Bedrock Prompt management without the cloud
-  ([`agentic-samples/`](#prompt-library-and-chaining-agentic-samples)) — and single-file
-  **agents** that run such a chain by driving the real window, like AgentCore on your own
-  machine, so you watch it work and carry on the conversation when it's done
+  ([`samples/`](#prompt-library-and-chaining-samples)) — and single-file **agents** that loop
+  and **flows** that run once, each driving the real window the way AgentCore drives a hosted
+  one, so you watch it work and carry on the conversation when it's done
   ([**automations**](#automating-the-chain-jrockdocinventoryjava)).
 - **Keyboard-driven**, with a Configure dialog for API key, endpoint, model and working directory.
 - **An installer**, one Swing wizard in one Java file, shipped beside the jar in every
-  release: program folder, working folder, shortcuts, the agents you pick with a folder
-  each, the settings and the key, the Explorer entries — and it never removes anything
-  ([**the installer**](#the-installer-installerinstalljrockjava)).
+  release: one folder for the lot, shortcuts, the agents and flows you pick, the settings
+  and the key, the Explorer entries — and it removes no folder, no document and no settings
+  file, ever ([**the installer**](#the-installer-installerinstalljrockjava)).
 - **Paper is the unit**, in and out: what arrives is a scan or a PDF in a standard page size,
   and what leaves is a document ready for a printer — or for **Adobe InDesign**, by its style
   names ([**paper in, paper out**](#paper-in-paper-out)).
@@ -169,25 +169,25 @@ Unset, prompts simply **follow the working directory** — which is what a plain
 and what setting the prompts directory equal to the working directory means. That state isn't
 a path frozen at launch: change the working directory later and prompts come with it.
 
-On Windows, installing the **"JRock here!"** Explorer entries bakes in whichever prompts
-directory is in effect at that moment — but only if it differs from the working directory,
-since otherwise the flag would pin every future launch to today's folder. So the library
-follows you into every folder; see
+On Windows, the **"JRock here!"** entry the [installer](#the-installer-installerinstalljrockjava)
+writes carries the install folder as `--prompts-dir`, so the library follows you into every
+folder you right-click; see
 [Explorer right-click integration](#windows-explorer-right-click-integration).
 
-For a ready-made one, point it at **`agentic-samples/`** in this repository — three prompts,
-two of which chain into a document-archiving workflow, and the two agents that run them, plus
-a template for a library of your own. See
-[Prompt library and chaining](#prompt-library-and-chaining-agentic-samples).
+For a ready-made one, point it at **`samples/`** in this repository — the prompts that chain
+into a document-archiving workflow, the agents and flows that run them, and a template for a
+library of your own. See
+[Prompt library and chaining](#prompt-library-and-chaining-samples).
 
 `--prompts-dir=<dir>` works too, and the flag can come before or after the prompt file. The
 directory is reported in the startup log whenever it isn't just the working directory —
 including when the path isn't usable, in which case it's reported and ignored rather than
 silently applied.
 
-The **agents** — the `.java` automations that drive JRock through those prompts — live in the
-same directory, which is why the Configure row is labelled **Prompts & agents** and why
-**Install agent** browses it. See [Agents](#windows-agents-one-automation-per-folder).
+The **agents and flows** — the `.java` automations that drive JRock through those prompts —
+do **not** live here. Each is installed into a folder of its own with the prompts it reads
+beside it, because that is where it looks for them; this directory is the library you read and
+borrow from. See [agents and flows](#windows-agents-and-flows-one-entry-each).
 
 ### `--working-dir`
 
@@ -699,7 +699,7 @@ from inside the running application, and different for every way of launching it
 - **`JRock/jrock-config.txt`** — the **endpoint**, the **model** and the **images DPI**, so the
   next start comes up the way you left it. Seeded with the settings in effect when the folder
   has none. Per folder rather than per user on purpose: it is what lets one folder's
-  [agent](#windows-agents-one-automation-per-folder) run on one model, and another folder's run
+  [agent](#windows-agents-and-flows-one-entry-each) run on one model, and another folder's run
   on a different one — or at a different DPI. An `images-dpi$` that isn't one of the values the
   Configure dropdown offers is reported in the startup log and ignored, since that dropdown
   could only show it as something else and then write that back. It also holds
@@ -1408,7 +1408,7 @@ becomes a base64 image part, `@txt` becomes a text part with the file's contents
 becomes a base64 [`input_audio` part](#what-an-audio-include-is-sent-as). In Extend mode,
 includes in prior turns are expanded too.
 
-## Prompt library and chaining (`agentic-samples/`)
+## Prompt library and chaining (`samples/`)
 
 Bedrock has a managed answer to reusable prompts:
 [Prompt management](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-management.html)
@@ -1420,9 +1420,11 @@ runs such a chain by itself is closer to
 [AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html),
 which hosts agents you write, runs them, and gives them tools to act with.
 
-The prompts in `agentic-samples/` are the Prompt management half, and the agents beside them
+The prompts in `samples/` are the Prompt management half, and the agents and flows beside them
 are the AgentCore half — AgentCore on the local machine, with the JRock window as the runtime
-and its automation API as the tools.
+and its automation API as the tools. A **flow** runs the chain once, on a document you point it
+at, which is what Bedrock Flows does for a hosted one; an **agent** loops instead, staying up to
+be asked.
 
 JRock does the same thing with **plain text files in a folder you own**. A prompt is a `.txt`
 file; the library is a directory ([the prompts directory](#the-prompts-directory)); a variable
@@ -1446,8 +1448,21 @@ there for it, a chain can also run itself: see
 
 ### The samples
 
-`agentic-samples/` holds prompts that chain and prompts that stand alone, the agents that run
-them, and doubles as a template for a prompts directory of your own:
+`samples/` is three folders, and the split is the one thing worth knowing before reading them:
+
+```
+samples/flows/     the 7 that run ONCE, on a document you point them at,
+                   each beside the prompt files it reads
+samples/agents/    the 5 that LOOP, started with JRock and staying up,
+                   each beside the prompt files it reads
+samples/prompts/   the prompts that belong to neither, for using by hand
+```
+
+A prompt file sits with whatever reads it, because that is where it is looked for — an agent
+resolves its prompt beside its own `.java` and nowhere else, which is why the
+[installer](#the-installer-installerinstalljrockjava) copies the two into one folder and never
+splits them. The prompts, wherever they sit, double as a template for a prompts directory of
+your own:
 
 - **`jrock-prompt-doc-to-ascii.txt`** — turn a document into plain text that keeps its layout:
   ASCII rules for tables, right-aligned text kept right-aligned to a fixed column, centred text
@@ -1512,11 +1527,12 @@ The result is a PDF you can identify from the file listing alone, and a text twi
 
 ### Using them
 
-Point JRock's prompts directory at the folder — `--prompts-dir` on the command line, or the
-**Prompts directory** row in [Configure](#configure-dialog-top-left-button) — and all three
-prompts are two keystrokes away from any working directory. On Windows, installing the
-["JRock here!" entries](#windows-explorer-right-click-integration) with it set bakes it in, so
-the library follows you into whichever folder you right-click.
+Point JRock's prompts directory at whichever folder holds the prompt you want —
+`--prompts-dir` on the command line, or the **Prompts** row in
+[Configure](#configure-dialog-top-left-button) — and it is two keystrokes away from any working
+directory. Installed, that folder is the install folder, which the
+["JRock here!" entry](#windows-explorer-right-click-integration) carries for you, so the library
+follows you into whichever folder you right-click.
 
 They are worth reading before they're worth running: the useful part is not the wording but
 the shape — one prompt per step, the step's input left as an include token at the bottom, and
@@ -1527,8 +1543,10 @@ text file.
 
 ### Automating the chain (`JRockDocInventory.java`)
 
-The eight steps above are a loop you run per document, and the third file in
-`agentic-samples/` runs them for you. It is one Java file, started the way JRock is:
+The eight steps above are a loop you run per document, and the first of the **flows** in
+`samples/flows/` runs them for you. A flow is one run, on one document, that asks you which —
+nothing about it loops, and nothing ever starts it behind you. It is one Java file, started the
+way JRock is:
 
 ```
 java -cp jrock.jar JRockDocInventory.java document.pdf   # no argument: it asks for the file
@@ -1596,16 +1614,17 @@ not a *u* with a combining mark trailing it — the two look identical on screen
 what the file system and the person searching the folder next year will agree on.
 
 JRock's flags are passed straight through, and the document is not — a bare argument is a prompt
-file to JRock, so the two are told apart on the way in. That is what
-[**Install agent**](#windows-agents-one-automation-per-folder) installs: one right-click command
-with `--working-dir` and no document (so the chooser asks, in that folder), one with the clicked
-file appended.
+file to JRock, so the two are told apart on the way in. That is what the installer's
+[right-click entry](#windows-agents-and-flows-one-entry-each) is made of: one command with
+`--working-dir` and no document (so the chooser asks, in that folder), one with the clicked file
+appended.
 
-**Copy `jrock.jar` into `agentic-samples/` first.** Nothing downloads it: take it from a
+**`-cp jrock.jar` has to name a jar that is there.** Nothing downloads it: the
+[installer](#the-installer-installerinstalljrockjava) puts one in the folder it installs into
+(one level up from `Flows\`, two up from an agent's own folder), or take it from a
 [reproducible build](#reproducible-builds) artifact, or build it with
-`java .github/build/BuildJar.java`, and put it next to the script. That copy is what enables
-automations, and it is deliberately a manual act — an automation directory is a jar, some
-prompts and the scripts that chain them, all files you put there yourself. The jar is in
+`java .github/build/BuildJar.java`. Running from a clone, point `-cp` at wherever you built it.
+The jar is in
 `.gitignore` and the build tool skips `.jar` files in that directory, so a local copy changes
 nothing about the repository or the reproducible source zip.
 
@@ -1636,7 +1655,7 @@ finished, no Ghostscript (so nothing was included, which is a stop rather than a
 asks about a document and attaches none of it), a reply that never came back. Nothing is
 overwritten — an existing `document.txt` becomes `document-2.txt`, and the same on rename.
 
-### A second agent: translating (`JRockTranslateToEnglish.java`)
+### A second flow: translating (`JRockTranslateToEnglish.java`)
 
 One pass instead of two, and the shorter half of why both samples are here:
 
@@ -1654,10 +1673,10 @@ from, read back off that first line.
 **The document can be any kind JRock can include**, and the include kind comes from the
 extension: `.pdf` as page images, `.docx` and `.rtf` converted to Markdown text, `.txt` `.md`
 `.csv` `.json` `.html` `.log` `.java` as they are, and `.png` `.jpg` `.jpeg` `.gif` `.webp` as pictures.
-Which is what makes this one worth [installing as an
-agent](#windows-agents-one-automation-per-folder): that right-click entry hands over whatever
-file you clicked, of any type, so a scan, a Word document and a photograph of a page all
-translate from the same menu item. An extension it has no include for is a stop naming the ones
+Which is what makes this one worth [a right-click entry of its
+own](#windows-agents-and-flows-one-entry-each): that entry hands over whatever file you clicked,
+of any type, so a scan, a Word document and a photograph of a page all translate from the same
+menu item. An extension it has no include for is a stop naming the ones
 that work — before the window opens, not after a minute of Ghostscript.
 
 The `.txt` next to the original is an archive copy, not the only place the answer is. The
@@ -1666,11 +1685,11 @@ and **Export selected Markdown with images as DOCX...** turns it into a document
 [either A4 orientation](#markdown-export-rtf-and-docx) — a translated letter usually wants to
 end up as a letter.
 
-**The other official UN languages** each have an agent of their own, built the same way:
+**The other official UN languages** each have a flow of their own, built the same way:
 `JRockTranslateToArabic.java`, `JRockTranslateToChinese.java`, `JRockTranslateToFrench.java`,
 `JRockTranslateToRussian.java` and `JRockTranslateToSpanish.java`. Each loads its own prompt and
 writes `<name>-ar.txt`, `-zh.txt`, `-fr.txt`, `-ru.txt` or `-es.txt`. There is one file per
-language because an agent is one file, and its right-click entry is named after it
+language because a flow is one file, and its right-click entry is named after it
 (*Translate To French*, and so on). The files differ in nothing but the language, its code and
 the class name, so a change to one belongs in all six.
 
@@ -1685,7 +1704,7 @@ The two files are also worth reading side by side. The plumbing — the flags, `
 automation *is* a prompt, an include and a send; what differs is the chain around them. Copy
 whichever is closer to yours.
 
-### A third agent: push-to-talk (`JRockPushToTalk.java`)
+### The first agent: push-to-talk (`JRockPushToTalk.java`)
 
 A loop rather than a pass, and no prompt file at all:
 
@@ -1748,31 +1767,31 @@ the voice, so the microphone doesn't record the last answer as the next question
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
-  appendix asks the model for this sentence, in English whatever the language — sets an alarm in the [timer agent](#a-fourth-agent-timer-and-alarm-jrocktimerjava).
+  appendix asks the model for this sentence, in English whatever the language — sets an alarm in the [timer agent](#a-second-agent-timer-and-alarm-jrocktimerjava).
   The first time is checked against the computer's clock first, and a model more than two
   minutes off sets nothing. The status line says what became of the alarm: set, refused, or
   not set because the timer agent isn't running.
 - **Location.** When the whole answer is *"I need to know your location"*, the agent does not
   show it or read it aloud. It sends `#here` to the
-  [location agent](#a-fifth-agent-location-jrocklocationjava) and gives the model the line that
+  [location agent](#a-third-agent-location-jrocklocationjava) and gives the model the line that
   comes back, unchanged, as the next prompt, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`.
   The reply to that is the turn's answer. This happens at most once a turn. The model knows
   which question the location answers only with History on.
 - **Calendar.** When the whole answer is *"I need your calendar for today"* — or *"… for this
   week"*, or *"… for 2026-12-24 to 2026-12-26"* — the agent asks the [calendar
-  agent](#a-seventh-agent-your-calendar-jrockcalendareventsjava) on `127.0.0.1:47473`, puts the
+  agent](#a-fifth-agent-your-calendar-jrockcalendareventsjava) on `127.0.0.1:47473`, puts the
   briefing into the next prompt and sends it. Once a turn. Each line carries the calendar it came
   from, so the model can say which calendar something is in.
 - **Weather.** When the whole answer is *"I need weather for this location: …"*, the agent
   does not show it or read it aloud either. If the location has no coordinates, the location
   agent is asked for them first. If the model already has them from `#here`, they are used as
-  given. The [weather agent](#a-sixth-agent-weather-jrockweatherjava) returns a checked
+  given. The [weather agent](#a-fourth-agent-weather-jrockweatherjava) returns a checked
   open-meteo.com address. The agent fetches that address into
   `jrock-prompt-ptt-weather.txt`, the way Fetch URL does, and the model's report is read
   aloud. Without the other agents, the request is shown and read aloud after all, and the
   status line says why. See [Multi-agent collaboration](#multi-agent-collaboration).
 
-### A fourth agent: timer and alarm (`JRockTimer.java`)
+### A second agent: timer and alarm (`JRockTimer.java`)
 
 The one to show first: **no Bedrock API key needed**, since nothing in it calls a model.
 
@@ -1808,7 +1827,7 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   says so, and the alarm still shows.
 - **Other agents set alarms** over TCP, on `127.0.0.1:47470` only. Connect, send the time as
   above and a newline, and read one line back: `1` means the alarm is set, `0` means it isn't.
-  Then close the connection. [Push-to-talk](#a-third-agent-push-to-talk-jrockpushtotalkjava)
+  Then close the connection. [Push-to-talk](#the-first-agent-push-to-talk-jrockpushtotalkjava)
   does this.
 - **JRock's agents' ports** are **47470–47479**. The timer has the first, the location agent
   47471, the weather agent 47472, and the calendar agent 47473. The range is
@@ -1820,7 +1839,7 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   folder with no key is fine. Set its **Narrate on** once: press Narrate in its JRock's log
   menu to list the devices, then pick one in Configure.
 
-### A fifth agent: location (`JRockLocation.java`)
+### A third agent: location (`JRockLocation.java`)
 
 It knows where the operator is and tells other agents.
 
@@ -1863,7 +1882,7 @@ It starts JRock and takes it as an automation, like the timer, and opens a small
 - **Run it in a folder of its own**, with History off there. A key is needed only for the
   openstreetmap.org lookups; GPS and typed values work without one.
 
-### A sixth agent: weather (`JRockWeather.java`)
+### A fourth agent: weather (`JRockWeather.java`)
 
 It turns a location into a checked address for the weather on open-meteo.com. It does not fetch
 the weather itself: the agent that asked does that.
@@ -1883,7 +1902,7 @@ java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
   address** to try one by hand.
 - It needs a key. **Run it in a folder of its own**, with History off there.
 
-### A seventh agent: your calendar (`JRockCalendarEvents.java`)
+### A fifth agent: your calendar (`JRockCalendarEvents.java`)
 
 What is in your calendar, read out of **Thunderbird's own offline copy** — today, this week,
 any span of days — for the push-to-talk agent to ask about and for you to read. The first agent
@@ -1945,7 +1964,7 @@ java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no
   `cal_calendar_schema_version`). A different one is **reported, not refused** — the tables this
   reads have been stable for years, and a bare refusal would be worse than a warning on a version
   that still works.
-- **Hands-free**, the [push-to-talk agent](#a-third-agent-push-to-talk-jrockpushtotalkjava) asks it
+- **Hands-free**, the [push-to-talk agent](#the-first-agent-push-to-talk-jrockpushtotalkjava) asks it
   when the model's whole answer is *"I need your calendar for today"*, *"… for this week"* or
   *"… for 2026-12-24 to 2026-12-26"*, exactly as it asks for a location or the weather: the
   briefing goes into the next prompt and the model answers out loud from it. Your event titles do
@@ -2126,7 +2145,7 @@ the one they are looking for.
 
 - **Working directory** (with a Browse button) — reroutes JRock's own files to the chosen
   folder. The OS-level process working directory is unchanged.
-- **Prompts & agents** (with a Browse button) — where Ctrl+O, Ctrl+S and **Install agent** open,
+- **Prompts** (with a Browse button) — where Ctrl+O and Ctrl+S open,
   always (see [the prompts directory](#the-prompts-directory)). It shows the path actually in effect, so
   on a plain launch it shows the working directory; set it back to that to have prompts follow
   the working directory again. Leaving the row untouched changes nothing, so moving the
@@ -2154,8 +2173,8 @@ the one they are looking for.
   row for.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
   `JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
-  folder's [agent](#windows-agents-one-automation-per-folder) a different agent from the same
-  automation installed from another folder.
+  folder's [agent](#windows-agents-and-flows-one-entry-each) a different agent from the same
+  automation installed into another folder.
 - **Autobackup log** — on a line of its own, right under the Model, and **on by default**: after five
   minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
@@ -2376,7 +2395,7 @@ when it finishes.
   The PowerShell process lasts exactly as long as the reading, so stopping it is ending the process.
 - **The text goes over as a UTF-8 file**, not as an argument, so a command line and its code
   page (see [**Names Windows cannot put on a command
-  line**](#windows-agents-one-automation-per-folder)) cannot turn Cyrillic into `?`.
+  line**](#windows-agents-and-flows-one-entry-each)) cannot turn Cyrillic into `?`.
 - **The Markdown is read, not the markup.** Headings, `**bold**`, `` `code` ``, list and quote
   markers, table pipes and rules are dropped, links keep their text, and `@txt`/`@img`/`@audio`
   tokens and picture references are left out entirely.
@@ -2748,8 +2767,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   (duplex) PDF scans... above its own separator (see [**merging duplex
   scans**](#merging-duplex-scans-ghostscript)), then Backup log... and Load from backup... (see
   [**backup and restore**](#backup-and-restore)); in the **browser**, also Show/hide the page
-  header & footer; on **Windows**, Install / Uninstall the "JRock here!" Explorer entry and
-  Install / Uninstall agent (see below). A label with a caret is a target that is always there,
+  header & footer. The Explorer entries are not here at all — they are the
+  [installer's](#the-installer-installerinstalljrockjava), which is what keeps this window the
+  same window on three platforms. A label with a caret is a target that is always there,
   always the same size and visibly for this, which the empty part of a bar is not — least of all
   on a phone, where there is hardly any of it. The window's own size and position are **not**
   here: they are Configure's [**Window** tab](#window-size-and-position-configure--window-ctrlm),
@@ -2763,18 +2783,23 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
 
 ## Windows: Explorer right-click integration
 
-On Windows, the window's menu (click the `JRock/` label beside *Configure*) offers
-**Install "JRock here!" (Explorer menu)...** and **Uninstall "JRock here!" (Explorer
-menu)...**. These items appear only on Windows. Installing adds two Explorer right-click
-entries at once:
+The right-click entries are the **[installer's](#the-installer-installerinstalljrockjava)**
+work, and nobody else's. JRock itself writes nothing to the registry and has no menu item
+that does — which is the point: a registry is the one thing on a Windows machine with no
+counterpart on the other two platforms JRock runs on, and keeping `reg.exe` out of
+`JRock.java` leaves every line of it doing the same thing on Windows, macOS and Linux.
+Page 8 of the installer writes three kinds of entry:
 
 - **"JRock here!"** — on a folder's empty space or on a folder icon. Launches JRock in that
-  folder, so its `JRock/` files (prompt, log, messages) are created right there. Explorer
-  starts the process with its current directory set to the clicked folder, so no path
-  argument is needed.
-- **"Open as prompt with JRock"** — on a **`.txt`** file. Launches JRock with that file loaded
-  as the initial (read-only) prompt. This adds a verb without changing the default open action
-  for `.txt`.
+  folder, so its `JRock/` files (prompt, log, messages) are created right there. **It carries
+  no `--working-dir`**, and that is the whole of what it means: Explorer starts a right-click
+  command in the folder that was clicked, JRock roots its files in the folder it was started
+  in, and so the folder you clicked is the folder it works in. A working folder on that
+  command line would send every click everywhere to one fixed place instead.
+- **"Open as prompt with JRock"** — on a **`.txt`** file. The same command with the file
+  appended, so it opens as the initial (read-only) prompt. A verb is added; the default open
+  action for `.txt` is untouched.
+- **One per agent and per flow** — see [the section below](#windows-agents-and-flows-one-entry-each).
 
 ![The Explorer context menu for a folder, with a "JRock here!" entry among the other shell verbs](images/explorer-jrock-here.png)
 
@@ -2783,52 +2808,45 @@ Clicking it starts JRock in that folder — no path argument, no console window.
 
 Details:
 
-- **Per-user and reversible.** Entries are written under `HKEY_CURRENT_USER`, so no admin rights
-  are needed, and Uninstall removes all of them.
-- **No console window.** Both launch `javaw.exe`, so nothing flashes on screen.
-- **Self-configuring.** They use the `javaw.exe` of the JVM currently running JRock, and launch
-  JRock's own `jrock.jar` (or the `JRock.java` file when running from source) — no paths to edit.
-- **The prompt library comes along.** If a [prompts directory](#the-prompts-directory) is set
-  — from `--prompts-dir` or from the Configure dialog — both entries are installed carrying
-  that flag, so **Ctrl+O opens your prompt library from whichever folder you right-clicked**.
-  Explorer supplies the working directory; this supplies the prompts directory. Nothing is
-  written when prompts just follow the working directory, since the flag would then pin every
-  future launch to the folder you installed from. It is captured at install time, so reinstall
-  after changing it — the confirmation dialog and the log both spell out exactly what was
-  written, including when nothing was.
-- **Inspectable.** The applied registry file is kept under `JRock/`
-  (`jrock-context-menu-install.reg` / `jrock-context-menu-uninstall.reg`), and each action is
-  recorded in the log.
+- **Per-user.** Entries are written under `HKEY_CURRENT_USER`, so no administrator is needed
+  and nothing lands outside your own account.
+- **Cleared out first.** Before writing anything, the installer finds **every JRock entry on
+  the machine** — in all eight shell roots, including the two under `HKEY_LOCAL_MACHINE` it
+  never writes to itself — and removes them. A stale entry from an install you no longer have
+  runs a jar that may not be there any more, and an installer that only added would leave a
+  menu full of them. Untick *Install the Explorer right-click entries* and the page does the
+  removal and nothing else: **that is how the entries are uninstalled.**
+- **What was removed is written down.** The removal is exported first to
+  `JRock/jrock-context-menus-removed.reg`, and `reg import` on that file puts every one of
+  those entries back exactly as it was. What was written is kept beside it as
+  `JRock/jrock-context-menus.reg`.
+- **The whole command line goes into the log.** Every entry, with its label and the command it
+  runs, so which jar runs from where with which arguments is readable without opening
+  `regedit`.
+- **No console window.** All of them launch `javaw.exe`, so nothing flashes on screen.
+- **The prompt library comes along.** "JRock here!" and the `.txt` verb carry
+  `--prompts-dir <install folder>`, so **Ctrl+O opens your prompt library from whichever
+  folder you right-clicked**. Explorer supplies the working directory; this supplies the
+  prompts directory.
 - On **Windows 11** the entries may appear under **"Show more options"**.
 
-## Windows: agents, one automation per folder
+## Windows: agents and flows, one entry each
 
-The same menu offers **Install agent (Explorer menu)...** and **Uninstall agent (Explorer
-menu)...**: the same idea for the `.java`
-[automations](#the-automation-api) that live beside the prompts. Install browses the
-[prompts & agents directory](#the-prompts-directory) for `.java` files only, and writes **one
-entry with two commands** for the automation you pick:
+Every agent and every flow you install gets **one entry with two commands**:
 
-- **inside or on a folder** — the agent runs with **no file**, so it asks which one to work on.
-  Its chooser opens in **the folder Explorer ran it from**, which is the folder you clicked — no
+- **inside or on a folder** — it runs with **no file**, so it asks which one to work on. Its
+  chooser opens in **the folder Explorer ran it from**, which is the folder you clicked — no
   flag carries that, the process working directory already is it.
-- **on a file of any type, in any folder** — the agent gets **that file's full path** as its
-  single argument, and works on it.
+- **on a file of any type, in any folder** — it gets **that file's full path** as its single
+  argument, and works on it.
 
-**jrock.jar is the prerequisite, and installing checks for it.** With no jar anywhere — not
-beside the agent, and not under the JRock that is running — nothing is written to the registry
-and the dialog says to copy one in. With no jar *beside the agent* but one under this JRock, you
-are **asked first**: the entry would work, carrying an absolute path, but the agent's own folder
-would not be a folder it can be run from by hand (`java -cp jrock.jar Agent.java` needs the jar
-there), and the entry breaks if this JRock's jar is later moved or replaced. Answer no, copy the
-jar in, install again — or say yes and the log records which jar the entry points at.
-
-Both commands are `javaw -cp jrock.jar <agent>.java --working-dir <the folder you installed
-from>`, plus `--prompts-dir` when one is set. The `--working-dir` flag is the whole trick:
-Explorer starts a right-click command in the folder that was **clicked**, which is the opposite
-of what an agent needs. An agent belongs to the folder it was installed from — that folder's
-model, its images DPI, its Bedrock key, all in that folder's
-[`JRock/jrock-config.txt`](#settings-files) — and may be run on a document anywhere on the disk.
+Both are `javaw -cp <install folder>\jrock.jar <its own .java> --working-dir <its folder>
+--prompts-dir <its folder>`. The `--working-dir` flag is the trick: Explorer starts a
+right-click command in the folder that was **clicked**, which is the opposite of what an agent
+needs. An agent belongs to the folder it was installed into — that folder's model, its images
+DPI, its Bedrock key, all in that folder's [`JRock/jrock-config.txt`](#settings-files) — and
+may be run on a document anywhere on the disk. Its own folder is also where its prompt files
+are, because that is where it looks for them.
 
 Which is why the samples open their chooser in the folder they were **started** in and not in
 the working directory: the settings folder is the one folder the document is certainly not in.
@@ -2836,30 +2854,22 @@ They read it once at startup, before JRock's `--working-dir` handling moves `use
 flag is involved — the process already knows the folder it was started in, so the command line
 is the wrong place to carry it, and there is nothing in the registry entry to get wrong.
 
-Which is why an entry is per **(agent, folder)** pair, not per agent. Install the same
-automation from two folders and you get two entries, with two sets of settings:
+The label says which **kind** it is and which **installation** it belongs to:
 
 ```
-JRock agent: Doc Inventory (HPScan)...          one model, 300 dpi
-JRock agent: Doc Inventory (Documents)...       another model, 150 dpi
-JRock agent: Translate To English (HPScan)...   the same folder, the other agent
+JRock agent: Timer (JRockAssistant)...                started with JRock, stays up
+JRock agent: Push To Talk (JRockAssistant)...         started with JRock, stays up
+JRock flow: Translate To French (JRockAssistant)...   one run, when you pick it
+JRock flow: Doc Inventory (JRockAssistant)...         one run, when you pick it
+JRock agent: Timer (ScanStation)...                   a second install, its own settings
 ```
 
-The label is built from the file name: `JRockDocInventory.java` → `Doc Inventory`,
-`JRockTranslateToEnglish.java` → `Translate To English`, camel case
-split into words, the `JRock` prefix moved to the front so every agent sits next to *JRock
-here!* in a menu full of other applications' verbs, and the working folder's name in
-parentheses. The registry key name adds a short hash of the working directory's path, so two
-folders with the same name stay apart and **Uninstall agent** addresses exactly what Install
-wrote — pick the same file from the same folder to remove it. Same as the entries above: per-user
-`HKEY_CURRENT_USER`, `javaw` so no console appears, and the applied registry file kept for
-inspection under `JRock/` as `jrock-agent-<name>-install.reg` / `-uninstall.reg`.
-
-Installing an agent needs `jrock.jar` itself — an agent is compiled against JRock at run time,
-and a class path is a jar, never a `.java` file. The jar is looked for **beside the agent**
-first, which is where an automation directory keeps it anyway
-([copy it in yourself](#automating-the-chain-jrockdocinventoryjava)), and then the jar this JRock
-is running from. With neither, install says so instead of writing an entry that could not work.
+It is built from the file name — `JRockDocInventory.java` → `Doc Inventory`, camel case split
+into words, the `JRock` prefix moved to the front so every one of them sits next to *JRock
+here!* in a menu full of other applications' verbs — with **the install folder** in
+parentheses. Not the agent's own folder: `Timer (Timer)` would say the same thing twice, while
+the install folder is what tells two installations apart. The registry key adds a short hash of
+that folder's path, so two installations in folders of the same name stay apart.
 
 **Names Windows cannot put on a command line.** A path holding a character the system ANSI
 code page has no room for — Cyrillic, Greek, CJK on a Cp1252 install — reaches a Java program
@@ -3165,63 +3175,92 @@ java InstallJRock.java            # the wizard
 java InstallJRock.java --check    # what it would find, printed; changes nothing
 ```
 
-**It never removes anything.** A `jrock.jar` already in the program folder is replaced, which is
-what installing a release means; a `jrock-config.txt` or a `bedrock-key.txt` already in a working
-folder is **kept**, and the log says so, because those are yours. Uninstalling is a separate
-program and not this one.
+**One folder holds the installation**, and that is the only thing to decide:
 
-Ten pages, in this order:
+```
+Documents\JRockAssistant\             jrock.jar + its SHA-256 and MD5
+                                      JRock\ — the window's own files
+                                      jrock-prompt-*.txt — the prompt library
+    Agents\PushToTalk\                the agent, its prompts, its own JRock\
+    Agents\Timer\                     …one folder each, because they all run at once
+    Agents\Weather\
+    Flows\                            every flow, their prompts, one JRock\
+```
 
-1. **What was unpacked** — `jrock.jar` and `agentic-samples/` have to be in the folder it was
-   started from, which is where a release unpacks to. Missing, it says so and waits for Retry.
-2. **Where the program goes** — default `C:\Program Files\NoSocial.Net\JRock` on Windows,
-   `~/Applications/NoSocial.Net/JRock` on macOS, `~/.local/share/nosocial.net/jrock` on Linux.
-   The jar is copied there with its **SHA-256 and MD5** written beside it, computed from the copy
-   that just landed. Program Files needs an elevated installer; refused, it says so and you pick
-   a folder of your own.
-3. **Ghostscript and xpdf** — looked for on `PATH`, with
-   [where to get them](#pdf-conversion-ghostscript) and a **Retry** when you have. Or continue
-   without: everything else works, and JRock names the missing tool if you ever ask it for that
-   conversion.
-4. **Where JRock keeps your work** — default `~/Documents/JRockAssistant`. The page says why the
-   **folder name** matters: it is what every Explorer entry is labelled with.
-5. **Shortcuts** — Start menu and Desktop, both called **JRock Assistant**, both opening JRock in
-   that folder. A real `.lnk` on Windows (written through `WScript.Shell`, the only way without a
-   native library), a `.desktop` file on Linux, a `.command` script on macOS.
-6. **Agents** — all of them, or pick them one by one. Each picked agent gets a **working folder**:
-   *with JRock* (the primary one), *its own* (`JRockAgents/Weather`, `JRockAgents/PushToTalk`, …),
-   or one you name — so an agent can have its own model, DPI and key. The `.java` files go beside
-   the jar, and **only the prompt files each chosen agent actually reads** go into the prompts
-   folder — read out of each agent's own source, where the file names are string constants, rather
-   than from a list in the installer that would be a second place to keep right. An agent working
-   in a folder of its own gets its prompts in there too. Picking *all* also copies the prompts that
-   belong to no agent, which would otherwise be left behind.
-7. **Settings and the key** — opens the new `jrock-config.txt` in whatever opens a `.txt`, waits
+An **agent** loops: it is started with JRock and stays up — a timer, a push-to-talk listener, a
+calendar reader answering a port. It gets a folder to itself, because JRock writes its log, its
+prompt and its transcript into a `JRock/` inside the folder it works in, and three agents
+sharing one folder would write over each other.
+
+A **flow** runs once, on something you point it at, and asks you for it: translate this
+document, inventory that scan. Nothing loops, nothing is ever started behind you, and one
+folder does for all of them. The installer reads which is which out of the folder each one was
+shipped in — `samples/agents/` or `samples/flows/`.
+
+**It removes no folder, no document and no settings file. Not one, ever.** A `jrock.jar` in the
+folder is replaced, which is what installing a release means; a `jrock-config.txt`, a
+`bedrock-key.txt` or a prompt file already there is **kept**, and the log says so, because those
+are yours. Nothing is deleted when you install somewhere else, and nothing is deleted when you
+install again.
+
+What it **may** remove is two kinds of pointer, and only when you say so: its own Explorer
+right-click entries (page 8, which clears every JRock entry on the machine before writing the
+new ones — and clears them even when you install none) and its own shortcuts (page 4, where
+unticking one that is there takes it away). A pointer is not data: the entries are written out
+to a `.reg` that puts every one of them back, and a shortcut is one tick away from being
+written again.
+
+Nine pages, in this order:
+
+1. **What was unpacked** — `jrock.jar` and `samples/` have to be in the folder it was started
+   from, which is where a release unpacks to. Missing, it says so and waits for Retry.
+2. **Where everything goes** — default `~/Documents/JRockAssistant`, with the tree above drawn
+   on the page. The jar is copied there with its **SHA-256 and MD5** written beside it, computed
+   from the copy that just landed. The page says why the **folder name** matters: it is what
+   every Explorer entry is labelled with.
+3. **Ghostscript and xpdf** — looked for on `PATH`, with [where to get them](#pdf-conversion-ghostscript)
+   and a **Retry** when you have. Or continue without: everything else works, and JRock names
+   the missing tool if you ever ask it for that conversion.
+4. **Shortcuts** — Start menu and Desktop, both called **JRock Assistant**, both opening JRock
+   in that folder. A real `.lnk` on Windows (written through `WScript.Shell`, the only way
+   without a native library), a `.desktop` file on Linux, a `.command` script on macOS.
+   **Unticking one that is already there removes it**, and the page says which file will go.
+5. **Agents and flows** — all of them, or pick them one by one. The table says of each one
+   whether it loops or runs once, how many prompt files it brings, and the folder it works in:
+   editable for an agent (filled in with `Agents\<its name>`), and `Flows\` for a flow, which
+   is not a choice and so is not offered as one. Each one is copied **with the prompt files its
+   own source names, beside its `.java`** — read out of its source, where the file names are
+   string constants, rather than from a list in the installer that would be a second place to
+   keep right. A prompt that belongs to no agent and no flow is shipped in `samples/prompts/`
+   and offered its own tick, into the install folder, where it becomes the prompt library.
+6. **Settings and the key** — opens the new `jrock-config.txt` in whatever opens a `.txt`, waits
    while you edit and save it, then opens `bedrock-key.txt` the same way. Still empty afterwards,
    it says the key can go in later and what already works without one: merging duplex scans,
    converting and including documents, fetching a URL, exporting to DOCX or RTF, printing. Only
    asking a model needs the key.
-8. **Settings for the agents** — when agents work in folders of their own, offers to copy
-   `jrock-config.txt` into each, and the key as a **separate tick**: an agent cannot ask a model
-   without one, and JRock itself never copies a key into a folder it was not typed for, so this is
-   a choice rather than a given. An existing file in any of those folders is left alone.
-9. **Right-click entries** — "JRock here!", "Open as prompt with JRock", and one per installed
-   agent, with **exactly the key names, labels and command lines JRock writes itself**, so what
-   this installs is what JRock's own *Uninstall agent* removes. Under `HKEY_CURRENT_USER`, no
-   administrator, and the applied `.reg` is kept in the working folder to be read. Skippable —
-   JRock's own Window menu installs them later.
-10. **Installed** — checks for **anything of JRock still running** (a JVM with the jar or an agent
-    on its command line, which is not a shell whose folder is named after JRock nor an editor with
-    `jrock-config.txt` open), names what it found with the folder each one works in, and waits for
-    Retry. Then it starts JRock in the primary folder and every agent in its own.
+7. **Settings for the agents and flows** — every folder that runs a JRock of its own is offered
+   a copy of `jrock-config.txt`, and the key as a **separate tick**: an agent cannot ask a model
+   without one, and JRock itself never copies a key into a folder it was not typed for, so this
+   is a choice rather than a given. An existing file in any of those folders is left alone.
+8. **Right-click entries** — "JRock here!", "Open as prompt with JRock", and one per installed
+   agent and flow, [as described above](#windows-explorer-right-click-integration). Every JRock
+   entry already on the machine is removed first and written out to a `.reg` that restores it;
+   with nothing ticked, the page **only** cleans up, which is how these entries are uninstalled.
+   The whole command line of every entry written goes into the log.
+9. **Installed** — checks for **anything of JRock still running** (a JVM with the jar or a
+   sample on its command line, which is not a shell whose folder is named after JRock nor an
+   editor with `jrock-config.txt` open), names what it found with the folder each one works in,
+   and waits for Retry. Then it starts JRock and **the agents** — not the flows: a flow is one
+   run you ask for, and starting one behind you would open a file chooser nobody asked for.
 
-**A previous install is read, not guessed.** The Explorer entries already hold the program folder,
-the working folder, the prompts folder and which agents are installed, so those become the
-defaults and the agents found become the ticks — installing again **extends** what is there
-instead of asking everything twice.
+**A previous install is read, not guessed.** The Explorer entries already hold the folder the
+jar is in, which agents and flows are installed and where each one works, so those become the
+defaults and the ticks — installing again **extends** what is there instead of asking everything
+twice.
 
-`--check` prints every one of those detections and writes nothing, which is what CI runs on all
-three platforms so the installer cannot rot unnoticed.
+`--check` prints every one of those detections — including every JRock registry entry it would
+clear — and writes nothing, which is what CI runs on all three platforms so the installer
+cannot rot unnoticed.
 
 ## Reproducible builds
 
@@ -3237,10 +3276,10 @@ For robustness the build runs on **three operating systems** and publishes three
 
 Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
 (`jrock.jar.sha256`, `jrock.jar.md5`), the zipped source (`jrock-src.zip`, which holds
-`JRock.java`, the sample prompts and the automation scripts) and `agentic-samples/` loose
+`JRock.java`, the sample prompts and the automation scripts) and `samples/` loose
 beside it, so the samples can be read without unpacking anything — and so an
 [automation](#automating-the-chain-jrockdocinventoryjava) is one `cp jrock.jar
-agentic-samples/` away from running. Because the build is reproducible, the `jrock.jar`
+samples/` away from running. Because the build is reproducible, the `jrock.jar`
 inside all three archives is identical.
 
 To verify and run JRock from a build artifact, unzip it, then:

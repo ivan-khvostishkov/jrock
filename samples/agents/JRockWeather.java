@@ -1,14 +1,17 @@
-// A JRock automation: where to get the weather for a location - the address on
-// open-meteo.com that has it, checked, for other agents to fetch.
+// A JRock agent (it loops, and is started with JRock): where to get the weather for a
+// location - the address on open-meteo.com that has it, checked, for other agents to
+// fetch.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
 //     java -cp jrock.jar JRockWeather.java [--working-dir <dir>]
 //
-// COPY jrock.jar HERE FIRST, take the flags as JRock's own, and expect a typed static
-// call rather than reflection: all of that is JRockDocInventory.java's opening comment,
-// and it is true of every automation in this directory. Read that file first.
+// The jar is wherever the installer put it - one folder up from samples/flows/,
+// two up from an agent's own folder - and -cp names it. Take the flags as
+// JRock's own and expect a typed static call rather than reflection: all of
+// that is samples/flows/JRockDocInventory.java's opening comment, and it is
+// true of every agent and every flow. Read that file first.
 //
 //   1. JRock is started and taken as an automation: its prompt read-only and Mic always
 //      on muted. This JRock is the agent's own - it asks the model for the address - so

@@ -1,13 +1,15 @@
-// A JRock automation: a push-to-talk voice agent.
+// A JRock agent (it loops, and is started with JRock): a push-to-talk voice agent.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
 //     java -cp jrock.jar JRockPushToTalk.java [--working-dir <dir>] [--prompts-dir <dir>]
 //
-// COPY jrock.jar HERE FIRST, take the flags as JRock's own, and expect a typed static
-// call rather than reflection: all of that is JRockDocInventory.java's opening comment,
-// and it is true of every automation in this directory. Read that file first.
+// The jar is wherever the installer put it - one folder up from samples/flows/,
+// two up from an agent's own folder - and -cp names it. Take the flags as
+// JRock's own and expect a typed static call rather than reflection: all of
+// that is samples/flows/JRockDocInventory.java's opening comment, and it is
+// true of every agent and every flow. Read that file first.
 //
 // What this one does is a loop, not a pass:
 //
