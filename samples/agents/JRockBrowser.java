@@ -13,11 +13,12 @@
 // the PNG it wrote, with no JRock, no model and no window. It is the way to see what the
 // browser did without spending a request on it.
 //
-// SIX HOSTS, AND NOTHING ELSE. duckduckgo.com, businessinsider.com, zdnet.com,
-// techcrunch.com, scmp.com, arstechnica.com - a list in this file, not a setting, not a
-// line in a request, and not something a model can add to. The web is the one thing an
-// agent reaches that nobody in the room controls, so what it may reach is written down
-// where it can be read.
+// SIX HOSTS AND ONE PAGE, AND NOTHING ELSE. duckduckgo.com, businessinsider.com,
+// zdnet.com, techcrunch.com, scmp.com, arstechnica.com - and Wikipedia's Current events
+// portal, which is allowed as a PAGE while its host is not allowed at all. A list in
+// this file, not a setting, not a line in a request, and not something a model can add
+// to. The web is the one thing an agent reaches that nobody in the room controls, so
+// what it may reach is written down where it can be read.
 //
 // The check is made TWICE, and the second time is the one that matters:
 //
@@ -134,6 +135,22 @@ public final class JRockBrowser {
         "techcrunch.com",
         "scmp.com",
         "arstechnica.com",
+    };
+
+    // ONE PAGE, NOT A HOST. Wikipedia's Current events portal is a news summary of the
+    // day, written by people, and the one page of that site worth reading here - so it
+    // is allowed as a PAGE and en.wikipedia.org is not on the host list at all.
+    //
+    // Which has a pleasing consequence rather than a cost: every link on it goes either
+    // out to a newspaper (off the list, refused) or further into Wikipedia (not on the
+    // list either, also refused). So this is a page that can be read and not travelled
+    // from, and #follow on it says so instead of wandering into an encyclopaedia.
+    //
+    // Matched on scheme, host and path, with a fragment ignored because a fragment is
+    // part of the same page - and with a QUERY REFUSED, because "?action=edit" is a
+    // different page wearing the same path.
+    private static final String[] ALLOWED_PAGES = {
+        "https://en.wikipedia.org/wiki/Portal:Current_events",
     };
 
     // Where a search goes. DuckDuckGo's own HTML form, which needs no JavaScript to show
@@ -349,6 +366,9 @@ public final class JRockBrowser {
         { "techcrunch.com", "techcrunch", "tech crunch", "crunch" },
         { "scmp.com", "scmp", "south china morning post", "south china", "morning post" },
         { "arstechnica.com", "arstechnica", "ars technica", "ars" },
+        { "https://en.wikipedia.org/wiki/Portal:Current_events", "current events",
+          "wikipedia current events", "wikipedia", "wiki current events", "wiki news",
+          "portal current events", "what is happening in the world" },
     };
 
     // THE FRONT PAGE OF A SITE, where asking for it plainly does not work.
@@ -373,7 +393,10 @@ public final class JRockBrowser {
                 .replaceAll("\\s+", " ").trim();
         for (String[] site : NAMES) {
             for (int i = 1; i < site.length; i++) {
-                if (spoken.equals(site[i])) return front(site[0]);
+                if (!spoken.equals(site[i])) continue;
+                // A name may stand for a whole address (the one allowed page) or for a
+                // domain (everything else).
+                return site[0].startsWith("https://") ? site[0] : front(site[0]);
             }
         }
         // A bare host, with or without a path after it.
@@ -398,6 +421,12 @@ public final class JRockBrowser {
         StringBuilder out = new StringBuilder("Pages can be read from these hosts, and "
                 + "their subdomains, and nowhere else:");
         for (String host : ALLOWED) out.append("\n- ").append(host);
+        out.append("\nAnd one page, whose host is otherwise not allowed at all:");
+        for (String page : ALLOWED_PAGES) {
+            out.append("\n- ").append(page)
+                    .append(" - ask for it as \"current events\". Nothing can be followed "
+                            + "from it: every link on it leads off the list.");
+        }
         return out.append("\nEach can be asked for by domain or by name - \"zdnet\", "
                 + "\"ars technica\", \"South China Morning Post\". A search goes to "
                 + "DuckDuckGo. The list is in the agent's own source: nothing in a "
@@ -444,8 +473,31 @@ public final class JRockBrowser {
         for (String allowed : ALLOWED) {
             if (host.equals(allowed) || host.endsWith("." + allowed)) return host;
         }
+        // The one page that is allowed without its host being.
+        if (allowedPage(uri) != null) return host;
         throw new Stop(host + " is not a host this agent reads" + when + ". The list is: "
-                + String.join(", ", ALLOWED) + ".");
+                + String.join(", ", ALLOWED) + ", and the one page "
+                + ALLOWED_PAGES[0] + ".");
+    }
+
+    // Which allowed page this address is, or null when it is none of them.
+    private static String allowedPage(URI uri) {
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        while (path.endsWith("/")) path = path.substring(0, path.length() - 1);
+        String query = uri.getQuery();
+        if (query != null && !query.isEmpty()) return null;
+        for (String allowed : ALLOWED_PAGES) {
+            URI page = URI.create(allowed);
+            String pagePath = page.getPath();
+            while (pagePath.endsWith("/")) pagePath = pagePath.substring(0, pagePath.length() - 1);
+            if (scheme.equals("https") && host.equals(page.getHost().toLowerCase(Locale.ROOT))
+                    && path.equals(pagePath)) {
+                return allowed;
+            }
+        }
+        return null;
     }
 
     // ---- The browser -----------------------------------------------------------
@@ -667,6 +719,12 @@ public final class JRockBrowser {
     // Every link on the page worth offering: the ones with words on them, pointing at a
     // host on the list, each address once, in the order they come down the page.
     private static List<Link> linksOn(WebSocket live, String tab) {
+        // Where we already are, so the links back to it can be dropped: "Skip to
+        // content", "Expand all", the logo that points at the page it is on. Following
+        // one would reload what is already in front of us, and on a page whose other
+        // links all lead off the list they would be the only candidates left.
+        String here = evaluate(live, tab, "location.href");
+        String bare = here.contains("#") ? here.substring(0, here.indexOf('#')) : here;
         String script =
                 "(function(){var out=[],seen={},as=document.querySelectorAll('a[href]');"
                 + "for(var i=0;i<as.length&&out.length<400;i++){var a=as[i];"
@@ -691,6 +749,8 @@ public final class JRockBrowser {
             } catch (Stop off) {
                 continue;
             }
+            String plain = href.contains("#") ? href.substring(0, href.indexOf('#')) : href;
+            if (plain.equals(bare)) continue;           // a link to this very page
             if (!texts.add(text.toLowerCase(Locale.ROOT))) continue;
             int top = 0;
             try {

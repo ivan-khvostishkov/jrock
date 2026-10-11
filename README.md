@@ -2169,11 +2169,22 @@ java -cp jrock.jar JRockBrowser.java --shot zdnet.com    # the photographs, and 
 java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation section"
 ```
 
-- **Six hosts, and nothing else, ever.** `duckduckgo.com`, `businessinsider.com`, `zdnet.com`,
-  `techcrunch.com`, `scmp.com`, `arstechnica.com` — a list in the agent's own source, not a
-  setting, not a line in a request, and not something a model can add to. The web is the one
-  thing an agent reaches that nobody in the room controls, so what it may reach is written down
-  where it can be read.
+- **Six hosts and one page, and nothing else, ever.** `duckduckgo.com`,
+  `businessinsider.com`, `zdnet.com`, `techcrunch.com`, `scmp.com`, `arstechnica.com` — a list
+  in the agent's own source, not a setting, not a line in a request, and not something a model
+  can add to. The web is the one thing an agent reaches that nobody in the room controls, so
+  what it may reach is written down where it can be read.
+- **And one page whose host is not allowed at all**: Wikipedia's
+  [Current events portal](https://en.wikipedia.org/wiki/Portal:Current_events), a summary of the
+  day written by people, asked for as *"current events"*. Allowed as a **page** — matched on
+  scheme, host and path, with a query refused, since `?action=edit` is a different page wearing
+  the same path. Which has a pleasing consequence rather than a cost: **every** link on it goes
+  either out to a newspaper (off the list) or further into Wikipedia (not on the list either),
+  so it is a page that can be read and not travelled from. `#links` on it answers **0**, which
+  is the honest number.
+- **Links back to the page you are on are dropped** — "Skip to content", "Expand all", the logo
+  that points at itself. Following one would reload what is already there, and on a page whose
+  other links all lead off the list they would otherwise be the only candidates left.
 - **Checked twice, and the second time is the one that matters.** Once on the address as given,
   and again on **the address the browser actually ended on** — which is not the same thing,
   because a redirect is something a site may do at any moment. Off the list, the page is
