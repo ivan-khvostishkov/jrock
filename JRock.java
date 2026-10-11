@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.15.0";
+    private static final String VERSION = "2.16.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -3090,6 +3090,16 @@ public class JRock {
             String url = log.selectedUrl();
             if (url != null) openUrlInNewTab(url, log);
         });
+        // Beside it, for the other kind of address in the log: a file on this machine.
+        // Greyed out unless the WHOLE selection looks like a local name, and nothing is
+        // started until the click has found something there (see localPathIn). Not in
+        // the browser, where there is no disk of the user's to open anything on and no
+        // shell to hand a name to.
+        javax.swing.JMenuItem openFileItem = isCheerpJ() ? null
+                : addMenuItem(logMenu, "Open local file", () -> {
+                    String path = localPathIn(log.selectedText());
+                    if (path != null) openLocalFile(path, log);
+                });
         // The log pane is read-only, so Copy is the only clipboard verb it needs.
         logMenu.addSeparator();
         javax.swing.JMenuItem copyLogItem = addEditItem(logMenu, "Copy", output,
@@ -3102,6 +3112,9 @@ public class JRock {
                 exportRtfItem.setEnabled(selected);
                 exportDocxItem.setEnabled(selected);
                 openUrlItem.setEnabled(selected && log.selectedUrl() != null);
+                if (openFileItem != null) {
+                    openFileItem.setEnabled(localPathIn(log.selectedText()) != null);
+                }
                 if (narrateItem != null) {
                     boolean speaking = narration != null;
                     narrateItem.setText(speaking ? "Stop narrating" : NARRATE_LABEL);
@@ -6351,6 +6364,121 @@ public class JRock {
         String[] cmd = isWindows() ? new String[] { "rundll32", "url.dll,FileProtocolHandler", url }
                 : os.contains("mac") ? new String[] { "open", url }
                 : new String[] { "xdg-open", url };
+        try {
+            new ProcessBuilder(cmd).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            return null;
+        } catch (IOException ex) {
+            return why + "; " + cmd[0] + " failed too: " + ex.getMessage();
+        }
+    }
+
+    // ---- A local file named in the log -------------------------------------
+    // "Open local file" hands a name in the transcript to whatever this desktop opens it
+    // with - a .docx to the word processor, a .wav to the player, a folder to the file
+    // manager - so the paths JRock writes all over its own log (every include, every
+    // conversion, every recording, every export) are one click from the thing itself,
+    // with no trip through Explorer to find them again.
+    //
+    // The WHOLE selection is the name, unlike the URL item which hunts for an address
+    // inside it. A path holds spaces - "C:\Program Files\..." - and nothing in running
+    // text says where one ends, so guessing would open the wrong thing or nothing at
+    // all. Select the name, all of it, and nothing else: that rule a reader can follow,
+    // and it is the one the item is greyed out by.
+    //
+    // Two checks, deliberately at different moments. What the text LOOKS like is asked
+    // on every right-click, because it costs nothing: a drive and a separator, a UNC
+    // share, or an absolute POSIX path, and none of the characters a name cannot hold.
+    // Whether anything is THERE is asked once, on the click - a menu that stats a file
+    // every time it opens stutters on a network path, and the answer would be stale by
+    // the time anybody clicked anyway. Only after that does an external process see the
+    // name.
+    //
+    // The name is the user's own choice out of the text in front of them, and the file
+    // is opened as double-clicking it would open it. A path a model printed into its
+    // answer is in the log like any other, so what is opened is worth a glance first -
+    // the same glance Explorer asks for.
+
+    // The selection as a local name, or null when it does not look like one here. For
+    // this machine: a Windows drive or share is not a name on Linux, and an absolute
+    // POSIX path is not one on Windows, and the item is greyed for both.
+    static String localPathIn(String selection) {
+        if (selection == null) return null;
+        // A selection dragged over a line usually takes the newline after it, and a
+        // path quoted in the text - "C:\...\report.docx" - is still that path.
+        String name = selection.strip();
+        if (name.length() >= 2 && name.startsWith("\"") && name.endsWith("\"")) {
+            name = name.substring(1, name.length() - 1).strip();
+        }
+        if (name.isEmpty() || name.contains("://")) return null;   // an address, not a path
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c == '\n' || c == '\r' || c == '\t' || c < ' ') return null;
+        }
+        boolean drive = name.length() >= 3 && Character.isLetter(name.charAt(0))
+                && name.charAt(1) == ':' && (name.charAt(2) == '\\' || name.charAt(2) == '/');
+        boolean share = name.startsWith("\\\\") && name.length() > 2;
+        boolean posix = name.startsWith("/") && name.length() > 1;
+        if (isWindows() ? !(drive || share) : !posix) return null;
+        if (isWindows()) {
+            // What no name on Windows can hold. The drive's own colon is already behind
+            // us, so any colon left is a second one - and that is not a path.
+            String rest = drive ? name.substring(2) : name;
+            for (int i = 0; i < rest.length(); i++) {
+                if ("<>\"|?*:".indexOf(rest.charAt(i)) >= 0) return null;
+            }
+        }
+        return name;
+    }
+
+    // Opens the selected name, once the disk says there is something there. The reason
+    // goes in the log either way: it is where the name came from, and where every other
+    // answer about a file already is.
+    private static void openLocalFile(String name, LogView log) {
+        Path file;
+        try {
+            file = Paths.get(name);
+        } catch (RuntimeException notAName) {
+            log.gray("Not opened: " + name + " is not a name this file system can take.");
+            return;
+        }
+        if (!Files.exists(file)) {
+            log.gray("Not opened: " + file + " is not there.");
+            return;
+        }
+        boolean folder = Files.isDirectory(file);
+        String failure = openWithDesktop(file);
+        log.gray(failure == null
+                ? "Opened " + (folder ? "the folder " : "") + file
+                        + (folder ? " in the file manager." : " with its own program.")
+                : "Could not open " + file + ": " + failure);
+    }
+
+    // Desktop.open first, which IS the platform's "open with the default program" -
+    // ShellExecute on Windows, Launch Services on macOS, the desktop's own handler on
+    // Linux - and the platform's opener when that is missing or refuses, exactly as
+    // openUrl falls back for an address. On Windows that is cmd's own start, whose empty
+    // "" is the window title it wants before a quoted path, or it would read the path as
+    // the title and open nothing.
+    private static String openWithDesktop(Path file) {
+        String why;
+        try {
+            if (java.awt.Desktop.isDesktopSupported()) {
+                java.awt.Desktop d = java.awt.Desktop.getDesktop();
+                if (d.isSupported(java.awt.Desktop.Action.OPEN)) {
+                    d.open(file.toFile());
+                    return null;
+                }
+            }
+            why = "this desktop has no default-program hook";
+        } catch (Exception ex) {
+            why = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+        }
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        String[] cmd = isWindows()
+                ? new String[] { "cmd", "/c", "start", "", file.toString() }
+                : os.contains("mac") ? new String[] { "open", file.toString() }
+                : new String[] { "xdg-open", file.toString() };
         try {
             new ProcessBuilder(cmd).redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
