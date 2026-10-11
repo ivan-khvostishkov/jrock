@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.17.0";
+    private static final String VERSION = "2.18.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -6672,6 +6672,39 @@ public class JRock {
                         + "enables\nautomations there anyway - and install again.");
                 return;
             }
+
+            // The jar that will be used is not the one beside the agent: the Explorer
+            // entry would still work, carrying an absolute path, but the agent's own
+            // folder is then not a folder the agent can be run from - every automation
+            // here says "copy jrock.jar here first", because by hand that is exactly
+            // what "java -cp jrock.jar Agent.java" needs. Asked before anything reaches
+            // the registry, and left as a choice: the entry is not wrong, only lonely.
+            Path beside = agent.getParent() == null ? null
+                    : agent.getParent().resolve("jrock.jar");
+            if (beside == null || !Files.isRegularFile(beside)) {
+                int answer = javax.swing.JOptionPane.showConfirmDialog(frame,
+                        "There is no jrock.jar in the agent's own folder:\n"
+                            + agent.getParent() + "\n\n"
+                            + "The Explorer entry will use the jar this JRock runs from:\n"
+                            + jar + "\n\n"
+                            + "That entry works, but the agent cannot be run by hand from "
+                            + "its own\nfolder - \"java -cp jrock.jar " + agent.getFileName()
+                            + "\" needs the jar there - and it\nbreaks if this JRock's jar "
+                            + "is moved or replaced.\n\n"
+                            + "Copy jrock.jar into the agent's folder and install again, "
+                            + "or install\nnow with the jar above?",
+                        AGENT_TITLE, javax.swing.JOptionPane.YES_NO_OPTION,
+                        javax.swing.JOptionPane.WARNING_MESSAGE);
+                if (answer != javax.swing.JOptionPane.YES_OPTION) {
+                    log.gray("Agent not installed: there is no jrock.jar in "
+                            + agent.getParent() + " - copy it there and install again.");
+                    log.gray("");
+                    return;
+                }
+                log.gray("No jrock.jar beside " + agent.getFileName() + ": the entry uses "
+                        + jar + " instead.");
+            }
+
             String label = agentLabel(agent);
             String key = agentKey(agent);
             String dirLaunch = buildAgentLaunch(javaw, jar, agent, null);

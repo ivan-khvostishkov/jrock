@@ -198,6 +198,16 @@ public final class JRockPushToTalk {
             "^\\W*I need weather for this location:\\s*(.*\\S)\\s*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
+    // The answer that asks what is in the operator's calendar, and for when: "today",
+    // "this week", or a span of two dates. The whole of the answer, as the others are.
+    //
+    // The span is handed to the calendar agent as it stands and parsed there, so the
+    // words the model may use - today, this week - are understood in one place rather
+    // than two, and anything else comes back as a reason rather than as a wrong day.
+    private static final java.util.regex.Pattern CALENDAR_REQUEST = java.util.regex.Pattern.compile(
+            "^\\W*I need your calendar for\\s*(.*\\S)\\W*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
     // Coordinates in a location line, as the location agent writes them - which the model
     // may already have from it, and then they are used as they are.
     private static final java.util.regex.Pattern COORDINATES = java.util.regex.Pattern.compile(
@@ -213,6 +223,7 @@ public final class JRockPushToTalk {
     // model and a page fetched take.
     private static final int LOCATION_PORT = 47471;
     private static final int WEATHER_PORT = 47472;
+    private static final int CALENDAR_PORT = 47473;
     private static final int AGENT_CONNECT_MS = 3000;
     private static final int AGENT_TIMEOUT_MS = 180_000;
 
@@ -314,9 +325,10 @@ public final class JRockPushToTalk {
         // Each once a turn - the location, then the weather for it, is a turn that goes
         // well - so a model that asks again is heard rather than asked forever.
         String note = null;
-        boolean askedLocation = false, askedWeather = false;
+        boolean askedLocation = false, askedWeather = false, askedCalendar = false;
         while (note == null) {
             java.util.regex.Matcher weather = WEATHER_REQUEST.matcher(answer.trim());
+            java.util.regex.Matcher calendar = CALENDAR_REQUEST.matcher(answer.trim());
             if (!askedLocation && LOCATION_REQUEST.matcher(answer.trim()).matches()) {
                 askedLocation = true;
                 later(() -> setState(State.ANSWERING, "Looking up the location\u2026"));
@@ -328,6 +340,22 @@ public final class JRockPushToTalk {
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(here[0]));
                 answer = sendAndRead("Sent the location, waiting for the reply\u2026");
+            } else if (!askedCalendar && calendar.matches()) {
+                // What is in the calendar is read off this machine by the calendar agent
+                // (JRockCalendarEvents.java), out of Thunderbird's own offline copy -
+                // nothing is fetched and nothing is asked of a server.
+                askedCalendar = true;
+                String span = calendar.group(1).trim();
+                later(() -> setState(State.ANSWERING, "Reading the calendar\u2026"));
+                String[] events = askAgent(CALENDAR_PORT, calendarRequest(span), "calendar",
+                        "JRockCalendarEvents.java");
+                if (events[0] == null) {
+                    note = "Calendar not sent: " + events[1];
+                    break;
+                }
+                check(JRock.automationClearPrompt());
+                check(JRock.automationSetPrompt(events[0]));
+                answer = sendAndRead("Sent the calendar, waiting for the reply\u2026");
             } else if (!askedWeather && weather.matches()) {
                 askedWeather = true;
                 String[] report = weather(weather.group(1));
@@ -352,6 +380,20 @@ public final class JRockPushToTalk {
         }
         String silent = JRock.automationNarrate(reply);
         return join(note, alarm, silent == null ? null : "Not read aloud: " + silent);
+    }
+
+    // What the model asked for, as the calendar agent's own request: "today" and "this
+    // week" are its own commands, a pair of dates is a range, and anything else is passed
+    // through for it to refuse with a reason rather than guessed at here.
+    private static String calendarRequest(String span) {
+        String asked = span.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9\\- ]", " ")
+                .trim().replaceAll("\\s+", " ");
+        java.util.regex.Matcher dates = java.util.regex.Pattern
+                .compile("(\\d{4}-\\d{2}-\\d{2}).*?(\\d{4}-\\d{2}-\\d{2})").matcher(asked);
+        if (dates.find()) return "#range " + dates.group(1) + " " + dates.group(2);
+        if (asked.contains("week")) return "#week";
+        if (asked.contains("next")) return "#next 5";
+        return "#today";
     }
 
     // The weather for a location the model named: its coordinates from the location
