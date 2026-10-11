@@ -113,6 +113,11 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
                 .startsWith("![Image: " + IMAGE_WIDTH + " x " + IMAGE_HEIGHT + ", ")
                 .endsWith("](" + name + ")\n@img " + hash);
 
+        // The stats block times the call itself: a local server answers in a few
+        // milliseconds, so the figure is only checked for being a figure in ms.
+        assertThat(theLog()).describedAs("the log pane's text")
+                .containsPattern("Round trip \\(RTT\\): [0-9,]+ ms");
+
         assertThat(theLog()).describedAs("the log pane's text")
                 // The include's own lines, which a restart reads the mapping back from.
                 .contains("Included @img " + hash + " from " + saved)
