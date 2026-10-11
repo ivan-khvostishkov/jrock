@@ -376,10 +376,23 @@ public final class JRockCalendarEvents {
                     .append(excluded.contains(name) ? " (left out of briefings)" : "");
         }
         if (counts.isEmpty()) out.append("\n- none; nothing is cached in this profile.");
-        return out.append('\n').append(footer()).toString();
+        Map<String, String> invisible = uncachedCalendars();
+        if (!invisible.isEmpty()) {
+            out.append("\nIn Thunderbird, but NOT cached - no events of theirs are on this "
+                    + "disk, so none can be read here:");
+            for (String name : invisible.values()) {
+                out.append("\n- ").append(name).append(": Offline Support is off in its "
+                        + "properties");
+            }
+        }
+        return out.append('\n').append(readFrom()).toString();
     }
 
     private static String footer() {
+        return readFrom() + uncachedNote();
+    }
+
+    private static String readFrom() {
         return "Read from Thunderbird's own offline copy in " + profile + ", read-only.";
     }
 
@@ -988,6 +1001,84 @@ public final class JRockCalendarEvents {
         return null;
     }
 
+    // THE CALENDARS NOTHING HERE CAN SEE: in the registry, but with Offline Support
+    // turned off (calendar.registry.<uuid>.cache.enabled = false) on a calendar that
+    // lives on a server. Thunderbird keeps those nowhere on this disk - it asks the
+    // server every time it needs them - so no file-based reader can see a single event
+    // in them, however often it looks.
+    //
+    // Which is worth saying out loud rather than leaving as a silence. An assistant that
+    // answers "nothing on Thursday" when Thursday is full, because the calendar it is in
+    // is not cached, is worse than one that says it cannot see that calendar: the first
+    // is believed. So every briefing ends with a line naming them when there are any,
+    // and #calendars lists them with the rest.
+    //
+    // A "storage" calendar is Thunderbird's own local one and lives in local.sqlite,
+    // which is read: cache.enabled means nothing there, and it is not reported.
+    private static Map<String, String> uncachedCalendars() {
+        Map<String, String> names = new LinkedHashMap<>();   // uuid -> name
+        Map<String, Boolean> cached = new LinkedHashMap<>();
+        Map<String, String> types = new LinkedHashMap<>();
+        Path prefs = profile == null ? null : profile.resolve("prefs.js");
+        if (prefs == null || !Files.isRegularFile(prefs)) return new LinkedHashMap<>();
+        Pattern pref = Pattern.compile("user_pref\\(\"calendar\\.registry\\."
+                + "([0-9a-fA-F-]+)\\.(name|cache\\.enabled|type)\",\\s*(.*)\\);");
+        try {
+            for (String line : Files.readAllLines(prefs, StandardCharsets.UTF_8)) {
+                Matcher m = pref.matcher(line.trim());
+                if (!m.matches()) continue;
+                String uuid = m.group(1);
+                String value = m.group(3).trim();
+                switch (m.group(2)) {
+                    case "name":
+                        names.put(uuid, unescape(strip(value)));
+                        break;
+                    case "cache.enabled":
+                        cached.put(uuid, Boolean.parseBoolean(value));
+                        break;
+                    default:
+                        types.put(uuid, strip(value));
+                }
+            }
+        } catch (IOException ex) {
+            throw new Stop("could not read " + prefs + ": " + ex.getMessage());
+        }
+        Map<String, String> invisible = new LinkedHashMap<>();
+        for (Map.Entry<String, Boolean> one : cached.entrySet()) {
+            if (one.getValue()) continue;
+            if ("storage".equals(types.get(one.getKey()))) continue;   // local.sqlite
+            invisible.put(one.getKey(), names.getOrDefault(one.getKey(),
+                    "(unnamed: " + one.getKey() + ")"));
+        }
+        return invisible;
+    }
+
+    // A prefs.js value with its quotes taken off, when it has any.
+    private static String strip(String value) {
+        return value.length() > 1 && value.startsWith("\"") && value.endsWith("\"")
+                ? value.substring(1, value.length() - 1) : value;
+    }
+
+    // The one line a briefing ends with when a calendar cannot be read at all, and
+    // nothing when they all can.
+    private static String uncachedNote() {
+        Map<String, String> invisible;
+        try {
+            invisible = uncachedCalendars();
+        } catch (Stop stop) {
+            return "";
+        }
+        if (invisible.isEmpty()) return "";
+        return "\nNOT INCLUDED, and not readable here at all: "
+                + String.join(", ", invisible.values())
+                + ". Thunderbird keeps " + (invisible.size() == 1 ? "it" : "them")
+                + " on the server only (Offline Support is off in the calendar's "
+                + "properties), so nothing on this disk holds "
+                + (invisible.size() == 1 ? "its" : "their") + " events. Anything in "
+                + (invisible.size() == 1 ? "it" : "them") + " is missing from this "
+                + "briefing - say so if it matters.";
+    }
+
     // The calendars' names, as Thunderbird keeps them in prefs.js. Read every time: a
     // calendar renamed in Thunderbird should be renamed here without a restart.
     private static Map<String, String> calendarNames() {
@@ -1429,6 +1520,7 @@ public final class JRockCalendarEvents {
                 return;
             }
             Set<String> inUse = new LinkedHashSet<>();
+            Map<String, String> invisible;
             try {
                 for (Path db : databases()) {
                     for (String[] row : query(db,
@@ -1436,6 +1528,7 @@ public final class JRockCalendarEvents {
                         inUse.add(names.getOrDefault(row[0], "(unnamed: " + row[0] + ")"));
                     }
                 }
+                invisible = uncachedCalendars();
             } catch (Stop stop) {
                 later(() -> say(stop.getMessage()));
                 return;
@@ -1454,9 +1547,31 @@ public final class JRockCalendarEvents {
                     });
                     calendarBox.add(box);
                 }
+                // The ones there is nothing to include: in Thunderbird, not on this disk.
+                // Shown rather than left out, because a calendar missing from this list
+                // is the one thing that would send somebody looking for a refresh button
+                // that would not have helped.
+                for (String name : invisible.values()) {
+                    javax.swing.JCheckBox box = new javax.swing.JCheckBox(name, false);
+                    box.setOpaque(false);
+                    box.setEnabled(false);
+                    box.setToolTipText("Offline Support is off for this calendar in "
+                            + "Thunderbird, so none of its events are on this disk and "
+                            + "nothing here can read them");
+                    calendarBox.add(box);
+                }
                 calendarBox.revalidate();
                 calendarBox.repaint();
                 if (note != null) say(note);
+                if (!invisible.isEmpty()) {
+                    say("Not readable here: " + String.join(", ", invisible.values())
+                            + " - Offline Support is off for "
+                            + (invisible.size() == 1 ? "it" : "them")
+                            + " in Thunderbird, so none of "
+                            + (invisible.size() == 1 ? "its" : "their")
+                            + " events are on this disk. Turn it on in the calendar's "
+                            + "properties and let Thunderbird sync.");
+                }
             });
         });
     }
