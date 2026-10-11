@@ -2321,12 +2321,32 @@ sequenceDiagram
     end
 ```
 
-- **Two files in five minutes is one letter.** A one-sided scanner given a two-sided letter is
-  run twice — the stack, then the stack turned over — and writes two PDFs a minute apart. So
-  `#recent` counts **documents**, not files: two scans close together *and* adjacent in name
-  (`scan0166.pdf`, `scan0167.pdf`) are reported as one letter in two passes, which is what
-  filing then merges. Three or more together are reported as what they are, with their times,
-  because at that point only the operator knows what happened.
+- **Whether two scans are one two-sided letter is not something this can know**, and the first
+  version of this agent pretended otherwise. It paired two scans with adjacent names a few
+  minutes apart — which sounds reasonable until you look at a real scanner folder:
+
+  ```
+  scan0164.pdf  21:55:24   2 pages   1.4 MB
+  scan0165.pdf  21:58:38   2 pages   1.9 MB
+  scan0166.pdf  21:58:59   2 pages   1.9 MB
+  scan0167.pdf  21:59:22   2 pages   0.9 MB
+  scan0168.pdf  21:59:42   2 pages   0.6 MB
+  ```
+
+  Five letters put through a flatbed one after the other look exactly like two-and-a-half
+  two-sided ones. Twenty seconds apart is both the time it takes to turn a stack over **and**
+  the time it takes to put the next letter in; the page counts are equal either way; and the
+  names are always adjacent, because a scanner counts. There is no signal there — and a wrong
+  guess merges two unrelated letters into one PDF and files them under one name, which is the
+  worst thing this agent could do.
+
+  So it guesses nothing. Every scan is reported as itself, with its time and its size, and
+  **which files make up one letter is said by the operator**: `#inventory` files the newest by
+  itself, `#inventory scan0166` files that one, and `#inventory scan0166 scan0167` (or
+  `#inventory duplex` for the newest two) merges the named pair as the two passes of one. One
+  by itself is the default because it is the one that cannot go wrong: a two-sided letter filed
+  as two single-sided ones is two files to tidy up, while two letters merged are a document
+  that is half somebody else's.
 - **Only `.txt` for content.** Asked what a letter says, it reads the `.txt` beside it and
   nothing else. It converts nothing: turning a PDF into text is the inventory flow's job — with
   Ghostscript, xpdf and a model — and doing it a second way here would be a second answer to
@@ -2346,7 +2366,10 @@ sequenceDiagram
 | `#scans [n]` | the last *n* scans, newest first, with their times and whether they are filed |
 | `#filed [n]` | the letters that have been filed and named |
 | `#file <name>` | the text of a filed letter, by any part of its name |
-| `#inventory [name]` | file it: the named scan, or the newest, through the inventory flow |
+| `#inventory` | file the newest scan, by itself |
+| `#inventory <name>` | file that one, by itself |
+| `#inventory duplex` | file the newest **two** as one two-sided letter, merged |
+| `#inventory <a> <b>` | file those two as one two-sided letter, merged |
 | `#folder` | where it is looking, and whether that folder is there |
 
 ### Multi-agent collaboration

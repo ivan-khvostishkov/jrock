@@ -31,16 +31,34 @@
 //     #scans [n]          the last n scans, newest first, with their times
 //     #file <name>        the TEXT of a filed letter, by any part of its name
 //     #filed [n]          the letters that have been filed and named, newest first
-//     #inventory [name]   file it: the named scan, or the most recent one, through the
-//                         doc inventory flow - which renames everything and says what to
+//     #inventory          file the newest scan, by itself
+//     #inventory <name>   file that one, by itself
+//     #inventory duplex   file the newest TWO as one two-sided letter, merged
+//     #inventory <a> <b>  file those two as one two-sided letter, merged
 //     #folder             where it is looking, and whether that folder is there
 //
-// TWO FILES IN FIVE MINUTES IS ONE LETTER. A one-sided scanner given a two-sided letter
-// is run twice - the stack, then the stack turned over - and writes two PDFs a minute
-// apart. So #recent counts DOCUMENTS, not files: two scans close together and adjacent in
-// name are reported as one letter in two passes, which is what #inventory then merges.
-// Three or more close together are reported as what they are, with their times, because
-// at that point only the operator knows what happened.
+// WHETHER TWO SCANS ARE ONE TWO-SIDED LETTER IS NOT SOMETHING THIS CAN KNOW, and the
+// first version of this agent pretended otherwise. It grouped two scans with adjacent
+// names a few minutes apart into one document, which sounds reasonable until you look at
+// a real scanner folder:
+//
+//     scan0164.pdf  21:55:24   2 pages
+//     scan0165.pdf  21:58:38   2 pages
+//     scan0166.pdf  21:58:59   2 pages
+//     scan0167.pdf  21:59:22   2 pages
+//     scan0168.pdf  21:59:42   2 pages
+//
+// Five letters put through a flatbed one after the other look exactly like two-and-a-half
+// two-sided letters. Twenty seconds apart is both the time it takes to turn a stack over
+// AND the time it takes to put the next letter in; the page counts are equal either way;
+// and the names are always adjacent, because a scanner counts. There is no signal here,
+// and a wrong guess merges two unrelated letters into one PDF and files them under one
+// name - which is the worst thing this agent could do.
+//
+// So it guesses nothing at all. Every scan is reported as itself, with its time and its
+// size, and WHICH FILES MAKE UP ONE LETTER IS SAID BY THE OPERATOR - one scan by itself,
+// or two named scans merged as the two passes of one. They know whether they turned the
+// stack over; this does not, and does not pretend to.
 //
 // ONLY .txt FOR CONTENT. Asked what a letter says, this agent reads the .txt file beside
 // it and nothing else. It does not convert anything: turning a PDF into text is the doc
@@ -88,8 +106,8 @@ public final class JRockLetters {
     private static final String SCAN_EXT = ".pdf";
     private static final String TEXT_EXT = ".txt";
 
-    // Two scans this close together, with adjacent names, are one two-sided letter.
-    private static final long DUPLEX_WINDOW_MS = 5 * 60_000;
+    // Nothing here measures how alike two scans are, on purpose: see the note at the top
+    // of this file. Which files make up one letter is said by the operator, not inferred.
 
     // How far back #recent looks when it is not told, and how many scans #scans lists.
     private static final int RECENT_MINUTES = 10;
@@ -219,14 +237,20 @@ public final class JRockLetters {
     private static final class Scan {
         final Path file;
         final Instant at;
+        final long size;
 
-        Scan(Path file, Instant at) {
+        Scan(Path file, Instant at, long size) {
             this.file = file;
             this.at = at;
+            this.size = size;
         }
 
         String name() {
             return file.getFileName().toString();
+        }
+
+        String megabytes() {
+            return String.format(Locale.ENGLISH, "%.1f MB", size / 1_048_576.0);
         }
     }
 
@@ -239,7 +263,8 @@ public final class JRockLetters {
                 String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
                 if (!name.endsWith(SCAN_EXT)) continue;
                 try {
-                    scans.add(new Scan(file, Files.getLastModifiedTime(file).toInstant()));
+                    scans.add(new Scan(file, Files.getLastModifiedTime(file).toInstant(),
+                            Files.size(file)));
                 } catch (IOException ex) {
                     // A file being written this second: it will be there next time.
                 }
@@ -280,53 +305,21 @@ public final class JRockLetters {
             return "Nothing has been scanned in the last " + minutes
                     + (minutes == 1 ? " minute." : " minutes.") + "\n" + footer(at);
         }
-        List<List<Scan>> documents = group(fresh);
         StringBuilder out = new StringBuilder("In the last " + minutes
-                + (minutes == 1 ? " minute" : " minutes") + ": " + documents.size()
-                + (documents.size() == 1 ? " document" : " documents") + ", "
-                + fresh.size() + (fresh.size() == 1 ? " file" : " files") + ".");
-        for (List<Scan> document : documents) {
-            Scan first = document.get(document.size() - 1);
-            out.append("\n- ").append(document.size() == 2
-                    ? "one letter in two passes (two-sided): " : "")
-                    .append(document.size() > 2 ? document.size() + " scans together: " : "");
-            for (int i = document.size() - 1; i >= 0; i--) {
-                Scan scan = document.get(i);
-                out.append(i == document.size() - 1 ? "" : ", ").append(scan.name())
-                        .append(" at ").append(ZonedDateTime.ofInstant(scan.at, zone)
-                                .format(CLOCK));
-            }
-            if (Files.isRegularFile(textOf(first.file))) {
-                out.append("  (filed already)");
-            }
+                + (minutes == 1 ? " minute" : " minutes") + ": " + fresh.size()
+                + (fresh.size() == 1 ? " scan" : " scans") + ".");
+        for (Scan scan : fresh) {       // newest first
+            out.append("\n- ").append(scan.name()).append("  ")
+                    .append(ZonedDateTime.ofInstant(scan.at, zone).format(CLOCK))
+                    .append("  ").append(scan.megabytes())
+                    .append(Files.isRegularFile(textOf(scan.file)) ? "  (filed already)" : "");
         }
-        out.append("\nAsk to file it and the inventory flow names it and renames every "
-                + "file of it.");
+        // NO GUESS about which of these belong together. The folder is the only thing
+        // this knows and the only thing it reports; which files make up one letter is
+        // the operator's to say, in words, naming them.
+        out.append("\nSay which one to file, or which TWO to file as one two-sided "
+                + "letter, and it is done that way.");
         return out.append('\n').append(footer(at)).toString();
-    }
-
-    // Scans into documents: two within five minutes of each other, with adjacent names,
-    // are the two passes of one two-sided letter.
-    private static List<List<Scan>> group(List<Scan> scans) {
-        List<List<Scan>> documents = new ArrayList<>();
-        List<Scan> current = new ArrayList<>();
-        for (Scan scan : scans) {     // newest first
-            if (current.isEmpty()) {
-                current.add(scan);
-                continue;
-            }
-            Scan last = current.get(current.size() - 1);
-            long apart = Math.abs(Duration.between(scan.at, last.at).toMillis());
-            if (apart <= DUPLEX_WINDOW_MS && adjacent(scan.name(), last.name())) {
-                current.add(scan);
-                continue;
-            }
-            documents.add(current);
-            current = new ArrayList<>();
-            current.add(scan);
-        }
-        if (!current.isEmpty()) documents.add(current);
-        return documents;
     }
 
     // Two names a scanner wrote one after the other: the same but for a trailing number,
@@ -492,34 +485,52 @@ public final class JRockLetters {
         List<Scan> scans = scansIn(at);
         if (scans.isEmpty()) throw new Stop("there are no PDFs in " + at + ".");
 
-        List<Scan> document;
-        if (asked.isBlank()) {
-            // The most recent document, which may be two passes of one letter.
-            document = group(scans).get(0);
-        } else {
-            Scan found = null;
-            for (Scan scan : scans) {
-                if (matches(scan.name(), asked)) {
-                    found = scan;
-                    break;
-                }
+        // WHAT TO FILE, said rather than guessed:
+        //
+        //   (nothing)        the newest scan, by itself
+        //   duplex           the newest two, as one two-sided letter
+        //   <name>           that one, by itself
+        //   <name> <name>    those two, as one two-sided letter
+        //
+        // One by itself is the default because it is the one that cannot go wrong: a
+        // two-sided letter filed as two single-sided ones is two files to tidy up, while
+        // two letters merged into one are a document that is half somebody else's.
+        List<Scan> document = new ArrayList<>();
+        String[] named = asked.isBlank() ? new String[0] : asked.trim().split("\\s+");
+        boolean duplex = named.length > 0 && named[0].equalsIgnoreCase("duplex");
+        if (duplex) {
+            named = java.util.Arrays.copyOfRange(named, 1, named.length);
+        }
+        if (named.length == 0) {
+            if (scans.size() < (duplex ? 2 : 1)) {
+                throw new Stop("there are not two scans in " + at + " to merge.");
             }
-            if (found == null) throw new Stop("no scan in " + at + " matches \"" + asked + "\".");
-            document = new ArrayList<>();
-            document.add(found);
-            // Its other pass, if it has one.
-            for (Scan scan : scans) {
-                if (scan != found && Math.abs(Duration.between(scan.at, found.at).toMillis())
-                        <= DUPLEX_WINDOW_MS && adjacent(scan.name(), found.name())) {
-                    document.add(scan);
-                    break;
+            document.add(scans.get(0));
+            if (duplex) document.add(scans.get(1));
+        } else {
+            for (String part : named) {
+                Scan found = null;
+                for (Scan scan : scans) {
+                    if (matches(scan.name(), part)) {
+                        found = scan;
+                        break;
+                    }
                 }
+                if (found == null) {
+                    throw new Stop("no scan in " + at + " matches \"" + part + "\".");
+                }
+                if (!document.contains(found)) document.add(found);
             }
         }
         if (document.size() > 2) {
-            throw new Stop(document.size() + " scans arrived together, and this files one "
-                    + "letter at a time - one file, or two passes of one two-sided letter. "
-                    + "Name the one to file.");
+            throw new Stop("one letter at a time: one scan, or two scans of one two-sided "
+                    + "letter. " + document.size() + " were named.");
+        }
+        if (document.size() == 2 && !adjacent(document.get(0).name(),
+                document.get(1).name())) {
+            // Said rather than refused: the operator may know something the names do not.
+            later(() -> say("Those two scans are not next to each other in name - merging "
+                    + "them anyway, as asked."));
         }
         for (Scan scan : document) {
             if (Files.isRegularFile(textOf(scan.file))) {
