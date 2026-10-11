@@ -1788,19 +1788,24 @@ the voice, so the microphone doesn't record the last answer as the next question
   window, goes into **JRock's log** to be read afterwards (an agent started by `javaw` has no
   console to print it to), and when the phrase itself cannot be read aloud — no speaker set —
   that is shown too. A missing microphone is **not** one of these: see the mute button above.
-- **While the model thinks, the room is not silent.** From the moment the recording stops to
-  the moment something is said, the speaker JRock narrates on carries a **very quiet machine
-  working** — a fan, and a disk that seeks every few seconds — at a level you notice only when
-  it stops. Those seconds are otherwise ambiguous in the one way that matters: hands-free you
-  are not looking at the window, and silence says nothing about whether the microphone heard the
-  end of your sentence, whether anything was sent, or whether this is the pause before *"Error.
-  Should I try again?"*. Deliberately **not a beep**: a notification sound is a program
-  announcing itself in the middle of a conversation, while a machine quietly working is a sound
-  everybody has heard all their lives and already reads as *it is doing something*. It fades in
-  over a third of a second, fades out in under two tenths, and is gone before the first word
-  rather than under it. Made as it plays — noise needs no sound files and no licence — and if no
-  speaker is set, or the one set is not there, there is simply no noise: one line in JRock's log
-  and the turn carries on, because nobody is owed a fan.
+- **While the model thinks, the line is not quite silent.** From the moment the recording stops
+  to the moment something is said, the speaker JRock narrates on carries **the odd crackle** —
+  the way an analogue line crackles: a scratch of a millisecond or twenty, a second or so apart,
+  sometimes two or three in a run, and **nothing at all in between**. Those seconds are
+  otherwise ambiguous in the one way that matters: hands-free you are not looking at the window,
+  and silence says nothing about whether the microphone heard the end of your sentence, whether
+  anything was sent, or whether this is the pause before *"Error. Should I try again?"*.
+
+  **Sparse rather than continuous, and that is the design.** A held sound — a fan, a hum, a hiss
+  — is something you end up listening *through*, and after a few turns it is tiring and in the
+  way of the voice. A few scratches say the same thing, *the line is open and something is
+  happening*, while leaving the room quiet: the loudest crackle peaks at a fortieth of the scale
+  and most are far quieter, so what you hear is a transient gone before it registers as a level
+  at all. Deliberately **not a beep** either — a notification sound is a program announcing
+  itself in the middle of a conversation, while a line that crackles is just a line. Made as it
+  plays, so there are no sound files to ship and no licence to check, and gone before the first
+  word rather than under it. If no speaker is set, or the one set is not there, there is simply
+  no sound: one line in JRock's log and the turn carries on.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the

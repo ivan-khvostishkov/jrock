@@ -1204,21 +1204,25 @@ public final class JRockPushToTalk {
     }
 
     // ---- The room ----------------------------------------------------------
-    // A machine quietly working, while the model thinks.
+    // An open line, while the model thinks.
     //
     // A spoken question takes seconds to answer - a send, sometimes a fetch and another
     // send - and hands-free the operator is not looking at the window. Silence over
     // those seconds says nothing: whether the microphone heard the end of the sentence,
     // whether anything was sent, whether this is the pause before "Error. Should I try
-    // again?". So the room gets a sound for exactly as long as the answer is on its way:
-    // a fan, and a disk that seeks now and then, at a level somebody notices only when
-    // it stops.
+    // again?". So for exactly as long as the answer is on its way, the line is not quite
+    // silent: a crackle every second or so, the way an analogue line crackles, and
+    // nothing at all in between.
     //
-    // Deliberately not a beep or a chime. Whoever is talking should go on feeling they
-    // are talking to somebody, and a notification sound is a program announcing itself
-    // in the middle of a conversation. A quiet machine in the background is a sound
-    // people have heard all their lives and already read as "it is doing something",
-    // which is the one thing the pause has to say.
+    // SPARSE, not continuous, and that is the whole design. A held sound - a fan, a hum,
+    // a hiss - is a sound somebody is listening THROUGH, and after a few turns it is
+    // tiring and in the way of the voice. A few scratches a second apart say the same
+    // thing ("the line is open, something is happening") while leaving the room quiet,
+    // and they sit far enough under a voice that the answer never has to compete.
+    //
+    // Deliberately not a beep or a chime either. Whoever is talking should go on feeling
+    // they are talking to somebody, and a notification sound is a program announcing
+    // itself in the middle of a conversation; a line that crackles is just a line.
     //
     // Made here, a slice at a time, rather than shipped as a file: noise needs no files
     // and no licence, and an endless wait needs an endless sound.
@@ -1226,34 +1230,43 @@ public final class JRockPushToTalk {
     private static final javax.sound.sampled.AudioFormat ROOM_FORMAT =
             new javax.sound.sampled.AudioFormat(ROOM_RATE, 16, 1, true, false);
 
-    // Quiet, and quiet in the way a room is: well under a tenth of the scale, so it sits
-    // beneath a voice rather than beside one. Loud enough to be missed when it goes.
-    private static final double ROOM_GAIN = 0.045;
+    // The loudest a crackle gets, as a fraction of the scale: a fortieth. Each one is a
+    // few milliseconds, so what is heard is far quieter than the figure looks - a
+    // transient that is gone before it registers as a level at all.
+    private static final double ROOM_GAIN = 0.025;
 
-    // The fan: white noise through two one-pole low passes, which is what turns a hiss
-    // into moving air. 0.08 of the way to the input each sample puts the corner near
-    // 280 Hz at this rate, and twice is the difference between a fan and a radio between
-    // stations. A little of the unfiltered noise is added back for the air in it.
-    private static final double ROOM_CUTOFF = 0.08;
-    private static final double ROOM_BODY = 3.2;    // the filtered part, back to full scale
-    private static final double ROOM_AIR = 0.03;    // the unfiltered part, a trace
+    // And most of them are quieter than that. The level of each crackle is picked
+    // between these two, so a handful stand out and the rest are barely there, which is
+    // what keeps it from sounding like a pattern.
+    private static final double ROOM_SOFTEST = 0.25;
+    private static final double ROOM_LOUDEST = 1.0;
 
-    // And it breathes: a fan that holds one exact level is a tone, and a tone is a
-    // machine. Once every six seconds, a fifth of the level.
-    private static final double ROOM_BREATH_HZ = 0.17;
-    private static final double ROOM_BREATH = 0.18;
+    // A crackle is a burst of noise, 1 to 25 ms of it, with no attack to speak of and a
+    // decay that squares away to nothing. Through one low pass - 0.35 of the way to the
+    // input each sample, so it keeps its edge - because unfiltered white noise is a
+    // digital click and a scratch has some body to it.
+    private static final double ROOM_CRACKLE_MIN_MS = 1;
+    private static final double ROOM_CRACKLE_MAX_MS = 25;
+    private static final double ROOM_CUTOFF = 0.35;
 
-    // The disk, seeking: two to five clicks, each a few milliseconds and gone, with
-    // seconds of nothing between the bursts. This is the part that reads as WORK rather
-    // than as a fan left on, so it is worth the dozen lines it takes.
-    private static final double ROOM_SEEK_GAIN = 0.35;
-    private static final long ROOM_SEEK_GAP_MIN_MS = 1_200;
-    private static final long ROOM_SEEK_GAP_MAX_MS = 5_000;
+    // How long the line is silent between them: a quarter of a second to two and a half,
+    // picked afresh every time. Never a steady tick, which would be a metronome and
+    // would be back to being a sound somebody listens through.
+    private static final long ROOM_GAP_MIN_MS = 250;
+    private static final long ROOM_GAP_MAX_MS = 2_500;
 
-    // On and off over a quarter of a second: anything faster is a click, and a click is
-    // the artificial thing this is trying not to be.
-    private static final double ROOM_FADE_IN_MS = 300;
-    private static final double ROOM_FADE_OUT_MS = 180;
+    // And now and then a crackle brings company: a third of them are a run of two to
+    // four, tens of milliseconds apart, which is what a scratch on a line actually
+    // sounds like rather than one tidy click.
+    private static final double ROOM_RUN_CHANCE = 0.33;
+    private static final long ROOM_RUN_GAP_MIN_MS = 15;
+    private static final long ROOM_RUN_GAP_MAX_MS = 70;
+
+    // A ramp either side, short because there is no held sound to ease in or out: all it
+    // has to do is keep a crackle that happens to be sounding when the answer arrives
+    // from being cut off square, which is the one way this could click.
+    private static final double ROOM_FADE_IN_MS = 120;
+    private static final double ROOM_FADE_OUT_MS = 120;
     private static final long ROOM_SLICE_MS = 50;      // one write, and how often stop is seen
 
     // How much sound the line may hold ahead of itself - three slices, where Java Sound's
@@ -1328,40 +1341,40 @@ public final class JRockPushToTalk {
             java.util.Random rnd = new java.util.Random();
             int frames = (int) (ROOM_RATE * ROOM_SLICE_MS / 1000);
             byte[] pcm = new byte[frames * 2];
-            double low = 0, lower = 0;          // the two filter stages
+            double low = 0;                     // the filter, for a scratch with body
             double level = 0;                   // the fade, 0 to 1 and back
             double up = 1000 / (ROOM_RATE * ROOM_FADE_IN_MS);
             double down = 1000 / (ROOM_RATE * ROOM_FADE_OUT_MS);
-            long i = 0;                         // frames played, for the breath
-            long click = -1;                    // the frame the click being played began on
-            int clickFor = 0;                   // and how many frames it lasts
-            int clicksLeft = 0;                 // how many are left in this burst
-            long nextClick = (long) (ROOM_RATE * seekGap(rnd) / 1000);
+            long i = 0;                         // frames played
+            long began = -1;                    // the frame this crackle began on
+            int lasts = 0;                      // and how many frames it lasts
+            double loud = 0;                    // and how loud this one is
+            int leftInRun = 0;                  // crackles still to come in this run
+            long next = frames(rnd, ROOM_GAP_MIN_MS, ROOM_GAP_MAX_MS);
             while (true) {
                 for (int s = 0; s < frames; s++, i++) {
                     level = roomStop ? Math.max(0, level - down) : Math.min(1, level + up);
-                    double white = rnd.nextDouble() * 2 - 1;
-                    low += (white - low) * ROOM_CUTOFF;
-                    lower += (low - lower) * ROOM_CUTOFF;
-                    double breath = 1 - ROOM_BREATH
-                            + ROOM_BREATH * Math.sin(2 * Math.PI * ROOM_BREATH_HZ * i / ROOM_RATE);
-                    if (i >= nextClick) {
-                        if (clicksLeft <= 0) clicksLeft = 2 + rnd.nextInt(4);
-                        click = i;
-                        clickFor = (int) (ROOM_RATE * (0.002 + rnd.nextDouble() * 0.004));
-                        clicksLeft--;
-                        nextClick = i + (clicksLeft > 0
-                                ? (long) (ROOM_RATE * (0.02 + rnd.nextDouble() * 0.05))
-                                : (long) (ROOM_RATE * seekGap(rnd) / 1000));
+                    if (i >= next) {
+                        began = i;
+                        lasts = (int) frames(rnd, ROOM_CRACKLE_MIN_MS, ROOM_CRACKLE_MAX_MS);
+                        loud = ROOM_SOFTEST + rnd.nextDouble() * (ROOM_LOUDEST - ROOM_SOFTEST);
+                        if (leftInRun <= 0 && rnd.nextDouble() < ROOM_RUN_CHANCE) {
+                            leftInRun = 1 + rnd.nextInt(3);   // a scratch, not a click
+                        }
+                        boolean inRun = leftInRun > 0;
+                        if (inRun) leftInRun--;
+                        next = i + lasts + (inRun
+                                ? frames(rnd, ROOM_RUN_GAP_MIN_MS, ROOM_RUN_GAP_MAX_MS)
+                                : frames(rnd, ROOM_GAP_MIN_MS, ROOM_GAP_MAX_MS));
                     }
-                    double seek = 0;
-                    if (click >= 0 && i - click < clickFor) {
-                        // A click decays rather than stops: squared, so it is a tick and
-                        // not a tap.
-                        double left = 1 - (i - click) / (double) clickFor;
-                        seek = (rnd.nextDouble() * 2 - 1) * left * left * ROOM_SEEK_GAIN;
+                    double v = 0;
+                    if (began >= 0 && i - began < lasts) {
+                        // No attack and a decay that squares away: a scratch, where a
+                        // fade in and out either side would be a soft little pop.
+                        double leftOf = 1 - (i - began) / (double) lasts;
+                        low += (rnd.nextDouble() * 2 - 1 - low) * ROOM_CUTOFF;
+                        v = low * leftOf * leftOf * loud;
                     }
-                    double v = (lower * ROOM_BODY + white * ROOM_AIR) * breath + seek;
                     int sample = (int) (Math.max(-1, Math.min(1, v)) * level
                             * ROOM_GAIN * Short.MAX_VALUE);
                     pcm[2 * s] = (byte) sample;
@@ -1378,10 +1391,10 @@ public final class JRockPushToTalk {
         }
     }
 
-    // Seconds between one burst of seeking and the next.
-    private static double seekGap(java.util.Random rnd) {
-        return ROOM_SEEK_GAP_MIN_MS
-                + rnd.nextDouble() * (ROOM_SEEK_GAP_MAX_MS - ROOM_SEEK_GAP_MIN_MS);
+    // Somewhere between two lengths in milliseconds, in frames - which is the unit
+    // everything in the loop above counts in.
+    private static long frames(java.util.Random rnd, double fromMs, double toMs) {
+        return (long) (ROOM_RATE * (fromMs + rnd.nextDouble() * (toMs - fromMs)) / 1000);
     }
 
     // One log line the first time the room cannot be played, and again only if the
