@@ -136,6 +136,13 @@ public final class InstallJRock {
         "HKLM\\Software\\Classes\\SystemFileAssociations\\.txt\\shell",
     };
 
+    // Samples that have been renamed. An install of the old name IS an install of the new
+    // one, so a rename does not read as one agent gone and another appeared - which on a
+    // page that offers only what is installed would hide the new one altogether. The
+    // folder the old name was working in is kept, so its settings and its log carry over.
+    private static final Map<String, String> RENAMED = Map.of(
+            "JRockCalendarEvents", "JRockThunderbird");
+
     private enum Kind { AGENT, FLOW }
 
     // One sample as the wizard knows it: its file, which kind it is, the prompts its own
@@ -477,6 +484,7 @@ public final class InstallJRock {
                 if (m.find()) {
                     String stem = Paths.get(m.group(1)).getFileName().toString()
                             .replaceAll("\\.java$", "");
+                    stem = RENAMED.getOrDefault(stem, stem);
                     // First entry found wins the folder: the same agent in two roots is
                     // one install written twice, with the same command in both.
                     previouslyInstalled.putIfAbsent(stem, flagIn(command, "--working-dir"));

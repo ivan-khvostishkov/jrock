@@ -244,6 +244,14 @@ public final class JRockPushToTalk {
             "^\\W*I need your calendar for\\s*(.*\\S)\\W*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
+    // The answer that asks about the operator's mail, and what about it: "today", "the
+    // last 3 days", "unanswered", "senders", "mail with somebody". The whole of the
+    // answer, as the others are, and the words after it are handed to the Thunderbird
+    // agent to make sense of - one place, not two.
+    private static final java.util.regex.Pattern MAIL_REQUEST = java.util.regex.Pattern.compile(
+            "^\\W*I need your mail:\\s*(.*\\S)\\W*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
     // Coordinates in a location line, as the location agent writes them - which the model
     // may already have from it, and then they are used as they are.
     private static final java.util.regex.Pattern COORDINATES = java.util.regex.Pattern.compile(
@@ -364,9 +372,11 @@ public final class JRockPushToTalk {
         // well - so a model that asks again is heard rather than asked forever.
         String note = null;
         boolean askedLocation = false, askedWeather = false, askedCalendar = false;
+        boolean askedMail = false;
         while (note == null) {
             java.util.regex.Matcher weather = WEATHER_REQUEST.matcher(answer.trim());
             java.util.regex.Matcher calendar = CALENDAR_REQUEST.matcher(answer.trim());
+            java.util.regex.Matcher mail = MAIL_REQUEST.matcher(answer.trim());
             if (!askedLocation && LOCATION_REQUEST.matcher(answer.trim()).matches()) {
                 askedLocation = true;
                 later(() -> setState(State.ANSWERING, "Looking up the location\u2026"));
@@ -380,13 +390,13 @@ public final class JRockPushToTalk {
                 answer = sendAndRead("Sent the location, waiting for the reply\u2026");
             } else if (!askedCalendar && calendar.matches()) {
                 // What is in the calendar is read off this machine by the calendar agent
-                // (JRockCalendarEvents.java), out of Thunderbird's own offline copy -
+                // (JRockThunderbird.java), out of Thunderbird's own offline copy -
                 // nothing is fetched and nothing is asked of a server.
                 askedCalendar = true;
                 String span = calendar.group(1).trim();
                 later(() -> setState(State.ANSWERING, "Reading the calendar\u2026"));
                 String[] events = askAgent(CALENDAR_PORT, calendarRequest(span), "calendar",
-                        "JRockCalendarEvents.java");
+                        "JRockThunderbird.java");
                 if (events[0] == null) {
                     note = "Calendar not sent: " + events[1];
                     break;
@@ -394,6 +404,22 @@ public final class JRockPushToTalk {
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(events[0]));
                 answer = sendAndRead("Sent the calendar, waiting for the reply\u2026");
+            } else if (!askedMail && mail.matches()) {
+                // The mail is read off this machine by the Thunderbird agent, out of
+                // Thunderbird's own search index. Nothing is fetched, no server is
+                // asked, and no message is opened, moved or marked.
+                askedMail = true;
+                String about = mail.group(1).trim();
+                later(() -> setState(State.ANSWERING, "Reading the mail\u2026"));
+                String[] mailbox = askAgent(CALENDAR_PORT, mailRequest(about), "Thunderbird",
+                        "JRockThunderbird.java");
+                if (mailbox[0] == null) {
+                    note = "Mail not sent: " + mailbox[1];
+                    break;
+                }
+                check(JRock.automationClearPrompt());
+                check(JRock.automationSetPrompt(mailbox[0]));
+                answer = sendAndRead("Sent the mail, waiting for the reply\u2026");
             } else if (!askedWeather && weather.matches()) {
                 askedWeather = true;
                 String[] report = weather(weather.group(1));
@@ -433,6 +459,35 @@ public final class JRockPushToTalk {
         if (asked.contains("week")) return "#week";
         if (asked.contains("next")) return "#next 5";
         return "#today";
+    }
+
+    // What the model asked about the mail, as the Thunderbird agent's own request. The
+    // words a model actually uses are mapped here, and anything it says that is not one
+    // of them is passed through for the agent to refuse with a reason - the same rule the
+    // calendar requests follow, and for the same reason: a guess here would be a wrong
+    // answer read aloud in a confident voice.
+    private static String mailRequest(String about) {
+        String asked = about.toLowerCase(java.util.Locale.ROOT).trim();
+        java.util.regex.Matcher with = java.util.regex.Pattern
+                .compile("(?:with|from|to)\\s+(.+)").matcher(asked);
+        java.util.regex.Matcher days = java.util.regex.Pattern
+                .compile("(\\d{1,3})\\s*day").matcher(asked);
+        if (asked.contains("unanswered") || asked.contains("no reply")
+                || asked.contains("not answered")) {
+            return "#unanswered" + (days.find() ? " " + days.group(1) : "");
+        }
+        if (asked.contains("sender") || asked.contains("who wrote")
+                || asked.contains("from whom")) {
+            return "#senders" + (days.find() ? " " + days.group(1) : "");
+        }
+        if (asked.startsWith("mailbox") || asked.contains("mailboxes")
+                || asked.contains("accounts")) {
+            return "#mailboxes";
+        }
+        if (with.matches()) return "#with " + with.group(1).trim();
+        if (asked.contains("today")) return "#mail";
+        if (days.find()) return "#mail " + days.group(1);
+        return "#mail";
     }
 
     // The weather for a location the model named: its coordinates from the location
@@ -605,7 +660,7 @@ public final class JRockPushToTalk {
                 .replaceAll("^[\"'“‘]|[\"'”’]$", "").trim();
         if (name.isEmpty()) return "Event not created: the answer named no event.";
         String request = "#new " + day + (at == null ? "" : " " + at) + " " + name;
-        String[] made = askAgent(CALENDAR_PORT, request, "calendar", "JRockCalendarEvents.java");
+        String[] made = askAgent(CALENDAR_PORT, request, "calendar", "JRockThunderbird.java");
         if (made[0] == null) return "Event not created: " + made[1];
         // The agent's first line is the one worth a status line; the rest tells the
         // operator what to press, and JRock's log has all of it.

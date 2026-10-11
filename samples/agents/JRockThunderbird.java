@@ -1,12 +1,18 @@
-// A JRock agent (it loops, and is started with JRock): what is in your calendar, read
-// out of Thunderbird's own offline copy - today, this week, any range - for other
-// agents to ask about and for you to read, and one thing it puts INTO the calendar: an
-// event, by posting an invitation to you from yourself.
+// A JRock agent (it loops, and is started with JRock): what Thunderbird already knows,
+// read out of its own files - your calendar and your mail - for other agents to ask
+// about and for you to read. And one thing it puts back: a calendar event, by posting an
+// invitation to you from yourself.
+//
+// THE CALENDAR half reads the cached calendars; THE MAIL half reads Thunderbird's global
+// search index, the one Search Messages is built on. Both read-only, both with the same
+// sqlite3, and neither of them ever the authority on anything: Thunderbird is. What is
+// here is what Thunderbird has written down, which is why every answer says how fresh
+// that is.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
-//     java -cp jrock.jar JRockCalendarEvents.java [--profile <thunderbird profile dir>]
-//     java -cp jrock.jar JRockCalendarEvents.java --profile <dir> --print week
+//     java -cp jrock.jar JRockThunderbird.java [--profile <thunderbird profile dir>]
+//     java -cp jrock.jar JRockThunderbird.java --profile <dir> --print week
 //
 // THE JAR IS NAMED ON -cp, as with every agent and every flow - this one uses it for one
 // thing only, placing its window beside JRock's. What it does NOT need is
@@ -38,6 +44,11 @@
 //          #calendars                     the calendars, and how many events each holds
 //          #new 2026-10-15 14:00 Dentist  a new event, by post (see below)
 //          #new 2026-12-24 Christmas Eve  the same, for a whole day
+//          #mail [days]                   what arrived today, or over that many days
+//          #unanswered [days]             received, with no reply sent (default 14)
+//          #with <name or address>        the last each way, and how much there has been
+//          #senders [days]                who wrote, and how often (default 5)
+//          #mailboxes                     the accounts indexed, and how fresh the index is
 //
 //      The push-to-talk agent asks when the model's answer is "I need your calendar for
 //      today" or "... for this week", and puts what comes back into its next prompt. It
@@ -110,7 +121,7 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public final class JRockCalendarEvents {
+public final class JRockThunderbird {
 
     // JRock's agents' ports (see JRockTimer.java), and the calendar agent's, the fourth
     // of them: timer 47470, location 47471, weather 47472, calendar 47473.
@@ -128,7 +139,12 @@ public final class JRockCalendarEvents {
     // Where this agent keeps the profile it was last pointed at, and the calendars left
     // out - beside this file, so the window remembers them and nothing of JRock's own
     // configuration is touched.
-    private static final String SETTINGS = "jrock-calendar-events.txt";
+    private static final String SETTINGS = "jrock-thunderbird.txt";
+
+    // What this agent was called when it only read calendars. Its settings file is read
+    // when the current one is not there, so a profile and an address chosen before the
+    // rename are still chosen after it - and the next save writes the new name.
+    private static final String SETTINGS_WAS = "jrock-calendar-events.txt";
 
     // Thunderbird's two calendar databases inside a profile: the cache of every calendar
     // on a server, and the local calendar it keeps itself. Both are read; either may be
@@ -243,10 +259,10 @@ public final class JRockCalendarEvents {
             return;
         }
 
-        onEdt(JRockCalendarEvents::showWindow);
+        onEdt(JRockThunderbird::showWindow);
         String said = listen();
         later(() -> listening.setText(said));
-        System.out.println("Calendar events agent is ready. " + said);
+        System.out.println("Thunderbird agent is ready. " + said);
         later(() -> refresh("#week"));
     }
 
@@ -295,10 +311,22 @@ public final class JRockCalendarEvents {
                 return calendars();
             case "#new":
                 return newEvent(line.substring(what.length()).trim());
+            case "#mail":
+                return mail(daysIn(parts, 1, 0), zone);
+            case "#unanswered":
+                return unanswered(daysIn(parts, 1, UNANSWERED_DAYS), zone);
+            case "#with":
+                return withPerson(line.substring(what.length()).trim(), zone);
+            case "#senders":
+                return senders(daysIn(parts, 1, SENDERS_DAYS), zone);
+            case "#mailboxes":
+                return mailboxes(zone);
             default:
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
-                        + "#today, #week, #next [n], #range <from> <to>, #calendars, or "
-                        + "#new <date> [time] <name>.");
+                        + "#today, #week, #next [n], #range <from> <to>, #calendars or "
+                        + "#new <date> [time] <name> about the calendar, or #mail [days], "
+                        + "#unanswered [days], #with <somebody>, #senders [days] or "
+                        + "#mailboxes about the mail.");
         }
     }
 
@@ -847,7 +875,7 @@ public final class JRockCalendarEvents {
                 + (identity == null ? "" : ",preselectid=" + identity)
                 + ",subject=" + encode(summary)
                 + ",body=" + encode("Calendar event: " + summary + "\r\n" + when
-                        + "\r\n\r\nSent by the JRock calendar events agent, to itself. The "
+                        + "\r\n\r\nSent by the JRock Thunderbird agent, to itself. The "
                         + "attached invitation is what puts it in the calendar.")
                 + ",attachment=" + file.toUri();
         try {
@@ -1297,7 +1325,7 @@ public final class JRockCalendarEvents {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        window = new javax.swing.JFrame("JRock - Calendar events (read-only)");
+        window = new javax.swing.JFrame("JRock - Thunderbird: calendar and mail (read-only)");
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
@@ -1374,6 +1402,7 @@ public final class JRockCalendarEvents {
         javax.swing.JPanel asks = new javax.swing.JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.LEFT, 6, 0));
         asks.setOpaque(false);
+        asks.add(label("Calendar:"));
         for (String[] ask : new String[][] { { "Today", "#today" }, { "This week", "#week" },
                                              { "Next 5", "#next 5" },
                                              { "Calendars", "#calendars" } }) {
@@ -1382,6 +1411,40 @@ public final class JRockCalendarEvents {
             b.addActionListener(e -> refresh(request));
             asks.add(b);
         }
+
+        // The mail questions, on a row of their own: the same buttons an agent's request
+        // lines are, so what the operator can see is what a model can ask for.
+        javax.swing.JPanel mailAsks = new javax.swing.JPanel(new java.awt.FlowLayout(
+                java.awt.FlowLayout.LEFT, 6, 0));
+        mailAsks.setOpaque(false);
+        mailAsks.add(label("Mail:"));
+        for (String[] ask : new String[][] { { "Arrived today", "#mail" },
+                                             { "Last 3 days", "#mail 3" },
+                                             { "Unanswered", "#unanswered" },
+                                             { "Senders (5 days)", "#senders 5" },
+                                             { "Mailboxes", "#mailboxes" } }) {
+            javax.swing.JButton b = new javax.swing.JButton(ask[0]);
+            String request = ask[1];
+            b.addActionListener(e -> refresh(request));
+            mailAsks.add(b);
+        }
+        // And the one question that needs a word typed into it.
+        javax.swing.JTextField withField = new javax.swing.JTextField(14);
+        withField.setToolTipText("A name or an address: the last mail each way, and how "
+                + "much there has been");
+        javax.swing.JButton withButton = new javax.swing.JButton("Mail with\u2026");
+        java.awt.event.ActionListener askWith = e -> {
+            String asked = withField.getText().trim();
+            if (asked.isEmpty()) {
+                say("Type a name or an address to look for first.");
+                return;
+            }
+            refresh("#with " + asked);
+        };
+        withButton.addActionListener(askWith);
+        withField.addActionListener(askWith);
+        mailAsks.add(withButton);
+        mailAsks.add(withField);
 
         calendarBox = new javax.swing.JPanel();
         calendarBox.setLayout(new javax.swing.BoxLayout(calendarBox, javax.swing.BoxLayout.Y_AXIS));
@@ -1411,7 +1474,7 @@ public final class JRockCalendarEvents {
         rows.setLayout(new javax.swing.BoxLayout(rows, javax.swing.BoxLayout.Y_AXIS));
         rows.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                profileRow, emailRow, asks }) {
+                profileRow, emailRow, asks, mailAsks }) {
             row.setAlignmentX(0f);
             rows.add(row);
         }
@@ -1481,6 +1544,13 @@ public final class JRockCalendarEvents {
             say("This profile does not send from " + keep + " any more - pick an address "
                     + "for new events.");
         }
+    }
+
+    // The caption at the head of a row of buttons.
+    private static javax.swing.JLabel label(String text) {
+        javax.swing.JLabel caption = new javax.swing.JLabel(text);
+        caption.setForeground(MUTED);
+        return caption;
     }
 
     // The address out of what the dropdown shows, which is "Name <address>".
@@ -1602,12 +1672,433 @@ public final class JRockCalendarEvents {
         status.setText("<html><div style='width:700px'>" + safe + "</div></html>");
     }
 
+    // ---- Mail ------------------------------------------------------------------
+    // Thunderbird's own global index, global-messages-db.sqlite - what Search Messages
+    // and the quick filter are built on. Read with the same sqlite3, the same -readonly,
+    // and the same never-write rule as the calendars.
+    //
+    // Three things make this answerable at all without reading a single mailbox file:
+    //
+    //   - messages holds one row per indexed message with its date (PRTime, as the
+    //     calendar's are), its folder and a JSON blob of Gloda's own attributes;
+    //   - that blob is keyed by attribute id, and the ones worth having are "43" the
+    //     sender, "59" read, "60" replied to, "54" from me - so "unanswered" is a fact
+    //     in the index rather than a guess from the text;
+    //   - messagesText_content holds the subject, the author and the recipients as the
+    //     text they were written as, which is what a person wants read back to them.
+    //
+    // The index is Thunderbird's and only Thunderbird keeps it up to date. A message that
+    // arrived while Thunderbird was closed is not in here until it has run again, so
+    // #mailboxes says how fresh the newest indexed message is and every answer can be
+    // read in that light.
+    private static final String MAIL_DB = "global-messages-db.sqlite";
+
+    // Gloda attribute ids inside messages.jsonAttributes.
+    private static final String FROM = "43";          // the sender's identity id
+    private static final String FROM_ME = "54";       // set when I sent it
+    private static final String READ = "59";
+    private static final String REPLIED = "60";
+    private static final int INVOLVES = 52;           // in messageAttributes, and indexed
+
+    // How far back a question looks when it does not say.
+    private static final int UNANSWERED_DAYS = 14;
+    private static final int SENDERS_DAYS = 5;
+    private static final int MAIL_LIMIT = 40;
+
+    // The folders whose name says they are not mail that arrived: the bins, the drafts,
+    // and Gmail's virtual ones - All Mail holds a copy of every message there is, so
+    // counting it would count everything twice.
+    private static final Set<String> SKIP_FOLDERS = new LinkedHashSet<>(java.util.Arrays.asList(
+            "trash", "bin", "spam", "junk", "drafts", "templates", "unsent messages",
+            "outbox", "all mail", "important", "starred", "[gmail]", "archive"));
+    private static final Set<String> SENT_FOLDERS = new LinkedHashSet<>(java.util.Arrays.asList(
+            "sent", "sent mail", "sent items", "gesendet", "gesendete elemente"));
+
+    // One indexed folder: which account it belongs to, and which of the three kinds of
+    // folder it is. The kind comes from the last part of its URI, because that is what
+    // the server called it and Thunderbird's display name can be anything.
+    private static final class MailFolder {
+        final int id;
+        final String account;
+        final String name;
+        final boolean received;
+        final boolean sent;
+
+        MailFolder(int id, String account, String name, boolean received, boolean sent) {
+            this.id = id;
+            this.account = account;
+            this.name = name;
+            this.received = received;
+            this.sent = sent;
+        }
+    }
+
+    // Where the mail index is, or a Stop saying it is not there. Separate from the
+    // calendar databases on purpose: a profile can have one and not the other, and a
+    // calendar question should not fail because mail was never indexed.
+    private static Path mailDatabase() {
+        if (profile == null) throw new Stop("no Thunderbird profile is set.");
+        Path db = profile.resolve(MAIL_DB);
+        if (!Files.isRegularFile(db)) {
+            throw new Stop("there is no " + MAIL_DB + " in " + profile + ". Thunderbird "
+                    + "builds it when Search Messages is used or indexing is on, and "
+                    + "until it exists there is nothing here to read.");
+        }
+        return db;
+    }
+
+    // Every folder the index knows, classified. Read on each request: a folder added in
+    // Thunderbird should be in the next answer.
+    private static List<MailFolder> mailFolders() {
+        List<MailFolder> folders = new ArrayList<>();
+        for (String[] row : query(mailDatabase(),
+                "SELECT id, name, folderURI FROM folderLocations")) {
+            if (row.length < 3) continue;
+            int id;
+            try {
+                id = Integer.parseInt(row[0].trim());
+            } catch (NumberFormatException ex) {
+                continue;
+            }
+            String uri = row[2];
+            String last = uri.contains("/") ? uri.substring(uri.lastIndexOf('/') + 1) : uri;
+            String tail = decode(last).toLowerCase(Locale.ROOT);
+            boolean sent = SENT_FOLDERS.contains(tail);
+            boolean skip = SKIP_FOLDERS.contains(tail);
+            folders.add(new MailFolder(id, accountOf(uri), decode(last),
+                    !sent && !skip, sent));
+        }
+        return folders;
+    }
+
+    // The account a folder belongs to: the user part of an IMAP or POP URI, which is the
+    // address you would call that mailbox by, and "Local Folders" for the ones that are
+    // only on this machine.
+    private static String accountOf(String uri) {
+        Matcher m = Pattern.compile("^[a-z]+://([^@/]*)@([^/]*)").matcher(uri);
+        if (!m.find()) return "(unknown)";
+        String user = decode(m.group(1));
+        String host = decode(m.group(2));
+        if (user.equalsIgnoreCase("nobody")) return host.replace("%20", " ");
+        return user.contains("@") ? user : user + " at " + host;
+    }
+
+    private static String decode(String text) {
+        try {
+            return java.net.URLDecoder.decode(text, "UTF-8");
+        } catch (java.io.UnsupportedEncodingException | IllegalArgumentException ex) {
+            return text;
+        }
+    }
+
+    // The folder ids of one kind, as an SQL list of numbers - which is the only thing
+    // that ever goes into a query here, parsed from the index's own ids.
+    private static String idsOf(List<MailFolder> folders, boolean received) {
+        StringBuilder out = new StringBuilder();
+        for (MailFolder f : folders) {
+            if (received ? !f.received : !f.sent) continue;
+            if (out.length() > 0) out.append(',');
+            out.append(f.id);
+        }
+        return out.length() == 0 ? "-1" : out.toString();
+    }
+
+    private static Map<Integer, MailFolder> byId(List<MailFolder> folders) {
+        Map<Integer, MailFolder> map = new LinkedHashMap<>();
+        for (MailFolder f : folders) map.put(f.id, f);
+        return map;
+    }
+
+    // PRTime to this machine's clock, for the one-line timestamps in an answer.
+    private static ZonedDateTime when(String micros, ZoneId zone) {
+        try {
+            return Instant.ofEpochMilli(Long.parseLong(micros.trim()) / MICROS).atZone(zone);
+        } catch (NumberFormatException ex) {
+            return Instant.EPOCH.atZone(zone);
+        }
+    }
+
+    // Gloda writes the author and recipients into its full-text table as the header said
+    // them, and appends the display name it did not have as the word "undefined". Taken
+    // off here rather than shown to anybody.
+    private static String who(String text) {
+        String name = text == null ? "" : text.trim();
+        if (name.endsWith(" undefined")) name = name.substring(0, name.length() - 10).trim();
+        return name.isEmpty() ? "(no sender)" : name;
+    }
+
+    private static String subjectOf(String text) {
+        String subject = text == null ? "" : text.trim();
+        return subject.isEmpty() ? "(no subject)" : subject;
+    }
+
+    // What arrived, newest first, over a span of days ending now. days = 0 is today.
+    private static String mail(int days, ZoneId zone) {
+        List<MailFolder> folders = mailFolders();
+        LocalDate from = LocalDate.now(zone).minusDays(Math.max(0, days));
+        long since = from.atStartOfDay(zone).toInstant().toEpochMilli() * MICROS;
+        List<String[]> rows = query(mailDatabase(),
+                "SELECT m.date, m.folderID, t.c3author, t.c1subject,"
+                + " json_extract(m.jsonAttributes,'$.\"" + READ + "\"')"
+                + " FROM messages m LEFT JOIN messagesText_content t ON t.docid = m.id"
+                + " WHERE m.deleted = 0 AND m.folderID IN (" + idsOf(folders, true) + ")"
+                + " AND m.date >= " + since
+                + " ORDER BY m.date DESC LIMIT " + MAIL_LIMIT);
+        String heading = days == 0 ? "Mail that arrived today, "
+                + LocalDate.now(zone).format(LONG_DAY)
+                : "Mail that arrived since " + from.format(LONG_DAY);
+        if (rows.isEmpty()) {
+            return heading + ":\nNothing arrived.\n" + mailFooter();
+        }
+        Map<Integer, MailFolder> where = byId(folders);
+        StringBuilder out = new StringBuilder(heading + " (" + rows.size()
+                + (rows.size() == MAIL_LIMIT ? " shown, newest first" : ", newest first")
+                + "):");
+        LocalDate day = null;
+        for (String[] row : rows) {
+            ZonedDateTime at = when(row[0], zone);
+            if (!at.toLocalDate().equals(day)) {
+                day = at.toLocalDate();
+                out.append("\n").append(day.format(DAY)).append(':');
+            }
+            MailFolder folder = where.get(number(row[1]));
+            out.append("\n  ").append(at.format(CLOCK)).append("  ").append(who(row[2]))
+                    .append("\n      ").append(subjectOf(row[3]))
+                    .append(folder == null ? "" : "  [" + folder.account + " / "
+                            + folder.name + "]")
+                    .append("0".equals(row[4].trim()) ? "  (unread)" : "");
+        }
+        return out.append('\n').append(mailFooter()).toString();
+    }
+
+    // What arrived and has had no reply: Gloda's own "replied to" flag, which Thunderbird
+    // sets when a reply is sent, so this is a fact out of the index and not a guess.
+    // Things I sent myself are left out, and so is anything in a bin or a drafts folder.
+    private static String unanswered(int days, ZoneId zone) {
+        List<MailFolder> folders = mailFolders();
+        LocalDate from = LocalDate.now(zone).minusDays(Math.max(1, days));
+        long since = from.atStartOfDay(zone).toInstant().toEpochMilli() * MICROS;
+        List<String[]> rows = query(mailDatabase(),
+                "SELECT m.date, m.folderID, t.c3author, t.c1subject,"
+                + " json_extract(m.jsonAttributes,'$.\"" + READ + "\"')"
+                + " FROM messages m LEFT JOIN messagesText_content t ON t.docid = m.id"
+                + " WHERE m.deleted = 0 AND m.folderID IN (" + idsOf(folders, true) + ")"
+                + " AND m.date >= " + since
+                + " AND IFNULL(json_extract(m.jsonAttributes,'$.\"" + REPLIED + "\"'),0) = 0"
+                + " AND json_extract(m.jsonAttributes,'$.\"" + FROM_ME + "\"') IS NULL"
+                + " ORDER BY m.date DESC LIMIT " + MAIL_LIMIT);
+        String heading = "Mail with no reply sent, from the last " + Math.max(1, days)
+                + " day(s)";
+        if (rows.isEmpty()) {
+            return heading + ":\nNothing is waiting for a reply.\n" + mailFooter();
+        }
+        Map<Integer, MailFolder> where = byId(folders);
+        StringBuilder out = new StringBuilder(heading + " (" + rows.size()
+                + (rows.size() == MAIL_LIMIT ? " shown" : "") + ", newest first):");
+        for (String[] row : rows) {
+            ZonedDateTime at = when(row[0], zone);
+            MailFolder folder = where.get(number(row[1]));
+            out.append("\n  ").append(at.format(DAY)).append(' ').append(at.format(CLOCK))
+                    .append("  ").append(who(row[2]))
+                    .append("\n      ").append(subjectOf(row[3]))
+                    .append(folder == null ? "" : "  [" + folder.account + " / "
+                            + folder.name + "]")
+                    .append("0".equals(row[4].trim()) ? "  (unread)" : "");
+        }
+        out.append("\nReplied to or not is Thunderbird's own flag: a reply sent from "
+                + "somewhere else - a phone, a web mailbox - is not in this index, so it "
+                + "can show as waiting when it is not.");
+        return out.append('\n').append(mailFooter()).toString();
+    }
+
+    // Everything between you and somebody: the last they wrote, the last you wrote back,
+    // and how much there has been. Matched on the address and on the name in the address
+    // book, because "abc" is as likely to be a person as a mailbox.
+    private static String withPerson(String text, ZoneId zone) {
+        String asked = text.trim();
+        if (asked.length() < 2) {
+            throw new Stop("#with wants somebody to look for, as #with acme.");
+        }
+        String like = "'%" + asked.replace("'", "''").toLowerCase(Locale.ROOT) + "%'";
+        List<String[]> who = query(mailDatabase(),
+                "SELECT i.id, i.value, IFNULL(c.name,'') FROM identities i"
+                + " LEFT JOIN contacts c ON c.id = i.contactID"
+                + " WHERE lower(i.value) LIKE " + like
+                + " OR lower(IFNULL(c.name,'')) LIKE " + like + " LIMIT 40");
+        if (who.isEmpty()) {
+            return "Nobody in the mail index matches \"" + asked + "\".\n" + mailFooter();
+        }
+        StringBuilder ids = new StringBuilder();
+        Set<String> addresses = new LinkedHashSet<>();
+        for (String[] one : who) {
+            if (ids.length() > 0) ids.append(',');
+            ids.append(number(one[0]));
+            addresses.add(one[2].isEmpty() ? one[1] : one[2] + " <" + one[1] + ">");
+        }
+        List<MailFolder> folders = mailFolders();
+        Map<Integer, MailFolder> where = byId(folders);
+        // involves is a multi-valued attribute with a row per identity and an index on
+        // it, which is what makes this a lookup rather than a scan of 200,000 messages.
+        List<String[]> rows = query(mailDatabase(),
+                "SELECT m.date, m.folderID, t.c1subject,"
+                + " json_extract(m.jsonAttributes,'$.\"" + FROM_ME + "\"')"
+                + " FROM messageAttributes a JOIN messages m ON m.id = a.messageID"
+                + " LEFT JOIN messagesText_content t ON t.docid = m.id"
+                + " WHERE a.attributeID = " + INVOLVES + " AND a.value IN (" + ids + ")"
+                + " AND m.deleted = 0 ORDER BY m.date DESC LIMIT 200");
+        String[] lastIn = null;
+        String[] lastOut = null;
+        int in = 0;
+        int out2 = 0;
+        for (String[] row : rows) {
+            MailFolder folder = where.get(number(row[1]));
+            boolean mine = row[3] != null && !row[3].trim().isEmpty()
+                    || (folder != null && folder.sent);
+            if (mine) {
+                out2++;
+                if (lastOut == null) lastOut = row;
+            } else if (folder == null || folder.received) {
+                in++;
+                if (lastIn == null) lastIn = row;
+            }
+        }
+        // "immobilienscout24" matches twenty-one addresses at that domain, and a line
+        // naming all of them is a line nobody can read and nothing can say out loud. A
+        // few are named and the rest counted.
+        List<String> named = new ArrayList<>(addresses);
+        String heading = named.size() <= 3 ? String.join(", ", named)
+                : named.size() + " addresses matching \"" + asked + "\", among them "
+                        + String.join(", ", named.subList(0, 3));
+        StringBuilder out = new StringBuilder("Mail with " + heading + ":");
+        out.append("\n  Last received: ").append(lastIn == null ? "never"
+                : when(lastIn[0], zone).format(LONG_DAY) + " at "
+                        + when(lastIn[0], zone).format(CLOCK) + " - "
+                        + subjectOf(lastIn[2]));
+        out.append("\n  Last sent:     ").append(lastOut == null ? "never"
+                : when(lastOut[0], zone).format(LONG_DAY) + " at "
+                        + when(lastOut[0], zone).format(CLOCK) + " - "
+                        + subjectOf(lastOut[2]));
+        out.append("\n  In the index:  ").append(in).append(" received, ").append(out2)
+                .append(" sent")
+                .append(rows.size() >= 200 ? " of the 200 most recent" : "");
+        return out.append('\n').append(mailFooter()).toString();
+    }
+
+    // Who wrote, over a span of days: one line each, most recent first, with how many.
+    private static String senders(int days, ZoneId zone) {
+        List<MailFolder> folders = mailFolders();
+        LocalDate from = LocalDate.now(zone).minusDays(Math.max(1, days));
+        long since = from.atStartOfDay(zone).toInstant().toEpochMilli() * MICROS;
+        List<String[]> rows = query(mailDatabase(),
+                "SELECT json_extract(m.jsonAttributes,'$.\"" + FROM + "\"') AS who,"
+                + " count(*), max(m.date)"
+                + " FROM messages m"
+                + " WHERE m.deleted = 0 AND m.folderID IN (" + idsOf(folders, true) + ")"
+                + " AND m.date >= " + since + " AND who IS NOT NULL"
+                + " GROUP BY who ORDER BY max(m.date) DESC LIMIT " + MAIL_LIMIT);
+        String heading = "Who wrote in the last " + Math.max(1, days) + " day(s), since "
+                + from.format(LONG_DAY);
+        if (rows.isEmpty()) return heading + ":\nNobody.\n" + mailFooter();
+        StringBuilder ids = new StringBuilder();
+        for (String[] row : rows) {
+            if (ids.length() > 0) ids.append(',');
+            ids.append(number(row[0]));
+        }
+        Map<Integer, String> names = new LinkedHashMap<>();
+        for (String[] one : query(mailDatabase(),
+                "SELECT i.id, i.value, IFNULL(c.name,'') FROM identities i"
+                + " LEFT JOIN contacts c ON c.id = i.contactID"
+                + " WHERE i.id IN (" + ids + ")")) {
+            names.put(number(one[0]), one[2].isEmpty() ? one[1]
+                    : one[2] + " <" + one[1] + ">");
+        }
+        StringBuilder out = new StringBuilder(heading + " (" + rows.size()
+                + (rows.size() == MAIL_LIMIT ? " shown" : "") + "):");
+        for (String[] row : rows) {
+            ZonedDateTime at = when(row[2], zone);
+            int count = number(row[1]);
+            out.append("\n  ").append(names.getOrDefault(number(row[0]), "(unknown)"))
+                    .append(" - ").append(count)
+                    .append(count == 1 ? " message, last " : " messages, last ")
+                    .append(at.format(DAY)).append(' ').append(at.format(CLOCK));
+        }
+        return out.append('\n').append(mailFooter()).toString();
+    }
+
+    // The mailboxes themselves: which accounts are indexed, how much of each, and how
+    // fresh the index is - which is the one thing every mail answer depends on.
+    private static String mailboxes(ZoneId zone) {
+        List<MailFolder> folders = mailFolders();
+        Map<Integer, MailFolder> where = byId(folders);
+        Map<String, int[]> perAccount = new LinkedHashMap<>();   // {messages, folders}
+        for (MailFolder f : folders) {
+            perAccount.computeIfAbsent(f.account, a -> new int[2])[1]++;
+        }
+        for (String[] row : query(mailDatabase(),
+                "SELECT folderID, count(*) FROM messages WHERE deleted = 0"
+                + " GROUP BY folderID")) {
+            MailFolder f = where.get(number(row[0]));
+            if (f == null) continue;
+            perAccount.computeIfAbsent(f.account, a -> new int[2])[0] += number(row[1]);
+        }
+        StringBuilder out = new StringBuilder("Mailboxes in Thunderbird's index:");
+        for (Map.Entry<String, int[]> one : perAccount.entrySet()) {
+            out.append("\n- ").append(one.getKey()).append(": ")
+                    .append(one.getValue()[0]).append(" indexed message(s) in ")
+                    .append(one.getValue()[1]).append(" folder(s)");
+        }
+        return out.append('\n').append(mailFooter()).toString();
+    }
+
+    // Every mail answer ends with this, because every mail answer depends on it: the
+    // index is Thunderbird's, and it is only as new as the last time Thunderbird ran.
+    private static String mailFooter() {
+        ZoneId zone = ZoneId.systemDefault();
+        String newest = "";
+        try {
+            List<String[]> rows = query(mailDatabase(),
+                    "SELECT max(date) FROM messages WHERE deleted = 0");
+            if (!rows.isEmpty() && rows.get(0).length > 0 && !rows.get(0)[0].isBlank()) {
+                ZonedDateTime at = when(rows.get(0)[0], zone);
+                newest = " The newest message in it is from " + at.format(LONG_DAY)
+                        + " at " + at.format(CLOCK) + ".";
+            }
+        } catch (Stop ignored) {
+            // The footer is not the place to fail.
+        }
+        return "Read from Thunderbird's own search index in " + profile + ", read-only."
+                + newest + " Nothing that arrived after that is in here yet - the index is "
+                + "Thunderbird's, and it fills while Thunderbird runs.";
+    }
+
+    private static int number(String text) {
+        try {
+            return Integer.parseInt(text == null ? "" : text.trim());
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+    }
+
+    // How many days a mail question was asked about, when it says.
+    private static int daysIn(String[] parts, int index, int whenMissing) {
+        if (parts.length <= index) return whenMissing;
+        try {
+            return Math.max(0, Math.min(366, Integer.parseInt(parts[index])));
+        } catch (NumberFormatException ex) {
+            throw new Stop("\"" + parts[index] + "\" is not a number of days.");
+        }
+    }
+
     // ---- Settings --------------------------------------------------------------
     // The profile and the calendars left out, in one small text file beside this agent:
     // two lines of its own, rather than anything of JRock's, which belongs to JRock.
     private static void readSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
-        if (!Files.isRegularFile(file)) return;
+        if (!Files.isRegularFile(file)) {
+            Path was = ownDirectory().resolve(SETTINGS_WAS);
+            if (!Files.isRegularFile(was)) return;
+            file = was;
+        }
         try {
             for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
                 String text = line.trim();
@@ -1629,7 +2120,7 @@ public final class JRockCalendarEvents {
 
     private static void writeSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
-        StringBuilder out = new StringBuilder("' JRock calendar events agent\n");
+        StringBuilder out = new StringBuilder("' JRock Thunderbird agent\n");
         if (profile != null) out.append("profile=").append(profile).append('\n');
         if (!eventEmail.isEmpty()) out.append("email=").append(eventEmail).append('\n');
         if (!excluded.isEmpty()) {
@@ -1651,7 +2142,7 @@ public final class JRockCalendarEvents {
         }
         try {
             java.security.CodeSource code =
-                    JRockCalendarEvents.class.getProtectionDomain().getCodeSource();
+                    JRockThunderbird.class.getProtectionDomain().getCodeSource();
             if (code != null && code.getLocation() != null) {
                 Path at = Paths.get(code.getLocation().toURI()).toAbsolutePath().normalize();
                 Path parent = Files.isDirectory(at) ? at : at.getParent();

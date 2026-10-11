@@ -1789,7 +1789,7 @@ the voice, so the microphone doesn't record the last answer as the next question
 - **A new event in the calendar.** An answer that says *"I'm putting it in the calendar on
   YYYY-MM-DD at HH:MM, named …"* — the appendix asks the model for this sentence too, in English
   whatever the language — sends `#new` to the [calendar
-  agent](#a-fifth-agent-your-calendar-jrockcalendareventsjava), which posts the invitation to you
+  agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava), which posts the invitation to you
   from yourself for you to send with **Ctrl+Enter**. Leave the time out and it is an event for
   the whole day. Two things make this safe to drive by voice: the sentence is **read aloud
   before anything happens**, so nothing reaches a calendar that the operator did not also hear,
@@ -1804,9 +1804,18 @@ the voice, so the microphone doesn't record the last answer as the next question
   which question the location answers only with History on.
 - **Calendar.** When the whole answer is *"I need your calendar for today"* — or *"… for this
   week"*, or *"… for 2026-12-24 to 2026-12-26"* — the agent asks the [calendar
-  agent](#a-fifth-agent-your-calendar-jrockcalendareventsjava) on `127.0.0.1:47473`, puts the
+  agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) on `127.0.0.1:47473`, puts the
   briefing into the next prompt and sends it. Once a turn. Each line carries the calendar it came
   from, so the model can say which calendar something is in.
+- **Mail.** When the whole answer is *"I need your mail: …"* — `today`, `3 days`, `unanswered`,
+  `senders 5 days`, `with <somebody>`, `mailboxes` — the agent asks the [Thunderbird
+  agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) on
+  `127.0.0.1:47473` and puts what comes back into the next prompt. Once a turn. So *"have I had
+  anything today?"*, *"who wrote this week?"*, *"when did I last hear from them?"* and *"what
+  have I not answered?"* are questions with answers, read off Thunderbird's own index without a
+  server being asked or a message being touched. The words the model may use are mapped to the
+  agent's own request in one place, and anything else is passed through for the agent to refuse
+  with a reason rather than guessed at.
 - **Weather.** When the whole answer is *"I need weather for this location: …"*, the agent
   does not show it or read it aloud either. If the location has no coordinates, the location
   agent is asked for them first. If the model already has them from `#here`, they are used as
@@ -1855,7 +1864,7 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   Then close the connection. [Push-to-talk](#the-first-agent-push-to-talk-jrockpushtotalkjava)
   does this.
 - **JRock's agents' ports** are **47470–47479**. The timer has the first, the location agent
-  47471, the weather agent 47472, and the calendar agent 47473. The range is
+  47471, the weather agent 47472, and the Thunderbird agent 47473. The range is
   below Windows' dynamic range (49152 and up, where the system hands out ports and Hyper-V
   reserves blocks of them), and no well-known service uses it. Another timer already running
   on the port is reported in the window. Alarms can still be set there by hand.
@@ -1927,21 +1936,23 @@ java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
   address** to try one by hand.
 - It needs a key. **Run it in a folder of its own**, with History off there.
 
-### A fifth agent: your calendar (`JRockCalendarEvents.java`)
+### A fifth agent: Thunderbird, your calendar and your mail (`JRockThunderbird.java`)
 
-What is in your calendar, read out of **Thunderbird's own offline copy** — today, this week,
-any span of days — for the push-to-talk agent to ask about and for you to read, and one thing it
-puts **into** the calendar: a new event, posted to you by yourself. The first agent here that
-needs **no model, no Bedrock key and no JRock automation**: it answers out of files rather than
-by asking anybody.
+What **Thunderbird already knows**, read out of its own files — your **calendar** and your
+**mail** — for the push-to-talk agent to ask about and for you to read. And one thing it puts
+back: a calendar event, posted to you by yourself. The first agent here that needs **no model,
+no Bedrock key and no JRock automation**: it answers out of files rather than by asking anybody.
+
+Neither half is ever the authority on anything — Thunderbird is. What is here is what
+Thunderbird has already written down, which is why **every answer says how fresh that is**.
 
 **Events, and that is the name.** Thunderbird keeps tasks (VTODO) in a table of their own, and a
 calendar served over CalDAV by Google has none — the cached table is empty. If your "tasks for
 today" are the things in your calendar, this is them.
 
 ```sh
-java -cp jrock.jar JRockCalendarEvents.java --profile K:\Thunderbird\Profiles\xxxx.default-release
-java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no window
+java -cp jrock.jar JRockThunderbird.java --profile K:\Thunderbird\Profiles\xxxx.default-release
+java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no window
 ```
 
 - **Where it reads.** `<profile>/calendar-data/cache.sqlite` is Thunderbird's cache of every
@@ -1949,7 +1960,7 @@ java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no
   never written and never moved**, and the names come from `<profile>/prefs.js`, where
   Thunderbird keeps them as `calendar.registry.<uuid>.name`.
 - **One profile, named in full.** The window has the folder as a field with a *Browse…* button,
-  and remembers it in `jrock-calendar-events.txt` beside the agent. No wildcards and no guessing:
+  and remembers it in `jrock-thunderbird.txt` beside the agent. No wildcards and no guessing:
   which profile is read is not a thing to be inferred when a machine has several.
 - **It needs `sqlite3`** — the command-line tool from [sqlite.org](https://sqlite.org/download.html),
   the one outside thing it wants, as Ghostscript and xpdf are for PDFs. Looked for **on `PATH`,
@@ -1986,7 +1997,7 @@ java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no
 - **The address is picked from a list, never said out loud.** The window's **New events from/to**
   dropdown is filled with the addresses that Thunderbird profile is set up to send from
   (`mail.identity.*.useremail` in `prefs.js`), and the chosen one is remembered in
-  `jrock-calendar-events.txt`. The same address is used at **both** ends, and nothing in a request
+  `jrock-thunderbird.txt`. The same address is used at **both** ends, and nothing in a request
   line can name an address — so an agent taking its instructions from a model, which took them
   from whatever was said in a noisy room, **cannot mail anybody but you**. The worst a mistake can
   do is send you a mail you did not want.
@@ -1994,6 +2005,55 @@ java -cp jrock.jar JRockCalendarEvents.java --print week      # one briefing, no
   switch that sends one — there is no `-send` — so the compose window comes up with the address,
   the subject, the body and the attachment all filled in, and **Ctrl+Enter** is the operator's.
   Which is where the one irreversible step belongs anyway.
+#### The mail half
+
+The same idea, on `global-messages-db.sqlite` — **Thunderbird's own global search index**, the
+one *Search Messages* and the quick filter are built on. Three things in it make real questions
+answerable without opening a single mailbox file: a row per message with its date and folder, a
+JSON blob of Gloda's own attributes (the sender, **read**, **replied to**, **from me**), and the
+subject, author and recipients as the text they were written as.
+
+So *"have I answered that?"* is a **fact out of the index** rather than a guess from the text.
+
+| | |
+|---|---|
+| `#mail` | what arrived today — time, who, subject, which account and folder, and which are unread |
+| `#mail 3` | the same over three days, grouped by day |
+| `#unanswered` | received in the last fortnight with no reply sent, newest first (`#unanswered 30` for longer) |
+| `#with acme` | the last mail each way with somebody, and how much there has been — matched on the address **and** on the name in the address book |
+| `#senders 5` | who wrote in the last five days, with how many each and when they last did |
+| `#mailboxes` | the accounts in the index, how much of each, and **how fresh the index is** |
+
+```
+Mail that arrived today, Sunday 11 October 2026 (8, newest first):
+Sun 11 Oct:
+  11:16  budgets@costalerts.amazonaws.com
+      AWS Budgets: Account ... has a budget exceeding your alert threshold  [me@gmail.com / INBOX]  (unread)
+```
+
+- **Folders are read, not guessed at.** An account's name comes from its IMAP URI, and a
+  folder's kind from the last part of that URI — so the bins, the drafts and Gmail's virtual
+  folders are left out of "what arrived", and **All Mail** especially, since it holds a copy of
+  every message there is and would count everything twice. Sent folders are what "the last you
+  wrote" is read from.
+- **The index is Thunderbird's, and only as new as the last time it ran.** A message that
+  arrived while Thunderbird was closed is not in there yet. Every mail answer therefore ends
+  with the date of the newest message in the index, and the appendix tells the model to say so
+  rather than answer as if the index were complete.
+- **Nothing is opened, moved, marked or sent by asking.** Read-only, with `-readonly` on every
+  query, exactly as the calendar half is. The one thing this agent writes is still the single
+  `.ics` for `#new`.
+- **Replied-to is Thunderbird's own flag**, which it sets when a reply is sent *from
+  Thunderbird*. A reply you sent from a phone or a web mailbox is not in this index, so a
+  message can show as waiting when it is not — `#unanswered` says that under its list rather
+  than leaving you to find it out.
+- **A query is a lookup, not a scan.** 192,899 messages and 75,441 conversations here, on a
+  network drive, answered in about four seconds: the date and folder indexes cut the set down
+  before any JSON is parsed, and `#with` goes through Gloda's indexed *involves* attribute
+  rather than reading every message.
+
+#### Both halves, in one window
+
 - **Every line names its calendar**, in square brackets, and `#calendars` lists them with their
   sizes — so "which calendar is that in?" is a question the model can actually answer, and a
   noisy feed can be recognised for what it is. Each calendar also has a **checkbox** in the
@@ -2138,7 +2198,7 @@ sequenceDiagram
         participant PTT as JRockPushToTalk
         participant PM as its JRock (model)
     end
-    participant Cal as JRockCalendarEvents, 127.0.0.1:47473
+    participant Cal as JRockThunderbird, 127.0.0.1:47473
     participant Tb as Thunderbird
 
     rect rgb(255, 245, 200)
@@ -2162,7 +2222,7 @@ sequenceDiagram
     end
 ```
 
-The address is not in any of those lines. It is chosen once in the calendar agent's window,
+The address is not in any of those lines. It is chosen once in the Thunderbird agent's window,
 from the addresses that Thunderbird profile sends from, and used at both ends — so the whole
 chain, from a noisy room through a model to a mail, **cannot reach anybody but the operator**.
 
@@ -3353,6 +3413,12 @@ Nine pages, in this order:
 jar is in, which agents and flows are installed and where each one works, so those become the
 folder, the ticks and the folder of each agent — installing again **updates** what is there
 instead of asking everything twice.
+
+A sample that has been **renamed** is still the same install: the installer maps the old name
+to the new one, keeps the folder it was working in - so its settings and its log carry over -
+and the rename never reads as one agent gone and another appeared. (`JRockCalendarEvents` is
+`JRockThunderbird` now, and the agent reads its old settings file when the new one is not there
+yet.)
 
 It reads **every** shell root for them, including the two under `HKEY_LOCAL_MACHINE` it never
 writes to itself. An entry can be in any of them — an older release wrote the same agent to
