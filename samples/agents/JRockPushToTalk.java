@@ -665,11 +665,10 @@ public final class JRockPushToTalk {
     // Proposes the new time an answer proposes, if it proposes one. Returns null when it
     // does not, and otherwise what became of it.
     //
-    // This is the one request in this agent that ends in a mail to somebody who is not
-    // the operator - the organizer of the meeting - and nothing here knows who that is:
-    // the Thunderbird agent reads the address off the event itself, refuses when the
-    // operator is the organizer, and leaves the sending to them. What goes over the wire
-    // from here is an id, a date and a time.
+    // Only an appointment that is entirely the operator's own can be moved: the
+    // Thunderbird agent refuses one somebody else organised and one with any other
+    // participant on it, naming them, and the mail it composes goes from the operator to
+    // the operator. What goes over the wire from here is an id, a date and a time.
     private static String movedIn(String answer) {
         java.util.regex.Matcher m = MOVE.matcher(answer);
         if (!m.find()) return null;

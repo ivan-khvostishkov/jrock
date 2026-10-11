@@ -1796,12 +1796,12 @@ the voice, so the microphone doesn't record the last answer as the next question
   and the address is the one picked in the agent's window at both ends, so it **cannot reach
   anybody else**. The status line says what became of it, and JRock's log has the whole of what
   the agent said back, including where the `.ics` file is.
-- **A new time for somebody else's meeting.** An answer that says *"I'm proposing to move
+- **A new time for an appointment of your own.** An answer that says *"I'm proposing to move
   event a3f91c to 2026-10-20 at 14:30"* — the id being the one the calendar answer printed —
-  sends `#move` to the Thunderbird agent, which composes the counter-proposal to that meeting's
-  organizer for you to send. The operator hears the sentence before anything is prepared, so no
-  meeting is touched that they did not hear named; and the appendix tells the model to say, in
-  its own words, that this is a proposal the organizer has to accept.
+  sends `#move` to the Thunderbird agent, which composes the update to you for you to send. You
+  hear the sentence before anything is prepared, so no appointment is touched that you did not
+  hear named, and anything with another participant on it comes back refused with who they
+  are.
 - **Location.** When the whole answer is *"I need to know your location"*, the agent does not
   show it or read it aloud. It sends `#here` to the
   [location agent](#a-third-agent-location-jrocklocationjava) and gives the model the line that
@@ -1983,7 +1983,7 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   | `#week` | today and the six days after it |
   | `#next [n]` | the next *n* events from now (default 5) |
   | `#range 2026-12-24 2026-12-26` | any span of days |
-  | `#move a3f91c 2026-10-20 14:30` | propose a new time for a meeting somebody else arranged, by the id on its line |
+  | `#move a3f91c 2026-10-20 14:30` | move an appointment of **your own**, by the id on its line |
   | `#tentative [days]` | the maybes, which every other answer leaves out — `#tentative 2026-12-01 2026-12-31` for a span |
   | `#calendars` | the calendars, and how many events each holds |
   | `#new 2026-10-15 14:00 Dentist` | a new event, by post (below) — an hour long unless the calendar says otherwise |
@@ -2021,20 +2021,27 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   a model without a character going astray. Six tell 1,569 events apart, are short enough to
   say, and are **derived rather than stored**, so the same event has the same id in every answer
   and after a restart. The whole UID works anywhere the short one does, for anybody who has it.
-- **`#move` proposes a new time; it does not move anything.** In the calendar standard's own
-  terms that is `METHOD:COUNTER` — an attendee telling the **organizer** that a different time
-  would suit, with the same UID and the organizer's own `SEQUENCE`, so their calendar offers
-  them a button to accept or decline it (RFC 5546). The meeting moves when they accept, because
-  only they can move it.
+- **`#move` moves an appointment that is entirely yours, and nothing else.** Organised by
+  you, or by nobody, and with **no participant but you**. Everything else is refused with the
+  reason: a meeting somebody else arranged is theirs to move, and a meeting with other people
+  on it cannot be moved without telling them — which is not a thing to do from across a room
+  by voice. In this calendar that leaves **311 of the 312** upcoming events movable and one
+  refused, which is about the right shape for a rule nobody has to think about.
 
-  **This is the one thing in this agent that addresses a mail to somebody else**, and four
-  things hold it in: the address is **read off the event's own `ORGANIZER` property**, so
-  nothing said out loud and nothing a model wrote can put an address there — the only people
-  reachable are the organizers of meetings already in your calendar; an event **you** organise
-  is refused, since a counter-proposal to yourself means nothing and that event is yours to
-  edit; the mail is **composed, never sent**, with Ctrl+Enter yours as always; and who it is
-  addressed to is on the status line and in the log before anybody presses anything. The new
-  time keeps the meeting's **original length** — a meeting moved is the same meeting.
+  ```
+  Stopped: "Legal review (confidential)" has 2 other participants (A. Partner
+  <partner@…>, other@…), so moving it is something they have to be told
+  about. Do that one in Thunderbird.
+  ```
+
+  So **no mail here can reach anybody but you** — it goes from your address to your address,
+  exactly as `#new` does, and the whole agent keeps the property that no address said out loud
+  can get into it. The mechanism follows from who is asking: the organizer of an event is the
+  one allowed to change it, so this writes `METHOD:REQUEST` with the same UID and the
+  `SEQUENCE` **one higher** than the event carries — an update, in the standard's own terms
+  (RFC 5546), which is what Thunderbird reads as *this event has moved* rather than as a new
+  one. Accept the update when it arrives and the calendar follows. The new time keeps the
+  appointment's **original length**, and nothing is sent until you press Ctrl+Enter.
 - **A new event goes by post, to you from yourself.** `#new` is the one thing here that is not
   read-only, and it still writes nothing to a calendar: it writes a temporary `.ics` file and has
   **Thunderbird** compose a mail with that invitation attached, **from** the address picked in the
