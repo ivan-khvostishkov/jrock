@@ -283,9 +283,31 @@ public final class JRockPushToTalk {
             "^\\W*I need the post:\\s*(.*\\S)\\W*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
-    // The answer the letters agent gives when it is handing over a letter's TEXT rather
-    // than a sentence about one: the marker, the file name, and then the letter.
+    // The answer an agent gives when it is handing over a DOCUMENT rather than a
+    // sentence: the marker, what kind of thing it is, a file name, and then the text. A
+    // letter off the scanner and an e-mail out of the index arrive the same way, and both
+    // go into the prompt as a file rather than as ten thousand characters of prompt.
     private static final String CONTENT = "CONTENT ";
+
+    // The sentence that saves the answer before last as a document. The operator has
+    // heard it, likes it, and wants it on disk - a drafted reply, a summary worth
+    // keeping - so what is exported is the PREVIOUS answer and never this sentence.
+    private static final java.util.regex.Pattern SAVE = java.util.regex.Pattern.compile(
+            "I(?:['\u2019]m| am) saving (?:the|that|it|this) ?(?:last|previous)? ?"
+            + "(?:answer|reply|draft|text)? ?to a (?:file|document)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    // The sentence that puts a drafted reply into Thunderbird's compose window - said
+    // ONLY after the operator has heard the draft and agreed to it, which the appendix
+    // is emphatic about. The id names the message being replied to; everything after the
+    // colon is the draft itself, as many lines as it takes.
+    private static final java.util.regex.Pattern DRAFT = java.util.regex.Pattern.compile(
+            "I(?:['\u2019]m| am) preparing (?:the|a) (?:draft|reply)(?: reply)? to "
+            + "(?:the message |message )?([0-9a-fA-F]{6}):\\s*(.+)",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
+    // The answer before this one, which is what the save sentence saves.
+    private static volatile String lastAnswer;
 
     // Coordinates in a location line, as the location agent writes them - which the model
     // may already have from it, and then they are used as they are.
@@ -457,7 +479,17 @@ public final class JRockPushToTalk {
                     break;
                 }
                 check(JRock.automationClearPrompt());
-                check(JRock.automationSetPrompt(mailbox[0]));
+                if (mailbox[0].startsWith(CONTENT)) {
+                    // One message, handed over as a document - the same way a scanned
+                    // letter is.
+                    String problem = includeDocument(mailbox[0]);
+                    if (problem != null) {
+                        note = "Message not included: " + problem;
+                        break;
+                    }
+                } else {
+                    check(JRock.automationSetPrompt(mailbox[0]));
+                }
                 answer = sendAndRead("Sent the mail, waiting for the reply\u2026");
             } else if (!askedPost && post.matches()) {
                 // The paper post, off the letters agent - which has no model of its own:
@@ -474,15 +506,7 @@ public final class JRockPushToTalk {
                 }
                 check(JRock.automationClearPrompt());
                 if (letters[0].startsWith(CONTENT)) {
-                    // A LETTER'S TEXT, which goes in as a file rather than as a wall of
-                    // prompt: written to a temp .txt and INCLUDED, exactly as a person
-                    // would include it with Ctrl+I. The transcript then holds a token and
-                    // a file beside it rather than ten thousand characters of letter, and
-                    // the model is reading a document rather than a quotation of one.
-                    String[] split = letters[0].split("\n", 2);
-                    String name = split[0].substring(CONTENT.length()).trim();
-                    String body = split.length > 1 ? split[1] : "";
-                    String problem = includeLetter(name, body);
+                    String problem = includeDocument(letters[0]);
                     if (problem != null) {
                         note = "Letter not included: " + problem;
                         break;
@@ -526,15 +550,23 @@ public final class JRockPushToTalk {
         String alarm = alarmIn(reply);
         String event = eventIn(reply);
         String moved = movedIn(reply);
-        if (handsFreeTurn && !handsFree) return join(note, alarm, event, moved);
+        String drafted = draftIn(reply);
+        String saved = savedIn(reply);
+        // What the NEXT save would save: this answer, unless this answer was itself a
+        // command about the last one.
+        if (saved == null && drafted == null) lastAnswer = reply;
+        if (handsFreeTurn && !handsFree) {
+            return join(note, alarm, event, moved, drafted, saved);
+        }
         // An answer of nothing at all - a reply that arrived empty - is a failed turn to
         // anyone listening, however well the request itself went: reading it out loud
         // would be silence, which is the one thing a spoken answer cannot be.
         if (reply.isBlank()) {
-            return join(note, alarm, event, moved, "The reply was empty.", sayFailed());
+            return join(note, alarm, event, moved, drafted, saved, "The reply was empty.",
+                    sayFailed());
         }
         String silent = JRock.automationNarrate(reply);
-        return join(note, alarm, event, moved,
+        return join(note, alarm, event, moved, drafted, saved,
                 silent == null ? null : "Not read aloud: " + silent);
     }
 
@@ -577,6 +609,10 @@ public final class JRockPushToTalk {
                 || asked.contains("from whom")) {
             return "#senders" + (days.find() ? " " + days.group(1) : "");
         }
+        // One message, read: its own text rather than a line about it.
+        java.util.regex.Matcher one = java.util.regex.Pattern
+                .compile("(?:message|read|open|what did|contents of)\\s+(.+)").matcher(asked);
+        if (one.matches()) return "#message " + one.group(1).trim();
         if (asked.startsWith("mailbox") || asked.contains("mailboxes")
                 || asked.contains("accounts")) {
             return "#mailboxes";
@@ -630,29 +666,48 @@ public final class JRockPushToTalk {
         return "#file " + asked;
     }
 
-    // A letter's text as a file in the prompt. Written where JRock's own files are, so it
-    // is beside the transcript that refers to it rather than in a temp folder somebody
-    // would have to go looking for.
-    private static String includeLetter(String name, String body) {
+    // A DOCUMENT an agent handed over - a scanned letter, an e-mail - as a file in the
+    // prompt rather than as a wall of prompt.
+    //
+    // Written where JRock's own files are, so it is beside the transcript that refers to
+    // it rather than in a temp folder somebody would have to go looking for, and then
+    // INCLUDED exactly as a person would include it with Ctrl+I. The transcript keeps a
+    // token and a file; the model reads a document rather than a quotation of one.
+    //
+    // The first line is "CONTENT <kind> <name>", and the kind decides what the model is
+    // asked to do with it: a letter is explained, an e-mail is answered about. Everything
+    // after that line is the thing itself.
+    private static String includeDocument(String answer) {
+        String[] split = answer.split("\n", 2);
+        String[] head = split[0].substring(CONTENT.length()).trim().split("\\s+", 2);
+        String kind = head.length > 0 ? head[0].toLowerCase(java.util.Locale.ROOT) : "document";
+        String name = head.length > 1 ? head[1].trim() : "document.txt";
+        String body = split.length > 1 ? split[1] : "";
+        boolean mail = kind.startsWith("message") || kind.startsWith("mail");
         try {
-            java.nio.file.Path dir = java.nio.file.Paths.get("")
-                    .toAbsolutePath().resolve("JRock").resolve("letters");
+            java.nio.file.Path dir = java.nio.file.Paths.get("").toAbsolutePath()
+                    .resolve("JRock").resolve(mail ? "mail" : "letters");
             java.nio.file.Files.createDirectories(dir);
             String safe = name.replaceAll("[^A-Za-z0-9._-]", "-");
-            if (!safe.toLowerCase(java.util.Locale.ROOT).endsWith(".txt")) safe += ".txt";
+            if (!safe.contains(".")) safe += mail ? ".md" : ".txt";
             java.nio.file.Path file = dir.resolve(safe);
             java.nio.file.Files.write(file, body.getBytes(StandardCharsets.UTF_8));
-            String problem = JRock.automationSetPrompt(
-                    "The operator asked about this letter. It is the text of a scanned "
-                    + "letter, filed as \"" + name + "\". Say what it is about and what "
-                    + "it asks of them, in a few spoken sentences, in the operator's own "
-                    + "language. Name any date, amount or reference number that matters. "
-                    + "Do not read out the file name.\n\n");
+            String problem = JRock.automationSetPrompt(mail
+                    ? "The operator asked about this e-mail. It is one message, written "
+                      + "out as Markdown: who sent it, when, what was attached, and what "
+                      + "it says. Answer what they asked in a few spoken sentences, in "
+                      + "their own language. If they asked whether it is worth replying "
+                      + "to, say what you think and why. Do not read out addresses, file "
+                      + "names or the message id.\n\n"
+                    : "The operator asked about this letter. It is the text of a scanned "
+                      + "letter, filed as \"" + name + "\". Say what it is about and what "
+                      + "it asks of them, in a few spoken sentences, in the operator's own "
+                      + "language. Name any date, amount or reference number that matters. "
+                      + "Do not read out the file name.\n\n");
             if (problem != null) return problem;
             return JRock.automationInclude(file.toString(), "txt");
         } catch (IOException ex) {
-            return "the letter could not be written beside the transcript: "
-                    + ex.getMessage();
+            return "it could not be written beside the transcript: " + ex.getMessage();
         }
     }
 
@@ -825,6 +880,48 @@ public final class JRockPushToTalk {
         report("calendar: " + proposed[0].replace("\n", " "));
         String first = proposed[0].split("\n", 2)[0].trim();
         return first.isEmpty() ? "New time proposed." : first;
+    }
+
+    // Puts a drafted reply into Thunderbird's compose window, if the answer says it is
+    // preparing one. Returns null when it does not.
+    //
+    // The order matters and the appendix insists on it: the draft is READ ALOUD first, as
+    // an ordinary answer, and this sentence comes only after the operator has agreed to
+    // it. So nothing opens a window on the strength of a first attempt at wording.
+    private static String draftIn(String answer) {
+        java.util.regex.Matcher m = DRAFT.matcher(answer);
+        if (!m.find()) return null;
+        String id = m.group(1);
+        String draft = m.group(2).trim();
+        if (draft.isEmpty()) return "Draft not prepared: there was no text in it.";
+        String[] prepared = askAgent(CALENDAR_PORT, "#reply " + id + " " + draft,
+                "Thunderbird", "JRockThunderbird.java");
+        if (prepared[0] == null) return "Draft not prepared: " + prepared[1];
+        report("mail: " + prepared[0].replace("\n", " "));
+        return prepared[0].split("\n", 2)[0].trim();
+    }
+
+    // Saves the answer BEFORE this one as a DOCX in the working folder, if the answer says
+    // it is saving one. Returns null when it does not.
+    //
+    // The previous answer and never this one: the operator liked something that was read
+    // to them and asked for it to be kept, and the sentence asking for that is not the
+    // thing they liked. JRock exports it the same way the window's own menu does - the
+    // Markdown laid out as A4 with any picture it refers to placed in it - so a drafted
+    // letter comes out as a letter rather than as a wall of text.
+    private static String savedIn(String answer) {
+        if (!SAVE.matcher(answer).find()) return null;
+        String keep = lastAnswer;
+        if (keep == null || keep.isBlank()) {
+            return "Nothing saved: there is no earlier answer in this conversation.";
+        }
+        String name = java.time.LocalDateTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm")) + "-ptt.docx";
+        java.nio.file.Path file = java.nio.file.Paths.get("").toAbsolutePath().resolve(name);
+        String problem = JRock.automationExportDocx(keep, file.toString());
+        if (problem != null) return "Not saved: " + problem;
+        report("saved the previous answer to " + file);
+        return "Saved to " + name + ".";
     }
 
     // Puts in the calendar what an answer says it is putting there, if it says so.

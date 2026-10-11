@@ -344,6 +344,11 @@ public final class JRockThunderbird {
                 return moveEvent(line.substring(what.length()).trim(), zone);
             case "#mail":
                 return mail(daysIn(parts, 1, 0), zone);
+            case "#message":
+            case "#read":
+                return message(line.substring(what.length()).trim(), zone);
+            case "#reply":
+                return reply(line.substring(what.length()).trim(), zone);
             case "#unanswered":
                 return unanswered(daysIn(parts, 1, UNANSWERED_DAYS), zone);
             case "#with":
@@ -358,8 +363,9 @@ public final class JRockThunderbird {
                         + "#tentative [days] or "
                         + "#new <date> [time] <name> or #move <id> <date> [time] about "
                         + "the calendar, or #mail [days], "
-                        + "#unanswered [days], #with <somebody>, #senders [days] or "
-                        + "#mailboxes about the mail.");
+                        + "#unanswered [days], #with <somebody>, #senders [days], "
+                        + "#message <id or words>, #reply <id> <text> or #mailboxes "
+                        + "about the mail.");
         }
     }
 
@@ -2287,7 +2293,7 @@ public final class JRockThunderbird {
         long since = from.atStartOfDay(zone).toInstant().toEpochMilli() * MICROS;
         List<String[]> rows = query(mailDatabase(),
                 "SELECT m.date, m.folderID, t.c3author, t.c1subject,"
-                + " json_extract(m.jsonAttributes,'$.\"" + READ + "\"')"
+                + " json_extract(m.jsonAttributes,'$.\"" + READ + "\"'), m.headerMessageID"
                 + " FROM messages m LEFT JOIN messagesText_content t ON t.docid = m.id"
                 + " WHERE m.deleted = 0 AND m.folderID IN (" + idsOf(folders, true) + ")"
                 + " AND m.date >= " + since
@@ -2314,7 +2320,8 @@ public final class JRockThunderbird {
                     .append("\n      ").append(subjectOf(row[3]))
                     .append(folder == null ? "" : "  [" + folder.account + " / "
                             + folder.name + "]")
-                    .append("0".equals(row[4].trim()) ? "  (unread)" : "");
+                    .append("0".equals(row[4].trim()) ? "  (unread)" : "")
+                    .append(row.length > 5 ? "  id " + messageId(row[5]) : "");
         }
         return out.append('\n').append(mailFooter()).toString();
     }
@@ -2328,7 +2335,7 @@ public final class JRockThunderbird {
         long since = from.atStartOfDay(zone).toInstant().toEpochMilli() * MICROS;
         List<String[]> rows = query(mailDatabase(),
                 "SELECT m.date, m.folderID, t.c3author, t.c1subject,"
-                + " json_extract(m.jsonAttributes,'$.\"" + READ + "\"')"
+                + " json_extract(m.jsonAttributes,'$.\"" + READ + "\"'), m.headerMessageID"
                 + " FROM messages m LEFT JOIN messagesText_content t ON t.docid = m.id"
                 + " WHERE m.deleted = 0 AND m.folderID IN (" + idsOf(folders, true) + ")"
                 + " AND m.date >= " + since
@@ -2351,7 +2358,8 @@ public final class JRockThunderbird {
                     .append("\n      ").append(subjectOf(row[3]))
                     .append(folder == null ? "" : "  [" + folder.account + " / "
                             + folder.name + "]")
-                    .append("0".equals(row[4].trim()) ? "  (unread)" : "");
+                    .append("0".equals(row[4].trim()) ? "  (unread)" : "")
+                    .append(row.length > 5 ? "  id " + messageId(row[5]) : "");
         }
         out.append("\nReplied to or not is Thunderbird's own flag: a reply sent from "
                 + "somewhere else - a phone, a web mailbox - is not in this index, so it "
@@ -2535,6 +2543,276 @@ public final class JRockThunderbird {
         } catch (NumberFormatException ex) {
             throw new Stop("\"" + parts[index] + "\" is not a number of days.");
         }
+    }
+
+    // ---- One message, read ------------------------------------------------------
+    // What a letter in the mail actually says, out of the index rather than out of the
+    // mailbox: Gloda keeps the body as TEXT in messagesText_content, which is what it
+    // searches, and that is exactly the shape wanted here. No MIME is parsed, no HTML is
+    // rendered, no raw message leaves this agent - a model asked what somebody wrote gets
+    // what they wrote, laid out as Markdown, and nothing else.
+    //
+    // ATTACHMENTS ARE NAMED, NOT READ. The index knows their names, types and sizes
+    // (attribute 51), and those go in the answer. What is inside one is a different job
+    // with different tools - the doc inventory flow, Ghostscript, xpdf - and guessing at
+    // an invoice's contents from its file name is exactly the kind of help nobody wants.
+    private static final int MESSAGE_MAX = 40_000;
+
+    // The short id every mail line carries, and what #message and #reply take: six hex
+    // characters of the message's own headerMessageID. Not the Message-ID itself, which
+    // reads <CAHk-=wi8rPqY4nF2xvQ...@mail.gmail.com> and is unsayable, unrepeatable and
+    // forty characters of somebody else's bookkeeping. Derived, so the same message has
+    // the same id in every answer and after a restart.
+    private static String messageId(String headerMessageId) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] sum = digest.digest((headerMessageId == null ? "" : headerMessageId)
+                    .getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 3; i++) hex.append(String.format("%02x", sum[i]));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            return "------";
+        }
+    }
+
+    // One message by its short id, or by words in its sender or subject.
+    private static String message(String asked, ZoneId zone) {
+        if (asked.isBlank()) {
+            throw new Stop("#message wants an id from a mail answer, or words from the "
+                    + "sender or the subject.");
+        }
+        List<MailFolder> folders = mailFolders();
+        String like = "'%" + asked.trim().replace("'", "''").toLowerCase(Locale.ROOT) + "%'";
+        // By id, which is a hash and so cannot be matched in SQL: the candidates come
+        // back by date and the id is worked out here. By words, the index does the work.
+        boolean byId = asked.trim().matches("[0-9a-fA-F]{6}");
+        List<String[]> rows = query(mailDatabase(),
+                "SELECT m.id, m.date, m.folderID, m.headerMessageID, t.c3author,"
+                + " t.c1subject, t.c4recipients, t.c0body,"
+                + " json_extract(m.jsonAttributes,'$.\"" + FROM + "\"'),"
+                + " json_extract(m.jsonAttributes,'$.\"51\"'),"
+                + " json_extract(m.jsonAttributes,'$.\"" + READ + "\"')"
+                + " FROM messages m LEFT JOIN messagesText_content t ON t.docid = m.id"
+                + " WHERE m.deleted = 0"
+                + (byId ? "" : " AND (lower(t.c3author) LIKE " + like
+                        + " OR lower(t.c1subject) LIKE " + like + ")")
+                + " ORDER BY m.date DESC LIMIT " + (byId ? 4000 : 40));
+        String[] found = null;
+        List<String[]> matches = new ArrayList<>();
+        for (String[] row : rows) {
+            if (byId) {
+                if (asked.trim().equalsIgnoreCase(messageId(row[3]))) {
+                    found = row;
+                    break;
+                }
+            } else {
+                matches.add(row);
+            }
+        }
+        if (found == null && matches.isEmpty()) {
+            throw new Stop("no message matches \"" + asked + "\"" + (byId
+                    ? " - an id is only good for as long as that message is in the index."
+                    : ". Ask for the mail of a day or a sender first, and use the id on "
+                      + "the line.") + "");
+        }
+        StringBuilder others = new StringBuilder();
+        if (found == null) {
+            found = matches.get(0);          // the most recent of them
+            if (matches.size() > 1) {
+                others.append("\n\n*").append(matches.size()).append(" messages matched \"")
+                        .append(asked).append("\" and this is the most recent. The others, "
+                                + "by id:*");
+                for (int i = 1; i < Math.min(matches.size(), 10); i++) {
+                    String[] one = matches.get(i);
+                    ZonedDateTime at = when(one[1], zone);
+                    others.append("\n- *id ").append(messageId(one[3])).append("  ")
+                            .append(at.format(DAY)).append(' ').append(at.format(CLOCK))
+                            .append("  ").append(who(one[4])).append(" - ")
+                            .append(subjectOf(one[5])).append('*');
+                }
+            }
+        }
+        // CONTENT, then the kind, then a file name: the same hand-over the letters agent
+        // uses, so whatever is asking writes it to a file and INCLUDES it rather than
+        // pasting a whole message into a prompt.
+        return "CONTENT message message-" + messageId(found[3]) + ".md\n"
+                + oneMessage(found, folders, zone) + others;
+    }
+
+    // One message as Markdown: who, when, to whom, what it is about, what came with it,
+    // and then the text as it was written.
+    private static String oneMessage(String[] row, List<MailFolder> folders, ZoneId zone) {
+        Map<Integer, MailFolder> where = byId(folders);
+        MailFolder folder = where.get(number(row[2]));
+        ZonedDateTime at = when(row[1], zone);
+        StringBuilder out = new StringBuilder("# ").append(subjectOf(row[5])).append("\n\n");
+        out.append("- **From:** ").append(who(row[4])).append('\n');
+        out.append("- **To:** ").append(who(row[6])).append('\n');
+        out.append("- **When:** ").append(at.format(LONG_DAY)).append(" at ")
+                .append(at.format(CLOCK)).append('\n');
+        if (folder != null) {
+            out.append("- **Where:** ").append(folder.account).append(" / ")
+                    .append(folder.name).append('\n');
+        }
+        out.append("- **id:** ").append(messageId(row[3]))
+                .append("  (for a reply to this message)\n");
+        List<String> attached = attachments(row[9]);
+        if (!attached.isEmpty()) {
+            out.append("- **Attached:** ").append(String.join(", ", attached))
+                    .append("\n- *What is inside an attachment is not read here: this "
+                            + "agent names them. A scan or a PDF goes through the doc "
+                            + "inventory flow to be read.*\n");
+        }
+        String body = row[7] == null ? "" : row[7];
+        boolean cut = body.length() > MESSAGE_MAX;
+        if (cut) body = body.substring(0, MESSAGE_MAX);
+        out.append("\n").append(tidy(body));
+        if (cut) {
+            out.append("\n\n*(Cut off after ").append(MESSAGE_MAX)
+                    .append(" characters.)*");
+        }
+        return out.append("\n\n").append(mailFooter()).toString();
+    }
+
+    // The attachments as the index lists them: [[name, type, size, ...], ...] out of the
+    // JSON, which is a list of lists and so read by hand rather than by json_extract.
+    private static List<String> attachments(String json) {
+        List<String> named = new ArrayList<>();
+        if (json == null || json.isBlank()) return named;
+        Matcher m = Pattern.compile("\\[\"([^\"]+)\",\"([^\"]*)\",(\\d+)").matcher(json);
+        while (m.find()) {
+            long size = Long.parseLong(m.group(3));
+            named.add(m.group(1) + " (" + m.group(2)
+                    + (size > 0 ? ", " + (size < 1024 ? size + " bytes"
+                            : String.format(Locale.ENGLISH, "%.0f kB", size / 1024.0)) : "")
+                    + ")");
+        }
+        return named;
+    }
+
+    // The body as the index kept it, made readable: the runs of blank lines a mail client
+    // leaves behind collapsed, the quoted-reply tail cut where it starts, and the tab
+    // columns some senders lay out in turned into spaces.
+    private static String tidy(String body) {
+        String text = body.replace("\r", "").replace('\t', ' ');
+        // The thread below a reply is already in the conversation; the first line of it
+        // is where this message stops saying anything new.
+        Matcher quoted = Pattern.compile(
+                "(?m)^(On .{0,80}wrote:|-{2,}\\s*Original Message\\s*-{2,}|"
+                + "From: .{0,120}Sent: )").matcher(text);
+        if (quoted.find() && quoted.start() > 200) {
+            text = text.substring(0, quoted.start()).trim()
+                    + "\n\n*(The quoted thread below this is not included.)*";
+        }
+        return text.replaceAll("\n{3,}", "\n\n").replaceAll("[ ]{3,}", "  ").trim();
+    }
+
+    // ---- A reply, prepared but not sent -----------------------------------------
+    // The draft the operator has already heard and agreed to, put in front of them in
+    // Thunderbird's own compose window - addressed, titled, quoted and ready, with the
+    // send key theirs as it is everywhere else here.
+    //
+    // THE ADDRESS IS READ OFF THE MESSAGE, never from anything said out loud: the sender
+    // of the message being replied to, and the identity it was addressed to as the sender
+    // of the reply. So this can write to the people who have written to the operator, and
+    // to nobody else - the same rule the calendar's #move follows.
+    //
+    // Not threaded, and that is a real limitation: Thunderbird's command line has no
+    // In-Reply-To, so this is a new message with "Re: " on it rather than a reply inside
+    // the thread. It goes to the right person with the right subject, and the thread it
+    // belongs to is the one thing it cannot say.
+    private static String reply(String asked, ZoneId zone) {
+        String[] split = asked.split("\\s", 2);
+        if (split.length < 2 || split[1].isBlank()) {
+            throw new Stop("#reply wants the id of the message and then the text of the "
+                    + "reply, as #reply a3f91c Thank you, Tuesday suits me.");
+        }
+        String id = split[0].trim();
+        String draft = split[1].trim();
+        List<MailFolder> folders = mailFolders();
+        List<String[]> rows = query(mailDatabase(),
+                "SELECT m.id, m.date, m.folderID, m.headerMessageID, t.c3author,"
+                + " t.c1subject, t.c4recipients FROM messages m"
+                + " LEFT JOIN messagesText_content t ON t.docid = m.id"
+                + " WHERE m.deleted = 0 ORDER BY m.date DESC LIMIT 4000");
+        String[] found = null;
+        for (String[] row : rows) {
+            if (id.equalsIgnoreCase(messageId(row[3]))) {
+                found = row;
+                break;
+            }
+        }
+        if (found == null) {
+            throw new Stop("no message has the id \"" + id + "\". Ask for the message "
+                    + "again and use the id on its line.");
+        }
+        String to = address(found[4]);
+        if (to.isEmpty()) {
+            throw new Stop("\"" + subjectOf(found[5]) + "\" has no address to reply to.");
+        }
+        Set<String> mine = new LinkedHashSet<>();
+        try {
+            for (String[] one : identities()) mine.add(one[1].toLowerCase(Locale.ROOT));
+        } catch (Stop ignored) {
+            // Then the account Thunderbird would pick by itself is the one used.
+        }
+        if (mine.contains(to.toLowerCase(Locale.ROOT))) {
+            throw new Stop("that message is from one of your own addresses, so there is "
+                    + "nobody else to reply to.");
+        }
+        // The identity it was addressed to, so the reply leaves as the right account.
+        String from = "";
+        for (String candidate : mine) {
+            if ((found[6] == null ? "" : found[6].toLowerCase(Locale.ROOT))
+                    .contains(candidate)) {
+                from = candidate;
+                break;
+            }
+        }
+        if (from.isEmpty()) from = eventEmail.trim();
+
+        Path thunderbird = thunderbird();
+        if (thunderbird == null) {
+            throw new Stop("Thunderbird was not found, and it is what the draft goes into.");
+        }
+        String subject = subjectOf(found[5]);
+        if (!subject.toLowerCase(Locale.ROOT).startsWith("re:")) subject = "Re: " + subject;
+        ZonedDateTime at = when(found[1], zone);
+        String body = draft + "\r\n\r\n"
+                + "-- \r\nOn " + at.format(LONG_DAY) + " at " + at.format(CLOCK) + ", "
+                + who(found[4]) + " wrote:\r\n> (the message this replies to)\r\n";
+        String identity = from.isEmpty() ? null : identityOf(from);
+        String compose = (from.isEmpty() ? "" : "from=" + encode(from) + ",")
+                + "to=" + encode(to)
+                + (identity == null ? "" : ",preselectid=" + identity)
+                + ",subject=" + encode(subject)
+                + ",body=" + encode(body);
+        try {
+            new ProcessBuilder(thunderbird.toString(), "-compose", compose)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+        } catch (IOException ex) {
+            throw new Stop("Thunderbird would not start: " + ex.getMessage());
+        }
+        return "Draft prepared: \"" + subject + "\"\nTo: " + to
+                + (from.isEmpty() ? "" : "\nFrom: " + from)
+                + "\nThunderbird's compose window is open with it. Read it there, change "
+                + "anything, and press Ctrl+Enter to send - nothing is sent until you do."
+                + "\nIt is a new message with \"Re:\" on it rather than a reply inside the "
+                + "thread: Thunderbird's command line cannot say In-Reply-To.";
+    }
+
+    // The address out of an author or recipient line as the index keeps it: "Name
+    // <someone@example.com>", or a bare address, with the "undefined" the index appends
+    // already taken off by who().
+    private static String address(String line) {
+        String text = who(line);
+        Matcher angled = Pattern.compile("<([^<>@\\s]+@[^<>@\\s]+)>").matcher(text);
+        if (angled.find()) return angled.group(1).trim();
+        Matcher bare = Pattern.compile("([^<>@\\s,;]+@[^<>@\\s,;]+)").matcher(text);
+        return bare.find() ? bare.group(1).trim() : "";
     }
 
     // ---- Settings --------------------------------------------------------------

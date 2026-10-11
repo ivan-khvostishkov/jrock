@@ -1805,6 +1805,18 @@ the voice, so the microphone doesn't record the last answer as the next question
   and the address is the one picked in the agent's window at both ends, so it **cannot reach
   anybody else**. The status line says what became of it, and JRock's log has the whole of what
   the agent said back, including where the `.ics` file is.
+- **What a message says, and answering it.** *"I need your mail: message Sam"* brings one
+  message back as a document — it goes into `JRock/mail/` and is **included** in the prompt, the
+  same way a scanned letter is, so the model reads a document rather than a quotation of one.
+  Asked to answer it, the model **reads the draft aloud first** and says nothing a program
+  recognises; only once the operator agrees does it say *"I'm preparing the draft reply to
+  0a6a15: …"*, and only then does a compose window open. Two steps, because a window that
+  appears while somebody is still thinking about the wording is a window they did not ask for.
+- **Saving an answer as a document.** *"I'm saving the last answer to a file"* exports **the
+  answer before that sentence** — the thing the operator just liked — through JRock's own
+  *Export selected Markdown with images as DOCX*, into the working folder as
+  `2026-10-12-0043-ptt.docx`. The previous answer and never the sentence asking for it: the
+  request is not the thing they liked.
 - **A new time for an appointment of your own.** An answer that says *"I'm proposing to move
   event a3f91c to 2026-10-20 at 14:30"* — the id being the one the calendar answer printed —
   sends `#move` to the Thunderbird agent, which composes the update to you for you to send. You
@@ -2101,6 +2113,8 @@ So *"have I answered that?"* is a **fact out of the index** rather than a guess 
 | `#unanswered` | received in the last fortnight with no reply sent, newest first (`#unanswered 30` for longer) |
 | `#with acme` | the last mail each way with somebody, and how much there has been — matched on the address **and** on the name in the address book |
 | `#senders 5` | who wrote in the last five days, with how many each and when they last did |
+| `#message <id or words>` | **one message's own text**, as Markdown: who, when, what was attached, and what they wrote |
+| `#reply <id> <text>` | a draft reply in Thunderbird's compose window, addressed and titled — never sent |
 | `#mailboxes` | the accounts in the index, how much of each, and **how fresh the index is** |
 
 ```
@@ -2130,6 +2144,85 @@ Sun 11 Oct:
   network drive, answered in about four seconds: the date and folder indexes cut the set down
   before any JSON is parsed, and `#with` goes through Gloda's indexed *involves* attribute
   rather than reading every message.
+
+#### Reading a message, and answering one
+
+- **The body comes out of the index, as text.** Gloda keeps it in `messagesText_content`,
+  because that is what it searches — so no MIME is parsed, no HTML is rendered, and **no raw
+  message leaves the agent**. A model asked what somebody wrote gets what they wrote, laid out
+  as Markdown with the sender, the date, the folder and the message's own short id.
+- **Attachments are named, not read.** The index knows their names, types and sizes, and those
+  go in the answer. What is *inside* one is a different job with different tools — the
+  [inventory flow](#automating-the-chain-jrockdocinventoryjava), Ghostscript, xpdf — and
+  guessing at an invoice's contents from its file name is exactly the kind of help nobody wants.
+- **Short ids, like the calendar's.** Every line of every mail answer ends with `id 0a6a15`:
+  six hex characters of the message's own `Message-ID`, which reads
+  `<CAHk-=wi8rPqY4nF2xvQ…@mail.gmail.com>` and is unsayable, unrepeatable and forty characters
+  of somebody else's bookkeeping. Derived, so the same message has the same id in every answer.
+- **The quoted thread is cut.** A reply's own words are what was asked for; the `On … wrote:`
+  tail underneath is already in the conversation.
+
+**Answering is two steps, and the window is the second one.** The draft is written, **read
+aloud, and agreed to** before anything opens — because a compose window that appears while the
+operator is still thinking about the wording is a window they did not ask for.
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    box Push-to-talk
+        participant PTT as JRockPushToTalk
+        participant PM as its JRock (model)
+    end
+    participant TB as JRockThunderbird, 127.0.0.1:47473
+    participant Th as Thunderbird
+
+    rect rgb(255, 245, 200)
+        Op->>PTT: "What was Sam writing to me about?"
+    end
+    rect rgb(220, 235, 255)
+        PM-->>PTT: "I need your mail: message Sam"
+        PTT->>TB: #35;message Sam
+        TB-->>PTT: CONTENT message message-0a6a15.md + the message as Markdown
+        Note over PTT: written into JRock/mail/ and INCLUDED as a document
+        PTT->>PM: "say what they asked" + the message
+    end
+    rect rgb(255, 245, 200)
+        PM-->>PTT: what it is about
+        PTT->>Op: reads it aloud
+        Op->>PTT: "Is it worth answering? Draft something."
+    end
+    rect rgb(220, 235, 255)
+        PM-->>PTT: the draft itself - no command sentence
+    end
+    rect rgb(255, 245, 200)
+        PTT->>Op: READS THE DRAFT ALOUD
+        Op->>PTT: "Good. Prepare it for sending."
+    end
+    rect rgb(220, 235, 255)
+        PM-->>PTT: "I'm preparing the draft reply to 0a6a15: <the draft>"
+        PTT->>TB: #35;reply 0a6a15 <the draft>
+        Note over TB: the address is read off the message, never from speech
+        TB->>Th: #45;compose to=whoever wrote, subject=Re: ..., body=the draft
+        TB-->>PTT: Draft prepared - the window is open
+    end
+    rect rgb(255, 245, 200)
+        Th->>Op: a compose window with the draft in it
+        Op->>Th: Ctrl+Enter, or edits it first
+    end
+```
+
+- **The address is read off the message**, never from anything said out loud: the sender of the
+  message being answered, and the identity it was addressed to as the sender of the reply. So
+  this writes to people who have written to the operator and to nobody else — the same rule
+  [`#move`](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava)
+  follows. A message from one of the operator's own addresses is refused: there is nobody else
+  to reply to.
+- **Not threaded, and that is a real limitation.** Thunderbird's command line has no
+  `In-Reply-To`, so the draft is a new message with `Re:` on it rather than a reply inside the
+  thread. It goes to the right person with the right subject; the thread it belongs to is the
+  one thing it cannot say.
+- **Nothing is sent.** As everywhere else here, the compose window is where it stops and
+  Ctrl+Enter is the operator's.
 
 #### Both halves, in one window
 

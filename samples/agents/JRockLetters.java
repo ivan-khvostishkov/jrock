@@ -435,10 +435,11 @@ public final class JRockLetters {
         }
         boolean cut = body.length() > TEXT_MAX;
         if (cut) body = body.substring(0, TEXT_MAX);
-        // CONTENT is the marker the asking agent splits on: everything after the first
-        // line is the letter itself, to be written to a file and included rather than
-        // pasted into a prompt.
-        return "CONTENT " + file.getFileName() + "\n" + body
+        // CONTENT, then the kind, then a file name: the marker the asking agent splits
+        // on. Everything after the first line is the letter itself, to be written to a
+        // file and included rather than pasted into a prompt - and the kind is what tells
+        // it whether it is holding a letter or an e-mail.
+        return "CONTENT letter " + file.getFileName() + "\n" + body
                 + (cut ? "\n\n(Cut off after " + TEXT_MAX + " characters.)" : "");
     }
 
