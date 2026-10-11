@@ -534,6 +534,15 @@ bill, and a guess is not one.
   priced requests` — which is every session since the log was last cleared. **Clear log**
   clears the lines it counts, so the total starts again from $0; requests to a model with no
   card price are not in it.
+- **A line arriving never takes your place in the log.** Appending follows the end of the
+  transcript only when **nothing is selected**: a selection is somebody about to copy a path, a
+  hash or an error, and the caret move that scrolls the pane also collapses a selection — so a
+  reply landing underneath used to take the reader's place and their text at once. Select
+  something and the view holds still until the selection is dropped.
+- **Nothing that arrives on a timer scrolls the log either**, selection or not. The autobackup is
+  the only thing in JRock that writes to the log without being asked, and its lines now appear
+  without moving the view; a backup you asked for from the menu still scrolls to its own result,
+  which is how you know it happened.
 - The **raw request and raw response** are shown for debugging, but prompt/reply/attachment
   content is **masked** (shown by hash/placeholder) so the transcript isn't a noisy duplicate
   and included files stay referenced only by hash. The response `id` is elided after its
@@ -3073,6 +3082,10 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   gone, link text kept; and the language asked for — `ru` for a Russian answer with a few
   English words in it, none for the reverse, `ja` rather than `zh` once there is kana. No
   window, and no speech.
+- **`JRockLogScrollTest`** selects a line in the real log, has the application append another,
+  and checks the selection and the caret are exactly where they were — then, with nothing
+  selected, that an asked-for line follows the end of the transcript and a timed one leaves the
+  view alone.
 - **`JRockLocalFileTest`** checks what the log's *Open local file* will take as a name: a path
   with spaces taken whole, quotes and a trailing newline forgiven, a folder accepted - and
   greyed out for an address, a relative name, two lines, a path for the other kind of machine,

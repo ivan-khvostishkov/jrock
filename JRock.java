@@ -115,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "2.18.0";
+    private static final String VERSION = "2.19.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -1723,11 +1723,25 @@ public class JRock {
 
         // ---- Public logging API --------------------------------------------
         void gray(String line) {
+            append(line, true);
+        }
+
+        // The same line, without following the end of the log.
+        //
+        // For anything that arrives on a timer rather than because somebody pressed
+        // something: an autobackup finishing while the reader is somewhere up the
+        // transcript should not drag them to the bottom. What a reader did ask for still
+        // scrolls, which is how they know it happened.
+        void grayQuiet(String line) {
+            append(line, false);
+        }
+
+        private void append(String line, boolean follow) {
             SwingUtilities.invokeLater(() -> {
                 Entry e = new Entry(false, null, null, line, "");
                 entries.add(e);
                 logCopySaved = false;
-                if (isVisible(e)) renderGray(e.text);
+                if (isVisible(e)) renderGray(e.text, follow);
                 persistMainLog();
             });
         }
@@ -2027,18 +2041,40 @@ public class JRock {
             if (dialogOnly) appendStyled("", java.awt.Color.BLACK);
         }
 
-        private void renderGray(String text) { appendStyled(addWrapPoints(text), java.awt.Color.GRAY); }
+        private void renderGray(String text) { renderGray(text, true); }
+
+        private void renderGray(String text, boolean follow) {
+            appendStyled(addWrapPoints(text), java.awt.Color.GRAY, follow);
+        }
 
         private void appendStyled(String line, java.awt.Color color) {
+            appendStyled(line, color, true);
+        }
+
+        private void appendStyled(String line, java.awt.Color color, boolean follow) {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setForeground(attrs, color);
+            // What was selected before the line arrived. A selection is somebody reading
+            // - about to copy a path, an error, a hash - and setCaretPosition below both
+            // scrolls the pane AND collapses the selection, so a reply landing underneath
+            // used to take their place and their text away at once.
+            int from = pane.getSelectionStart();
+            int to = pane.getSelectionEnd();
+            boolean selecting = from != to;
             try {
                 pane.getStyledDocument().insertString(
                         pane.getStyledDocument().getLength(), line + "\n", attrs);
             } catch (BadLocationException ignored) {
                 // Position is always valid (document end); ignore defensively.
             }
-            pane.setCaretPosition(pane.getStyledDocument().getLength());
+            if (selecting) {
+                // The insert went in at the very end, past the selection, so its offsets
+                // still mean what they meant; put it back in case the caret moved with
+                // the document, and scroll nowhere.
+                pane.select(from, to);
+            } else if (follow) {
+                pane.setCaretPosition(pane.getStyledDocument().getLength());
+            }
         }
 
         // ---- Persistence ---------------------------------------------------
@@ -5776,7 +5812,11 @@ public class JRock {
             return;
         }
 
-        log.gray("Backing up " + jrockDir() + " to " + zip + " ...");
+        // Who gets scrolled to. An autobackup (ask == false) is the only thing in JRock
+        // that writes to the log without being asked, so it is the only thing that must
+        // not move the view out from under a reader (see LogView.grayQuiet).
+        java.util.function.Consumer<String> note = ask ? log::gray : log::grayQuiet;
+        note.accept("Backing up " + jrockDir() + " to " + zip + " ...");
         sendGate.accept(false);
         new SwingWorker<String, Void>() {
             private long files, bytes, skipped;
@@ -5804,16 +5844,16 @@ public class JRock {
                     failure = "Could not write the backup " + zip + ": " + ex;
                 }
                 if (failure == null) {
-                    log.gray("Backed up " + files + " file(s), " + fmtNum(bytes)
+                    note.accept("Backed up " + files + " file(s), " + fmtNum(bytes)
                             + " bytes, to " + zip);
                     if (skipped > 0) {
-                        log.gray(skipped + " file(s) were being written while the backup "
+                        note.accept(skipped + " file(s) were being written while the backup "
                                 + "ran and were left out of it. Nothing is missing from "
                                 + "the zip because of it: a file JRock replaces is in "
                                 + "there either as it was before the write or as it is "
                                 + "after it.");
                     }
-                    log.gray("");
+                    note.accept("");
                 } else {
                     backupNote(frame, log, ask, failure,
                             javax.swing.JOptionPane.WARNING_MESSAGE);
@@ -5829,8 +5869,13 @@ public class JRock {
     // window until they came back.
     private static void backupNote(JFrame frame, LogView log, boolean ask,
                                    String message, int messageType) {
-        log.gray(message);
-        log.gray("");
+        if (ask) {
+            log.gray(message);
+            log.gray("");
+        } else {
+            log.grayQuiet(message);
+            log.grayQuiet("");
+        }
         if (ask) {
             javax.swing.JOptionPane.showMessageDialog(frame, message, "Backup log", messageType);
         }
