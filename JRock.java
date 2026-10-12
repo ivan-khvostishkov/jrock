@@ -3281,6 +3281,28 @@ public class JRock {
             }
         });
 
+        // Ctrl+, opens Configure, and F1 opens Help: the two keys every desktop program
+        // has for its settings and its manual, and the two things in this window that
+        // could only be reached by aiming at a button. Ctrl+, is the settings key on
+        // macOS and in most editors, and the comma is not a letter anyone could read as
+        // a verb; F1 is the one key that means help on every platform there is.
+        //
+        // Through the button rather than the dialog, so what the key does and what the
+        // click does cannot drift apart. Help is called directly because its own button
+        // lives inside Configure - a form that should not have to be open to read the
+        // manual - and it takes the window as its parent.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_COMMA, InputEvent.CTRL_DOWN_MASK),
+                "jrock-configure");
+        frame.getRootPane().getActionMap().put("jrock-configure", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { configure.doClick(); }
+        });
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0), "jrock-help");
+        frame.getRootPane().getActionMap().put("jrock-help", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { showHelpDialog(frame); }
+        });
+
         // Ctrl+U is the same include for something that is not on this machine: U for
         // URL, next to Ctrl+I because that is what it is - Include, over the network
         // (see showFetchUrlDialog).
@@ -6461,31 +6483,54 @@ public class JRock {
     private static javax.swing.JPanel shortcutsPanel(java.awt.Font plainFont, int descWidth) {
         // A 2-column grid so keys and descriptions align cleanly (no
         // space-padding). The "Shortcuts" border title keeps the default bold.
-        String[][] keys = {
-            {"Ctrl+Enter", "Send message (call a Bedrock model)"},
-            {"Ctrl+I", "Include a text, image, audio, PDF, RTF, DOCX or XLSX file"},
-            {"Ctrl+U", "Fetch a URL and include what it answers with"},
-            {"Ctrl+Space", "Start recording from the microphone; again to stop and include "
-                    + "it (or type it, with Transcribe on)"},
-            {"Ctrl+D", "Toggle Dialog only"},
-            {"Ctrl+E", "Toggle History (send the prior dialog too)"},
-            {"Ctrl+S", "Save prompt as (a copy)"},
-            {"Ctrl+O", "Load prompt from a file"},
-            {"Ctrl+Shift+S", "Save log as (a copy, or just the selected text)"},
-            {"Ctrl+P", "Print log (or the selected text) / save as PDF"},
-        };
+        //
+        // In the order of the rule they follow: plain Ctrl acts on the prompt, and
+        // Ctrl+Shift acts on the log or is the second variant of its plain twin - so each
+        // Ctrl+Shift row sits under the plain one it is the second half of, and the list
+        // teaches the pattern by its shape.
+        //
+        // Built rather than written out, because two of these keys are only bound when the
+        // machine can do the thing: a list naming a key that does nothing on this computer
+        // is worse than a shorter list.
+        java.util.List<String[]> keys = new ArrayList<>();
+        keys.add(new String[] {"Ctrl+Enter", "Send message (call a Bedrock model)"});
+        keys.add(new String[] {"Ctrl+I",
+                "Include a text, image, audio, PDF, RTF, DOCX or XLSX file"});
+        keys.add(new String[] {"Ctrl+Shift+I", "Include a whole folder"});
+        keys.add(new String[] {"Ctrl+U", "Fetch a URL and include what it answers with"});
+        if (recordAvailable()) {
+            keys.add(new String[] {"Ctrl+Space", "Start recording from the microphone; "
+                    + "again to stop and include it (or type it, with Transcribe on)"});
+        }
+        if (narrateAvailable()) {
+            keys.add(new String[] {"Ctrl+N",
+                    "Narrate the selected text, or stop what is playing"});
+        }
+        keys.add(new String[] {"Ctrl+S", "Save prompt as (a copy)"});
+        keys.add(new String[] {"Ctrl+Shift+S",
+                "Save log as (a copy, or just the selected text)"});
+        keys.add(new String[] {"Ctrl+O", "Load prompt from a file"});
+        keys.add(new String[] {"Ctrl+Shift+D",
+                "Export the selected Markdown as DOCX (the prompt's selection, or the log's)"});
+        keys.add(new String[] {"Ctrl+Shift+R", "The same selection as RTF"});
+        keys.add(new String[] {"Ctrl+P", "Print log (or the selected text) / save as PDF"});
+        keys.add(new String[] {"Ctrl+D", "Toggle Dialog only"});
+        keys.add(new String[] {"Ctrl+E", "Toggle History (send the prior dialog too)"});
+        keys.add(new String[] {"Ctrl+M", "Window size and position (Configure, Window tab)"});
+        keys.add(new String[] {"Ctrl+,", "Configure"});
+        keys.add(new String[] {"F1", "This Help window"});
         javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
         shortcuts.setBorder(javax.swing.BorderFactory.createTitledBorder("Shortcuts"));
         java.awt.GridBagConstraints sc = new java.awt.GridBagConstraints();
         sc.anchor = java.awt.GridBagConstraints.WEST;
         sc.fill = java.awt.GridBagConstraints.HORIZONTAL;
         sc.insets = new java.awt.Insets(1, 4, 1, 4);
-        for (int r = 0; r < keys.length; r++) {
-            javax.swing.JLabel keyLbl = new javax.swing.JLabel(keys[r][0]);
+        for (int r = 0; r < keys.size(); r++) {
+            javax.swing.JLabel keyLbl = new javax.swing.JLabel(keys.get(r)[0]);
             keyLbl.setFont(plainFont);
             javax.swing.JLabel descLbl = new javax.swing.JLabel(
                     "<html><body style='width:" + (descWidth - browserTextSlack(descWidth))
-                    + "px'>" + keys[r][1] + "</body></html>");
+                    + "px'>" + keys.get(r)[1] + "</body></html>");
             descLbl.setFont(plainFont);
             addTextSlack(descLbl, descWidth);
             // Golden-ratio-ish column weights: key column narrow (~38%), desc wide.

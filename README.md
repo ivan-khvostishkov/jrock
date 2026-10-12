@@ -3840,21 +3840,43 @@ of your own and it is named in the title just as on the desktop.
 
 ## Keyboard shortcuts
 
+One principle: **plain `Ctrl` acts on the prompt**, and **`Ctrl+Shift` acts on the log or is the
+second variant** of its plain twin. The same list is in the window itself, behind **F1**.
+
 | Shortcut | Action |
 |---|---|
 | Ctrl+Enter | Send (and plain Enter, with the **Enter** checkbox on) |
 | Shift+Enter | A new line in the prompt, always — whatever the **Enter** checkbox says |
+| Ctrl+I | Include text/image/audio files, a PDF, an RTF, a DOCX or an XLSX (multi-select) |
+| Ctrl+Shift+I | Include a whole **folder** |
+| Ctrl+U | Fetch a URL and include what it answers with |
+| Ctrl+Space | Start recording from the microphone; again to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
+| Ctrl+N | Narrate the selected text, or stop what is playing |
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+Shift+S | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
-| Ctrl+I | Include text/image/audio files, a PDF, an RTF or a DOCX (multi-select) |
-| Ctrl+U | Fetch a URL and include what it answers with |
-| Ctrl+Space | Start recording from the microphone; again to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
+| Ctrl+Shift+D | Export the selection as **DOCX** — the prompt's selection, or the log's |
+| Ctrl+Shift+R | The same selection as **RTF** |
+| Ctrl+P | Print log (or the selected text) / save as PDF |
 | Ctrl+D | Toggle Dialog only |
 | Ctrl+E | Toggle History (send the prior dialog too) |
 | Ctrl+M | Open Configure on its **Window** tab (size and on-screen position) |
-| Ctrl+P | Print log (or the selected text) / save as PDF |
+| Ctrl+, | Configure |
+| F1 | Help |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |
+
+**`Ctrl+L` no longer saves the log** — it is `Ctrl+Shift+S`. `L` read as *Load* while sitting
+next to `Ctrl+O`, which really loads, and it broke the pattern besides: `Ctrl+S` was named after
+the verb and `Ctrl+L` after the object, so one verb had two unrelated letters. There is no alias
+for the old key, deliberately: a shortcut that still works is a shortcut nobody stops reaching
+for. **`Ctrl+E`** keeps its letter for a worse reason — it is for *extend*, a word no longer in
+the window, and the obvious `Ctrl+H` is unusable because the toolkit makes it backspace inside a
+text area. `Ctrl+Space` and `Ctrl+N` are bound only where the machine can record and narrate, and
+the window's own list leaves out whichever it cannot do.
+
+Deliberately **without** a shortcut: Clear log (destructive, and one keystroke from the log it
+clears), Backup log, Load from backup, Merge two-sided scans, the page header and footer, and
+*What is in the JRock folder*.
 
 ## Tests
 
@@ -4290,40 +4312,7 @@ Or, if you want to modify the source and run it in place (no build step):
 java JRock.java
 ```
 
-### Keyboard
-
-One principle: **plain `Ctrl` acts on the prompt**, and **`Ctrl+Shift` acts on the log or is the
-second variant** of its plain twin.
-
-| | |
-|---|---|
-| `Ctrl+Enter` | Send. `Enter` sends too when the **Enter** tick is on; `Shift+Enter` is always a newline |
-| `Ctrl+O` / `Ctrl+S` | Load a prompt from a file / save a copy of the prompt |
-| `Ctrl+Shift+S` | Save a copy of the **log** |
-| `Ctrl+I` / `Ctrl+Shift+I` | Include a **file** / include a **folder** |
-| `Ctrl+U` | Fetch a URL into the prompt |
-| `Ctrl+Space` / `Ctrl+N` | Start or stop **recording** / **narrate** the selection or stop it |
-| `Ctrl+Shift+D` / `Ctrl+Shift+R` | Export the selection as **DOCX** / as **RTF** |
-| `Ctrl+P` | Print the log, or the selection |
-| `Ctrl+D` / `Ctrl+E` | Dialog only / History |
-| `Ctrl+,` | Configure |
-| `F1` | Help |
-| `Ctrl+M` | Move and resize the window from the keyboard |
-| `Ctrl+Z` `Ctrl+Y` `Ctrl+Shift+Z` | Undo, redo, redo |
-
-**`Ctrl+L` no longer saves the log** — it is `Ctrl+Shift+S`. `L` read as *Load* while sitting
-next to `Ctrl+O`, which really loads, and it broke the pattern besides: `Ctrl+S` was named after
-the verb and `Ctrl+L` after the object, so one verb had two unrelated letters. There is no alias
-for the old key, deliberately: a shortcut that still works is a shortcut nobody stops reaching
-for. **`Ctrl+E`** keeps its letter for a worse reason — it is for *extend*, a word no longer in
-the window, and the obvious `Ctrl+H` is unusable because the toolkit makes it backspace inside a
-text area.
-
-Deliberately **without** a shortcut: Clear log (destructive, and one keystroke from the log it
-clears), Backup log, Load from backup, Merge two-sided scans, the page header and footer, and
-*What is in the JRock folder*.
-
-### No window at all: `--cli`
+## No window at all: `--cli`
 
 A shell version, for a question that does not need a window:
 
