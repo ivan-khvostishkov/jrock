@@ -10347,22 +10347,39 @@ public class JRock {
         row.add(isCheerpJ() ? pasteRow(urlF, "address") : urlF, BorderLayout.CENTER);
         panel.add(row, BorderLayout.SOUTH);
 
-        // The dialog opens with the URL field focused, so Ctrl+U, paste, Enter is all a
-        // fetch takes. JOptionPane focuses its OK button by default; the field asks for
-        // the focus once it is in the dialog on screen, and once only.
-        urlF.addAncestorListener(new javax.swing.event.AncestorListener() {
-            @Override public void ancestorAdded(javax.swing.event.AncestorEvent e) {
-                urlF.removeAncestorListener(this);
-                javax.swing.SwingUtilities.invokeLater(urlF::requestFocusInWindow);
+        // THE DIALOG OPENS WITH THE URL FIELD FOCUSED, so Ctrl+U, paste, Enter is all a
+        // fetch takes.
+        //
+        // Through selectInitialValue, which is the one place a JOptionPane asks where its
+        // focus goes: the UI calls it as the pane is shown, and the default puts it on
+        // the OK button. Overriding it is the whole mechanism - the field is focused
+        // instead, at the exact moment the button would have been.
+        //
+        // It was an ancestor listener with an invokeLater inside it, which asked for the
+        // focus from outside that mechanism and therefore raced it: the pane's own
+        // selectInitialValue could run after ours and take the focus to the button. On
+        // this desktop ours happened to win; in CI the test that checks this timed out
+        // after 30 seconds, which is what a race looks like when the other machine is
+        // slower in a different place.
+        javax.swing.JOptionPane pane = new javax.swing.JOptionPane(panel,
+                javax.swing.JOptionPane.PLAIN_MESSAGE,
+                javax.swing.JOptionPane.OK_CANCEL_OPTION) {
+            @Override public void selectInitialValue() {
+                // In the window, and then at all: requestFocusInWindow fails outright
+                // when the dialog's window is not the focused one, which is the normal
+                // state of affairs on a machine with no window manager - a CI runner
+                // under Xvfb. requestFocus is remembered there instead, and granted when
+                // the window becomes active, which is what the test checks for.
+                if (!urlF.requestFocusInWindow()) urlF.requestFocus();
             }
-            @Override public void ancestorRemoved(javax.swing.event.AncestorEvent e) { }
-            @Override public void ancestorMoved(javax.swing.event.AncestorEvent e) { }
-        });
-
-        int result = javax.swing.JOptionPane.showConfirmDialog(
-                frame, panel, "Fetch URL",
-                javax.swing.JOptionPane.OK_CANCEL_OPTION,
-                javax.swing.JOptionPane.PLAIN_MESSAGE);
+        };
+        javax.swing.JDialog dialog = pane.createDialog(frame, "Fetch URL");
+        dialog.setVisible(true);          // modal: returns when it is answered or closed
+        dialog.dispose();
+        Object answer = pane.getValue();
+        // Null is the window closed with its own button, which is a cancel like any other.
+        int result = (answer instanceof Integer) ? (Integer) answer
+                : javax.swing.JOptionPane.CANCEL_OPTION;
         if (result != javax.swing.JOptionPane.OK_OPTION) return;
 
         final String typed = urlF.getText();
