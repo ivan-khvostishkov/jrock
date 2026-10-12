@@ -2445,12 +2445,25 @@ java -cp jrock.jar JRockBrowser.java --shot zdnet.com    # the photographs, and 
 java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation section"
 ```
 
-- **Seven hosts and one page, and nothing else, ever.** `duckduckgo.com`,
-  `businessinsider.com`, `zdnet.com`, `techcrunch.com`, `scmp.com`, `arstechnica.com`,
-  `theverge.com` — a list
+- **Fifteen hosts, five parts of hosts and one page, and nothing else, ever.** The hosts:
+  `duckduckgo.com`, `businessinsider.com`, `zdnet.com`, `techcrunch.com`, `scmp.com`,
+  `arstechnica.com`, `theverge.com`, `artificialintelligence-news.com`,
+  `analyticsindiamag.com`, `venturebeat.com`, `marktechpost.com`, `testingcatalog.com`,
+  `news9live.com`, `officechai.com`, `latestly.com` — a list
   in the agent's own source, not a setting, not a line in a request, and not something a model
   can add to. The web is the one thing an agent reaches that nobody in the room controls, so
   what it may reach is written down where it can be read.
+- **And five PARTS of hosts** — a path and everything under it, which is the only honest
+  way to allow some things. `medium.com` is a million blogs and one of them is wanted, so
+  `/data-science-in-your-pocket` is in and the rest of Medium is no more on the list than the
+  rest of the web; `mezha.ua` writes in Ukrainian everywhere except `/en`; and documentation
+  lives in a product's own corner of an enormous help site, so `helpx.adobe.com` is allowed at
+  `/indesign/desktop` and `/lightroom/mobile`, and `docs.aws.amazon.com` at
+  `/bedrock/latest/userguide`. Matched on the host — exactly, or with `www.`, and **never a
+  subdomain**, because `somebodyelse.medium.com` is somebody else — and on the start of the
+  path, as that page (`…/desktop.html`), that folder (`…/desktop/anything`), and nothing that
+  merely begins with the same letters (`…/desktop-beta`). Each is asked for by the product's
+  name: *"indesign"*, *"lightroom"*, *"bedrock"*, *"data science in your pocket"*, *"mezha"*.
 - **And one page whose host is not allowed at all**: Wikipedia's
   [Current events portal](https://en.wikipedia.org/wiki/Portal:Current_events), a summary of the
   day written by people, asked for as *"current events"*. Allowed as a **page** — matched on
@@ -2495,7 +2508,7 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   wraps to the width it actually has, and breaks **inside** a word when the word is wider than
   that — which a file name or an address, being one long token with no space in it, always is.
 - **One tab per site**, kept. A second page on a site reuses its tab, and since the only sites
-  there are are the seven, there can never be an eighth tab. Per site rather than one in total
+  there are are the ones on the list, there can never be a tab for anything else. Per site rather than one in total
   because a consent answered on one and a sign-in on another are both worth keeping.
 - **Its browser is not yours, and the window says where it lives.** The agent starts a Chromium
   of its own — Edge, Chrome, Brave or Vivaldi, whichever it finds — with

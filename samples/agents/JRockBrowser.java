@@ -136,6 +136,36 @@ public final class JRockBrowser {
         "scmp.com",
         "arstechnica.com",
         "theverge.com",
+        "artificialintelligence-news.com",
+        "analyticsindiamag.com",
+        "venturebeat.com",
+        "marktechpost.com",
+        "testingcatalog.com",
+        "news9live.com",
+        "officechai.com",
+        "latestly.com",
+    };
+
+    // PART OF A HOST, AND NOT THE HOST. The third kind of entry, between a whole host and
+    // a single page: a path and everything under it.
+    //
+    // Which is the only honest way to allow some of these. medium.com is a million blogs
+    // and one of them is wanted: "/data-science-in-your-pocket" is a publication, and the
+    // rest of Medium is no more on this list than the rest of the web. mezha.ua writes in
+    // Ukrainian everywhere except under /en. And documentation is a product's own corner
+    // of a company's enormous help site - helpx.adobe.com is the whole of Adobe's help,
+    // docs.aws.amazon.com is the whole of AWS, and what is wanted is InDesign on the
+    // desktop, Lightroom on mobile, and Bedrock.
+    //
+    // Matched on the host and the start of the path, so everything below the prefix is in
+    // and its neighbours are out. A query is allowed here, unlike on a single page: a
+    // documentation page with ?topic= on it is still that page.
+    private static final String[][] ALLOWED_PREFIXES = {
+        { "medium.com", "/data-science-in-your-pocket" },
+        { "mezha.ua", "/en" },
+        { "helpx.adobe.com", "/indesign/desktop" },
+        { "helpx.adobe.com", "/lightroom/mobile" },
+        { "docs.aws.amazon.com", "/bedrock/latest/userguide" },
     };
 
     // ONE PAGE, NOT A HOST. Wikipedia's Current events portal is a news summary of the
@@ -369,6 +399,29 @@ public final class JRockBrowser {
         { "scmp.com", "scmp", "south china morning post", "south china", "morning post" },
         { "arstechnica.com", "arstechnica", "ars technica", "ars" },
         { "theverge.com", "theverge", "the verge", "verge" },
+        { "artificialintelligence-news.com", "artificial intelligence news", "ai news",
+          "artificialintelligence news" },
+        { "analyticsindiamag.com", "analytics india", "analytics india magazine",
+          "analyticsindiamag" },
+        { "venturebeat.com", "venturebeat", "venture beat" },
+        { "marktechpost.com", "marktechpost", "mark tech post" },
+        { "testingcatalog.com", "testingcatalog", "testing catalog" },
+        { "news9live.com", "news9", "news 9", "news9live", "news nine" },
+        { "officechai.com", "officechai", "office chai" },
+        { "latestly.com", "latestly", "the latestly" },
+        // The parts of hosts, by the full address each one starts at (see
+        // ALLOWED_PREFIXES). A name for a documentation set is the product's name:
+        // nobody says "helpx dot adobe dot com slash indesign slash desktop".
+        { "https://medium.com/data-science-in-your-pocket", "data science in your pocket",
+          "medium data science in your pocket", "data science in my pocket" },
+        { "https://mezha.ua/en/", "mezha", "mezha ua", "mezha english" },
+        { "https://helpx.adobe.com/indesign/desktop.html", "indesign", "adobe indesign",
+          "indesign help", "indesign documentation", "indesign docs" },
+        { "https://helpx.adobe.com/lightroom/mobile.html", "lightroom", "adobe lightroom",
+          "lightroom mobile", "lightroom help", "lightroom documentation",
+          "lightroom docs" },
+        { "https://docs.aws.amazon.com/bedrock/latest/userguide/", "bedrock",
+          "aws bedrock", "bedrock docs", "bedrock documentation", "bedrock user guide" },
         { "https://en.wikipedia.org/wiki/Portal:Current_events", "current events",
           "wikipedia current events", "wikipedia", "wiki current events", "wiki news",
           "portal current events", "what is happening in the world" },
@@ -424,6 +477,11 @@ public final class JRockBrowser {
         StringBuilder out = new StringBuilder("Pages can be read from these hosts, and "
                 + "their subdomains, and nowhere else:");
         for (String host : ALLOWED) out.append("\n- ").append(host);
+        out.append("\nAnd these PARTS of hosts - that path and everything under "
+                + "it, and nothing else on those hosts:");
+        for (String[] prefix : ALLOWED_PREFIXES) {
+            out.append("\n- ").append(prefix[0]).append(prefix[1]);
+        }
         out.append("\nAnd one page, whose host is otherwise not allowed at all:");
         for (String page : ALLOWED_PAGES) {
             out.append("\n- ").append(page)
@@ -431,9 +489,10 @@ public final class JRockBrowser {
                             + "from it: every link on it leads off the list.");
         }
         return out.append("\nEach can be asked for by domain or by name - \"zdnet\", "
-                + "\"ars technica\", \"South China Morning Post\". A search goes to "
-                + "DuckDuckGo. The list is in the agent's own source: nothing in a "
-                + "request can add to it.").toString();
+                + "\"ars technica\", \"venturebeat\", \"data science in your pocket\", "
+                + "\"indesign\", \"lightroom\", \"bedrock\". A search goes to DuckDuckGo. "
+                + "The list is in the agent's own source: nothing in a request can add "
+                + "to it.").toString();
     }
 
     // A page, read: photographed, and then read out of the photograph by a model.
@@ -476,11 +535,44 @@ public final class JRockBrowser {
         for (String allowed : ALLOWED) {
             if (host.equals(allowed) || host.endsWith("." + allowed)) return host;
         }
-        // The one page that is allowed without its host being.
+        // The one page, and the parts of hosts, that are allowed without the host being.
         if (allowedPage(uri) != null) return host;
-        throw new Stop(host + " is not a host this agent reads" + when + ". The list is: "
-                + String.join(", ", ALLOWED) + ", and the one page "
+        if (allowedPrefix(uri) != null) return host;
+        throw new Stop(host + " is not a host this agent reads" + when + ", or not at that "
+                + "path. The hosts are: " + String.join(", ", ALLOWED) + ". The parts of "
+                + "hosts are: " + prefixList() + ". And the one page is "
                 + ALLOWED_PAGES[0] + ".");
+    }
+
+    // Which allowed part of a host this address is under, as "host/prefix", or null when
+    // it is under none of them.
+    private static String allowedPrefix(URI uri) {
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        if (!scheme.equals("https")) return null;
+        for (String[] allowed : ALLOWED_PREFIXES) {
+            // The host exactly, or www. in front of it - and not a subdomain beyond that:
+            // "x.medium.com" is somebody else's blog, which is the whole point here.
+            if (!host.equals(allowed[0]) && !host.equals("www." + allowed[0])) continue;
+            // The prefix itself, as a page ("/indesign/desktop.html") or as a folder
+            // ("/indesign/desktop/anything"), and nothing that merely starts with the
+            // same letters ("/indesign/desktop-beta").
+            if (path.equals(allowed[1]) || path.equals(allowed[1] + ".html")
+                    || path.startsWith(allowed[1] + "/")) {
+                return allowed[0] + allowed[1];
+            }
+        }
+        return null;
+    }
+
+    private static String prefixList() {
+        StringBuilder out = new StringBuilder();
+        for (String[] allowed : ALLOWED_PREFIXES) {
+            if (out.length() > 0) out.append(", ");
+            out.append(allowed[0]).append(allowed[1]);
+        }
+        return out.toString();
     }
 
     // Which allowed page this address is, or null when it is none of them.
