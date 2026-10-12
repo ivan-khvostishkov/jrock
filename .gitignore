@@ -49,6 +49,11 @@ out-automation/
 out-installer/
 /InstallJRock.java
 
+# Pictures from .github/build/Screenshots.java. They are a build output, uploaded as an
+# artifact by the screenshots workflow; the ones this README shows are in images/, which
+# is tracked.
+screenshots/
+
 # Checksums BuildJar writes beside the jar (the jar itself is covered by *.jar)
 jrock.jar.sha256
 jrock.jar.md5

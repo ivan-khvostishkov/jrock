@@ -1,0 +1,112 @@
+name: Screenshots
+
+# The README's screenshots, taken by the program they are of - on all three desktops.
+#
+# WHY THIS IS A BUILD STEP. A screenshot pasted into a README is a claim about what the
+# program looks like, and it stops being true the moment anything moves: a renamed button,
+# a reworded line, a window that grew a row. These are taken by DRIVING the real program
+# through its own automation API and then painting its window, so a picture that is out of
+# date is a build that is out of date. Nothing is staged.
+#
+# WHY THREE OPERATING SYSTEMS. Swing takes its look from the platform, so one window is
+# three pictures - and a README can then show one program rather than one platform, with
+# the file names saying which runner each came from. Pick whichever mix illustrates a
+# section best; the artifact holds all of them.
+#
+# No credentials, and no network. Two scenes need an answer in the log, and those answers
+# are RECORDED: each was asked once of the real endpoint from a folder with a key, and the
+# reply and its usage block were copied into Screenshots.java. The step runs a Chat
+# Completions endpoint of its own on the LOOPBACK address that replays them, so the
+# pictures show what the model really said while nothing leaves the runner and nothing
+# here can cost anything.
+#
+# Painting and not java.awt.Robot: Robot photographs the SCREEN, which on a macOS runner
+# needs the screen-recording permission nobody can grant a CI job. printAll() asks the
+# window to draw itself into an image, which works under xvfb and on every runner.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    strategy:
+      fail-fast: false        # one desktop failing should not cost the other two
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            name: linux
+          - runner: macos-latest
+            name: macos
+          - runner: windows-latest
+            name: windows
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      # JDK 11 is JRock's documented minimum, and the screenshots should be of what the
+      # minimum looks like rather than of whatever the newest JDK draws.
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      # The jar first, because the agents are compiled against it - the same two commands
+      # the build workflow runs, so a screenshot is of the code that was just built.
+      - name: Build the JAR and compile the agents
+        shell: bash
+        run: |
+          javac -encoding UTF-8 --release 11 -g:source,lines,vars -d out JRock.java
+          java .github/build/BuildJar.java
+          javac -encoding UTF-8 --release 11 -cp jrock.jar -d out-automation \
+                samples/agents/*.java samples/flows/*.java
+
+      # A display, on the one runner that has none. Xvfb is also what the GUI tests use.
+      - name: Take the screenshots (Linux, under Xvfb)
+        if: matrix.runner == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+          xvfb-run -a --server-args="-screen 0 1600x1200x24" \
+            java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
+                 screenshots ${{ matrix.name }}
+
+      - name: Take the screenshots (macOS)
+        if: matrix.runner == 'macos-latest'
+        run: |
+          java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
+               screenshots ${{ matrix.name }}
+
+      - name: Take the screenshots (Windows)
+        if: matrix.runner == 'windows-latest'
+        shell: bash
+        run: |
+          java -cp "jrock.jar;out-automation" .github/build/Screenshots.java \
+               screenshots ${{ matrix.name }}
+
+      # The five JRock scenes are the point of the step, and a missing one is a bug rather
+      # than a runner's bad day - so they are counted. The two agent windows are not: each
+      # is started in the same JVM and skipped with a reason if it cannot come up, which
+      # should not cost the pictures that did.
+      - name: What was taken
+        shell: bash
+        run: |
+          ls -la screenshots/
+          taken=$(ls screenshots/*.png | wc -l)
+          echo "$taken picture(s)"
+          if [ "$taken" -lt 5 ]; then
+            echo "::error::fewer than the five JRock scenes were taken"
+            exit 1
+          fi
+
+      - name: Upload the screenshots
+        uses: actions/upload-artifact@v6
+        with:
+          name: screenshots-${{ matrix.name }}
+          path: screenshots/
+          if-no-files-found: error

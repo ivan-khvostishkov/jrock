@@ -4312,6 +4312,70 @@ Or, if you want to modify the source and run it in place (no build step):
 java JRock.java
 ```
 
+## Screenshots, taken by the build
+
+The desktop screenshots are **built, not taken by hand**. `.github/workflows/screenshots.yml`
+runs `.github/build/Screenshots.java` against the jar it has just built, on
+**Ubuntu, macOS and Windows**, and uploads `screenshots-linux`, `screenshots-macos` and
+`screenshots-windows` as build artifacts — so every push leaves three sets of current pictures
+to choose from, and a window that has changed cannot keep an old picture in this file.
+
+A scene is reached by **driving the program through its own
+[automation API](#the-automation-api)** — the same calls a flow uses — and the window is then
+asked to paint itself:
+
+| | |
+|---|---|
+| `01-window-at-startup` | The session report, and what the folder came up with |
+| `02-a-question-in-the-prompt` | `automationSetPrompt` |
+| `03-a-page-included-as-an-image` | `automationInclude`: the token, the Markdown reference above it, and the log line naming what was attached |
+| `04-a-question-and-its-answer` | `automationSend`: the turn, the raw request and response, and the stats block |
+| `05-two-turns-with-history-and-dialog-only` | A second turn with **History** on, then **Dialog only** — the conversation without the machinery |
+| `06-the-timer-agent` | `JRockTimer`, which needs no JRock at all |
+| `07-the-papers-agent` | `JRockPapers`, showing the two folders it reads |
+
+Run it locally the way CI does (the jar first, because the agents compile against it):
+
+```sh
+javac -encoding UTF-8 --release 11 -d out JRock.java
+java .github/build/BuildJar.java
+javac -encoding UTF-8 --release 11 -cp jrock.jar -d out-automation samples/agents/*.java samples/flows/*.java
+java -cp "jrock.jar:out-automation" .github/build/Screenshots.java screenshots linux
+```
+
+Three decisions worth knowing about:
+
+- **`printAll()`, not `java.awt.Robot`.** Robot photographs the screen, which needs a screen —
+  and on a macOS runner it needs the screen-recording permission nobody can grant a CI job.
+  `printAll()` asks the window to draw itself into an image, which works under `xvfb` (Linux)
+  and on every runner, and draws exactly what the window would show.
+- **The replies are recorded, and replayed from a loopback endpoint.** Two scenes need an answer
+  in the log, and an answer needs a model to have said something. So each was asked **once of
+  the real endpoint**, from a folder with a key, with the same question and the same page
+  attached — and the reply text was copied out of `JRock/messages/*-assistant.txt` (which holds
+  it verbatim) together with the **token counts from the usage block of that same response**. The
+  step then runs a Chat Completions endpoint of its own on the **loopback address** that replays
+  them, serving the model id that really answered. So the picture shows what `openai.gpt-5.4`
+  really said, and the stats under it are that turn's real numbers — while CI needs no
+  credential, reaches no network, and cannot cost anything. Re-record with `--include` and
+  `--cli` in a folder that has a key, and paste the reply and the usage back into
+  `Screenshots.java`. The questions are deliberately ones whose answers do not go stale: ask what
+  today's date means for the due date and the answer has today's date in it, which the next
+  build's picture would contradict.
+- **A throwaway folder with a presentable name.** `jrock-demo/Demo` under the temp folder: the
+  window puts the folder in its title bar and the report prints the whole path, and
+  `/tmp/jrock-demo/Demo` reads like a demo where `createTempDirectory`'s random digits read like
+  a mistake. It is emptied before each run, so every picture is of a first start.
+
+**Not built:** the two browser pictures and the touch menu (JRock Web, which is a page and not a
+window), the Explorer context menu (a shell menu, not JRock's), and the Ghostscript PDF scene,
+which needs an external tool installed on the runner. Those stay hand-taken.
+
+`images/` still holds the hand-taken desktop pictures; the artifact is what replaces them, one at
+a time, as it becomes clear which platform suits each section best. A new scene is a few lines in
+`Screenshots.java` — a prompt, a send, a `shoot()` — so the cheapest way to document a feature
+with a picture is to add it there rather than to reach for a snipping tool.
+
 ## No window at all: `--cli`
 
 A shell version, for a question that does not need a window:
