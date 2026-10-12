@@ -3978,11 +3978,38 @@ Nine pages, in this order:
    An entry under `HKEY_LOCAL_MACHINE` that somebody else wrote needs an administrator to
    remove: it is named in the log and left alone, and nothing else waits for it. The whole
    command line of every entry written goes into the log.
-9. **Installed** — checks for **anything of JRock still running** (a JVM with the jar or a
-   sample on its command line, which is not a shell whose folder is named after JRock nor an
-   editor with `jrock-config.txt` open), names what it found with the folder each one works in,
-   and waits for Retry. Then it starts JRock and **the agents** — not the flows: a flow is one
-   run you ask for, and starting one behind you would open a file chooser nobody asked for.
+9. **Installed** — offers **Run JRock and its agents at login**, and then runs
+   `JRockStart.cmd` (see below), which is what starts the installation from here on. Also
+   reports anything of JRock already running (a JVM with the jar or a sample on its command
+   line, which is not a shell whose folder is named after JRock nor an editor with
+   `jrock-config.txt` open), because the script is about to ask what to do about it.
+
+**One script starts the installation, and it looks before it starts.** The installer writes
+`JRockStart.cmd` and `JRockStart.ps1` beside the jar, with the command lines it would have used
+itself — JRock and **the agents**, not the flows, since a flow is one run you ask for and
+starting one behind you would open a file chooser nobody asked for.
+
+Why a script rather than the installer starting nine processes: the day after the install,
+*"start all of it"* is still something you want, and starting it twice is the one thing you must
+not do — two JRocks in one folder write the same log and the same prompt file over each other. A
+script can look first, every time, for ever; an installer can only look the once. So:
+
+- **Nothing running** → it starts everything and says nothing at all, which is what it does at
+  login.
+- **Some of it running** → it names what it found and asks whether to **stop all of it and start
+  again**. Yes is a restart; No leaves the machine exactly as it was.
+- **It stops only what it starts.** A running *flow* names the same jar and is deliberately left
+  alone: a flow is a document three model passes deep, this script cannot start one again, and
+  killing somebody's conversion to restart the agents would be a poor trade. Verified against a
+  real machine: twelve processes of JRock and its agents claimed, one running translation flow
+  untouched.
+
+**Run at login** is a shortcut in the Startup folder (`~/.config/autostart` on Linux) pointing at
+that script — all of it, agents included, because *run it at login* means all of it or there is
+no point. Unlike the Start menu and Desktop ticks it does **not** default to on: it starts as
+whatever you chose last time, read off the disk, because adding an autostart entry is a decision
+about somebody's machine. Unticking it when it is there removes it, the same way the other two
+work.
 
 **A previous install is read, not guessed.** The Explorer entries already hold the folder the
 jar is in, which agents and flows are installed and where each one works, so those become the

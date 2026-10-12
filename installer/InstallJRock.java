@@ -95,6 +95,22 @@ public final class InstallJRock {
     private static final String AGENTS_DIR = "Agents";
     private static final String FLOWS_DIR = "Flows";
 
+    // THE START SCRIPT, written beside the jar: one thing that starts the whole
+    // installation - JRock and every agent installed with it, each in its own folder.
+    //
+    // Why a script rather than this installer starting nine processes itself. The day
+    // after the install, "start all of it" is still something the operator wants, and
+    // starting it twice is the one thing they must not do: two JRocks in one folder write
+    // the same log and the same prompt file over each other. A script can look first,
+    // every time, for ever; an installer can only look the once.
+    //
+    // Two files on Windows, and the pair is deliberate: the .ps1 holds the thinking,
+    // because asking Windows what is running is a WMI query and that is PowerShell's job,
+    // and the .cmd is the thing a person can double-click in Explorer.
+    private static final String START_PS1 = "JRockStart.ps1";
+    private static final String START_CMD = "JRockStart.cmd";
+    private static final String START_SH = "jrock-start.sh";
+
     // What the artifact must hold, beside this installer.
     private static final String JAR = "jrock.jar";
     private static final String SAMPLES = "samples";
@@ -214,6 +230,10 @@ public final class InstallJRock {
     private static Path home;            // the one folder the installation lives in
     private static boolean startMenu = true;
     private static boolean desktop = true;
+    // Run everything at login. Unlike the other two this does NOT default to yes: adding
+    // an autostart entry is a decision about somebody's machine, and the honest default
+    // is whatever they chose last time (see main, where it is read off the disk).
+    private static boolean startup;
     private static boolean withSamples = true;
     private static boolean customise;
     // Something is installed already, so this run is an UPDATE of it: the page offers
@@ -375,6 +395,12 @@ public final class InstallJRock {
             for (String[] e : entries) System.out.println("  " + e[0]);
         }
         System.out.println("Running JRock:       " + or(String.join(", ", runningJRock()), "none"));
+        Path script = home == null ? null : home.resolve(isWindows() ? START_CMD : START_SH);
+        System.out.println("Start script:        " + (script == null ? "(no folder yet)"
+                : script + (Files.isRegularFile(script) ? "" : "  - not written yet")));
+        Path login = shortcutFile(Place.STARTUP);
+        System.out.println("At login:            " + (login == null ? "not offered here"
+                : Files.exists(login) ? login : "no (" + login.getParent() + " has none)"));
     }
 
     private static String or(Object value, String otherwise) {
@@ -597,6 +623,12 @@ public final class InstallJRock {
 
     // What was not read from a previous install: the defaults for this machine.
     private static void defaults() {
+        // The login entry: on if it is there, off if it is not. Never on by default - an
+        // installer that adds an autostart entry nobody asked for is an installer people
+        // uninstall - and never off by surprise either, which is why it is read rather
+        // than assumed.
+        Path login = shortcutFile(Place.STARTUP);
+        startup = login != null && Files.exists(login);
         Path userHome = Paths.get(System.getProperty("user.home", "."));
         Path documents = Files.isDirectory(userHome.resolve("Documents"))
                 ? userHome.resolve("Documents") : userHome;
@@ -718,8 +750,8 @@ public final class InstallJRock {
 
         // 4. Shortcuts - installed when ticked, and taken away when not.
         steps.add(new Step("Shortcuts", panel -> {
-            Path menuAt = shortcutFile(startMenuDir());
-            Path deskAt = shortcutFile(desktopDir());
+            Path menuAt = shortcutFile(Place.MENU);
+            Path deskAt = shortcutFile(Place.DESKTOP);
             panel.add(text("Both open JRock in " + home + "."));
             panel.add(check("Start menu shortcut \"" + SHORTCUT + "\"", startMenu,
                     v -> {
@@ -747,10 +779,10 @@ public final class InstallJRock {
                           + "and on the Desktop."));
             }
         }, () -> {
-            if (startMenu) shortcut(startMenuDir(), true);
-            else removeShortcut(startMenuDir(), true);
-            if (desktop) shortcut(desktopDir(), false);
-            else removeShortcut(desktopDir(), false);
+            if (startMenu) shortcut(Place.MENU);
+            else removeShortcut(Place.MENU);
+            if (desktop) shortcut(Place.DESKTOP);
+            else removeShortcut(Place.DESKTOP);
             return null;
         }));
 
@@ -821,7 +853,12 @@ public final class InstallJRock {
                 for (Sample s : found) s.selected = true;
             }
             if (selected().isEmpty()) return "Nothing is ticked.";
-            return copySamples();
+            String problem = copySamples();
+            if (problem != null) return problem;
+            // Written here rather than at the end, because it is written FROM the set
+            // that has just been copied - and because an installer closed before its
+            // last page should still leave behind the thing that starts what it put in.
+            return writeStartScript();
         }));
 
         // 6. The settings, and the key.
@@ -979,25 +1016,39 @@ public final class InstallJRock {
                 panel.add(value("Flows:    " + selectedOfKind(Kind.FLOW).size()
                         + " in " + FLOWS_DIR + "\\, each run by its right-click entry"));
             }
+            panel.add(value("Starts:   " + startScriptName()
+                    + ", beside the jar - which starts all of it, or none of it"));
+            Path loginAt = shortcutFile(Place.STARTUP);
+            if (loginAt != null) {
+                panel.add(check("Run JRock and its agents at login", startup, v -> {
+                    startup = v;
+                    redraw();
+                }));
+                if (!startup && Files.exists(loginAt)) {
+                    panel.add(alarm("Will be removed: " + loginAt));
+                }
+            }
             List<String> running = runningJRock();
             if (!running.isEmpty()) {
-                panel.add(alarm("Something of JRock is still running: "
-                        + String.join(", ", running)));
-                panel.add(note("Close it, then press Retry - a second JRock in the same "
-                        + "folder writes the same log and the same prompt file, and the "
-                        + "two overwrite each other."));
+                panel.add(note("Some of JRock is running: " + String.join(", ", running)
+                        + ". The script will name what it finds and ask whether to stop "
+                        + "all of it and start again - a no leaves it exactly as it is."));
             } else {
-                panel.add(note("Nothing of JRock is running. Next starts JRock in "
-                        + home.getFileName() + (selectedOfKind(Kind.AGENT).isEmpty() ? "."
+                panel.add(note("Nothing of JRock is running, so the script will start it "
+                        + "without a word: JRock in " + home.getFileName()
+                        + (selectedOfKind(Kind.AGENT).isEmpty() ? "."
                         : ", and each agent in its own folder. The flows are not started: "
                           + "a flow is one run you ask for, from its right-click entry.")));
             }
         }, () -> {
-            List<String> running = runningJRock();
-            if (!running.isEmpty()) return "Still running: " + String.join(", ", running);
-            launchAll();
+            if (startup) shortcut(Place.STARTUP);
+            else removeShortcut(Place.STARTUP);
+            String problem = runStartScript();
+            if (problem != null) return problem;
             javax.swing.JOptionPane.showMessageDialog(window,
-                    "Started. This installer is done.", "JRock",
+                    startScriptName() + " is running. This installer is done.\n\n"
+                    + "Run it again whenever you want everything started: it looks for "
+                    + "what is already there first.", "JRock",
                     javax.swing.JOptionPane.INFORMATION_MESSAGE);
             window.dispose();
             return null;
@@ -1135,69 +1186,257 @@ public final class InstallJRock {
         }
     }
 
+    // ---- The start script ------------------------------------------------------
+    // Written with the command lines this installer would have used itself, so that what
+    // starts the installation tomorrow is what started it today.
+    //
+    // NOTHING, OR ALL OF IT. Finding some of JRock already running, it names what it
+    // found and asks whether to stop all of it and start again: yes is a restart, no
+    // leaves the machine exactly as it was. Finding nothing, it starts everything and
+    // says nothing at all - which is what it does at login, where there is nobody to
+    // tell and nothing to ask.
+    //
+    // The agents only. A flow is a single run that asks for a document, so starting one
+    // would open a file chooser nobody asked for; its right-click entry is how it begins.
+    private static String writeStartScript() {
+        Path jar = home.resolve(JAR);
+        List<String[]> toStart = new ArrayList<>();
+        toStart.add(new String[] { PRODUCT, home.toString(), "-jar", jar.toString() });
+        for (Sample s : selectedOfKind(Kind.AGENT)) {
+            Path dir = s.dir(home);
+            toStart.add(new String[] { s.words(), dir.toString(), "-cp", jar.toString(),
+                    dir.resolve(s.file.getFileName()).toString(),
+                    "--working-dir", dir.toString(), "--prompts-dir", dir.toString() });
+        }
+        try {
+            if (isWindows()) {
+                Files.write(home.resolve(START_PS1),
+                        windowsStartScript(jar, toStart).getBytes(StandardCharsets.UTF_8));
+                Files.write(home.resolve(START_CMD), ("@echo off\r\n"
+                        + "rem Starts JRock and its agents - or asks first, if some are "
+                        + "already running.\r\n"
+                        + "powershell.exe -NoProfile -ExecutionPolicy Bypass -File "
+                        + "\"%~dp0" + START_PS1 + "\"\r\n").getBytes(StandardCharsets.UTF_8));
+                say("Start script: " + home.resolve(START_CMD) + " (and " + START_PS1 + ")");
+            } else {
+                Path sh = home.resolve(START_SH);
+                Files.write(sh, otherStartScript(jar, toStart).getBytes(StandardCharsets.UTF_8));
+                sh.toFile().setExecutable(true);
+                say("Start script: " + sh);
+            }
+            return null;
+        } catch (IOException ex) {
+            return "Could not write the start script: " + ex.getMessage();
+        }
+    }
+
+    private static String windowsStartScript(Path jar, List<String[]> toStart) {
+        StringBuilder ps = new StringBuilder();
+        ps.append("# JRock Assistant: start all of it, or none of it.\r\n")
+          .append("# Written by the JRock installer for ").append(home).append("\r\n")
+          .append("# Run it again whenever you like - it looks before it starts anything.\r\n\r\n")
+          .append("$ErrorActionPreference = 'Stop'\r\n")
+          .append("$jar = ").append(psText(jar.toString())).append("\r\n")
+          .append("$javaw = ").append(psText(launcher())).append("\r\n\r\n")
+          .append("# What to start, in order, each in the folder whose settings it reads.\r\n")
+          .append("$toStart = @(\r\n");
+        for (String[] one : toStart) {
+            ps.append("    @{ What = ").append(psText(one[0]))
+              .append("; Dir = ").append(psText(one[1])).append("; Args = @(");
+            for (int i = 2; i < one.length; i++) {
+                if (i > 2) ps.append(", ");
+                ps.append(psArg(one[i]));
+            }
+            ps.append(") }\r\n");
+        }
+        ps.append(")\r\n\r\n")
+          // WHAT THIS SCRIPT STARTS, and nothing else: a running FLOW names the same jar
+          // and must not be caught in a restart. A flow is one run somebody asked for -
+          // a document being converted, three model passes deep - and this script would
+          // kill it without being able to start it again, because flows are not started
+          // here. So the ones that are ours are these, by name, and anything else of
+          // JRock's is left exactly as it is.
+          .append("$mine = @(").append(startedNames(toStart)).append(")\r\n\r\n")
+          // Contains and not -like: a path can hold [ or ], which -like reads as a
+          // wildcard, and the question here is whether this exact jar is named.
+          .append("$ours = @(Get-CimInstance Win32_Process | Where-Object {\r\n")
+          .append("    $_.CommandLine -and $_.CommandLine.Contains($jar) } | Where-Object {\r\n")
+          .append("    $name = if ($_.CommandLine -match '([A-Za-z0-9]+)\\.java') "
+                  + "{ $matches[1] } else { 'JRock' }\r\n")
+          .append("    $mine -contains $name })\r\n")
+          .append("$running = @($ours)\r\n")
+          .append("if ($running.Count -gt 0) {\r\n")
+          .append("    $names = @($running | ForEach-Object {\r\n")
+          .append("        if ($_.CommandLine -match '([A-Za-z0-9]+)\\.java') "
+                  + "{ $matches[1] } else { 'JRock' }\r\n")
+          .append("    } | Sort-Object -Unique) -join ', '\r\n")
+          .append("    Add-Type -AssemblyName System.Windows.Forms | Out-Null\r\n")
+          .append("    $answer = [System.Windows.Forms.MessageBox]::Show(\r\n")
+          .append("        \"This is already running:`r`n`r`n$names`r`n`r`n"
+                  + "Stop all of it and start it again?\",\r\n")
+          .append("        'JRock Assistant',\r\n")
+          .append("        [System.Windows.Forms.MessageBoxButtons]::YesNo,\r\n")
+          .append("        [System.Windows.Forms.MessageBoxIcon]::Question)\r\n")
+          .append("    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { exit 0 }\r\n")
+          .append("    $running | ForEach-Object {\r\n")
+          .append("        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }\r\n")
+          // Long enough for the ports to be given back: an agent that is starting while
+          // the one it replaces still holds 47470 cannot listen on it.
+          .append("    Start-Sleep -Milliseconds 900\r\n")
+          .append("}\r\n\r\n")
+          .append("foreach ($one in $toStart) {\r\n")
+          .append("    Start-Process -FilePath $javaw -ArgumentList $one.Args "
+                  + "-WorkingDirectory $one.Dir | Out-Null\r\n")
+          .append("}\r\n")
+          .append("exit 0\r\n");
+        return ps.toString();
+    }
+
+    // The same for a desktop that is not Windows, without the question: there is no one
+    // dialog box every Linux has, and a script that kills things after asking in a
+    // terminal nobody is looking at would be worse than one that says what it found.
+    private static String otherStartScript(Path jar, List<String[]> toStart) {
+        StringBuilder sh = new StringBuilder("#!/bin/sh\n")
+                .append("# JRock Assistant: start all of it, or none of it.\n")
+                .append("# Written by the JRock installer for ").append(home).append("\n\n")
+                .append("JAR=\"").append(jar).append("\"\n")
+                .append("JAVA=\"").append(launcher()).append("\"\n")
+                .append("RUNNING=$(pgrep -f \"$JAR\" | tr '\\n' ' ')\n")
+                .append("if [ -n \"$RUNNING\" ]; then\n")
+                .append("  echo \"JRock is already running (pids: $RUNNING).\"\n")
+                .append("  echo \"Stop it and run this again to restart everything.\"\n")
+                .append("  exit 1\n")
+                .append("fi\n");
+        for (String[] one : toStart) {
+            sh.append("( cd \"").append(one[1]).append("\" && \"$JAVA\"");
+            for (int i = 2; i < one.length; i++) sh.append(" \"").append(one[i]).append("\"");
+            sh.append(" >/dev/null 2>&1 & )   # ").append(one[0]).append("\n");
+        }
+        return sh.append("exit 0\n").toString();
+    }
+
+    // The names this script starts, as PowerShell strings: 'JRock' for the window itself
+    // and the class name of each agent, which is what its command line shows.
+    private static String startedNames(List<String[]> toStart) {
+        StringBuilder names = new StringBuilder(psText(PRODUCT));
+        for (String[] one : toStart) {
+            for (int i = 2; i < one.length; i++) {
+                if (!one[i].endsWith(".java")) continue;
+                String file = Paths.get(one[i]).getFileName().toString();
+                names.append(", ").append(psText(file.substring(0, file.length() - 5)));
+            }
+        }
+        return names.toString();
+    }
+
+    // A PowerShell single-quoted string: the one quote it has to escape is its own.
+    private static String psText(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    // One argument for Start-Process -ArgumentList, which joins the list with spaces and
+    // quotes nothing - so a path with a space in it has to arrive already quoted.
+    private static String psArg(String value) {
+        return "'\"" + value.replace("'", "''") + "\"'";
+    }
+
     // ---- Shortcuts -------------------------------------------------------------
     // One shortcut that starts JRock in the install folder. A .lnk is a COM object, so
     // PowerShell makes it - the one way to write a real shortcut without a native
     // library. Elsewhere it is a .desktop file or a small .command script, which is what
     // those desktops use.
-    private static Path shortcutFile(Path dir) {
+    // Three places one can go, and the third points somewhere else: the Start menu and
+    // the Desktop start JRock, while the startup entry runs the start SCRIPT - the whole
+    // installation, agents included, because "run it at login" means all of it or there
+    // is no point to it.
+    private enum Place {
+        MENU("Start menu"), DESKTOP("Desktop"), STARTUP("startup at login");
+
+        final String words;
+
+        Place(String words) {
+            this.words = words;
+        }
+
+        /** The folder, or null where this desktop has nowhere to put one. */
+        Path dir() {
+            if (this == MENU) return startMenuDir();
+            if (this == DESKTOP) return desktopDir();
+            return startupDir();
+        }
+    }
+
+    private static Path shortcutFile(Place place) {
+        Path dir = place.dir();
         if (dir == null) return null;
         if (isWindows()) return dir.resolve(SHORTCUT + ".lnk");
         if (isMac()) return dir.resolve(SHORTCUT + ".command");
         return dir.resolve("jrock-assistant.desktop");
     }
 
-    private static void shortcut(Path dir, boolean menu) {
+    private static void shortcut(Place place) {
+        Path dir = place.dir();
         if (dir == null) {
-            say("No " + (menu ? "Start menu" : "Desktop") + " folder found; no shortcut.");
+            say("No " + place.words + " folder on this desktop; nothing written.");
             return;
         }
+        boolean all = place == Place.STARTUP;
         try {
             Files.createDirectories(dir);
             Path jar = home.resolve(JAR);
-            Path file = shortcutFile(dir);
+            Path file = shortcutFile(place);
+            String about = (all ? "JRock and its agents in " : "JRock in ")
+                    + home.getFileName();
             if (isWindows()) {
+                // WindowStyle 7 is minimised, which together with PowerShell's own
+                // -WindowStyle Hidden is the difference between a console window
+                // appearing at every login and not.
                 String ps = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('"
                         + file + "'); "
-                        + "$s.TargetPath = '" + launcher() + "'; "
-                        + "$s.Arguments = '-jar \"" + jar + "\"'; "
+                        + "$s.TargetPath = '" + (all ? powershellExe() : launcher()) + "'; "
+                        + "$s.Arguments = '" + (all
+                            ? "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "
+                              + "\"" + home.resolve(START_PS1) + "\""
+                            : "-jar \"" + jar + "\"") + "'; "
                         + "$s.WorkingDirectory = '" + home + "'; "
-                        + "$s.Description = 'JRock in " + home.getFileName() + "'; "
+                        + (all ? "$s.WindowStyle = 7; " : "")
+                        + "$s.Description = '" + about + "'; "
                         + "$s.Save()";
                 List<String> out = run("powershell.exe", "-NoProfile", "-NonInteractive",
                         "-Command", ps);
-                say(Files.isRegularFile(file) ? "Shortcut: " + file
+                say(Files.isRegularFile(file) ? place.words + ": " + file
                         : "Could not write " + file + " " + out);
                 return;
             }
+            String command = all ? "\"" + home.resolve(START_SH) + "\""
+                                 : "\"" + launcher() + "\" -jar \"" + jar + "\"";
             if (isMac()) {
-                Files.write(file, ("#!/bin/sh\ncd \"" + home + "\"\nexec \"" + launcher()
-                        + "\" -jar \"" + jar + "\"\n").getBytes(StandardCharsets.UTF_8));
+                Files.write(file, ("#!/bin/sh\ncd \"" + home + "\"\nexec " + command + "\n")
+                        .getBytes(StandardCharsets.UTF_8));
                 file.toFile().setExecutable(true);
-                say("Launcher: " + file);
+                say(place.words + ": " + file);
                 return;
             }
             Files.write(file, ("[Desktop Entry]\nType=Application\nName=" + SHORTCUT
-                    + "\nComment=JRock in " + home.getFileName() + "\nExec=\"" + launcher()
-                    + "\" -jar \"" + jar + "\"\nPath=" + home + "\nTerminal=false\n"
-                    + "Categories=Development;Utility;\n").getBytes(StandardCharsets.UTF_8));
+                    + "\nComment=" + about + "\nExec=" + command + "\nPath=" + home
+                    + "\nTerminal=false\nCategories=Development;Utility;\n")
+                    .getBytes(StandardCharsets.UTF_8));
             file.toFile().setExecutable(true);
-            say("Launcher: " + file);
+            say(place.words + ": " + file);
         } catch (IOException ex) {
-            say("Could not write the " + (menu ? "Start menu" : "Desktop") + " shortcut: "
-                    + ex.getMessage());
+            say("Could not write the " + place.words + " entry: " + ex.getMessage());
         }
     }
 
-    // Unticked means gone: a shortcut this installer would have written, taken away when
-    // it is already there. Only that one file, by its exact name - nothing else in the
-    // Start menu or on the Desktop is any of this installer's business.
-    private static void removeShortcut(Path dir, boolean menu) {
-        Path file = shortcutFile(dir);
+    // Unticked means gone: an entry this installer would have written, taken away when it
+    // is already there. Only that one file, by its exact name - nothing else in the Start
+    // menu, on the Desktop or in Startup is any of this installer's business.
+    private static void removeShortcut(Place place) {
+        Path file = shortcutFile(place);
         if (file == null || !Files.exists(file)) return;
         try {
             Files.delete(file);
-            say("Removed the " + (menu ? "Start menu" : "Desktop") + " shortcut " + file);
+            say("Removed the " + place.words + " entry " + file);
         } catch (IOException ex) {
             say("Could not remove " + file + ": " + ex.getMessage());
         }
@@ -1216,6 +1455,26 @@ public final class InstallJRock {
     private static Path desktopDir() {
         Path desktopFolder = Paths.get(System.getProperty("user.home"), "Desktop");
         return Files.isDirectory(desktopFolder) ? desktopFolder : null;
+    }
+
+    // Where a desktop starts things at login. Windows reads the Startup folder, and the
+    // freedesktop desktops read ~/.config/autostart; a Mac wants a launch agent, which is
+    // a plist and a different story, so there the tick is not offered at all.
+    private static Path startupDir() {
+        if (isWindows()) {
+            String appData = System.getenv("APPDATA");
+            return appData == null ? null : Paths.get(appData,
+                    "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+        }
+        if (isMac()) return null;
+        return Paths.get(System.getProperty("user.home"), ".config", "autostart");
+    }
+
+    // PowerShell by its full path, for a shortcut that has to find it with no PATH.
+    private static String powershellExe() {
+        String root = System.getenv("SystemRoot");
+        return root == null ? "powershell.exe"
+                : root + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
     }
 
     // ---- Explorer entries ------------------------------------------------------
@@ -1463,23 +1722,28 @@ public final class InstallJRock {
     // JRock, and the AGENTS - the ones that loop. A flow is a single run that asks for a
     // document, so starting one here would open a file chooser nobody asked for; its
     // right-click entry is how it is meant to begin.
-    private static void launchAll() {
-        Path jar = home.resolve(JAR);
-        start(List.of(launcher(), "-jar", jar.toString()), home, "JRock");
-        say("Started JRock in " + home);
-        for (Sample s : selectedOfKind(Kind.AGENT)) {
-            Path dir = s.dir(home);
-            start(List.of(launcher(), "-cp", jar.toString(),
-                    dir.resolve(s.file.getFileName()).toString(),
-                    "--working-dir", dir.toString(),
-                    "--prompts-dir", dir.toString()), dir, s.words());
-            say("Started " + s.words() + " in " + dir);
+    private static String runStartScript() {
+        Path script = home.resolve(isWindows() ? START_PS1 : START_SH);
+        if (!Files.isRegularFile(script)) {
+            String problem = writeStartScript();   // closed the installer and came back
+            if (problem != null) return problem;
         }
+        List<String> command = isWindows()
+                ? List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File", script.toString())
+                : List.of("/bin/sh", script.toString());
+        start(command, home, startScriptName());
+        say("Ran " + script);
         List<Sample> flows = selectedOfKind(Kind.FLOW);
         if (!flows.isEmpty()) {
             say(flows.size() + " flow(s) installed and not started: each one runs when you "
                     + "pick it from a right-click menu.");
         }
+        return null;
+    }
+
+    private static String startScriptName() {
+        return isWindows() ? START_CMD : START_SH;
     }
 
     private static void start(List<String> command, Path in, String what) {
