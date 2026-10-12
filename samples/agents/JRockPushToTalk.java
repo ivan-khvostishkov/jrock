@@ -98,7 +98,7 @@
 // on the screen all the same.
 //
 // A turn that brings no answer - a send that failed, a reply that never came, a reply
-// that arrived empty - is said out loud as well as shown: "Error. Should I try again?",
+// that arrived empty - is said out loud as well as shown: "Something went wrong. Should I try again?",
 // the same fixed phrase every time, because hands-free nobody is looking at the window
 // and a silence where an answer should be says nothing about whether one is still
 // coming. Trying again is the operator's: say it again, or press the button again.
@@ -202,7 +202,15 @@ public final class JRockPushToTalk {
     // anything is coming. It asks rather than tells, because trying again is theirs to
     // do and takes nothing but saying it again: hands-free listens by itself after
     // RETRY_PAUSE_MS, and a held turn is the button pressed once more.
-    private static final String FAILED_ALOUD = "Error. Should I try again?";
+    //
+    // A SENTENCE, not a word. It was "Error." - a noun on its own, which is how a machine
+    // labels a condition and not how anybody says it. Read out loud by a voice that has
+    // been answering in sentences all day, a bare noun is the moment the illusion of
+    // talking to somebody collapses. "Something went wrong" has a subject and a verb,
+    // blames nobody, and covers every way a turn can fail - a send that did not go, a
+    // reply that never came, a reply that arrived empty, a model that kept asking for
+    // more instead of answering.
+    private static final String FAILED_ALOUD = "Something went wrong. Should I try again?";
 
     // How often hands-free looks for a microphone that is not there.
     //

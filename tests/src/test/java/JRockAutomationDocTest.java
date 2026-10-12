@@ -97,7 +97,7 @@ class JRockAutomationDocTest extends JRockGuiFixture {
         awaitReadyCount(1);
         assertThat(JRock.automationBegin("narrate test")).isNull();
         try {
-            String words = "Error. Should I try again?";
+            String words = "Something went wrong. Should I try again?";
 
             // With nothing selected there is nothing to read: narration takes no text any
             // more, so an agent cannot speak words that appear nowhere. (What it says it

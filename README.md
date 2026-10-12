@@ -1854,7 +1854,7 @@ the voice, so the microphone doesn't record the last answer as the next question
   seconds, sometimes two or three in a run, and **nothing at all in between**. Those seconds are
   otherwise ambiguous in the one way that matters: hands-free you are not looking at the window,
   and silence says nothing about whether the microphone heard the end of your sentence, whether
-  anything was sent, or whether this is the pause before *"Error. Should I try again?"*.
+  anything was sent, or whether this is the pause before *"Something went wrong. Should I try again?"*.
 
   **Sparse rather than continuous, and that is the design.** A held sound — a fan, a hum, a hiss
   — is something you end up listening *through*, and after a few turns it is tiring and in the
@@ -1939,7 +1939,7 @@ the voice, so the microphone doesn't record the last answer as the next question
   model going in circles: the second fetch hands back exactly what the first one did, so it
   cannot be the thing that unsticks it. And the **sixth** fetch is where a question asked across
   a room has to be answered with what there is. Either way the operator hears the usual
-  **"Error. Should I try again?"** and the window shows what the model kept asking for — because
+  **"Something went wrong. Should I try again?"** and the window shows what the model kept asking for — because
   *"I need your mail: message 0d613e"*, read out to somebody who asked what their post says, is
   the machine talking to itself while they are still waiting.
 - **The web.** When the whole answer is *"I need the web: …"* — `site zdnet.com`,
