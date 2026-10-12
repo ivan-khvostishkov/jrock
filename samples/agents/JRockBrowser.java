@@ -367,6 +367,36 @@ public final class JRockBrowser {
         String said = listen();
         later(() -> listening.setText(said));
         System.out.println("Browser agent is ready. " + said);
+        openOnStartup();
+    }
+
+    // The browser, started and put on the search page before anything is asked of it.
+    //
+    // The first page of a session is often a consent wall or a sign-in rather than the
+    // page, and those are the operator's to answer in that window - so the window is
+    // there from the start, with something harmless in it, and whatever it wants
+    // answering can be answered while nobody is waiting. The profile keeps the answer, so
+    // the first real request lands on the page itself.
+    //
+    // On a thread of its own and quietly: starting a Chromium takes a second or two, a
+    // machine with none should still have a working agent for everything else, and a
+    // failure here is a line in the window rather than an agent that did not come up.
+    private static void openOnStartup() {
+        daemon(() -> {
+            String home = front("duckduckgo.com");
+            try {
+                WebSocket live = browserSocket(note -> later(() -> say(note)));
+                String tab = tab(live, site(home));
+                fetchInto(live, tab, home, note -> later(() -> say(note)));
+                later(() -> say("The browser is open on duckduckgo.com. Anything it asks "
+                        + "for - a consent dialogue, a sign-in - can be answered in that "
+                        + "window now, and it is remembered."));
+            } catch (Stop stop) {
+                later(() -> say("The browser is not open yet: " + stop.getMessage()));
+            } catch (RuntimeException ex) {
+                later(() -> say("The browser is not open yet: " + ex));
+            }
+        }, "jrock-browser-startup").start();
     }
 
     // ---- Answering -------------------------------------------------------------
@@ -891,15 +921,13 @@ public final class JRockBrowser {
 
     // Both sides of a documentation score, with plurals taken off.
     //
-    // Because documentation is written in the plural and asked about in the singular:
-    // the heading is "Guardrails", "Denied topics", "Grids and guides", and the question
-    // is "a guardrail", "block a topic", "the baseline grid". Unstemmed, those meet as a
-    // NEAR miss - worth 2 where an exact word is worth 8 - so a page whose title is
-    // precisely the answer loses to any page that happens to repeat a word of the
-    // question. Measured: "block a topic with a guardrail" chose "Test your guardrail"
-    // over "Denied topics" before this, and the other way round after it.
+    // Documentation is written in the plural and asked about in the singular: the heading
+    // is "Guardrails", "Denied topics", "Grids and guides", and the question is "a
+    // guardrail", "block a topic", "the baseline grid". Unstemmed those meet as a near
+    // miss, which is worth a quarter of an exact word - so the page whose title IS the
+    // answer loses to any page that repeats a word of the question.
     //
-    // Only in the walk. The scoring itself is left alone, because #follow is calibrated
+    // Only in the walk. The scoring itself stays as it is, because #follow is calibrated
     // against it on news headlines, where "Tesla" and "Teslas" are different claims.
     private static String stemmed(String text) {
         StringBuilder out = new StringBuilder();
@@ -1748,8 +1776,7 @@ public final class JRockBrowser {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        // Counted rather than written: the title said "7 hosts" for as long as there
-        // were seven, and the list has grown twice since.
+        // Counted, so the title is right whatever the list holds.
         window = new javax.swing.JFrame("JRock - Browser (" + ALLOWED.length
                 + " hosts, read-only)");
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
@@ -1983,9 +2010,14 @@ public final class JRockBrowser {
     }
 
     private static void say(String text) {
-        // No HTML escaping any more, and that is the point of the change: this is text in
-        // a text area, so "<", ">" and "&" are the characters they are - an address with
-        // a query in it used to arrive here as "&amp;".
+        // Printed and logged whether or not there is a window to show it in: --shot,
+        // --links and --docs run the same code with no window of ours.
+        if (status == null) {
+            System.out.println(text);
+            return;
+        }
+        // No HTML escaping: this is text in a text area, so "<", ">" and "&" are the
+        // characters they are, and an address with a query keeps its "&".
         status.setText(text);
         int wide = status.getWidth();
         if (wide > 0) status.setSize(wide, Short.MAX_VALUE);

@@ -394,7 +394,8 @@ public final class InstallJRock {
         }
         if (isWindows()) {
             List<String[]> entries = existingEntries();
-            System.out.println("JRock entries now:   " + entries.size()
+            System.out.println("JRock entries now:   " + entryTitles(entries).size()
+                    + " in " + entries.size() + " registry key(s)"
                     + (entries.isEmpty() ? "" : " (page 8 would clear them first)"));
             for (String[] e : entries) System.out.println("  " + e[0]);
         }
@@ -1038,12 +1039,13 @@ public final class InstallJRock {
                 }
             }
             if (!already.isEmpty()) {
-                panel.add(alarm(already.size() + " JRock entr" + (already.size() == 1
+                List<String> titles = entryTitles(already);
+                panel.add(alarm(titles.size() + " JRock entr" + (titles.size() == 1
                         ? "y is" : "ies are") + " in the registry now, and "
                         + (contextMenus ? "all of them are removed before the ones above "
                                           + "are written"
                                         : "all of them are removed")));
-                for (String[] e : already) panel.add(value("  " + e[2]));
+                for (String title : titles) panel.add(value("  " + title));
             }
             panel.add(note(already.isEmpty()
                     ? "Written under HKEY_CURRENT_USER - no administrator, and nothing "
@@ -1575,6 +1577,15 @@ public final class InstallJRock {
     // ---- Explorer entries ------------------------------------------------------
     // Every JRock right-click entry on this machine, wherever it is and whoever wrote it:
     // {full key, key under its root with the hive short name, its label}.
+    // The entries as Explorer shows them: one per label, sorted. The same entry is
+    // written under several keys - a folder, a folder's background, any file - and the
+    // keys matter to the removal and to --check, not to somebody reading a page.
+    private static List<String> entryTitles(List<String[]> entries) {
+        java.util.TreeSet<String> titles = new java.util.TreeSet<>();
+        for (String[] e : entries) titles.add(e[2]);
+        return new ArrayList<>(titles);
+    }
+
     private static List<String[]> existingEntries() {
         List<String[]> entries = new ArrayList<>();
         if (!isWindows()) return entries;
