@@ -1306,9 +1306,208 @@ public class JRock {
         http();
         // Command line:
         //   [--working-dir <dir>] [--prompts-dir <dir>] [<initial-prompt-file>]
-        String sourceArg = parseArgs(args);
+        // --cli and --include never show a window (see cli).
+        String mode = null;
+        String modeArg = null;
+        java.util.List<String> rest = new java.util.ArrayList<>();
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals(CLI_FLAG) || args[i].equals(INCLUDE_FLAG)) {
+                mode = args[i];
+                // --cli takes an optional question; --include needs a file.
+                if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+                    modeArg = args[++i];
+                }
+            } else {
+                rest.add(args[i]);
+            }
+        }
+        String sourceArg = parseArgs(rest.toArray(new String[0]));
+        if (mode != null) {
+            System.exit(cli(mode, modeArg, sourceArg));
+            return;
+        }
         SwingUtilities.invokeLater(() -> createAndShowGui(sourceArg));
     }
+
+    private static final String CLI_FLAG = "--cli";
+    private static final String INCLUDE_FLAG = "--include";
+
+    // ---- No window at all ------------------------------------------------------
+    // JRock as a shell command: the same conversation, the same folder, the same log and
+    // the same includes - and no Swing window anywhere.
+    //
+    //   java JRock.java --cli                 ask, read, ask again; Ctrl+C ends it
+    //   java JRock.java --cli "a question"    one answer, then exit
+    //   java JRock.java --include <file>      attach that file and exit, for the next run
+    //
+    // IT GOES THROUGH THE WHOLE STARTUP, deliberately. initSession is what restores the
+    // log from disk, adopts the folder's settings, prints the session report and - the
+    // reason the operator asked for it this way - RELOADS THE INCLUDES, so a picture
+    // attached in a previous run is still attached and can still be referred to. A
+    // shortcut that skipped it would be a different program wearing the same name.
+    //
+    // The components it needs are a text area for the prompt and a text pane for the log,
+    // and neither is a window: Swing only refuses to make WINDOWS without a display, so
+    // these two exist perfectly well with nothing on the screen. That is what lets the
+    // whole of the startup run unchanged instead of being written a second time.
+    private static int cli(String mode, String modeArg, String sourceArg) {
+        System.setProperty("java.awt.headless", "true");
+        cliEcho = true;
+        JTextArea input = new JTextArea();
+        JTextPane pane = new JTextPane();
+        LogView log = new LogView(pane);
+        ui = null;                      // there is no window to drive: no automation here
+
+        // THE SAVED PROMPT IS READ, AND THEN DROPPED - and both halves of that matter.
+        //
+        // Read, because the includes are reloaded from what REFERS to them: a hash in the
+        // log is only mapped back to its file if the prompt or a message mentions it (see
+        // reloadIncludes). So the prompt has to be in front of initSession for an image
+        // attached yesterday to be referable today, which is the reason for going through
+        // the whole startup at all.
+        //
+        // And then dropped, because a shell asks a fresh question every time: carrying
+        // yesterday's prompt into today's question would send it. Not SAVED over, either
+        // - the file keeps whatever it held until something is actually asked, so the
+        // window's prompt is still there if that is where it was being written.
+        String note = null;
+        String recovered = sourceArg != null ? readFileQuietly(Paths.get(sourceArg))
+                                             : readFileQuietly(promptFile());
+        if (recovered != null) {
+            input.setText(recovered);
+            note = sourceArg != null ? "file named on the command line: " + sourceArg
+                                     : "recovered persistent file: JRock/jrock-prompt.txt";
+        }
+        initSession(log, input, note);
+        input.setText("");
+
+        if (INCLUDE_FLAG.equals(mode)) {
+            if (modeArg == null) {
+                System.out.println("--include wants a file: java JRock.java --include "
+                        + "report.pdf");
+                return 2;
+            }
+            Path file = Paths.get(modeArg).toAbsolutePath().normalize();
+            if (!Files.isRegularFile(file)) {
+                System.out.println("Not a file: " + file);
+                return 2;
+            }
+            IncludeAction act = new IncludeAction(null, input, log, true, false, false);
+            includeFile(act, file);
+            savePromptQuietly(input.getText());
+            // THE TOKEN, and only the token: it is what anybody has to type to refer to
+            // this file, and with the prompt no longer carried into the next question a
+            // hash nobody has been shown is a file they cannot mention. Printed on its
+            // own rather than as the whole prompt, which may also hold the Markdown
+            // reference line that goes above it.
+            java.util.regex.Matcher token = INCLUDE_TOKEN.matcher(input.getText());
+            StringBuilder tokens = new StringBuilder();
+            while (token.find()) {
+                tokens.append(tokens.length() == 0 ? "" : " ").append(token.group());
+            }
+            System.out.println("Attached: " + (tokens.length() == 0
+                    ? input.getText().trim() : tokens));
+            System.out.println("Refer to it by that token in the next --cli question.");
+            return 0;
+        }
+
+        cliAwaitReady(log);
+        cliShowIncludes();
+        if (modeArg != null && !modeArg.isBlank()) {
+            return cliAsk(log, input, modeArg) ? 0 : 1;
+        }
+        System.out.println("");
+        System.out.println("Ask, and press Enter. Ctrl+C ends it, and so does an empty "
+                + "line.");
+        java.io.BufferedReader in = new java.io.BufferedReader(
+                new java.io.InputStreamReader(System.in, StandardCharsets.UTF_8));
+        while (true) {
+            System.out.print("\n> ");
+            System.out.flush();
+            String line;
+            try {
+                line = in.readLine();
+            } catch (java.io.IOException ended) {
+                return 0;
+            }
+            if (line == null || line.isBlank()) return 0;
+            cliAsk(log, input, line);
+        }
+    }
+
+    // Waits for the startup to finish saying what it has to say.
+    //
+    // The model list is fetched off the main thread, as it is in the window - so without
+    // this the report's last lines land on top of the first question, and a shell that
+    // talks over its own prompt looks broken. "Ready." is the report's last word, and
+    // the wait gives up rather than hanging if something has gone wrong enough that it
+    // never comes.
+    private static void cliAwaitReady(LogView log) {
+        for (int waited = 0; waited < 30_000; waited += 100) {
+            // The LAST line, and not merely a line somewhere: a restored log already ends
+            // with the previous session's "Ready.", so looking anywhere in the text
+            // matched instantly and the report went on printing over the first prompt.
+            if ("Ready.".equals(lastNonBlank(log.fullText()))) break;
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException ended) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    // What is attached and can be mentioned, with the token to mention it by. Nothing
+    // at all when nothing is: a line saying "no attachments" is a line in the way.
+    private static void cliShowIncludes() {
+        if (INCLUDES.isEmpty()) return;
+        System.out.println();
+        System.out.println("Attached, and referable by token:");
+        for (java.util.Map.Entry<String, Path> one : INCLUDES.entrySet()) {
+            // The kind is read off the file itself, which is where the token's kind came
+            // from in the first place (see includeKindOf).
+            String kind = includeKindOf(one.getValue());
+            System.out.println("  @" + (kind == null ? "txt" : kind) + " " + one.getKey()
+                    + "   " + one.getValue().getFileName());
+        }
+    }
+
+    private static String lastNonBlank(String text) {
+        String[] lines = text.split("\n");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            if (!lines[i].isBlank()) return lines[i].trim();
+        }
+        return "";
+    }
+
+    // One question and its answer, through the same send the window uses - the prompt is
+    // set, the appendix of history applies, the reply is logged and autosaved. True when
+    // an answer came back.
+    private static boolean cliAsk(LogView log, JTextArea input, String question) {
+        input.setText(question);
+        savePromptQuietly(input.getText());
+        java.util.List<String[]> history = historyOn ? log.dialogHistory()
+                : new java.util.ArrayList<>();
+        log.human(question, clockOn);
+        try {
+            String[] result = callModel(question, history, clockOn, log);
+            if (!"1".equals(result[0])) {
+                System.out.println("Nothing came back: " + result[1]);
+                return false;
+            }
+            log.assistant(result[1], clockOn);
+            return true;
+        } catch (Throwable ex) {
+            System.out.println("Nothing came back: " + ex.getClass().getSimpleName()
+                    + ": " + ex.getMessage());
+            return false;
+        }
+    }
+
+    // Whether the log should also go to standard output: true under --cli, where the
+    // pane nobody can see is not where anybody is reading.
+    private static volatile boolean cliEcho;
+
 
     private static final String PROMPTS_DIR_FLAG = "--prompts-dir";
     private static final String WORKING_DIR_FLAG = "--working-dir";
@@ -1724,6 +1923,10 @@ public class JRock {
 
         // ---- Public logging API --------------------------------------------
         void gray(String line) {
+            // Under --cli the pane is a component nobody can see, so the line goes where
+            // the reader is (see cliEcho). Indented, so that the report and the answers
+            // are told apart by eye in a terminal with no colours.
+            if (cliEcho) System.out.println("  " + line);
             append(line, true);
         }
 
@@ -1753,6 +1956,13 @@ public class JRock {
         void assistant(String text, boolean withTimestamp) { dialog(ROLE_ASSISTANT, text, withTimestamp); }
 
         private void dialog(String role, String text, boolean withTimestamp) {
+            // Only the answer: the question was typed by the person reading this, a
+            // second ago, and a shell that repeats what you just said is a shell nobody
+            // wants. The log still keeps both, which is what the log is for.
+            if (cliEcho && ROLE_ASSISTANT.equals(role)) {
+                System.out.println();
+                System.out.println(text);
+            }
             SwingUtilities.invokeLater(() -> {
                 String stamp = LocalDateTime.now().format(STAMP_FMT);
                 String suffix = withTimestamp ? " \u00B7 " + humanNow() : "";

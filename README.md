@@ -4289,3 +4289,40 @@ Or, if you want to modify the source and run it in place (no build step):
 ```sh
 java JRock.java
 ```
+
+### No window at all: `--cli`
+
+A shell version, for a question that does not need a window:
+
+```sh
+java JRock.java --cli                       # ask, read, ask again; Ctrl+C or an empty line ends it
+java JRock.java --cli "what is 2 + 2"       # one answer, then exit
+java JRock.java --include report.pdf        # attach that file and exit
+```
+
+**It goes through the whole startup**, deliberately: the log is restored, the folder's settings
+are adopted, the session report is printed, and — the reason it is worth doing — **the includes
+are reloaded**, so a file attached in an earlier run can still be referred to. The components it
+needs are a text area and a text pane, and neither is a window: Swing only refuses to make
+*windows* without a display, so the whole of the existing startup runs unchanged rather than
+being written a second time. There is no narration, no recording and no file dialogs — those are
+desktop features that happen to live in the same file.
+
+**`--include` attaches and exits**, printing the token to refer to it by:
+
+```
+$ java JRock.java --include figures.txt
+Attached: @txt b26e46c5cfd7
+Refer to it by that token in the next --cli question.
+
+$ java JRock.java --cli "@txt b26e46c5cfd7 what was the revenue? Answer with the number only."
+1,240,000
+```
+
+**The saved prompt is read and then dropped.** Read, because an include is only mapped back to
+its file if something *refers* to it, so the prompt has to be in front of the reload — and
+dropped, because a shell asks a fresh question every time and carrying yesterday's prompt into
+today's question would send it. It is not written over either: the prompt file keeps what it
+held until something is actually asked, and then holds the question. What is attached is listed
+at startup with the token to mention it by, since a hash nobody has been shown is a file they
+cannot refer to.
