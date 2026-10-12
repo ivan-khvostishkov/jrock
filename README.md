@@ -540,9 +540,8 @@ bill, and a guess is not one.
   card price are not in it.
 - **A line arriving never takes your place in the log.** Appending follows the end of the
   transcript only when **nothing is selected**: a selection is somebody about to copy a path, a
-  hash or an error, and the caret move that scrolls the pane also collapses a selection — so a
-  reply landing underneath used to take the reader's place and their text at once. Select
-  something and the view holds still until the selection is dropped.
+  hash or an error, and the caret move that scrolls the pane would collapse it. Select something
+  and the view holds still until the selection is dropped.
 - **Nothing that arrives on a timer scrolls the log either**, selection or not. The autobackup is
   the only thing in JRock that writes to the log without being asked, and its lines now appear
   without moving the view; a backup you asked for from the menu still scrolls to its own result,
@@ -1868,11 +1867,9 @@ the voice, so the microphone doesn't record the last answer as the next question
   no sound: one line in JRock's log and the turn carries on.
 
   **And the gaps are silent because nothing is open in them.** A speaker hisses while its output
-  stream is *active*, whatever is in the stream — which is why the first version of this sounded
-  like crackles over a constant background even though the code writes exact zeros between them,
-  and why narration sounds clean on the same device through the same 22050 Hz mono format: speech
-  masks a noise floor that silence exposes. It cannot be turned down from in here, so the line is
-  not held open. The thread sleeps through the gap with the device **closed**, opens it for the
+  stream is *active*, whatever the stream holds — writing exact zeros still hisses, and that
+  noise floor cannot be turned down from in here. So the line is not held open: the thread
+  sleeps through the gap with the device **closed**, opens it for the
   twenty-odd milliseconds a burst lasts, and closes it again. Opening this machine's monitor
   speakers costs about 95 ms, which is invisible in a gap that is random to begin with — and the
   room now goes quiet **26 ms** after the answer arrives, against 383 ms when a line was being
@@ -1882,8 +1879,6 @@ the voice, so the microphone doesn't record the last answer as the next question
   button — a setting one stray keypress away from being something else, with a caret blinking in
   it as an invitation. Every agent gives it to the window's **root pane** instead: no key
   bindings, so a keypress does nothing at all, and Tab still steps into the window as usual.
-  Measured before and after on the location agent, where the focus used to sit in an editable
-  field next to *Determine automatically*.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
@@ -1993,11 +1988,9 @@ start up in order to ring would be a strange alarm clock.
 java -cp jrock.jar JRockTimer.java --working-dir D:\Timer
 ```
 
-It used to start a JRock for a single setting: the speaker in **Configure → Narrate on**, read
-through the automation API. That was the wrong way round twice over — a setting belongs to the
-program whose setting it is, and an API should offer an **action** (*narrate this*) rather than
-hand out somebody else's state. So the speaker is chosen **in this window** and remembered
-beside the agent in `jrock-timer.txt`, the jar on the class path is habit rather than need, and
+The speaker is chosen **in this window** and remembered beside the agent in
+`jrock-timer.txt` — a setting belongs to the program whose setting it is. The jar on the class
+path is habit rather than need, and
 JRock's flags are accepted and ignored so that one right-click entry and one start script can
 treat every agent alike.
 
@@ -2112,8 +2105,17 @@ It starts JRock and takes it as an automation, like the timer, and opens a small
   4. The model reads the place from what came back, or says `NOT FOUND`.
 
   A place goes to coordinates the same way, with `jrock-prompt-place-to-gps-url.txt` and
-  `jrock-prompt-place-to-gps.txt`. The prompts name only the site: building the address and
-  its query string is left to the model.
+  `jrock-prompt-place-to-gps.txt`.
+
+- **The prompt names the site; the model writes the address.** There is no URL template in the
+  source for openstreetmap.org or anywhere else. A query string hard-coded here would be a copy
+  of somebody's API that can change without warning, and checking it means finding the current
+  documentation for a service nobody here controls. A model has read those sites, so it is asked
+  for the address instead — which is the kind of work it is good at: put these coordinates in
+  the right parameters of a form you have seen a thousand times. **The address is then checked
+  before anything is fetched**, which is what makes it safe to let a model write one: scheme,
+  host, port and the absence of a user name are all verified against the one site the prompt
+  named. The same trick runs the [weather agent](#a-fourth-agent-weather-jrockweatherjava).
 - **Other agents ask** on `127.0.0.1:47471`. They send one line and read one line back, and the
   agent closes the connection after it. A line is a place, coordinates, or both, comma-separated
   and latitude first: `Munich, Bavaria`, `Lat: 48.13, Lon: 11.59`, or
@@ -2145,9 +2147,11 @@ java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
   format, **with coordinates**, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`. They get back
   one line: the address, or an empty line and the reason in the window.
 - `jrock-prompt-weather-url.txt` asks the model for the open-meteo.com address with the current
-  weather and the forecast, in Celsius and in the local time zone. The address is checked the
-  way the location agent checks its own, but against `open-meteo.com` and its subdomains.
-  Addresses are kept for the run, by coordinates.
+  weather and the forecast, in Celsius and in the local time zone — **no URL template in the
+  source**, for the reason the [location agent](#a-third-agent-location-jrocklocationjava)
+  gives: an API's query string is not ours to keep up to date, and a model that has read the
+  site can write one from the coordinates. The address is then checked the same way, against
+  `open-meteo.com` and its subdomains, and kept for the run by coordinates.
 - The window lists the lines asked for and the addresses given, and has a field and **Get
   address** to try one by hand.
 - It needs a key. **Run it in a folder of its own**, with History off there.
@@ -2572,55 +2576,28 @@ not by searching:
      (2 of 5 page fetches)
 ```
 
-- **Why a walk and not a search.** Documentation *has* a search box, and it is JavaScript asking
-  a service that answers in JSON — nothing this agent can use, since it reads pages from pictures
-  and runs no page's script. But documentation is also the one kind of site built as a tree whose
-  branches are **labelled**: *"Grids and guides"* → *"Create baseline grids"*. The labels are the
-  index, and following them is what a person does with the same page. (On these three sites the
-  labels of the articles themselves are on the front page, so the walk is short — see below.)
-- **Which documentation is named in the question**, not in a separate argument: *"…in indesign"*,
-  *"bedrock: what is a guardrail"*. The longest matching name wins, so *"lightroom mobile"* is not
-  read as *"lightroom"* with a stray *"mobile"* left in the question — and the product's name then
-  comes **out** of the question before anything is scored, because it is on every link in its own
-  documentation and would score the nav bar as highly as the page being looked for.
-- **Five page fetches, at most.** Every step is a page load in a real browser, and a tree this
-  deep is a tree whose answer is not down this branch. Reaching the cap ends the walk with
-  whatever it has rather than failing — an operator waiting on a voice assistant would rather have
-  the page five steps in than a refusal.
-
-  In practice **all three sets answer in two**, and that is worth knowing rather than hiding:
-  their front pages already list the articles, so the first page is the index and the second is
-  the answer. Measured — `use-a-baseline-grid.html`, `thread-text-frames.html`,
-  `create-masks.html`, `guardrails.html`: two fetches each. The cap is there for the branches
-  that do nest, and the rule below is what stops a flat index from eating all five.
-- **Each step must match the question *strictly better* than the last.** This is the rule that
-  keeps it a walk down a tree rather than a tour of one floor: *"Test your guardrail"* → *"Create
-  your guardrail"* is a step sideways between pages that match a question about guardrails exactly
-  as well. Without it the walk spent all five fetches on siblings and stopped on the last one it
-  happened to see — which is how a question about what a guardrail **is** ended up on the page
-  about deleting one. It is also what makes one step enough on a site that renders its whole
-  navigation tree on every page, as the AWS user guide does (**377** followable links on the front
-  page): everything is already visible, so there is nothing deeper to find.
-- **Plurals are taken off both sides.** Documentation is written in the plural (*"Guardrails"*,
-  *"Denied topics"*, *"Grids and guides"*) and asked about in the singular (*"a guardrail"*,
-  *"block a topic"*). Unstemmed those meet as a *near* miss, worth 2 where an exact word is worth
-  8, so the page whose title is precisely the answer loses to any page that repeats a word of the
-  question: *"block a topic with a guardrail"* chose *"Test your guardrail"* before this and
-  *"Bedrock Guardrails"* → `guardrails.html` after it. Only in the walk — the scoring itself is
-  left alone, because `#follow` is calibrated on news headlines, where *Tesla* and *Teslas* are
-  different claims.
-- **Ties go to the page nearer the top of the set**: fewer path segments, then a shorter address.
-  That is how documentation is filed — an overview sits above the pages it introduces — so a
-  question matching both means the overview.
-- **It cannot leave that documentation.** Every step is re-checked after it loads, and a link is
-  only considered if it is under the **same** prefix: a link to Photoshop's help or to Adobe's
-  front page is allowed by the list and is not an answer to a question about InDesign.
-- **Only the page it stops on is photographed**, and only then is a model asked to read it. The
-  pages walked through are read for their links alone — the pictures are the expensive part, a
-  dozen per page and a model call to read them.
-- **The trail comes back with the answer** (`Walked: Use a baseline grid`), because the words of
-  the question are what chose the page: if it stopped somewhere unhelpful, that line is what says
-  why, and asking again in the documentation's own words is what fixes it.
+- **Why a walk and not a search.** A documentation search box is JavaScript asking a service
+  that answers in JSON — no use to an agent that reads pages from pictures and runs no page's
+  script. But documentation is a tree whose branches are **labelled** (*"Grids and guides"* →
+  *"Create baseline grids"*), so the labels are the index and following them is what a person
+  does with the same page.
+- **The product is named in the question**, not in a separate argument: *"…in indesign"*,
+  *"bedrock: what is a guardrail"*. It is taken out of the question before the labels are
+  matched, since it appears on every link in its own documentation.
+- **Five page fetches at most**, and the cap ends the walk with whatever it has rather than
+  failing. A step is only taken when it matches the question **better** than the one before, so
+  the walk goes deeper and never sideways between pages that match equally well — and a site
+  that lists its whole tree on the front page (the AWS user guide shows **377** followable links
+  there) is answered in one step. All three sets answer in **two fetches**:
+  `use-a-baseline-grid.html`, `thread-text-frames.html`, `create-masks.html`, `guardrails.html`.
+- **It cannot leave that documentation.** Every step is re-checked after it loads, and only
+  links under the same path prefix are considered: Photoshop's help is on the list and is not an
+  answer about InDesign.
+- **Only the page it stops on is photographed** and read by a model. The pages on the way are
+  read for their links alone, which is what keeps the cost of a walk to one page's pictures.
+- **The trail comes back with the answer** (`Walked: Use a baseline grid`). The words of the
+  question chose the page, so if it stopped somewhere unhelpful, asking again in the
+  documentation's own words is what fixes it.
 
 `--docs "<question>"` runs the walk alone — no pictures, no model, no JRock and no window — and
 prints every step, which is how the examples above were measured.
@@ -2643,29 +2620,22 @@ The post that comes through the door, and the documents that arrive by every oth
 the scanner has put in its folder, what arrived when, what a filed letter says, and what was
 kept as a document of its own.
 
-**Papers, and that is the name.** The [Thunderbird
+**Papers, not mail.** The [Thunderbird
 agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) reads
-e-mail; this one reads what is on paper. *"Mail"* would have meant both and so neither — and
-*"Letters"*, which this agent was called first, stopped being true the moment it also handled
-the documents nobody posted. A scan is a **letter**, a kept answer or a downloaded file is a
-**document**, *papers* is the word that covers both, and the agent says which of the two it is
-reading out by the folder it came from.
+e-mail; this one reads what is on paper. A scan is a **letter**, a file in the incoming folder
+is a **document**, and the answer says which it is, by the folder it came from.
 
 ```sh
 java -cp jrock.jar JRockPapers.java --folder D:\HPNetworkScan
 java -cp jrock.jar JRockPapers.java --folder D:\HPNetworkScan --print recent
 ```
 
-**A new shape: an agent with no JRock of its own, that drives a flow.** Every other agent here
-starts a JRock and holds it. This one starts none — looking at a folder needs no model, and a
-window that did nothing but sit there would be a window to close. When a letter has to be
-*filed*, it starts the **doc inventory flow** with `--auto`, as a process of its own: that flow
-starts a JRock, merges the two passes if there are two, reads the letter, names it, renames
-every file of it, prints one line saying what it did, and exits. Its window closes with it.
-
-So the long-running thing has no model and no key, and the thing with the model lives for one
-letter — an agent for what is always true, a flow for what happens once, which is exactly the
-distinction those two words have carried all along.
+**No JRock of its own.** It lists folders and reads text files, which needs no model and no
+key. Anything that needs one — filing a scan, converting a document, making a document out of a
+kept answer — it hands to the **doc inventory flow**, started with `--auto` as a process of its
+own. The flow opens a JRock, does the work, prints one line saying what it did, and exits with
+its window. So the part that runs all day holds no key, and the part that uses a model lives for
+one document.
 
 ```mermaid
 sequenceDiagram
@@ -2743,9 +2713,8 @@ sequenceDiagram
     end
 ```
 
-- **Whether two scans are one two-sided letter is not something this can know**, and the first
-  version of this agent pretended otherwise. It paired two scans with adjacent names a few
-  minutes apart — which sounds reasonable until you look at a real scanner folder:
+- **Which files make up one letter is said by the operator**, never guessed. A scanner folder
+  gives nothing to guess from:
 
   ```
   scan0164.pdf  21:55:24   2 pages   1.4 MB
@@ -2755,38 +2724,31 @@ sequenceDiagram
   scan0168.pdf  21:59:42   2 pages   0.6 MB
   ```
 
-  Five letters put through a flatbed one after the other look exactly like two-and-a-half
-  two-sided ones. Twenty seconds apart is both the time it takes to turn a stack over **and**
-  the time it takes to put the next letter in; the page counts are equal either way; and the
-  names are always adjacent, because a scanner counts. There is no signal there — and a wrong
-  guess merges two unrelated letters into one PDF and files them under one name, which is the
-  worst thing this agent could do.
+  Five letters put through a flatbed look exactly like two-and-a-half two-sided ones. Twenty
+  seconds apart is both the time to turn a stack over and the time to put the next letter in,
+  the page counts match either way, and the names are always adjacent because a scanner counts.
+  A wrong guess merges two unrelated letters into one PDF under one name.
 
-  So it guesses nothing. Every scan is reported as itself, with its time and its size, and
-  **which files make up one letter is said by the operator**: `#inventory` files the newest by
+  So every scan is reported as itself, with its time and size. `#inventory` files the newest by
   itself, `#inventory scan0166` files that one, and `#inventory scan0166 scan0167` (or
-  `#inventory duplex` for the newest two) merges the named pair as the two passes of one. One
-  by itself is the default because it is the one that cannot go wrong: a two-sided letter filed
-  as two single-sided ones is two files to tidy up, while two letters merged are a document
-  that is half somebody else's.
+  `#inventory duplex` for the newest two) merges a named pair as two passes of one letter. One
+  by itself is the default: a two-sided letter filed as two is two files to tidy up, two letters
+  merged is a document that is half somebody else's.
 - **A note to self is a mail.** *"I'm making a note: the boiler service is due in March"* opens
   a compose window addressed **from your own address to the same address**, with the note as the
   whole body and `Note: ` and its first line as the subject. Why mail rather than a file
   somewhere: your mailbox is the thing you already search, on every device you own, so a note
   that lands there is a note you will find again — and nothing else here has that property. No
   date and no `.ics`: `#new` is for a thing that happens at a time, this is for a thing to keep.
-  **The Markdown is taken off** before it becomes a body — a model asked for a note writes like
-  a model, and asterisks, backticks and heading hashes in a mail are litter; the words stay, the
-  typography goes, and `3 * 4 * 5` survives because emphasis needs no space inside its marks.
-  The address is the one picked in the window, at both ends, so a note cannot reach anybody
-  else, and the last keystroke is yours.
-- **Mail can be asked for over any span up to a year**, not just the last few days: *"anything
-  from the spring"*, *"did I ever hear back from them"*. The agent always could — `#mail 183` is
-  183 days and the cap is 366 — but nothing told the **model** it could, and the words it would
-  use were not understood: *"six months"* fell through to today's post. Weeks, months, half a
-  year and a year now turn into the days the agent counts in, and the appendix says to reach for
-  a long span whenever the question is not about something recent. Forty lines come back at the
-  most, newest first, and the answer says when there were more.
+  **The Markdown is taken off** before it becomes a body: a mail is not a document, so the words
+  stay and the asterisks and heading hashes go. The address is the one picked in the window, at
+  both ends, so a note cannot reach anybody else, and the last keystroke is yours.
+- **Mail can be asked for over any span up to a year**: *"anything from the spring"*, *"did I
+  ever hear back from them"*. `#mail 183` is
+  183 days and the cap is 366. Weeks, months, half a year and a year are turned into the days
+  the agent counts in, and the model is told to reach for a long span whenever the question is
+  not about something recent. Forty lines come back at the most, newest first, and the answer
+  says when there were more.
 - **Two folders, read the same way: the scanner's, and `Documents\Incoming`.** The scanner's
   is where paper arrives; the incoming one is where documents arrive by **every other route** —
   something downloaded, something copied off a phone, and anything this agent was asked to keep.
@@ -2798,58 +2760,35 @@ sequenceDiagram
   first. That is what makes that folder *always filed by design*.
 
   **Both are rows in the window**, each with its own *Browse…* and *Use*, and both are
-  remembered in `jrock-papers.txt` (`folder=`, `incoming=`). They were not, and that was two
-  bugs in one: the incoming folder could only be named with `--incoming` on the command line, and
-  the settings file **read** `incoming=` while never writing it — so the folder documents are
-  saved into was forgotten by the next start and silently went back to `Documents\Incoming`.
-  `#folder` now answers with both folders too, since the difference between them is the shape of
-  this agent: one is written by a scanner, the other is where everything saved goes.
-- **A file that is not already text is read through the flow**, and not through a model of this
-  agent's own. Asked about a `.docx`, a PDF or a photograph in the incoming folder, the agent
-  runs the **doc inventory flow** on it — the same run that files a scanned letter — and reads
-  the `.txt` the flow leaves beside it. It used to include the file in a JRock of its own and ask
-  a model for clean Markdown, which meant this agent read a *document* one way and a *scan*
-  another, paid for a send every time the same file was asked about, and could answer twice
-  about one document and disagree with itself. One route now: the flow converts and names, this
-  agent reads files. A document asked about twice is converted once, the text stays on the disk
-  where the operator can see what was read, and nothing here needs a key, a model or a window.
+  remembered in `jrock-papers.txt` (`folder=`, `incoming=`). `#folder` answers with both.
+- **A file that is not already text is read through the flow.** Asked about a `.docx`, a PDF or
+  a photograph in the incoming folder, the agent runs the **doc inventory flow** on it — the
+  same run that files a scanned letter — and reads the `.txt` it leaves beside it. So a document
+  is converted once however often it is asked about, the text stays on the disk where you can
+  see what was read, and the agent itself needs no key, model or window.
 
-  What the flow takes — a PDF, a DOCX, an RTF, a TXT or an image — is therefore exactly what
-  this agent will read out. A **spreadsheet** came off that list with this change: it was on it
-  while a model of this agent's own did the reading, the flow does not take one, and a `.xlsx`
-  is now listed and said to be a kind that cannot be read out rather than promised and then
-  refused.
-- **Keeping an answer is this agent's job, and the flow's hands.** *"I'm saving the last answer
-  to a file"* sends the Markdown here; the agent writes it to `saved-<stamp>.txt` in the incoming
-  folder and runs the flow on that. A `.txt` **standing on its own** is a document in its own
-  right there — nobody's plain-text copy of anything — so the flow exports it as a **DOCX with
-  its pictures placed**, by JRock's own Markdown writer and with **no send**, since the text is
-  already the text; then it names both files, as it names everything else here. Measured on one
-  kept answer: `Heading1` for the `#` line, a bold run for the `**1,240.00 EUR**`, the bullets as
-  paragraphs, both files renamed to `2026-11-30-Unknown-Invoice-2026-0042`, and **one** model
-  call in the whole run — the name.
+  What the flow takes — a PDF, a DOCX, an RTF, a TXT or an image — is exactly what this agent
+  reads out. A `.xlsx` is listed and said to be a kind that cannot be read out, rather than
+  promised and then refused.
+- **Keeping an answer** — *"I'm saving the last answer to a file"* — sends the Markdown here.
+  The agent writes it to `saved-<stamp>.txt` in the incoming folder and runs the flow on that. A
+  `.txt` standing on its own is a document in its own right, so the flow exports it as a **DOCX
+  with its pictures placed** (JRock's own Markdown writer, no send — the text is already the
+  text) and names both files. One kept answer, end to end: `Heading1` for the `#` line, a bold
+  run for `**1,240.00 EUR**`, the bullets as paragraphs, both files named
+  `2026-11-30-Unknown-Invoice-2026-0042`, one model call in the run — the name.
 
-  A `.txt` and not a `.md`, deliberately: markdown and plain text are both human readable, the
-  exporter lays out whichever it finds, and one text extension is one fewer kind of file for
-  everything downstream to have an opinion about. This is also where this agent's last JRock
-  went: it used to put the Markdown into a prompt of its own and export that
-  (`automationExportPromptDocx`), which worked and was the odd one out — a window started to
-  write a file, while every other conversion it needs is the flow's. Nothing of the result
-  changed in the move, because the flow calls the same exporter. A naming that fails is not a
-  save that failed: the text is on the disk either way, and the answer says so.
-- **Filing takes minutes, and nothing waits for ever.** The flow behind it is Ghostscript, xpdf
-  and three model passes over a scanned page, so a minute or two is an ordinary letter and
-  push-to-talk waits **twelve minutes** for this one request while telling the operator what is
-  happening — every other question the papers agent answers, it answers at once. The flow gets
-  **twenty minutes** of its own, and that limit is now kept by a thread of its own that ends the
-  process. It has to be: the agent reads the flow's output until the stream ends, and a stream
-  ends when the process does, so a flow that will not exit is not slow but permanent — and the
-  limit that was checked *after* the reading could never be reached. That is what happened on 12
-  October: a letter was filed, named and renamed, the result line was read, and the agent then
-  waited on a process that was never going to exit, with every later request queued behind it
-  and the operator told that nothing had been filed. Killing a flow is safe at any point, since
-  it renames files one at a time and only after the model has answered: what is lost is a
-  conversion, never half a renamed document.
+  A `.txt` rather than a `.md`: the exporter lays out markdown or plain text, whichever it
+  finds, so one text extension is enough. If the naming fails the text is still on the disk, and
+  the answer says so.
+- **Filing takes minutes, and nothing waits for ever.** The flow behind it is Ghostscript,
+  xpdf and three model passes over a scanned page, so a minute or two is an ordinary letter.
+  Push-to-talk waits **twelve minutes** for this one request, telling the operator what is
+  happening; every other question the papers agent answers at once. The flow gets **twenty
+  minutes**, kept by a thread of its own that ends the process — the agent reads the flow's
+  output until the stream ends, and a stream ends when the process does, so a limit checked
+  after the reading could never be reached. A flow that will not exit is killed, the agent
+  says so, and the next request is answered.
 - **Only `.txt` for content.** Asked what a letter says, it reads the `.txt` beside it and
   nothing else. It converts nothing: turning a PDF into text is the inventory flow's job — with
   Ghostscript, xpdf and a model — and doing it a second way here would be a second answer to
@@ -3395,10 +3334,9 @@ when it finishes.
 - **The speaker is yours to set, and nobody else's.** Windows moves its default output to
   whatever was plugged in last, so JRock does not use that default. A first run has no device set.
   Open **Configure → Narrate on:** and the dropdown lists what this machine has; pick one,
-  press OK, and it is kept as `narrate-device$` in `JRock/jrock-config.txt`. (Pressing Narrate
-  with nothing set also says so and lists them, which is how it used to be found out.) That
-  field is free text over a dropdown, like the model, and emptying it is how a device is
-  unset.
+  press OK, and it is kept as `narrate-device$` in `JRock/jrock-config.txt`. (Pressing Narrate with nothing set says so and lists
+  them too.) That field is free text over a dropdown, like the model, and emptying it is how a
+  device is unset.
 - **A device that is not there is a failure, and no fallback.** If the speaker is disconnected
   (a Bluetooth speaker switched off, headphones unplugged), Narrate says so in the log and reads
   nothing. It does not switch to another device. The same happens if the device disappears during
@@ -3982,14 +3920,11 @@ second variant** of its plain twin. The same list is in the window itself, behin
 | F1 | Help |
 | Ctrl+Z / Ctrl+Y | Undo / redo in the prompt |
 
-**`Ctrl+L` no longer saves the log** — it is `Ctrl+Shift+S`. `L` read as *Load* while sitting
-next to `Ctrl+O`, which really loads, and it broke the pattern besides: `Ctrl+S` was named after
-the verb and `Ctrl+L` after the object, so one verb had two unrelated letters. There is no alias
-for the old key, deliberately: a shortcut that still works is a shortcut nobody stops reaching
-for. **`Ctrl+E`** keeps its letter for a worse reason — it is for *extend*, a word no longer in
-the window, and the obvious `Ctrl+H` is unusable because the toolkit makes it backspace inside a
-text area. `Ctrl+Space` and `Ctrl+N` are bound only where the machine can record and narrate, and
-the window's own list leaves out whichever it cannot do.
+Saving the log is `Ctrl+Shift+S`, under the rule above: `Ctrl+S` saves the prompt, and the log
+is its `Ctrl+Shift` twin. **`Ctrl+E`** for History is the one letter that fits nothing — `H` is
+unusable, since the toolkit makes `Ctrl+H` a backspace inside a text area. `Ctrl+Space` and
+`Ctrl+N` are bound only where the machine can record and narrate, and the window's own list
+leaves out whichever it cannot do.
 
 Deliberately **without** a shortcut: Clear log (destructive, and one keystroke from the log it
 clears), Backup log, Load from backup, Merge two-sided scans, the page header and footer, and
@@ -4280,42 +4215,35 @@ written again.
 Nine pages, in this order:
 
 1. **What was unpacked** — `jrock.jar` and `samples/` have to be in the folder it was started
-   from, which is where a release unpacks to. Missing, it says so and waits for Retry. On an
-   update it also says **what is running right now**, named one by one — *JRock (javaw.exe
-   17880), Browser, Location, Papers, PushToTalk, Thunderbird, Timer, Weather* — with a **Stop
-   them all now** button, because Windows will not let a file be replaced while a process has it
-   open and `jrock.jar` is open in every one of them. Nothing of a session is lost by stopping
-   them: JRock writes its log as it goes and autosaves the prompt, and the last page's start
-   script puts them all back.
+   from, which is where a release unpacks to. Missing, it says so and waits for Retry. It also
+   names **what is running right now** — *JRock (javaw.exe 17880), Browser, Papers, Timer…* —
+   with a **Stop them all now** button: Windows will not replace a file a process has open, and
+   `jrock.jar` is open in every one of them. Stopping them loses nothing (the log is written as
+   it goes and the prompt is autosaved) and the last page starts them again.
 2. **Where everything goes** — default `~/Documents/JRockAssistant`, with the tree above drawn
    on the page. The jar is copied there with its **SHA-256 and MD5** written beside it, computed
-   from the copy that just landed. The page says why the **folder name** matters: it is what
-   every Explorer entry is labelled with. This is the first write, so it is where the question
-   above is asked again if it has to be: *N processes are still running — stop them and carry
-   on?* A **no** keeps the page rather than failing halfway through a copy.
-3. **Ghostscript and xpdf** — looked for on `PATH`, with [where to get them](#pdf-conversion-ghostscript)
-   and a **Retry** when you have. Or continue without: everything else works, and JRock names
-   the missing tool if you ever ask it for that conversion.
-4. **Shortcuts** — Start menu and Desktop, both called **JRock Assistant**, both opening JRock
+   from the copy that just landed. The **folder name** is what every Explorer entry is labelled
+   with, so it is worth one you will recognise. If something is still running, this page asks
+   once more before copying; a **no** keeps the page.
+3. **Shortcuts** — Start menu and Desktop, both called **JRock Assistant**, both opening JRock
    in that folder. A real `.lnk` on Windows (written through `WScript.Shell`, the only way
    without a native library), a `.desktop` file on Linux, a `.command` script on macOS.
    **Unticking one that is already there removes it**, and the page says which file will go.
-5. **Agents and flows** — all of them, or pick them one by one. **Unless something is
-   installed already**, in which case this page offers *that* and nothing else: the agents and
-   flows the Explorer entries name, each in the folder they name, ticked. Running the installer
-   again is normally a new jar rather than a new argument about which agents, and offering the
-   whole catalogue to somebody who has already chosen is offering to undo their choice. The
-   full list is one radio button away — *Show all 12 and let me change the set* — which is how
-   something new is added. An agent that is installed but **not in this artifact** (one from an
-   older release, or renamed since) is named on the page: its right-click entry goes with the
-   rest, and its files stay exactly where they are. The table says of each one
-   whether it loops or runs once, how many prompt files it brings, and the folder it works in:
-   editable for an agent (filled in with `Agents\<its name>`), and `Flows\` for a flow, which
-   is not a choice and so is not offered as one. Each one is copied **with the prompt files its
-   own source names, beside its `.java`** — read out of its source, where the file names are
-   string constants, rather than from a list in the installer that would be a second place to
-   keep right. A prompt that belongs to no agent and no flow is shipped in `samples/prompts/`
-   and offered its own tick, into the install folder, where it becomes the prompt library.
+4. **Agents and flows** — all of them, or pick them one by one. **Where something is installed
+   already**, this page offers *that* set and nothing else, ticked, each in the folder its
+   Explorer entry names; the full catalogue is one radio button away (*Show all 12 and let me
+   change the set*). An agent that is installed but not in this artifact is named on the page:
+   its right-click entry goes with the rest, and its files stay where they are. The table says
+   whether each one loops or runs once, how many prompt files it brings, and the folder it works
+   in — editable for an agent, `Flows\` for a flow. Each is copied with the prompt files its own
+   source names, and a prompt belonging to no sample is offered its own tick into the install
+   folder, where it becomes the prompt library.
+5. **Ghostscript, xpdf and sqlite3** — looked for on `PATH`, with where to get each and a
+   **Retry** when you have. After the agents, because which tools are wanted depends on which
+   agents are going in: `sqlite3` is only looked for when the **Thunderbird** agent is in the
+   set, since nothing else here reads your calendar and mail index. Or continue without any of
+   them: everything else works, and JRock or the agent names the missing tool when something is
+   asked of it that needs one.
 6. **Settings and the key** — opens the new `jrock-config.txt` in whatever opens a `.txt`, waits
    while you edit and save it, then opens `bedrock-key.txt` the same way. Still empty afterwards,
    it says the key can go in later and what already works without one: merging duplex scans,
@@ -4323,23 +4251,15 @@ Nine pages, in this order:
    asking a model needs the key.
 7. **Settings for the agents and flows** — every folder that runs a JRock of its own is offered
    a copy of `jrock-config.txt`, and the key as a **separate tick**: an agent cannot ask a model
-   without one, and JRock itself never copies a key into a folder it was not typed for, so this
-   is a choice rather than a given.
+   without one, and JRock itself never copies a key into a folder it was not typed for.
 
-   The page now says **what will happen to each file in each folder, before it happens** —
-   `jrock-config.txt - KEPT as it is - this folder has its own`, or `copied, because there is
-   none yet` — and the ticks read *Fill in a missing jrock-config.txt (never replaces one)*.
-   The behaviour was always that; the words were not. "Copy jrock-config.txt into each of them"
-   is a sentence somebody can reasonably read as *replace the settings of every agent I have set
-   up*, and the answer to "will it?" belongs on the page rather than in the log afterwards.
-
-   A file already in one of those folders is left alone, with
-   one exception that cannot lose anything: an **empty** `jrock-config.txt` or `bedrock-key.txt`
-   is written over. That is not a corner case — the home folder's own key file starts empty, so
-   an install done before the key was typed leaves an empty key in every agent folder, and
-   keeping those for ever would mean agents that cannot ask a model and a tick that looked as
-   though it had worked. Nothing is copied **from** an empty file either, so a key you typed
-   into one agent's folder yourself is never overwritten by a blank one.
+   **Nothing is overwritten.** The page says what will happen to each file in each folder before
+   it happens — `jrock-config.txt - KEPT as it is - this folder has its own`, or `copied,
+   because there is none yet` — and the ticks read *Fill in a missing jrock-config.txt (never
+   replaces one)*. The one exception is an **empty** file, which is filled in: the home folder's
+   key file starts empty, so an install done before the key was typed leaves a blank key in every
+   agent folder. Nothing is copied **from** an empty file either, so a key you typed into one
+   agent's folder yourself stays.
 8. **Right-click entries** — "JRock here!", "Open as prompt with JRock", and one per installed
    agent and flow, [as described above](#windows-explorer-right-click-integration). Every JRock
    entry already on the machine is removed first and written out to a `.reg` that restores it;
@@ -4448,25 +4368,24 @@ java JRock.java
 
 ## Screenshots, taken by the build
 
-The desktop screenshots are **built, not taken by hand**. `.github/workflows/screenshots.yml`
-runs `.github/build/Screenshots.java` against the jar it has just built, on
-**Ubuntu, macOS and Windows**, and uploads `screenshots-linux`, `screenshots-macos` and
-`screenshots-windows` as build artifacts — so every push leaves three sets of current pictures
-to choose from, and a window that has changed cannot keep an old picture in this file.
+`.github/workflows/screenshots.yml` runs `.github/build/Screenshots.java` against the jar it has
+just built, on **Ubuntu, macOS and Windows**, and uploads `screenshots-linux`,
+`screenshots-macos` and `screenshots-windows` as build artifacts. Swing takes its look from the
+platform, so one window is three pictures and a section can show whichever suits it.
 
-A scene is reached by **driving the program through its own
-[automation API](#the-automation-api)** — the same calls a flow uses — and the window is then
+Each scene is reached by driving the program through its own
+[automation API](#the-automation-api) — the same calls a flow uses — and the window is then
 asked to paint itself:
 
 | | |
 |---|---|
-| `01-window-at-startup` | The session report, and what the folder came up with |
+| `01-window-at-startup` | The session report |
 | `02-a-question-in-the-prompt` | `automationSetPrompt` |
-| `03-a-page-included-as-an-image` | `automationInclude`: the token, the Markdown reference above it, and the log line naming what was attached |
-| `04-a-question-and-its-answer` | `automationSend`: the turn, the raw request and response, and the stats block |
-| `05-two-turns-with-history-and-dialog-only` | A second turn with **History** on, then **Dialog only** — the conversation without the machinery |
-| `06-the-timer-agent` | `JRockTimer`, which needs no JRock at all |
-| `07-the-papers-agent` | `JRockPapers`, showing the two folders it reads |
+| `03-a-page-included-as-an-image` | `automationInclude`: the token, the Markdown reference above it, and the log line |
+| `04-a-question-and-its-answer` | `automationSend`: the turn, the raw request and response, the stats |
+| `05-two-turns-with-history-and-dialog-only` | The conversation without the machinery around it |
+| `06-the-timer-agent` | `JRockTimer` |
+| `07-the-papers-agent` | `JRockPapers`, with its two folders |
 
 Run it locally the way CI does (the jar first, because the agents compile against it):
 
@@ -4474,44 +4393,30 @@ Run it locally the way CI does (the jar first, because the agents compile agains
 javac -encoding UTF-8 --release 11 -d out JRock.java
 java .github/build/BuildJar.java
 javac -encoding UTF-8 --release 11 -cp jrock.jar -d out-automation samples/agents/*.java samples/flows/*.java
-java -cp "jrock.jar:out-automation" .github/build/Screenshots.java screenshots linux
+java -cp "jrock.jar:out-automation" .github/build/Screenshots.java screenshots linux /tmp
 ```
 
-Three decisions worth knowing about:
+- **`printAll()`, not `java.awt.Robot`.** Robot photographs the screen, and on a macOS runner
+  that needs a screen-recording permission nobody can grant a CI job. `printAll()` asks the
+  window to draw itself into an image, which works under `xvfb` and on every runner.
+- **The replies are recorded and replayed.** Two scenes need an answer in the log, so each was
+  asked once of the real endpoint and the reply copied into `Screenshots.java` with the token
+  counts from the same response. The step serves them from a Chat Completions endpoint of its own
+  on the **loopback address**, under the model id that really answered — so the picture shows
+  what `openai.gpt-5.4` said and the stats are that turn's real numbers, while CI needs no
+  credential, reaches no network and cannot cost anything. The questions are ones whose answers
+  do not go stale; re-record with `--include` and `--cli` in a folder that has a key.
+- **A throwaway folder, named in the picture.** The window puts the working folder in its title
+  bar and the report prints the whole path, so where the demo folder goes is the third argument:
+  the Unix runners are given `/tmp`, for `/tmp/jrock-demo/Demo`. Without it the folder is under
+  your own temp path, account name and all — fine locally, worth knowing before pasting a
+  picture into a file everybody reads. It is emptied before each run, so every picture is of a
+  first start.
 
-- **`printAll()`, not `java.awt.Robot`.** Robot photographs the screen, which needs a screen —
-  and on a macOS runner it needs the screen-recording permission nobody can grant a CI job.
-  `printAll()` asks the window to draw itself into an image, which works under `xvfb` (Linux)
-  and on every runner, and draws exactly what the window would show.
-- **The replies are recorded, and replayed from a loopback endpoint.** Two scenes need an answer
-  in the log, and an answer needs a model to have said something. So each was asked **once of
-  the real endpoint**, from a folder with a key, with the same question and the same page
-  attached — and the reply text was copied out of `JRock/messages/*-assistant.txt` (which holds
-  it verbatim) together with the **token counts from the usage block of that same response**. The
-  step then runs a Chat Completions endpoint of its own on the **loopback address** that replays
-  them, serving the model id that really answered. So the picture shows what `openai.gpt-5.4`
-  really said, and the stats under it are that turn's real numbers — while CI needs no
-  credential, reaches no network, and cannot cost anything. Re-record with `--include` and
-  `--cli` in a folder that has a key, and paste the reply and the usage back into
-  `Screenshots.java`. The questions are deliberately ones whose answers do not go stale: ask what
-  today's date means for the due date and the answer has today's date in it, which the next
-  build's picture would contradict.
-- **A throwaway folder with a presentable name.** `jrock-demo/Demo`, emptied before each run so
-  every picture is of a first start. The window puts the folder in its title bar and the session
-  report prints the whole path, which makes the path part of the picture — so where it goes is
-  the third argument, and the Unix runners are given `/tmp`: `/tmp/jrock-demo/Demo` reads like a
-  demo, where `createTempDirectory`'s random digits and macOS's `/var/folders/zz/…/T` do not.
-  Run locally without that argument and the pictures carry **your own temp path, account name and
-  all** — fine on your machine, worth knowing before pasting one into a file everybody reads.
-
-**Not built:** the two browser pictures and the touch menu (JRock Web, which is a page and not a
-window), the Explorer context menu (a shell menu, not JRock's), and the Ghostscript PDF scene,
-which needs an external tool installed on the runner. Those stay hand-taken.
-
-`images/` still holds the hand-taken desktop pictures; the artifact is what replaces them, one at
-a time, as it becomes clear which platform suits each section best. A new scene is a few lines in
-`Screenshots.java` — a prompt, a send, a `shoot()` — so the cheapest way to document a feature
-with a picture is to add it there rather than to reach for a snipping tool.
+**Not built:** the two browser pictures and the touch menu (JRock Web is a page, not a window),
+the Explorer context menu (a shell menu, not JRock's), and the Ghostscript PDF scene, which
+needs a tool installed on the runner. A new scene is a prompt, a send and a `shoot()` in
+`Screenshots.java`.
 
 ## No window at all: `--cli`
 
