@@ -2421,6 +2421,13 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   browser's window is still sitting on it**: answer it once, by hand, and ask again. The
   profile is kept between runs, so the second attempt is the page itself. A paywall or a login
   works the same way — whatever the operator can reach in that window, the agent can then read.
+- **The window's own status line wraps to the window.** Every agent's status line is a
+  wrapping text area rather than an HTML label, because a label wraps only where its HTML names
+  a width in **CSS** pixels — which Swing scales by the display, so `width:680px` asks for 886
+  device pixels and a narrower window simply cuts the line off. Measured on a 130% screen: the
+  letters agent wanted 939 px in a window with 818, and showed two lines of three. A text area
+  wraps to the width it actually has, and breaks **inside** a word when the word is wider than
+  that — which a file name or an address, being one long token with no space in it, always is.
 - **One tab per site**, kept. A second page on a site reuses its tab, and since the only sites
   there are are the seven, there can never be an eighth tab. Per site rather than one in total
   because a consent answered on one and a sign-in on another are both worth keeping.

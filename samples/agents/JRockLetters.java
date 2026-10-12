@@ -137,7 +137,7 @@ public final class JRockLetters {
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField folderField;
     private static javax.swing.JTextArea result;
-    private static javax.swing.JLabel status;
+    private static javax.swing.JTextArea status;
     private static javax.swing.JLabel listening;
     private static volatile ServerSocket server;
 
@@ -847,10 +847,22 @@ public final class JRockLetters {
         scroll.setBorder(javax.swing.BorderFactory.createTitledBorder(
                 "What an agent is told"));
 
-        status = new javax.swing.JLabel(" ");
+        // A WRAPPING TEXT AREA AND NOT A LABEL, for two reasons that both ended up on
+        // the operator's screen. A label wraps only if the HTML gives it a width in CSS
+        // pixels, and Swing scales those by the display: "width:720px" asked for 939
+        // device pixels on a 130% screen where the window had 818 to give, so the text
+        // was cut off on the right. And a file name here is seventy characters with no
+        // space in it, which Swing's HTML cannot break at all. A text area wraps to the
+        // width it actually HAS, and breaks inside a word when a word is wider than that.
+        status = new javax.swing.JTextArea(1, 1);
         status.setFont(small);
         status.setForeground(MUTED);
         status.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 2, 8, 2));
+        status.setEditable(false);
+        status.setOpaque(false);
+        status.setFocusable(false);
+        status.setLineWrap(true);
+        status.setWrapStyleWord(true);
 
         listening = new javax.swing.JLabel(" ");
         listening.setFont(small);
@@ -861,12 +873,19 @@ public final class JRockLetters {
         north.setLayout(new javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS));
         north.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                folderRow, asks, status }) {
+                folderRow, asks }) {
             row.setAlignmentX(0f);
             row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                     row.getPreferredSize().height));
             north.add(row);
         }
+        // The status line is NOT capped at the height it happens to have while the window
+        // is being built, which is the height of the single space it holds then. That cap
+        // is the other half of what the operator photographed: a sentence needing three
+        // lines was given the room for one, so the last line was cut off at the bottom as
+        // well as the right. It grows as it needs to, and the list below gives up the room.
+        status.setAlignmentX(0f);
+        north.add(status);
 
         javax.swing.JPanel content = new javax.swing.JPanel(new java.awt.BorderLayout());
         content.setBackground(BACKGROUND);
@@ -921,8 +940,14 @@ public final class JRockLetters {
     }
 
     private static void say(String text) {
-        String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-        status.setText("<html><div style='width:720px'>" + safe + "</div></html>");
+        status.setText(text);
+        // How tall a wrapped line is depends on how wide it is allowed to be, so the area
+        // is pinned to the width it HAS before the layout is asked again - otherwise the
+        // row keeps the height it had for the sentence before this one. Width 0 means the
+        // window has not been laid out yet, and then there is nothing to re-measure.
+        int wide = status.getWidth();
+        if (wide > 0) status.setSize(wide, Short.MAX_VALUE);
+        status.revalidate();
         System.out.println(text);
     }
 

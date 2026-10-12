@@ -112,7 +112,7 @@ public final class JRockWeather {
     private static javax.swing.JTextField locationField;
     private static javax.swing.JButton askButton;
     private static javax.swing.DefaultListModel<String> served;   // EDT only
-    private static javax.swing.JLabel status;
+    private static javax.swing.JTextArea status;
     private static javax.swing.JLabel listening;
     private static volatile ServerSocket server;
 
@@ -356,10 +356,21 @@ public final class JRockWeather {
         top.add(locationField, java.awt.BorderLayout.CENTER);
         top.add(askButton, java.awt.BorderLayout.EAST);
 
-        status = new javax.swing.JLabel(" ");
+        // A WRAPPING TEXT AREA AND NOT A LABEL. A label wraps only where its HTML names a
+        // width in CSS pixels, and Swing scales those by the display: "width:440px" asked
+        // for 576 device pixels on a 130% screen, in a window with 460 to give, so the line
+        // was cut off on the right. A text area wraps to the width it HAS, and breaks
+        // inside a word when the word is wider than that - which a file name or an
+        // address, being one long token with no space in it, always is.
+        status = new javax.swing.JTextArea(1, 1);
         status.setFont(small);
         status.setForeground(MUTED);
         status.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 2, 10, 2));
+        status.setEditable(false);
+        status.setOpaque(false);
+        status.setFocusable(false);
+        status.setLineWrap(true);
+        status.setWrapStyleWord(true);
 
         served = new javax.swing.DefaultListModel<>();
         javax.swing.JList<String> list = new javax.swing.JList<>(served);
@@ -400,8 +411,13 @@ public final class JRockWeather {
 
     // The status line, wrapped rather than widening the window for a long message.
     private static void say(String text) {
-        String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-        status.setText("<html><div style='width:440px'>" + safe + "</div></html>");
+        status.setText(text);
+        // A wrapped line's height depends on the width it is given, so the area is pinned
+        // to the width it HAS before the layout runs again - otherwise the row keeps the
+        // height it had for the sentence before. Width 0 is a window not laid out yet.
+        int wide = status.getWidth();
+        if (wide > 0) status.setSize(wide, Short.MAX_VALUE);
+        status.revalidate();
     }
 
     // ---- Plumbing --------------------------------------------------------------

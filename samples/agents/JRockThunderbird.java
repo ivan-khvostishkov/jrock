@@ -261,7 +261,7 @@ public final class JRockThunderbird {
     private static boolean fillingEmails;
     private static javax.swing.JTextArea briefing;
     private static javax.swing.JPanel calendarBox;
-    private static javax.swing.JLabel status;
+    private static javax.swing.JTextArea status;
     private static javax.swing.JLabel listening;
     private static volatile ServerSocket server;
 
@@ -1648,10 +1648,22 @@ public final class JRockThunderbird {
         javax.swing.JScrollPane text = new javax.swing.JScrollPane(briefing);
         text.setBorder(javax.swing.BorderFactory.createTitledBorder("What an agent is told"));
 
-        status = new javax.swing.JLabel(" ");
+        // A WRAPPING TEXT AREA AND NOT A LABEL. A label wraps only if its HTML names a
+        // width in CSS pixels, and Swing scales those by the display - "width:700px"
+        // asks for 913 device pixels on a 130% screen - so a window with less than that
+        // to give cuts the line off on the right. And an address or a path is one long
+        // token with no space in it, which Swing's HTML cannot break anywhere at all. A
+        // text area wraps to the width it HAS, and breaks inside a word when the word is
+        // wider than that.
+        status = new javax.swing.JTextArea(1, 1);
         status.setFont(small);
         status.setForeground(MUTED);
         status.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 2, 8, 2));
+        status.setEditable(false);
+        status.setOpaque(false);
+        status.setFocusable(false);
+        status.setLineWrap(true);
+        status.setWrapStyleWord(true);
 
         listening = new javax.swing.JLabel(" ");
         listening.setFont(small);
@@ -1867,8 +1879,13 @@ public final class JRockThunderbird {
     }
 
     private static void say(String text) {
-        String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-        status.setText("<html><div style='width:700px'>" + safe + "</div></html>");
+        // No HTML escaping any more, and that is the point of the change: this is text in
+        // a text area, so "<", ">" and "&" are the characters they are - an address with
+        // a query in it used to arrive here as "&amp;".
+        status.setText(text);
+        int wide = status.getWidth();
+        if (wide > 0) status.setSize(wide, Short.MAX_VALUE);
+        status.revalidate();
     }
 
     // ---- Moving an appointment of the operator's own ----------------------------

@@ -203,7 +203,7 @@ public final class JRockBrowser {
     private static volatile Process browser;
     private static volatile WebSocket socket;
     private static volatile Path profileDir;
-    private static javax.swing.JTextField profileLine;
+    private static javax.swing.JTextArea profileLine;
     // ONE TAB PER SITE, kept. Asking for another page on a site it already has reuses
     // that site's tab, so there is never a second arstechnica.com window to wonder about -
     // and because the only sites there are are the six on the list, the number of tabs
@@ -220,7 +220,7 @@ public final class JRockBrowser {
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField askField;
     private static javax.swing.JTextArea result;
-    private static javax.swing.JLabel status;
+    private static javax.swing.JTextArea status;
     private static javax.swing.JLabel listening;
     private static volatile ServerSocket server;
 
@@ -1406,17 +1406,31 @@ public final class JRockBrowser {
         // Always on screen, because "which browser is this and what does it know?" is a
         // fair question to have an answer to without reading the log - and because the
         // answer to "how do I make it forget everything?" is this path.
-        profileLine = new javax.swing.JTextField();
+        profileLine = new javax.swing.JTextArea(1, 1);
         profileLine.setFont(small);
         profileLine.setForeground(MUTED);
-        profileLine.setEditable(false);       // a field, so the path can be copied out
+        profileLine.setEditable(false);   // but selectable: the path can be copied out
         profileLine.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 2, 6, 2));
         profileLine.setOpaque(false);
+        profileLine.setLineWrap(true);
+        profileLine.setWrapStyleWord(true);
 
-        status = new javax.swing.JLabel(" ");
+        // A WRAPPING TEXT AREA AND NOT A LABEL. A label wraps only if its HTML names a
+        // width in CSS pixels, and Swing scales those by the display - "width:680px"
+        // asks for 886 device pixels on a 130% screen - so a window with less than that
+        // to give cuts the line off on the right. And an address or a path is one long
+        // token with no space in it, which Swing's HTML cannot break anywhere at all. A
+        // text area wraps to the width it HAS, and breaks inside a word when the word is
+        // wider than that.
+        status = new javax.swing.JTextArea(1, 1);
         status.setFont(small);
         status.setForeground(MUTED);
         status.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 2, 6, 2));
+        status.setEditable(false);
+        status.setOpaque(false);
+        status.setFocusable(false);
+        status.setLineWrap(true);
+        status.setWrapStyleWord(true);
 
         listening = new javax.swing.JLabel(" ");
         listening.setFont(small);
@@ -1427,10 +1441,18 @@ public final class JRockBrowser {
         north.setLayout(new javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS));
         north.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                askRow, allowed, profileLine, status }) {
+                askRow, allowed }) {
             row.setAlignmentX(0f);
             row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                     row.getPreferredSize().height));
+            north.add(row);
+        }
+        // The two wrapping rows are NOT capped at the height they have while the window
+        // is built - a single space each - which would be one line for ever however much
+        // arrives. They grow, and the list below gives up the room.
+        for (javax.swing.JComponent row : new javax.swing.JComponent[] {
+                profileLine, status }) {
+            row.setAlignmentX(0f);
             north.add(row);
         }
 
@@ -1521,8 +1543,13 @@ public final class JRockBrowser {
     }
 
     private static void say(String text) {
-        String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-        status.setText("<html><div style='width:680px'>" + safe + "</div></html>");
+        // No HTML escaping any more, and that is the point of the change: this is text in
+        // a text area, so "<", ">" and "&" are the characters they are - an address with
+        // a query in it used to arrive here as "&amp;".
+        status.setText(text);
+        int wide = status.getWidth();
+        if (wide > 0) status.setSize(wide, Short.MAX_VALUE);
+        status.revalidate();
         System.out.println(text);
         JRock.automationNote("Browser agent: " + text);
     }
