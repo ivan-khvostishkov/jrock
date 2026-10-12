@@ -681,7 +681,7 @@ The main log is a bit-perfect copy of the pane, except that each role header is 
 
 **Clear log** empties `jrock-log.txt` and the window but never touches `JRock/messages/`, so
 paid-for inputs/outputs are preserved. If the log has changed since it was last exported with
-**Ctrl+L** (Save log as a copy), Clear log first asks for confirmation and suggests saving.
+**Ctrl+Shift+S** (Save log as a copy), Clear log first asks for confirmation and suggests saving.
 
 ## Settings files
 
@@ -1457,7 +1457,7 @@ be asked.
 JRock does the same thing with **plain text files in a folder you own**. A prompt is a `.txt`
 file; the library is a directory ([the prompts directory](#the-prompts-directory)); a variable
 is an [`@txt` / `@img` include token](#multimodal-includes-ctrli); and chaining is you —
-**Ctrl+L** the part of the reply you want, **Ctrl+I** it into the next prompt.
+**Ctrl+Shift+S** the part of the reply you want, **Ctrl+I** it into the next prompt.
 
 | Bedrock | JRock |
 |---|---|
@@ -1465,7 +1465,7 @@ is an [`@txt` / `@img` include token](#multimodal-includes-ctrli); and chaining 
 | Variable, filled in at invoke time | an `@txt` / `@img` token, filled in by Ctrl+I |
 | Version / variant (immutable snapshot) | a file copy — or whatever your version control already does |
 | Prompt builder in the console | the prompt pane, and any text editor |
-| Flow: prompt nodes wired output → input, version + alias, `InvokeFlow` | Ctrl+L the output, Ctrl+I it into the next prompt |
+| Flow: prompt nodes wired output → input, version + alias, `InvokeFlow` | Ctrl+Shift+S the output, Ctrl+I it into the next prompt |
 | IAM permissions, service quotas, per-node billing | files |
 
 Nothing to deploy, nothing to keep in sync with a region, and the whole workflow is
@@ -1540,7 +1540,7 @@ of every document for reading and further automation.
    PNG per page, and each page's `@img` token lands in the prompt. Page images because layout is
    the whole question here, and a scan has no text layer at all.
 3. **Ctrl+Enter**. The reply is the document as plain text.
-4. **Select that reply in the log and press Ctrl+L** — with a selection, Ctrl+L saves *just the
+4. **Select that reply in the log and press Ctrl+Shift+S** — with a selection, Ctrl+Shift+S saves *just the
    selection* ("Save selected text as"), so you get the document and not the transcript around
    it. Save it next to the PDF.
 5. **Ctrl+O** → `jrock-prompt-doc-inventory.txt`. Ctrl+O always opens back in the prompts
@@ -3845,7 +3845,7 @@ of your own and it is named in the title just as on the desktop.
 | Ctrl+Enter | Send (and plain Enter, with the **Enter** checkbox on) |
 | Shift+Enter | A new line in the prompt, always — whatever the **Enter** checkbox says |
 | Ctrl+S | Save prompt as (a copy) |
-| Ctrl+L | Save log as (a copy, or just the selected text) |
+| Ctrl+Shift+S | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
 | Ctrl+I | Include text/image/audio files, a PDF, an RTF or a DOCX (multi-select) |
 | Ctrl+U | Fetch a URL and include what it answers with |
@@ -4289,6 +4289,39 @@ Or, if you want to modify the source and run it in place (no build step):
 ```sh
 java JRock.java
 ```
+
+### Keyboard
+
+One principle: **plain `Ctrl` acts on the prompt**, and **`Ctrl+Shift` acts on the log or is the
+second variant** of its plain twin.
+
+| | |
+|---|---|
+| `Ctrl+Enter` | Send. `Enter` sends too when the **Enter** tick is on; `Shift+Enter` is always a newline |
+| `Ctrl+O` / `Ctrl+S` | Load a prompt from a file / save a copy of the prompt |
+| `Ctrl+Shift+S` | Save a copy of the **log** |
+| `Ctrl+I` / `Ctrl+Shift+I` | Include a **file** / include a **folder** |
+| `Ctrl+U` | Fetch a URL into the prompt |
+| `Ctrl+Space` / `Ctrl+N` | Start or stop **recording** / **narrate** the selection or stop it |
+| `Ctrl+Shift+D` / `Ctrl+Shift+R` | Export the selection as **DOCX** / as **RTF** |
+| `Ctrl+P` | Print the log, or the selection |
+| `Ctrl+D` / `Ctrl+E` | Dialog only / History |
+| `Ctrl+,` | Configure |
+| `F1` | Help |
+| `Ctrl+M` | Move and resize the window from the keyboard |
+| `Ctrl+Z` `Ctrl+Y` `Ctrl+Shift+Z` | Undo, redo, redo |
+
+**`Ctrl+L` no longer saves the log** — it is `Ctrl+Shift+S`. `L` read as *Load* while sitting
+next to `Ctrl+O`, which really loads, and it broke the pattern besides: `Ctrl+S` was named after
+the verb and `Ctrl+L` after the object, so one verb had two unrelated letters. There is no alias
+for the old key, deliberately: a shortcut that still works is a shortcut nobody stops reaching
+for. **`Ctrl+E`** keeps its letter for a worse reason — it is for *extend*, a word no longer in
+the window, and the obvious `Ctrl+H` is unusable because the toolkit makes it backspace inside a
+text area.
+
+Deliberately **without** a shortcut: Clear log (destructive, and one keystroke from the log it
+clears), Backup log, Load from backup, Merge two-sided scans, the page header and footer, and
+*What is in the JRock folder*.
 
 ### No window at all: `--cli`
 

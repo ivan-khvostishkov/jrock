@@ -1411,7 +1411,7 @@ public class JRock {
             return 0;
         }
 
-        cliAwaitReady(log);
+        cliAwaitReady();
         cliShowIncludes();
         if (modeArg != null && !modeArg.isBlank()) {
             return cliAsk(log, input, modeArg) ? 0 : 1;
@@ -1437,47 +1437,40 @@ public class JRock {
 
     // Waits for the startup to finish saying what it has to say.
     //
-    // The model list is fetched off the main thread, as it is in the window - so without
-    // this the report's last lines land on top of the first question, and a shell that
-    // talks over its own prompt looks broken. "Ready." is the report's last word, and
-    // the wait gives up rather than hanging if something has gone wrong enough that it
-    // never comes.
-    private static void cliAwaitReady(LogView log) {
-        for (int waited = 0; waited < 30_000; waited += 100) {
-            // The LAST line, and not merely a line somewhere: a restored log already ends
-            // with the previous session's "Ready.", so looking anywhere in the text
-            // matched instantly and the report went on printing over the first prompt.
-            if ("Ready.".equals(lastNonBlank(log.fullText()))) break;
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException ended) {
-                Thread.currentThread().interrupt();
-                return;
-            }
+    // Every log line is appended on the event thread, even with no window, so the report
+    // is still being written while this thread runs on. Without the wait the first prompt
+    // is printed into the middle of it, and a shell that talks over its own prompt looks
+    // broken.
+    //
+    // One empty task, and the wait is exact rather than a guess: invokeAndWait returns
+    // only after everything queued BEFORE it has run, and the whole report was queued by
+    // initSession. It replaced a poll for "Ready." in the log text, which was wrong twice
+    // - a restored log already ends with the previous session's Ready, and reading the
+    // entry list from this thread while the event thread appended to it threw
+    // ConcurrentModificationException, which is exactly the kind of thing that only shows
+    // up when the thing is run.
+    private static void cliAwaitReady() {
+        try {
+            SwingUtilities.invokeAndWait(() -> { });
+        } catch (Exception interrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 
-    // What is attached and can be mentioned, with the token to mention it by. Nothing
-    // at all when nothing is: a line saying "no attachments" is a line in the way.
+    // What is attached and can be mentioned, with the token to mention it by. Nothing at
+    // all when nothing is: a line saying "no attachments" is a line in the way.
+    //
+    // It matters because the prompt is not carried into the question any more: a hash
+    // nobody has been shown is a file they cannot refer to.
     private static void cliShowIncludes() {
         if (INCLUDES.isEmpty()) return;
         System.out.println();
         System.out.println("Attached, and referable by token:");
         for (java.util.Map.Entry<String, Path> one : INCLUDES.entrySet()) {
-            // The kind is read off the file itself, which is where the token's kind came
-            // from in the first place (see includeKindOf).
             String kind = includeKindOf(one.getValue());
             System.out.println("  @" + (kind == null ? "txt" : kind) + " " + one.getKey()
                     + "   " + one.getValue().getFileName());
         }
-    }
-
-    private static String lastNonBlank(String text) {
-        String[] lines = text.split("\n");
-        for (int i = lines.length - 1; i >= 0; i--) {
-            if (!lines[i].isBlank()) return lines[i].trim();
-        }
-        return "";
     }
 
     // One question and its answer, through the same send the window uses - the prompt is
@@ -1914,7 +1907,7 @@ public class JRock {
         private Path file;
         private boolean dialogOnly = false;
 
-        // Tracks whether the log has been exported (Ctrl+L) since it last changed.
+        // Tracks whether the log has been exported (Ctrl+Shift+S) since it last changed.
         // An empty/just-cleared log counts as "saved" (nothing worth keeping). Set
         // false on any new entry; set true after a successful Save log copy.
         private boolean logCopySaved = true;
@@ -2519,6 +2512,19 @@ public class JRock {
         // The includes the log and the prompt refer to, known again, so a conversation
         // goes on after a restart without attaching every file again.
         reloadIncludes(input, log, restored);
+        // NOT UNDER --cli, at the operator's word, and it is the one optimisation worth
+        // making there: the list is for the Configure dropdown and for seeing what this
+        // key can reach, which is a window's business. In a shell it is a second HTTP
+        // request before a single question has been asked, and the question is usually
+        // the only reason the program was started at all. Said in the log, because a
+        // line that is missing without explanation is worse than a slow one.
+        if (cliEcho) {
+            log.gray("Available models (mantle): (skipped for --cli)");
+            log.gray("");
+            log.gray("Ready.");
+            log.gray("");
+            return;
+        }
         log.gray("Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
@@ -2669,7 +2675,7 @@ public class JRock {
                 + "files in JRock/messages/: every message you sent and every answer you "
                 + "were charged for is still there, so clearing the log costs you "
                 + "nothing. If the log has changed since you last saved a copy of it "
-                + "(Ctrl+L), you are asked first.");
+                + "(Ctrl+Shift+S), you are asked first.");
 
         javax.swing.JPanel topRight = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
@@ -3163,11 +3169,19 @@ public class JRock {
             }
         });
 
-        // Ctrl+L: save a COPY of the current log to a file the user chooses
-        // (symmetric to Ctrl+S for the prompt). Marks the log as exported so
-        // Clear log won't warn about unsaved changes.
+        // Ctrl+Shift+S: save a COPY of the current log to a file the user chooses.
+        // Marks the log as exported so Clear log won't warn about unsaved changes.
+        //
+        // It was Ctrl+L, and L read as LOAD - sitting next to Ctrl+O, which really does
+        // load. Worse, it broke the one pattern: Ctrl+S is named after the verb (save)
+        // and Ctrl+L after the object (log), so the same verb had two unrelated letters.
+        // Plain Ctrl acts on the prompt, Ctrl+Shift on the log or on the second variant
+        // of its plain twin, and that rule now holds throughout. No alias for the old
+        // one: a shortcut that still works is a shortcut nobody stops reaching for.
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.CTRL_DOWN_MASK), "jrock-save-log");
+                KeyStroke.getKeyStroke(KeyEvent.VK_S,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                "jrock-save-log");
         frame.getRootPane().getActionMap().put("jrock-save-log", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
                 saveLogAs(frame, log);
@@ -3217,6 +3231,53 @@ public class JRock {
         frame.getRootPane().getActionMap().put("jrock-include", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
                 showIncludeDialog(frame, input, log, extendMode.isSelected());
+            }
+        });
+
+        // Ctrl+Shift+I: the same, for a FOLDER - the second variant of its plain twin.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_I,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                "jrock-include-dir");
+        frame.getRootPane().getActionMap().put("jrock-include-dir", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showIncludeDirectoryDialog(frame, input, log, extendMode.isSelected());
+            }
+        });
+
+        // Ctrl+N: narrate the log's selection, or stop one that is playing. The twin of
+        // Ctrl+Space, which records - the two halves of talking to this program, and
+        // only one of them had a key.
+        if (narrateAvailable()) {
+            frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW)
+                    .put(KeyStroke.getKeyStroke(KeyEvent.VK_N, InputEvent.CTRL_DOWN_MASK),
+                            "jrock-narrate-key");
+            frame.getRootPane().getActionMap().put("jrock-narrate-key", new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent e) {
+                    narrateSelection(frame, log);
+                }
+            });
+        }
+
+        // Ctrl+Shift+D and Ctrl+Shift+R: the two exports, which had no keys at all - and
+        // they matter more now that the selection may be the PROMPT's, since the whole
+        // point of that is to copy an answer down, correct a line and keep the result.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_D,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                "jrock-export-docx");
+        frame.getRootPane().getActionMap().put("jrock-export-docx", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                exportSelectedMarkdown(frame, log, input, true);
+            }
+        });
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_R,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                "jrock-export-rtf");
+        frame.getRootPane().getActionMap().put("jrock-export-rtf", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                exportSelectedMarkdown(frame, log, input, false);
             }
         });
 
@@ -6410,7 +6471,7 @@ public class JRock {
             {"Ctrl+E", "Toggle History (send the prior dialog too)"},
             {"Ctrl+S", "Save prompt as (a copy)"},
             {"Ctrl+O", "Load prompt from a file"},
-            {"Ctrl+L", "Save log as (a copy, or just the selected text)"},
+            {"Ctrl+Shift+S", "Save log as (a copy, or just the selected text)"},
             {"Ctrl+P", "Print log (or the selected text) / save as PDF"},
         };
         javax.swing.JPanel shortcuts = new javax.swing.JPanel(new java.awt.GridBagLayout());
@@ -9020,14 +9081,14 @@ public class JRock {
     }
 
     // Clears the log after confirming when there are unsaved changes. If the log
-    // hasn't been exported (Ctrl+L) since it last changed, warns and advises the
+    // hasn't been exported (Ctrl+Shift+S) since it last changed, warns and advises the
     // user to cancel and save first; only clears on explicit confirmation.
     private static void clearLogConfirmed(JFrame frame, LogView log) {
         if (!log.isEmpty() && !log.isLogCopySaved()) {
             int choice = javax.swing.JOptionPane.showConfirmDialog(frame,
                     "The log has changed since it was last saved.\n\n"
                         + "Clear it anyway? To keep a copy, cancel and save the log "
-                        + "first with Ctrl+L.",
+                        + "first with Ctrl+Shift+S.",
                     "Clear log without saving?",
                     javax.swing.JOptionPane.OK_CANCEL_OPTION,
                     javax.swing.JOptionPane.WARNING_MESSAGE);
