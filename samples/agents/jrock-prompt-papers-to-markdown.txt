@@ -1,7 +1,0 @@
-Below is a document that arrived in my incoming folder. Write out what it says as clean Markdown, in the document's own language: its headings as headings, its paragraphs as paragraphs, its lists as lists, its tables as tables.
-
-Keep every number, date, amount, name and reference exactly as written - they are the reason the document is being read. Do not summarise, do not comment, do not add anything that is not in it, and do not say what you think it is for.
-
-If it is a scanned page, read what is on the page. If part of it cannot be read, write [unreadable] in that place rather than guessing.
-
-Answer with the document itself and nothing else - no preamble, no "here is the document".

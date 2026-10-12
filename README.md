@@ -2724,6 +2724,22 @@ sequenceDiagram
     rect rgb(255, 245, 200)
         PM-->>PTT: what the letter is about
         PTT->>Op: reads it aloud
+        Op->>PTT: speaks: "Save that answer to a file."
+    end
+    rect rgb(220, 235, 255)
+        PM-->>PTT: "I need the post: save"
+        PTT->>Pap: #35;save + the markdown of the answer before that sentence
+        Note over Pap: writes saved-#60;stamp#62;.txt into Incoming - no model, no key
+        Pap->>Flow: java -cp jrock.jar JRockDocInventory.java #45;#45;auto saved-#60;stamp#62;.txt
+        Flow->>FM: starts it, takes it as an automation
+        Note over Flow,FM: a TXT on its own: the DOCX from that markdown (no send), then the name
+        Flow-->>Pap: AUTO-RESULT name=... files=2
+        Pap-->>PTT: Saved in Incoming as #60;name#62;.docx
+        PTT->>PM: that answer as the next prompt
+    end
+    rect rgb(255, 245, 200)
+        PM-->>PTT: "Saved as the DHL shipping confirmation."
+        PTT->>Op: reads it aloud
     end
 ```
 
@@ -2788,21 +2804,39 @@ sequenceDiagram
   saved into was forgotten by the next start and silently went back to `Documents\Incoming`.
   `#folder` now answers with both folders too, since the difference between them is the shape of
   this agent: one is written by a scanner, the other is where everything saved goes.
-- **A file that is not already text goes through a model once.** Asked about a `.docx`, a PDF, a
-  spreadsheet or a photograph in the incoming folder, the agent includes it in **its own JRock**
-  as the kind it is and asks for clean Markdown — the same bargain the Thunderbird agent strikes
-  with an attachment, for the same reason: a DOCX is a zip of XML and a PDF is drawing
-  instructions, and neither is something to read aloud. What comes back is prose; nothing raw
-  ever leaves.
-- **Keeping an answer is this agent's job now, not push-to-talk's.** *"I'm saving the last
-  answer to a file"* sends the Markdown here, and here it becomes a document: the text goes into
-  this agent's JRock **prompt**, the prompt is exported as a DOCX with its pictures placed
-  (`automationExportPromptDocx`), and then the **doc inventory flow names it** — so a kept
-  answer is named by the same machinery as a scanned letter rather than carrying a timestamp.
-  Three things follow from the move: the document lands in the folder the operator
-  synchronises, it is named rather than stamped, and the Markdown travels between two agents as
-  every other document here already does. A naming that fails is not a save that failed: the
-  answer says what the file is called either way.
+- **A file that is not already text is read through the flow**, and not through a model of this
+  agent's own. Asked about a `.docx`, a PDF or a photograph in the incoming folder, the agent
+  runs the **doc inventory flow** on it — the same run that files a scanned letter — and reads
+  the `.txt` the flow leaves beside it. It used to include the file in a JRock of its own and ask
+  a model for clean Markdown, which meant this agent read a *document* one way and a *scan*
+  another, paid for a send every time the same file was asked about, and could answer twice
+  about one document and disagree with itself. One route now: the flow converts and names, this
+  agent reads files. A document asked about twice is converted once, the text stays on the disk
+  where the operator can see what was read, and nothing here needs a key, a model or a window.
+
+  What the flow takes — a PDF, a DOCX, an RTF, a TXT or an image — is therefore exactly what
+  this agent will read out. A **spreadsheet** came off that list with this change: it was on it
+  while a model of this agent's own did the reading, the flow does not take one, and a `.xlsx`
+  is now listed and said to be a kind that cannot be read out rather than promised and then
+  refused.
+- **Keeping an answer is this agent's job, and the flow's hands.** *"I'm saving the last answer
+  to a file"* sends the Markdown here; the agent writes it to `saved-<stamp>.txt` in the incoming
+  folder and runs the flow on that. A `.txt` **standing on its own** is a document in its own
+  right there — nobody's plain-text copy of anything — so the flow exports it as a **DOCX with
+  its pictures placed**, by JRock's own Markdown writer and with **no send**, since the text is
+  already the text; then it names both files, as it names everything else here. Measured on one
+  kept answer: `Heading1` for the `#` line, a bold run for the `**1,240.00 EUR**`, the bullets as
+  paragraphs, both files renamed to `2026-11-30-Unknown-Invoice-2026-0042`, and **one** model
+  call in the whole run — the name.
+
+  A `.txt` and not a `.md`, deliberately: markdown and plain text are both human readable, the
+  exporter lays out whichever it finds, and one text extension is one fewer kind of file for
+  everything downstream to have an opinion about. This is also where this agent's last JRock
+  went: it used to put the Markdown into a prompt of its own and export that
+  (`automationExportPromptDocx`), which worked and was the odd one out — a window started to
+  write a file, while every other conversion it needs is the flow's. Nothing of the result
+  changed in the move, because the flow calls the same exporter. A naming that fails is not a
+  save that failed: the text is on the disk either way, and the answer says so.
 - **Filing takes minutes, and nothing waits for ever.** The flow behind it is Ghostscript, xpdf
   and three model passes over a scanned page, so a minute or two is an ordinary letter and
   push-to-talk waits **twelve minutes** for this one request while telling the operator what is
@@ -2863,7 +2897,7 @@ flowchart LR
         WX["Weather<br/>:47472<br/>its own JRock"]
         TB["Thunderbird<br/>:47473<br/>its own JRock"]
         BR["Browser<br/>:47474<br/>its own JRock"]
-        LET["Papers<br/>:47475<br/>its own JRock"]
+        PAP["Papers<br/>:47475<br/>no JRock"]
     end
 
     subgraph flows ["Flows - one run each, from a right-click"]
@@ -2892,9 +2926,9 @@ flowchart LR
     PTT -->|"a place"| WX
     PTT -->|"calendar, mail, #35;new, #35;reply"| TB
     PTT -->|"#35;page, #35;search, #35;follow"| BR
-    PTT -->|"#35;recent, #35;file, #35;inventory, #35;save"| LET
+    PTT -->|"#35;recent, #35;file, #35;inventory, #35;save"| PAP
 
-    LET -->|"--auto, then AUTO-RESULT back"| DOC
+    PAP -->|"--auto, then AUTO-RESULT back"| DOC
 
     PTT --> MODEL
     LOC --> MODEL
@@ -2912,8 +2946,7 @@ flowchart LR
     TB --> TOOLS
     DOC --> TOOLS
     DOC --> DISK
-    LET --> DISK
-    LET --> MODEL
+    PAP --> DISK
     TR --> DISK
 ```
 
@@ -3110,7 +3143,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![...](<name>)` (or `![](<hash>)`) placed as the image that include names. |
-| `automationExportPromptDocx(String file)` | The same, for **what the prompt holds** - or its selection, when it has one. No model, no send, nothing cleared: the prompt is a sheet of paper here. An agent with a document to keep sets the prompt and asks for it as a file, so what was written is on the screen as well as on the disk. |
+| `automationExportPromptDocx(String file)` | The same, for **what the prompt holds** - or its selection, when it has one. No model, no send, nothing cleared: the prompt is a sheet of paper here. It is what `Ctrl+Shift+D` does by hand when the selection is the prompt's, offered to an automation that has written something and wants it as a file. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationMergeDuplex(front, back, out)` | **Merge two-sided scans**: the same interleave as the window menu — front 1, back N, front 2, back N−1 — with the two dialogs replaced by three arguments. Both passes must have the same page count, or one of them is not the file it was taken for; refused rather than guessed at, since the mistake it makes is every back page against the wrong front. No dialog either way: an automation that cannot press OK must not be shown one. The two scans are left exactly as they were. |
 | `automationNote(String line)` | One line in JRock's log, from the agent driving it. An agent is started by `javaw` and **has no standard output at all**, and its own window has one status line the next turn overwrites — so this is the only place a reason can still be read an hour later. Needs no `automationBegin`. |

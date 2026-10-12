@@ -333,6 +333,31 @@ public final class JRockDocInventory {
             check(JRock.automationExportDocx(markdown, wordFile.toString()));
             written.add(wordFile);
             System.out.println("Wrote " + wordFile);
+        } else if (pass == PASS_NAME && alone(document)) {
+            // A TXT THAT IS NOBODY'S PLAIN-TEXT COPY IS A DOCUMENT OF ITS OWN, and gets
+            // the DOCX the others get. No send: the text is already the text, and the
+            // exporter reads Markdown - which is what makes this work for a kept answer
+            // as well as for a plain note. Markdown or ASCII, a .txt is human-readable
+            // either way and JRock's writer lays out whichever it finds.
+            //
+            // Which is how the papers agent keeps an answer now: it writes the markdown
+            // it was handed as <stamp>.txt and runs this flow, instead of starting a
+            // JRock of its own to export a DOCX. One document type fewer, one JRock
+            // fewer, and the same exporter either way.
+            //
+            // Only when the TXT stands alone. A .txt BESIDE a document is that
+            // document's plain text - this chain wrote it in pass two - and exporting a
+            // DOCX from it would be making a second document out of a copy.
+            String markdown = readText(document);
+            if (markdown.isBlank()) {
+                throw new Stop(document.getFileName() + " is empty, so there is no "
+                        + "document to make of it.");
+            }
+            System.out.println("A text document on its own: writing its DOCX, no send.");
+            wordFile = free(dir, stem(document), "." + EXT_DOCX);
+            check(JRock.automationExportDocx(markdown, wordFile.toString()));
+            written.add(wordFile);
+            System.out.println("Wrote " + wordFile);
         }
 
         // ---- Pass two: the DOCX as plain text -------------------------------
@@ -788,6 +813,15 @@ public final class JRockDocInventory {
     // The request's file is checked and not read, which is the point of checking it: if
     // the message JRock says it sent is not on disk, the stamps do not mean what they
     // look like they mean and the reply under the other one is not to be trusted.
+    // One text file, read as UTF-8: the markdown a .md document arrives as.
+    private static String readText(Path file) {
+        try {
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new Stop("could not read:\n\n    " + file + "\n\n" + ex.getMessage());
+        }
+    }
+
     private static String reply(String[] sent) {
         if (!"1".equals(sent[0])) throw new Stop(sent[3]);
         if (JRock.automationMessageFile("operator", sent[1]) == null) {
@@ -957,6 +991,13 @@ public final class JRockDocInventory {
             if (Files.isRegularFile(beside)) found.add(beside);
         }
         return found;
+    }
+
+    // Is this file the only copy of its document? Which is what says whether a TXT is a
+    // document in its own right - a note, or an answer somebody kept - or the plain text
+    // of a document that is already here, written by pass two or by Acrobat.
+    private static boolean alone(Path file) {
+        return siblingsOf(file).isEmpty();
     }
 
     // The sibling furthest down the chain from file, when one is further down than file

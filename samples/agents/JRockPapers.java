@@ -2,9 +2,12 @@
 // has put in a folder, what arrived when, and - once a letter has been filed - what it
 // says.
 //
-// LETTERS, and that is the name. The Thunderbird agent reads e-mail; this one reads the
+// PAPERS, and that is the name. The Thunderbird agent reads e-mail; this one reads the
 // post that comes through the door, which is a different thing with a different rhythm
-// and a different pile. "Mail" would have meant both and so neither.
+// and a different pile. "Mail" would have meant both and so neither - and "Letters",
+// which this agent was called first, stopped being true the moment it also handled the
+// documents nobody posted. A scan is a letter, a kept answer or a file dropped in the
+// incoming folder is a document, and papers covers both (see kindOfPlace).
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
@@ -119,16 +122,15 @@ public final class JRockPapers {
     // The kinds of file in there this agent can read out. Anything JRock can include as
     // text or as a document, which is what makes "always filed by design" true of that
     // folder: a file in it can be ASKED about whatever it arrived as.
+    // What can be read out, which is what the doc inventory flow converts and nothing
+    // else: text, the word-processor documents, a PDF, and a picture of a page. A
+    // spreadsheet is off this list - it was on it when a model of this agent's own did
+    // the reading, and the flow does not take one - so a .xlsx in the folder is listed
+    // and said to be a kind that cannot be read out, instead of being promised and then
+    // refused.
     private static final String[] READABLE = {
-        ".txt", ".md", ".docx", ".rtf", ".pdf", ".xlsx", ".png", ".jpg", ".jpeg", ".gif",
+        ".txt", ".md", ".docx", ".rtf", ".pdf", ".png", ".jpg", ".jpeg", ".gif",
     };
-
-    // How long its own JRock gets to come up, and how long one refining pass may take.
-    private static final long READY_TIMEOUT_MS = 120_000;
-    private static final long REPLY_TIMEOUT_MS = 10 * 60_000;
-
-    // The prompt that turns a document into clean Markdown, beside this file.
-    private static final String PROMPT_TO_MARKDOWN = "jrock-prompt-papers-to-markdown.txt";
 
     // Nothing here measures how alike two scans are, on purpose: see the note at the top
     // of this file. Which files make up one letter is said by the operator, not inferred.
@@ -158,7 +160,6 @@ public final class JRockPapers {
     private static volatile Path folder;
     private static volatile Path incoming;
     private static volatile Process flowRunning;
-    private static volatile boolean started;   // its JRock, started once and kept
 
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField folderField;
@@ -505,20 +506,14 @@ public final class JRockPapers {
             }
         }
         Path file = matches.get(0);
-        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        // Not text? Then it goes through this agent's own JRock first: included as the
-        // kind it is and asked for as Markdown, which is the same bargain the Thunderbird
-        // agent strikes with an attachment. Nothing raw goes back to whoever asked - a
-        // DOCX is a zip, a PDF is a picture, and neither is something to read aloud.
-        if (!name.endsWith(TEXT_EXT) && !name.endsWith(".md")) {
-            return "CONTENT " + kindOfPlace(file) + " " + file.getFileName() + "\n"
-                    + refined(file);
-        }
+        // Text already, or the text the flow wrote beside it - see textFor. Either way
+        // what is read here is a file, and this agent asks no model anything.
+        Path text = textFor(file);
         String body;
         try {
-            body = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            body = new String(Files.readAllBytes(text), StandardCharsets.UTF_8);
         } catch (IOException ex) {
-            throw new Stop("could not read " + file.getFileName() + ": " + ex.getMessage());
+            throw new Stop("could not read " + text.getFileName() + ": " + ex.getMessage());
         }
         boolean cut = body.length() > TEXT_MAX;
         if (cut) body = body.substring(0, TEXT_MAX);
@@ -572,7 +567,7 @@ public final class JRockPapers {
         Process already = flowRunning;
         if (already != null && already.isAlive()) {
             throw new Stop("a letter is being filed already - one at a time, because they "
-                    + "share a folder and a JRock.");
+                    + "share a folder, and the flow has one JRock of its own.");
         }
         List<Scan> scans = scansIn(at);
         if (scans.isEmpty()) throw new Stop("there are no PDFs in " + at + ".");
@@ -1178,9 +1173,23 @@ public final class JRockPapers {
     // else here, instead of carrying a timestamp. And the markdown arrives as a MESSAGE
     // between two agents, which is the same way every other document already travels.
     //
-    // The route is JRock's prompt: set it, export it as a DOCX with its pictures placed,
-    // which is exactly what a person does by hand with Ctrl+A and the export item. The
-    // prompt is a sheet of paper here - nothing is sent and no model is asked.
+    // The route is the markdown ONTO THE DISK and then the flow, which is the only thing
+    // here that turns one kind of document into another. The agent writes a .txt - the
+    // text it was handed, unchanged, where anybody can see it - and the flow takes a
+    // .txt standing on its own as a document in its own right: it exports it as a DOCX
+    // with its pictures placed, names both and renames them. One run, the same run a
+    // scanned letter gets.
+    //
+    // A .txt and not a .md, deliberately: markdown and plain text are both human
+    // readable, JRock's exporter lays out whichever it finds, and one text extension is
+    // one fewer kind of file for everything downstream to have an opinion about.
+    //
+    // It used to be done here, through a JRock of this agent's own: the markdown into the
+    // prompt, automationExportPromptDocx, then the flow to name the result. That worked
+    // and it was the odd one out - this agent started a window to write a file, while
+    // every other conversion it needs is the flow's. Nothing of the result changed in the
+    // move: the DOCX is written by the same exporter either way, because the flow calls
+    // it too.
     private static String save(String markdown) {
         String words = markdown == null ? "" : markdown.trim();
         if (words.isEmpty()) {
@@ -1193,28 +1202,28 @@ public final class JRockPapers {
         } catch (IOException ex) {
             throw new Stop("could not make " + at + ": " + ex.getMessage());
         }
-        startJRock("saving a document");
         String stamp = java.time.LocalDateTime.now()
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm"));
-        Path file = free(at, "saved-" + stamp, ".docx");
-        check(JRock.automationClearPrompt());
-        check(JRock.automationSetPrompt(words));
-        String problem = JRock.automationExportPromptDocx(file.toString());
-        if (problem != null) throw new Stop("the document was not written: " + problem);
-        later(() -> say("Saved " + file.getFileName() + " - naming it now."));
+        Path file = free(at, "saved-" + stamp, TEXT_EXT);
+        try {
+            Files.write(file, words.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new Stop("could not write " + file + ": " + ex.getMessage());
+        }
+        later(() -> say("Wrote " + file.getFileName() + " - making the document and "
+                + "naming it now, through the doc inventory flow."));
 
-        // And then named properly, by the one thing here that names documents. A failure
-        // to rename is not a failure to save: the document is on the disk either way, and
-        // the answer says what it is called.
+        // The flow: the DOCX, the text, and the name. A failure here is not a save that
+        // failed - the markdown is on the disk either way, and the answer says so.
         String named = file.getFileName().toString();
         try {
             List<String> command = new ArrayList<>(List.of(java(), "-cp",
                     jar().toString(), flow().toString(), AUTO_FLAG, file.toString()));
             String renamed = valueIn(runFlow(command, at), "name=");
-            if (!renamed.isEmpty()) named = renamed;
+            if (!renamed.isEmpty()) named = renamed + ".docx";
         } catch (Stop stop) {
-            return "Saved in " + at.getFileName() + " as " + named + ", but it could not "
-                    + "be named: " + stop.getMessage();
+            return "The markdown is in " + at.getFileName() + " as " + named + ", but no "
+                    + "document was made of it: " + stop.getMessage();
         }
         return "Saved in " + at.getFileName() + " as " + named + ".";
     }
@@ -1229,40 +1238,49 @@ public final class JRockPapers {
     }
 
     // ---- A document, read out --------------------------------------------------
-    // Any file the incoming folder holds, as Markdown: included as the kind it is and
-    // put through this agent's own model once.
+    // The text of one file: itself when it is text, and otherwise the .txt the doc
+    // inventory flow writes beside it - the flow being run first if nobody has.
     //
-    // Which is the same thing the Thunderbird agent does with an attachment, and for the
-    // same two reasons. A DOCX is a zip of XML and a PDF is a set of instructions for
-    // drawing: neither is text, and whoever asked wants to be told what the document
-    // says, not what it is made of. And a model that has just read it can lay it out as
-    // prose, which is what gets read aloud at the other end.
-    private static String refined(Path file) {
-        Path prompt = ownDirectory().resolve(PROMPT_TO_MARKDOWN);
-        String instructions = Files.isRegularFile(prompt) ? read(prompt) : null;
-        if (instructions == null || instructions.isBlank()) {
-            instructions = "Below is a document. Write out what it says as clean Markdown: "
-                    + "its headings, its paragraphs, its lists and its tables, in the "
-                    + "document's own language. Keep every number, date, name and "
-                    + "reference exactly as written. Do not summarise and do not add "
-                    + "anything that is not in it.";
+    // WHY THE FLOW AND NOT A MODEL OF THIS AGENT'S OWN. It used to be the latter: a
+    // JRock started here, the document included as the kind it is, a model asked for
+    // clean Markdown. Which meant this agent read a DOCUMENT one way and a SCAN another -
+    // a scan has always been read from the .txt the flow had already written - so there
+    // were two routes to "what does this say", one of them paying for a send on every
+    // asking, and the two could disagree about the same file.
+    //
+    // There is one route now. The flow converts, names and writes the text; this agent
+    // reads files. What that gains, beyond one answer instead of two: a document asked
+    // about twice is converted once, the conversion is the same one a letter gets, the
+    // text stays on the disk where the operator can see what was read, and nothing here
+    // needs a key, a model or a window of its own.
+    //
+    // The flow takes a PDF, a DOCX, an RTF, a TXT or an image, and nothing else - which
+    // is now also exactly what this agent will read out (see READABLE).
+    private static Path textFor(Path file) {
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.endsWith(TEXT_EXT) || name.endsWith(".md")) return file;
+        Path beside = textOf(file);
+        if (Files.isRegularFile(beside)) return beside;      // filed before, by anybody
+
+        Path dir = file.toAbsolutePath().getParent();
+        if (dir == null) throw new Stop(file + " is not in a folder this can work in.");
+        later(() -> say("Reading " + file.getFileName() + " through the doc inventory flow "
+                + "- its own JRock window will open."));
+        List<String> command = new ArrayList<>(List.of(java(), "-cp", jar().toString(),
+                flow().toString(), AUTO_FLAG, file.toString()));
+        String named = valueIn(runFlow(command, dir), "name=");
+        if (named.isEmpty()) {
+            throw new Stop("the flow did not say what it filed " + file.getFileName()
+                    + " as, so there is no text to read.");
         }
-        startJRock("reading a document");
-        check(JRock.automationClearPrompt());
-        check(JRock.automationSetPrompt(instructions.replaceAll("\\s+$", "") + "\n\n"));
-        String kind = kindOf(file);
-        String problem = JRock.automationInclude(file.toString(), kind);
-        if (problem != null) {
-            throw new Stop("could not include " + file.getFileName() + " (" + kind + "): "
-                    + problem);
+        // The flow RENAMES every file of the document to the name it chose, so the text
+        // to read is beside the new name and not the old one.
+        Path text = dir.resolve(named + TEXT_EXT);
+        if (!Files.isRegularFile(text)) {
+            throw new Stop("the flow filed it as " + named + " but left no " + TEXT_EXT
+                    + " beside it.");
         }
-        String[] sent = JRock.automationSend(REPLY_TIMEOUT_MS);
-        if (!"1".equals(sent[0])) throw new Stop("the model did not answer: " + sent[3]);
-        String markdown = read(Paths.get(JRock.automationMessageFile("assistant", sent[2])));
-        if (markdown == null || markdown.isBlank()) {
-            throw new Stop("the model's answer was empty.");
-        }
-        return markdown;
+        return text;
     }
 
     // "letter" for the scanner's folder, "document" for the incoming one: the kind says
@@ -1273,43 +1291,12 @@ public final class JRockPapers {
         return parent != null && parent.equals(in) ? "document" : "letter";
     }
 
-    // How JRock should be asked to include this file: the include kinds, by extension.
-    private static String kindOf(Path file) {
-        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (name.endsWith(".pdf")) return "pdfhtml";
-        if (name.endsWith(".docx")) return "docx";
-        if (name.endsWith(".rtf")) return "rtf";
-        if (name.endsWith(".xlsx")) return "xlsx";
-        if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")
-                || name.endsWith(".gif")) {
-            return "imgref";
-        }
-        return "txt";
-    }
-
     private static String read(Path file) {
         try {
             return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException ex) {
             return null;
         }
-    }
-
-    // ---- Its own JRock -----------------------------------------------------------
-    // Started once, when something first needs it, and not before: listing a folder
-    // needs no model, and a window that did nothing but sit there would be a window to
-    // close. Saving a document needs one (its prompt is the paper), and so does reading
-    // out a file that is not already text.
-    private static void startJRock(String what) {
-        if (started) return;
-        started = true;
-        JRock.main(new String[0]);
-        check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
-        check(JRock.automationBegin("papers agent: " + what));
-    }
-
-    private static void check(String problem) {
-        if (problem != null) throw new Stop(problem);
     }
 
     // ---- Settings --------------------------------------------------------------
