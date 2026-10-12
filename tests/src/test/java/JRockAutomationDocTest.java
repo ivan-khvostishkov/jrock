@@ -7,14 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import javax.imageio.ImageIO;
 
-import org.assertj.swing.finder.JOptionPaneFinder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -60,22 +57,27 @@ class JRockAutomationDocTest extends JRockGuiFixture {
     }
 
     @Test
-    @DisplayName("automationInclude \"pdfhtml\" asks before converting, then references each page image")
+    @DisplayName("automationInclude \"pdfhtml\" converts without asking, then references each page image")
     void includesAPdfAsHtmlWithImageReferences() throws Exception {
         awaitReadyCount(1);
         Path pdf = A4Pdf.writeTwoPages(workingDirectory().resolve("scan.pdf"));
 
         assertThat(JRock.automationBegin("pdfhtml test")).isNull();
         try {
-            CompletableFuture<String> included = CompletableFuture.supplyAsync(
-                    () -> JRock.automationInclude(pdf.toString(), "pdfhtml"));
-            // The same question the include dialog's filter asks, and the same answer.
-            press(JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS)
-                    .using(robot).yesButton());
-            assertThat(included.get(60, TimeUnit.SECONDS)).isNull();
+            // NOTHING IS PRESSED HERE, and the call returning is the assertion: the
+            // include's two questions - convert into a new folder, or include a folder
+            // already there - are answered by JRock itself while an automation holds the
+            // window, because an automation that stops for a dialog is not an automation
+            // (the doc inventory flow is usually driven by an agent, with nobody at the
+            // keyboard). A modal question would block this call for ever, so a test that
+            // presses no button and still gets its answer is a test that nothing asked.
+            assertThat(JRock.automationInclude(pdf.toString(), "pdfhtml")).isNull();
 
             assertThat(workingDirectory().resolve("scan.pdf.html").resolve("page1.html"))
                     .isRegularFile();
+            // And the log says a question was answered on the operator's behalf, which is
+            // the other half of the bargain: nobody was asked, and it is written down.
+            assertThat(logPane().text()).contains("answered by the automation");
             String prompt = JRock.automationPromptText();
             // Every page image with its reference above its token. Both pages of this PDF
             // have the same blank background, and an image already included is not
