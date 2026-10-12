@@ -899,6 +899,15 @@ public final class JRockLetters {
         window.setMinimumSize(window.getSize());
         window.setLocationRelativeTo(null);
         window.setVisible(true);
+        // NOTHING THAT CAN BE CHANGED HAS THE FOCUS WHEN THIS OPENS. Swing gives it to
+        // the first focusable component, which in these windows is a field, a checkbox or
+        // a button - a setting one stray keypress away from being something else, with a
+        // caret blinking in it as an invitation. The root pane takes it instead: it has no
+        // key bindings of its own, so a keypress does nothing at all, and Tab still steps
+        // into the window the usual way. Done in a later() so it happens AFTER Swing has
+        // handed the focus out on activation.
+        window.getRootPane().setFocusable(true);
+        later(() -> window.getRootPane().requestFocusInWindow());
         if (folder == null) {
             say("Set the folder your scanner writes into, then press Use.");
         } else {

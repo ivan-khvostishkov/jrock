@@ -1832,8 +1832,8 @@ the voice, so the microphone doesn't record the last answer as the next question
   that is shown too. A missing microphone is **not** one of these: see the mute button above.
 - **While the model thinks, the line is not quite silent.** From the moment the recording stops
   to the moment something is said, the speaker JRock narrates on carries **the odd crackle** —
-  the way an analogue line crackles: a scratch of a millisecond or twenty, a second or so apart,
-  sometimes two or three in a run, and **nothing at all in between**. Those seconds are
+  the way an analogue line crackles: a scratch of a millisecond or twenty, every couple of
+  seconds, sometimes two or three in a run, and **nothing at all in between**. Those seconds are
   otherwise ambiguous in the one way that matters: hands-free you are not looking at the window,
   and silence says nothing about whether the microphone heard the end of your sentence, whether
   anything was sent, or whether this is the pause before *"Error. Should I try again?"*.
@@ -1859,6 +1859,13 @@ the voice, so the microphone doesn't record the last answer as the next question
   speakers costs about 95 ms, which is invisible in a gap that is random to begin with — and the
   room now goes quiet **26 ms** after the answer arrives, against 383 ms when a line was being
   drained, because there is nothing left to drain.
+- **Nothing that can be changed has the focus when a window opens.** Swing hands the focus to
+  the first component that will take it, which in these windows is a text field, a checkbox or a
+  button — a setting one stray keypress away from being something else, with a caret blinking in
+  it as an invitation. Every agent gives it to the window's **root pane** instead: no key
+  bindings, so a keypress does nothing at all, and Tab still steps into the window as usual.
+  Measured before and after on the location agent, where the focus used to sit in an editable
+  field next to *Determine automatically*.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the

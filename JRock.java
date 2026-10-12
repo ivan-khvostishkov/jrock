@@ -1877,6 +1877,21 @@ public class JRock {
             }
         }
 
+        // Lets the selection go and follows the end of the conversation again. On the EDT.
+        //
+        // An automation that selected something in order to export it has to undo that,
+        // and not as a tidiness: appendStyled deliberately scrolls NOWHERE while a
+        // selection exists, because somebody selecting a path or an error is about to
+        // copy it and a reply landing underneath should not take it away. A selection
+        // left behind by a program therefore stops the pane following the conversation -
+        // and the operator sitting in front of it, watching the answers arrive, sees a
+        // window that has simply stopped moving.
+        void selectNothing() {
+            int end = pane.getDocument().getLength();
+            pane.select(end, end);
+            pane.setCaretPosition(end);
+        }
+
         // The address the selection points at (see urlAtSelection), or null - read
         // against the text around the selection, so part of an address will do.
         String selectedUrl() {
@@ -3880,6 +3895,10 @@ public class JRock {
         onEdt(() -> live.log.selectLast(markdown.trim()));
         String failure = writeMarkdownExport(live.log, markdown, true, false,
                 "DOCX (A4 portrait)", target);
+        // The selection goes, whether that worked or not: it was this program's doing,
+        // not the operator's, and a selection left in the pane stops it following the
+        // conversation (see selectNothing).
+        onEdt(live.log::selectNothing);
         return failure == null ? null : "could not export " + target + ": " + failure;
     }
 

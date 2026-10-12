@@ -1277,11 +1277,16 @@ public final class JRockPushToTalk {
     private static final double ROOM_CRACKLE_MAX_MS = 25;
     private static final double ROOM_CUTOFF = 0.35;
 
-    // How long the line is silent between them: a quarter of a second to two and a half,
-    // picked afresh every time. Never a steady tick, which would be a metronome and
-    // would be back to being a sound somebody listens through.
-    private static final long ROOM_GAP_MIN_MS = 250;
-    private static final long ROOM_GAP_MAX_MS = 2_500;
+    // How long the line is silent between them: half a second to five, picked afresh
+    // every time. Never a steady tick, which would be a metronome and would be back to
+    // being a sound somebody listens through.
+    //
+    // Twice what it was, at the operator's word: one crackle a second or so reads as a
+    // line that is doing something, and about one every two and a half seconds still
+    // does - while being half as much of it to sit through for a turn that takes half a
+    // minute. The sound says "the line is open", and it only has to say it now and then.
+    private static final long ROOM_GAP_MIN_MS = 500;
+    private static final long ROOM_GAP_MAX_MS = 5_000;
 
     // And now and then a crackle brings company: a third of them are a run of two to
     // four, tens of milliseconds apart, which is what a scratch on a line actually
@@ -1623,6 +1628,15 @@ public final class JRockPushToTalk {
             window.setLocationRelativeTo(null);
         }
         window.setVisible(true);
+        // NOTHING THAT CAN BE CHANGED HAS THE FOCUS WHEN THIS OPENS. Swing gives it to
+        // the first focusable component, which in these windows is a field, a checkbox or
+        // a button - a setting one stray keypress away from being something else, with a
+        // caret blinking in it as an invitation. The root pane takes it instead: it has no
+        // key bindings of its own, so a keypress does nothing at all, and Tab still steps
+        // into the window the usual way. Done in a later() so it happens AFTER Swing has
+        // handed the focus out on activation.
+        window.getRootPane().setFocusable(true);
+        later(() -> window.getRootPane().requestFocusInWindow());
         window.toFront();
         window.requestFocus();
     }
