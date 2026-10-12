@@ -2770,6 +2770,22 @@ sequenceDiagram
   What the flow takes — a PDF, a DOCX, an RTF, a TXT or an image — is exactly what this agent
   reads out. A `.xlsx` is listed and said to be a kind that cannot be read out, rather than
   promised and then refused.
+- **On paper: the file's own print action, not a page the agent draws.** `#print <name>` hands
+  the document to the shell with the **print** verb — the same thing as right-clicking it in
+  Explorer and choosing *Print* — so a PDF goes to the PDF reader, a DOCX to Word, and the pages
+  come out of whichever printer is the default one. Either folder, a scanned letter or a
+  document that arrived some other way, and `#print` with nothing after it prints the newest
+  scan.
+
+  **The best kind there is of that document is the one that prints.** One document is usually
+  several files — a filed letter is a PDF with a `.txt` beside it, a kept answer is a DOCX with
+  the Markdown it was made from — so the files are grouped by their name without its extension
+  and the first kind of `PRINTABLE` that is there wins: the PDF, then the word-processor file,
+  then the text, then a picture. A PDF is the document *as it will print*; its `.txt` is the
+  right document in the wrong form. Several documents matching the name is a question back, as
+  reading one out is — more firmly so here, where a guess costs paper. In the window the button
+  needs a name typed into the field: a row of buttons is one stray click away from a sheet of
+  paper.
 - **Keeping an answer** — *"I'm saving the last answer to a file"* — sends the Markdown here.
   The agent writes it to `saved-<stamp>.txt` in the incoming folder and runs the flow on that. A
   `.txt` standing on its own is a document in its own right, so the flow exports it as a **DOCX
@@ -2812,6 +2828,8 @@ sequenceDiagram
 | `#inventory <name>` | file that one, by itself |
 | `#inventory duplex` | file the newest **two** as one two-sided letter, merged |
 | `#inventory <a> <b>` | file those two as one two-sided letter, merged |
+| `#print` | print the newest scan on the default printer |
+| `#print <name>` | print that document, in the best kind there is of it |
 | `#folder` | where it is looking, and whether that folder is there |
 
 ### Multi-agent collaboration

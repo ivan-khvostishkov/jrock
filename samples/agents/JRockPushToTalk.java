@@ -308,7 +308,7 @@ public final class JRockPushToTalk {
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
     // The answer that asks about the PAPER post: what the scanner has put in its folder,
-    // what arrived when, filing one, and what a filed letter says.
+    // what arrived when, filing one, what a filed letter says, and printing one on paper.
     private static final java.util.regex.Pattern POST_REQUEST = java.util.regex.Pattern.compile(
             "^\\W*I need the post:\\s*(.*\\S)\\W*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
@@ -373,6 +373,12 @@ public final class JRockPushToTalk {
     // papers agent answers, it answers at once.
     private static final int FILING_TIMEOUT_MS = 12 * 60_000;
     private static final String FILING_REQUEST = "#inventory";
+
+    // Printing is a handover rather than a lookup too, but a quick one: the papers agent
+    // hands the document to the program that owns it and the paper comes out afterwards.
+    // It gets the ordinary limit, and a status line of its own because something is about
+    // to happen in another room.
+    private static final String PRINT_REQUEST = "#print";
 
     // The lever: on, JRock listens and the agent converses (see converse). Written on
     // the EDT, read by the worker's loop too. And, EDT only: whether that loop is
@@ -563,6 +569,8 @@ public final class JRockPushToTalk {
                 if (postAsked.startsWith(FILING_REQUEST)) {
                     later(() -> setState(State.ANSWERING,
                             "Filing the letter - this takes a few minutes…"));
+                } else if (postAsked.startsWith(PRINT_REQUEST)) {
+                    later(() -> setState(State.ANSWERING, "Printing it…"));
                 }
                 String[] letters = askAgent(PAPERS_PORT, postAsked, "papers",
                         "JRockPapers.java",
@@ -799,6 +807,10 @@ public final class JRockPushToTalk {
                 // wins: a second one here would be a line that never runs.
                 { "incoming", "#incoming" }, { "documents", "#incoming" },
                 { "file it", "#inventory" }, { "inventory", "#inventory" },
+                // ON PAPER. "print it" is the newest scan, the way "file it" is, and
+                // anything after "print" is the document's name - which the papers agent
+                // matches, and whose best printable kind it picks.
+                { "print it", "#print" }, { "print", "#print" },
                 { "file", "#file" }, { "read", "#file" }, { "what", "#file" },
                 { "folder", "#folder" } }) {
             if (lower.equals(shape[0])) return shape[1];

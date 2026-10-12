@@ -33,7 +33,15 @@
 //     #inventory <name>   file that one, by itself
 //     #inventory duplex   file the newest TWO as one two-sided letter, merged
 //     #inventory <a> <b>  file those two as one two-sided letter, merged
+//     #print              print the newest scan on the default printer
+//     #print <name>       print that document, in the best kind there is of it
 //     #folder             where it is looking, and whether that folder is there
+//
+// PRINTING IS THE DESKTOP'S OWN PRINT ACTION, not a page this agent draws. It hands the
+// file to the shell with the "print" verb - the same thing as right-clicking it in
+// Explorer and choosing Print - so a PDF goes to the PDF reader, a DOCX to Word, and the
+// default printer is the one the operator set. A document that exists in several kinds is
+// printed in the best of them, which is the PDF when there is one: see PRINTABLE.
 //
 // WHETHER TWO SCANS ARE ONE TWO-SIDED LETTER IS NOT SOMETHING THIS CAN KNOW, and the
 // first version of this agent pretended otherwise. It grouped two scans with adjacent
@@ -124,6 +132,29 @@ public final class JRockPapers {
     private static final String[] READABLE = {
         ".txt", ".md", ".docx", ".rtf", ".pdf", ".png", ".jpg", ".jpeg", ".gif",
     };
+
+    // What can be PRINTED, BEST FIRST - and the order is the whole of #print's decision.
+    //
+    // One document is usually several files: a filed letter is a PDF with a .txt beside
+    // it, a kept answer is a DOCX with the markdown it was made from. They are the same
+    // document in different kinds, so printing takes the first of these that is there:
+    //
+    //   a PDF is the document AS IT WILL PRINT - fixed pages, the scan itself;
+    //   a word-processor file is that document still being laid out by whatever opens it;
+    //   a text file is the words without the layout;
+    //   a picture is a page with no text in it at all.
+    //
+    // So the PDF of a letter is printed and its .txt is not, which is what somebody
+    // asking for a letter on paper means.
+    private static final String[] PRINTABLE = {
+        ".pdf", ".docx", ".doc", ".rtf", ".odt", ".txt", ".md",
+        ".png", ".jpg", ".jpeg", ".gif",
+    };
+
+    // How long the shell gets to take the document off this agent's hands. It is a
+    // handover and not a print run - the program that owns the kind does the printing,
+    // and the paper comes out after this has returned.
+    private static final long PRINT_HANDOVER_MS = 60_000;
 
     // Nothing here measures how alike two scans are, on purpose: see the note at the top
     // of this file. Which files make up one letter is said by the operator, not inferred.
@@ -222,11 +253,13 @@ public final class JRockPapers {
                 return incomingList(count(rest, LIST_MAX));
             case "#save":
                 return save(rest);
+            case "#print":
+                return print(rest);
             default:
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
                         + "#recent [minutes], #scans [n], #filed [n], #incoming [n], "
                         + "#save <markdown>, #file <name>, "
-                        + "#inventory [name] or #folder.");
+                        + "#inventory [name], #print [name] or #folder.");
         }
     }
 
@@ -812,8 +845,8 @@ public final class JRockPapers {
             }
         }, "jrock-papers-listener");
         t.start();
-        return "Listening on 127.0.0.1:" + PORT + " for #recent, #scans, #file and "
-                + "#inventory.";
+        return "Listening on 127.0.0.1:" + PORT + " for #recent, #scans, #file, "
+                + "#inventory and #print.";
     }
 
     // How long a request may be.
@@ -994,6 +1027,22 @@ public final class JRockPapers {
         read.addActionListener(readIt);
         nameField.addActionListener(readIt);
         asks.add(read);
+        // Printing takes a NAME and has no button of its own for "the newest", which
+        // #print still answers: a row of buttons is one stray click away from paper, and
+        // the request that spends it should be one somebody typed.
+        javax.swing.JButton print = new javax.swing.JButton("Print it…");
+        print.setToolTipText("Print that document on the default printer, in the best "
+                + "kind there is of it");
+        print.addActionListener(e -> {
+            String typed = nameField.getText().trim();
+            if (typed.isEmpty()) {
+                say("Type part of a document's name first - printing uses paper, so it "
+                        + "prints what was named and nothing by default.");
+                return;
+            }
+            ask("#print " + typed);
+        });
+        asks.add(print);
         asks.add(nameField);
 
         result = new javax.swing.JTextArea(18, 76);
@@ -1248,6 +1297,188 @@ public final class JRockPapers {
         return file;
     }
 
+    // ---- Printing one, on paper --------------------------------------------------
+    // A document out of either folder, on paper, by the DESKTOP'S OWN PRINT ACTION - the
+    // same thing as right-clicking the file in Explorer and choosing Print. Nothing here
+    // lays out a page: the program that owns the kind does it, on whichever printer the
+    // operator has set as the default, so a PDF prints as its reader prints it and a DOCX
+    // as Word does.
+    //
+    // WHICH FILE, when a document is several of them: the best kind there is of it, the
+    // PDF first - see PRINTABLE. Printing the .txt beside a filed letter would be the
+    // right document in the wrong form, which is a sheet of paper nobody asked for.
+    private static String print(String asked) {
+        Path at = scanFolder();
+        if (asked.isBlank()) {
+            // The newest scan, which is what #inventory files when it is told nothing:
+            // the thing that has just come off the glass.
+            List<Scan> scans = scansIn(at);
+            if (scans.isEmpty()) {
+                throw new Stop("there are no PDFs in " + at + " to print. Name a document "
+                        + "and that one is printed instead.");
+            }
+            return printFile(scans.get(0).file);
+        }
+
+        // BOTH FOLDERS, as #file reads from both: a letter off the scanner and a document
+        // that arrived by some other route are both documents, and printing is the same
+        // act either way.
+        List<Path> files = new ArrayList<>();
+        for (Scan scan : filesIn(at, null)) files.add(scan.file);
+        Path other = incomingFolder();
+        if (Files.isDirectory(other)) {
+            for (Scan file : filesIn(other, null)) files.add(file.file);
+        }
+
+        // Grouped by the name WITHOUT its extension, folder by folder: that grouping is
+        // what one document is here, and the files in a group are its kinds.
+        java.util.LinkedHashMap<String, List<Path>> documents =
+                new java.util.LinkedHashMap<>();
+        for (Path file : files) {
+            if (!printable(file)) continue;
+            if (!matches(file.getFileName().toString(), asked)) continue;
+            documents.computeIfAbsent(withoutExtension(file), key -> new ArrayList<>())
+                    .add(file);
+        }
+        if (documents.isEmpty()) {
+            StringBuilder out = new StringBuilder("Nothing that can be printed matches \""
+                    + asked + "\" in either folder. What there is:");
+            int shown = 0;
+            for (Path file : files) {
+                if (!printable(file)) continue;
+                if (shown++ >= 20) break;
+                out.append("\n- ").append(file.getFileName());
+            }
+            if (shown == 0) out.append("\n- nothing yet.");
+            return out.toString();
+        }
+        List<String> stems = new ArrayList<>(documents.keySet());
+        if (stems.size() > 1) {
+            // The same rule as reading one out - one clearly shortest name is the one
+            // that was meant, several of a length is a question rather than a guess - and
+            // more firmly so here, where guessing wrong costs paper.
+            stems.sort(Comparator.comparingInt(stem -> nameOf(stem).length()));
+            if (nameOf(stems.get(1)).length() == nameOf(stems.get(0)).length()) {
+                StringBuilder out = new StringBuilder(stems.size() + " documents match \""
+                        + asked + "\". Which one to print:");
+                for (String stem : stems) {
+                    out.append("\n- ").append(bestKind(documents.get(stem)).getFileName());
+                }
+                return out.toString();
+            }
+        }
+        return printFile(bestKind(documents.get(stems.get(0))));
+    }
+
+    // The first kind of this document that PRINTABLE names, which is the best one there
+    // is of it. A kind not on that list cannot be in a group, so there is always one.
+    private static Path bestKind(List<Path> kinds) {
+        for (String ext : PRINTABLE) {
+            for (Path file : kinds) {
+                if (file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(ext)) {
+                    return file;
+                }
+            }
+        }
+        return kinds.get(0);
+    }
+
+    private static boolean printable(Path file) {
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        for (String ext : PRINTABLE) {
+            if (name.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
+    // The file's whole path with its extension taken off, which is what makes two kinds
+    // of one document one key - and keeps two documents of the same name in different
+    // folders apart.
+    private static String withoutExtension(Path file) {
+        String path = file.toAbsolutePath().normalize().toString();
+        int dot = path.lastIndexOf('.');
+        int slash = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+        return dot > slash ? path.substring(0, dot) : path;
+    }
+
+    private static String nameOf(String path) {
+        Path name = Paths.get(path).getFileName();
+        return name == null ? path : name.toString();
+    }
+
+    // THE PRINT VERB, and not a page this agent draws. Java's own desktop print IS that
+    // verb on Windows, so it is what is tried first: no process to start, no path to
+    // quote, and exactly the action the context menu performs.
+    //
+    // The shell is then asked directly for the kinds the desktop will not take, by the
+    // verb's name, which is the same route by another door.
+    private static String printFile(Path file) {
+        later(() -> say("Printing " + file.getFileName() + " - the default print action "
+                + "for that kind of file, on the default printer."));
+        try {
+            if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop()
+                    .isSupported(java.awt.Desktop.Action.PRINT)) {
+                java.awt.Desktop.getDesktop().print(file.toFile());
+                return sentToPrinter(file);
+            }
+        } catch (IOException | RuntimeException ex) {
+            // Nothing claims the print verb for this kind, or the desktop would not take
+            // it. The shell is asked below, and its complaint is the one reported.
+        }
+
+        List<String> command;
+        if (windows()) {
+            // The verb by name. The path goes in single quotes with any of its own
+            // doubled, which is PowerShell's escape, so a file called "O'Brien.pdf"
+            // prints rather than ending the string early.
+            command = List.of("powershell", "-NoProfile", "-Command",
+                    "Start-Process -FilePath '"
+                            + file.toAbsolutePath().toString().replace("'", "''")
+                            + "' -Verb Print");
+        } else if (mac()) {
+            command = List.of("lpr", file.toAbsolutePath().toString());
+        } else {
+            command = List.of("lp", file.toAbsolutePath().toString());
+        }
+        try {
+            Process shell = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start();
+            shell.getOutputStream().close();
+            if (!shell.waitFor(PRINT_HANDOVER_MS, TimeUnit.MILLISECONDS)) {
+                shell.destroyForcibly();
+                throw new Stop("the print command for " + file.getFileName() + " did not "
+                        + "finish within " + PRINT_HANDOVER_MS / 1000 + " seconds.");
+            }
+            // Read AFTER it has gone, which is safe here and keeps this to one thread:
+            // handing a file to the shell says nothing at all when it works and a line
+            // or two of complaint when it does not.
+            String said = new String(shell.getInputStream().readAllBytes(),
+                    StandardCharsets.UTF_8);
+            if (shell.exitValue() != 0) {
+                String why = lastLine(said);
+                throw new Stop("printing " + file.getFileName() + " failed"
+                        + (why.isEmpty() ? "." : ": " + why));
+            }
+        } catch (IOException ex) {
+            throw new Stop("could not print " + file.getFileName() + ": " + ex.getMessage());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new Stop("interrupted while " + file.getFileName() + " was being sent to "
+                    + "the printer.");
+        }
+        return sentToPrinter(file);
+    }
+
+    // What the asking agent is told: the file that went, so the operator hears WHICH kind
+    // of the document was printed, and where the paper is coming from.
+    private static String sentToPrinter(Path file) {
+        return "Printing " + file.getFileName() + " - the " + kindOfPlace(file) + " was "
+                + "handed to the program that owns that kind of file with the default "
+                + "print action, as right-clicking it and choosing Print does. The pages "
+                + "come out of the default printer.";
+    }
+
     // ---- A document, read out --------------------------------------------------
     // The text of one file: itself when it is text, and otherwise the .txt the doc
     // inventory flow writes beside it - the flow being run first if nobody has.
@@ -1359,6 +1590,14 @@ public final class JRockPapers {
             // The working directory it is, then.
         }
         return Paths.get("").toAbsolutePath().normalize();
+    }
+
+    private static boolean windows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private static boolean mac() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
     }
 
     private static Thread daemon(Runnable what, String name) {
