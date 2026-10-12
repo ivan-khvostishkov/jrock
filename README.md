@@ -1884,15 +1884,22 @@ the voice, so the microphone doesn't record the last answer as the next question
   anybody else**. The status line says what became of it, and JRock's log has the whole of what
   the agent said back, including where the `.ics` file is.
 - **What a message says, and answering it.** *"I need your mail: message Sam"* brings one
-  message back as a document — it goes into `JRock/mail/` and is **included** in the prompt, the
+  message back as a document — it goes into `PTTFiles/mail/` and is **included** in the prompt, the
   same way a scanned letter is, so the model reads a document rather than a quotation of one.
   Asked to answer it, the model **reads the draft aloud first** and says nothing a program
   recognises; only once the operator agrees does it say *"I'm preparing the draft reply to
   0a6a15: …"*, and only then does a compose window open. Two steps, because a window that
   appears while somebody is still thinking about the wording is a window they did not ask for.
+- **Everything it writes goes in one folder, `PTTFiles/`**, under the agent's own working
+  folder: the answers saved as DOCX, and the letters and messages the other agents hand over.
+  One folder, so **one folder can be synchronised** — point a cloud client at it and *"save that
+  answer"* said across a room becomes a document on a phone a minute later. Deliberately not the
+  working folder itself and not `JRock/` inside it: those hold the API key, the conversation and
+  the log, and a folder destined for somebody's cloud should hold what was asked for and nothing
+  else. It is made the first time something is written into it.
 - **Saving an answer as a document.** *"I'm saving the last answer to a file"* exports **the
   answer before that sentence** — the thing the operator just liked — through JRock's own
-  *Export selected Markdown with images as DOCX*, into the working folder as
+  *Export selected Markdown with images as DOCX*, into `PTTFiles/` as
   `2026-10-12-0043-ptt.docx`. The previous answer and never the sentence asking for it: the
   request is not the thing they liked.
 - **A new time for an appointment of your own.** An answer that says *"I'm proposing to move
@@ -2313,7 +2320,7 @@ sequenceDiagram
         PM-->>PTT: "I need your mail: message Sam"
         PTT->>TB: #35;message Sam
         TB-->>PTT: CONTENT message message-0a6a15.md + the message as Markdown
-        Note over PTT: written into JRock/mail/ and INCLUDED as a document
+        Note over PTT: written into PTTFiles/mail/ and INCLUDED as a document
         PTT->>PM: "say what they asked" + the message
     end
     rect rgb(255, 245, 200)
@@ -2557,7 +2564,7 @@ sequenceDiagram
         PM-->>PTT: "I need the post: Shipping Confirmation"
         PTT->>Let: #35;file Shipping Confirmation
         Let-->>PTT: CONTENT <name>.txt + the letter's text
-        Note over PTT: written into JRock/letters/ and INCLUDED as a document
+        Note over PTT: written into PTTFiles/letters/ and INCLUDED as a document
         PTT->>PM: "say what this letter is about" + the .txt
     end
     rect rgb(255, 245, 200)
@@ -2614,7 +2621,7 @@ sequenceDiagram
   ignored on both sides, and every word of the question has to be somewhere in the name, in any
   order. Several matches is a question back, not a guess.
 - **The letter goes into the prompt as a file.** Push-to-talk writes what comes back into
-  `JRock/letters/` and **includes** it, exactly as a person would with Ctrl+I — so the
+  `PTTFiles/letters/` and **includes** it, exactly as a person would with Ctrl+I — so the
   transcript holds a token and a file beside it rather than ten thousand characters of letter,
   and the model is reading a document rather than a quotation of one.
 

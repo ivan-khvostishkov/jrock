@@ -138,6 +138,21 @@ public final class JRockPushToTalk {
     private static final String LISTENING_HANDS_FREE =
             "Hands-free: just talk, it sends when you stop. Ctrl or the button ends it.";
 
+    // WHERE THIS AGENT'S FILES GO: one folder, so that one folder can be synchronised.
+    //
+    // Everything push-to-talk writes for the operator to keep lands here - an answer
+    // saved as a DOCX, and the letters and messages the other agents hand over - because
+    // the reason for asking was a good one: a folder that syncs to a phone turns "save
+    // that answer" said across a room into a document in a pocket, with nothing else of
+    // JRock's going along with it.
+    //
+    // Which is the other half of it. NOT the working folder and not JRock's own folder
+    // inside it: those hold the API key, the conversation and the log, and a folder meant
+    // for a cloud service should contain what was asked for and nothing besides.
+    private static final String FILES_DIR = "PTTFiles";
+    private static final String MAIL_SUB = "mail";
+    private static final String LETTERS_SUB = "letters";
+
     // What goes after every recording, expected beside this file; and the placeholder in
     // it that becomes the time the question was asked.
     private static final String PROMPT_APPENDIX = "jrock-prompt-push-to-talk-appendix.txt";
@@ -744,10 +759,12 @@ public final class JRockPushToTalk {
     // A DOCUMENT an agent handed over - a scanned letter, an e-mail - as a file in the
     // prompt rather than as a wall of prompt.
     //
-    // Written where JRock's own files are, so it is beside the transcript that refers to
-    // it rather than in a temp folder somebody would have to go looking for, and then
-    // INCLUDED exactly as a person would include it with Ctrl+I. The transcript keeps a
-    // token and a file; the model reads a document rather than a quotation of one.
+    // Written into this agent's own files folder (see FILES_DIR) rather than into a temp
+    // folder somebody would have to go looking for, and then INCLUDED exactly as a person
+    // would include it with Ctrl+I. The transcript keeps a token and a file; the model
+    // reads a document rather than a quotation of one. Being in that folder means a
+    // letter read out in the kitchen is also on the operator's phone, which is the same
+    // reason the saved answers are there.
     //
     // The first line is "CONTENT <kind> <name>", and the kind decides what the model is
     // asked to do with it: a letter is explained, an e-mail is answered about. Everything
@@ -760,9 +777,7 @@ public final class JRockPushToTalk {
         String body = split.length > 1 ? split[1] : "";
         boolean mail = kind.startsWith("message") || kind.startsWith("mail");
         try {
-            java.nio.file.Path dir = java.nio.file.Paths.get("").toAbsolutePath()
-                    .resolve("JRock").resolve(mail ? "mail" : "letters");
-            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Path dir = filesDir(mail ? MAIL_SUB : LETTERS_SUB);
             String safe = name.replaceAll("[^A-Za-z0-9._-]", "-");
             if (!safe.contains(".")) safe += mail ? ".md" : ".txt";
             java.nio.file.Path file = dir.resolve(safe);
@@ -1029,11 +1044,16 @@ public final class JRockPushToTalk {
         }
         String name = java.time.LocalDateTime.now().format(
                 java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm")) + "-ptt.docx";
-        java.nio.file.Path file = java.nio.file.Paths.get("").toAbsolutePath().resolve(name);
+        java.nio.file.Path file;
+        try {
+            file = filesDir(null).resolve(name);
+        } catch (IOException ex) {
+            return "Not saved: " + FILES_DIR + " could not be made (" + ex.getMessage() + ").";
+        }
         String problem = JRock.automationExportDocx(keep, file.toString());
         if (problem != null) return "Not saved: " + problem;
         report("saved the previous answer to " + file);
-        return "Saved to " + name + ".";
+        return "Saved to " + FILES_DIR + "/" + name + ".";
     }
 
     // Puts in the calendar what an answer says it is putting there, if it says so.
@@ -1893,6 +1913,16 @@ public final class JRockPushToTalk {
             // Fall through to the working directory.
         }
         return Paths.get("").toAbsolutePath().normalize();
+    }
+
+    // The folder this agent's files go in, made the first time something is written
+    // into it - under the working folder, so each push-to-talk has its own, and with a
+    // subfolder for the kinds that arrive in numbers (see FILES_DIR).
+    private static Path filesDir(String sub) throws IOException {
+        Path dir = Paths.get("").toAbsolutePath().resolve(FILES_DIR);
+        if (sub != null) dir = dir.resolve(sub);
+        Files.createDirectories(dir);
+        return dir;
     }
 
     // A message file's text, or null when there is none to read.
