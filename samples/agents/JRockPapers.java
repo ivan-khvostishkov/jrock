@@ -162,6 +162,7 @@ public final class JRockPapers {
 
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField folderField;
+    private static javax.swing.JTextField incomingField;
     private static javax.swing.JTextArea result;
     private static javax.swing.JTextArea status;
     private static javax.swing.JLabel listening;
@@ -260,14 +261,34 @@ public final class JRockPapers {
         return at;
     }
 
+    // BOTH folders, because there are two and the difference between them is the whole
+    // shape of this agent: one is written by a scanner and read here, the other is where
+    // a document that nobody scanned arrives and where everything saved is put.
     private static String where() {
+        StringBuilder out = new StringBuilder();
         Path at = folder;
-        if (at == null) return "No scan folder is set yet.";
-        if (!Files.isDirectory(at)) return "Set to " + at + ", which is not there.";
-        List<Scan> scans = scansIn(at);
-        return "Watching " + at + ": " + scans.size()
-                + (scans.size() == 1 ? " PDF" : " PDFs") + ", "
-                + filedIn(at).size() + " of them filed and named.";
+        if (at == null) {
+            out.append("No scan folder is set yet.");
+        } else if (!Files.isDirectory(at)) {
+            out.append("The scan folder is set to ").append(at)
+               .append(", which is not there.");
+        } else {
+            List<Scan> scans = scansIn(at);
+            out.append("Watching ").append(at).append(": ").append(scans.size())
+               .append(scans.size() == 1 ? " PDF" : " PDFs").append(", ")
+               .append(filedIn(at).size()).append(" of them filed and named.");
+        }
+        Path in = incomingFolder();
+        out.append("\nDocuments arrive in, and are saved into, ").append(in);
+        if (!Files.isDirectory(in)) {
+            out.append(" - which does not exist yet, and is made the first time something "
+                    + "is written into it.");
+        } else {
+            int many = filesIn(in, null).size();
+            out.append(": ").append(many)
+               .append(many == 1 ? " file." : " files.");
+        }
+        return out.toString();
     }
 
     // ---- What is in the folder -------------------------------------------------
@@ -885,6 +906,46 @@ public final class JRockPapers {
         folderRow.add(folderField, java.awt.BorderLayout.CENTER);
         folderRow.add(folderButtons, java.awt.BorderLayout.EAST);
 
+        // THE SECOND FOLDER, which this agent has always read and saved into and never
+        // showed. It is where a document that nobody scanned arrives - something
+        // downloaded, copied in, or handed over by another agent - and it is where #save
+        // writes, so it is the folder worth synchronising. Shown because an agent that
+        // writes into a folder should say which folder, and settable here because the
+        // alternative was a command-line flag that the settings file then forgot.
+        incomingField = new javax.swing.JTextField(incomingFolder().toString(), 40);
+        incomingField.setFont(small);
+        incomingField.setToolTipText("Where documents arrive, and where this agent saves "
+                + "what it is given - not the scanner's folder");
+        javax.swing.JButton browseIn = new javax.swing.JButton("Browse…");
+        browseIn.addActionListener(e -> {
+            javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+            chooser.setDialogTitle("The folder documents arrive in");
+            chooser.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
+            Path at = incomingFolder();
+            if (Files.isDirectory(at)) chooser.setCurrentDirectory(at.toFile());
+            if (chooser.showOpenDialog(window) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                incomingField.setText(chooser.getSelectedFile().getAbsolutePath());
+                useIncoming();
+            }
+        });
+        javax.swing.JButton useIn = new javax.swing.JButton("Use");
+        useIn.addActionListener(e -> useIncoming());
+        incomingField.addActionListener(e -> useIncoming());
+
+        javax.swing.JPanel incomingButtons = new javax.swing.JPanel(new java.awt.FlowLayout(
+                java.awt.FlowLayout.LEFT, 6, 0));
+        incomingButtons.setOpaque(false);
+        incomingButtons.add(browseIn);
+        incomingButtons.add(useIn);
+
+        javax.swing.JPanel incomingRow = new javax.swing.JPanel(
+                new java.awt.BorderLayout(8, 0));
+        incomingRow.setOpaque(false);
+        incomingRow.add(new javax.swing.JLabel("Incoming folder:"),
+                java.awt.BorderLayout.WEST);
+        incomingRow.add(incomingField, java.awt.BorderLayout.CENTER);
+        incomingRow.add(incomingButtons, java.awt.BorderLayout.EAST);
+
         javax.swing.JPanel asks = new javax.swing.JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.LEFT, 6, 0));
         asks.setOpaque(false);
@@ -892,7 +953,8 @@ public final class JRockPapers {
                                              { "Last hour", "#recent 60" },
                                              { "All scans", "#scans" },
                                              { "Filed", "#filed" },
-                                             { "File the newest", "#inventory" } }) {
+                                             { "File the newest", "#inventory" },
+                                             { "Incoming", "#incoming" } }) {
             javax.swing.JButton b = new javax.swing.JButton(ask[0]);
             String request = ask[1];
             b.addActionListener(e -> ask(request));
@@ -949,7 +1011,7 @@ public final class JRockPapers {
         north.setLayout(new javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS));
         north.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                folderRow, asks }) {
+                folderRow, incomingRow, asks }) {
             row.setAlignmentX(0f);
             row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                     row.getPreferredSize().height));
@@ -1001,6 +1063,26 @@ public final class JRockPapers {
         folderField.setText(folder.toString());
         writeSettings();
         ask("#recent 60");
+    }
+
+    // The other folder: where a document that was not scanned comes from, and where
+    // everything this agent saves goes. Made if it is not there, because a folder
+    // somebody synchronises should not be missing the moment it is named.
+    private static void useIncoming() {
+        String typed = incomingField.getText().trim();
+        if (typed.isEmpty()) {
+            say("No incoming folder set.");
+            return;
+        }
+        incoming = Paths.get(typed).toAbsolutePath().normalize();
+        incomingField.setText(incoming.toString());
+        try {
+            Files.createDirectories(incoming);
+        } catch (IOException ex) {
+            say("Could not make " + incoming + ": " + ex.getMessage());
+        }
+        writeSettings();
+        ask("#incoming");
     }
 
     private static void ask(String request) {
@@ -1250,10 +1332,15 @@ public final class JRockPapers {
         }
     }
 
+    // Both folders, because both are settable and readSettings has always read both -
+    // this wrote only the scanner's, so an incoming folder given with --incoming, or
+    // picked in the window, was forgotten by the next start and silently went back to
+    // Documents\Incoming.
     private static void writeSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
         String out = "' JRock papers agent\n"
-                + (folder == null ? "" : "folder=" + folder + "\n");
+                + (folder == null ? "" : "folder=" + folder + "\n")
+                + (incoming == null ? "" : "incoming=" + incoming + "\n");
         try {
             Files.write(file, out.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {

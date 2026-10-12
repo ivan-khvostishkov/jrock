@@ -395,7 +395,7 @@ public final class InstallJRock {
                     + (entries.isEmpty() ? "" : " (page 8 would clear them first)"));
             for (String[] e : entries) System.out.println("  " + e[0]);
         }
-        System.out.println("Running JRock:       " + or(String.join(", ", runningJRock()), "none"));
+        System.out.println("Running JRock:       " + or(runningList(runningJRock()), "none"));
         Path script = home == null ? null : home.resolve(isWindows() ? START_CMD : START_SH);
         System.out.println("Start script:        " + (script == null ? "(no folder yet)"
                 : script + (Files.isRegularFile(script) ? "" : "  - not written yet")));
@@ -674,6 +674,23 @@ public final class InstallJRock {
                 panel.add(found(true, previouslyInstalled.size() + " agent(s) and flow(s) "
                         + "already installed: " + String.join(", ",
                         previouslyInstalled.keySet())));
+                List<Running> running = runningJRock();
+                if (!running.isEmpty()) {
+                    panel.add(found(false, running.size() + " of them "
+                            + (running.size() == 1 ? "is" : "are") + " running right now: "
+                            + runningList(running)));
+                    panel.add(note("They have to go before the program they run can be "
+                            + "replaced: Windows does not allow a file to be overwritten "
+                            + "while a process has it open, and jrock.jar is open in every "
+                            + "one of them. Nothing of a session is lost by stopping them - "
+                            + "JRock writes its log as it goes and autosaves the prompt - "
+                            + "and the installer offers this again at the copy itself if "
+                            + "you would rather close their windows yourself."));
+                    panel.add(action("Stop them all now", () -> {
+                        stopJRocks();
+                        redraw();
+                    }));
+                }
                 panel.add(note("So this run is an UPDATE of that install: its folder is "
                         + "the folder below, and page 5 offers what is installed rather "
                         + "than the whole catalogue - the full list is one radio button "
@@ -701,6 +718,10 @@ public final class InstallJRock {
                     + "is a second JRock with its own model, DPI and key, installed the "
                     + "same way."));
         }, () -> {
+            // The one check that has to happen before anything is written, because this
+            // is the write that a running JRock makes impossible.
+            String running = stopFirstIfRunning();
+            if (running != null) return running;
             try {
                 Files.createDirectories(home);
                 Path jar = home.resolve(JAR);
@@ -919,18 +940,33 @@ public final class InstallJRock {
                 return;
             }
             panel.add(text("Every folder below runs a JRock of its own, and a JRock of its "
-                    + "own reads the settings in its own folder:"));
-            for (Path dir : dirs) panel.add(value(dir.toString()));
-            panel.add(check("Copy jrock-config.txt into each of them", copySettings,
-                    v -> copySettings = v));
-            panel.add(check("Copy bedrock-key.txt too", copyKey, v -> copyKey = v));
+                    + "own reads the settings in its own folder."));
+            panel.add(text("NOTHING HERE IS OVERWRITTEN. A file that is already in one of "
+                    + "these folders is kept exactly as it is - only a missing or an empty "
+                    + "one is filled in. What that means folder by folder, as it stands "
+                    + "right now:"));
+            panel.add(check("Fill in a missing jrock-config.txt (never replaces one)",
+                    copySettings, v -> {
+                        copySettings = v;
+                        redraw();
+                    }));
+            panel.add(check("Fill in a missing bedrock-key.txt as well (never replaces one)",
+                    copyKey, v -> {
+                        copyKey = v;
+                        redraw();
+                    }));
+            Path from = home.resolve(PRODUCT);
+            for (Path dir : dirs) {
+                panel.add(value(dir.toString()));
+                panel.add(fate(dir, from, "jrock-config.txt", copySettings));
+                panel.add(fate(dir, from, "bedrock-key.txt", copyKey));
+            }
             panel.add(note("An agent cannot ask a model without a key in its own folder. "
                     + "JRock itself never copies a key into a folder it was not typed for, "
-                    + "which is why this is a tick and not a given - and why a key "
-                    + "already in one of these folders is left alone. An EMPTY "
-                    + "jrock-config.txt or bedrock-key.txt is not left alone: a blank file "
-                    + "is nobody's setting, and is what an install done before the key was "
-                    + "typed leaves behind."));
+                    + "which is why this is a tick and not a given. An EMPTY file is the "
+                    + "one exception to \"kept as it is\": a blank jrock-config.txt or "
+                    + "bedrock-key.txt is nobody's setting, and is what an install done "
+                    + "before the key was typed leaves behind."));
         }, () -> {
             for (Path dir : sampleFolders()) {
                 Path jrock = dir.resolve(PRODUCT);
@@ -1029,9 +1065,9 @@ public final class InstallJRock {
                     panel.add(alarm("Will be removed: " + loginAt));
                 }
             }
-            List<String> running = runningJRock();
+            List<Running> running = runningJRock();
             if (!running.isEmpty()) {
-                panel.add(note("Some of JRock is running: " + String.join(", ", running)
+                panel.add(note("Some of JRock is running: " + runningList(running)
                         + ". The script will name what it finds and ask whether to stop "
                         + "all of it and start again - a no leaves it exactly as it is."));
             } else {
@@ -1104,6 +1140,32 @@ public final class InstallJRock {
     // nothing, and would write over a key that somebody had typed into that folder
     // themselves. A file that cannot be READ counts as one with something in it, because
     // the only thing worse than leaving an empty config in place is replacing a real one.
+    // What is about to happen to one file in one folder, said before it happens.
+    //
+    // Because "Copy jrock-config.txt into each of them" is a sentence somebody can read
+    // as "replace the settings of every agent I have set up", and the answer to "will it?"
+    // should be on the page rather than in the log afterwards. The same three questions
+    // copyIfUnset asks, asked here for the answer instead of for the action.
+    private static javax.swing.JComponent fate(Path dir, Path from, String name,
+                                               boolean ticked) {
+        Path source = from.resolve(name);
+        Path target = dir.resolve(PRODUCT).resolve(name);
+        String what = "   " + name + " - ";
+        if (!ticked) {
+            return found(true, what + "not touched (the tick is off)");
+        }
+        if (!Files.isRegularFile(source) || isBlank(source, true)) {
+            return found(false, what + "nothing to copy: " + source + " is "
+                    + (Files.exists(source) ? "empty" : "not there"));
+        }
+        if (Files.exists(target) && !isBlank(target, false)) {
+            return found(true, what + "KEPT as it is - this folder has its own");
+        }
+        return found(true, what + (Files.exists(target)
+                ? "filled in, because the file there is empty"
+                : "copied, because there is none yet"));
+    }
+
     private static void copyIfUnset(Path from, Path to) throws IOException {
         if (!Files.isRegularFile(from) || isBlank(from, true)) return;
         boolean there = Files.exists(to);
@@ -1684,7 +1746,25 @@ public final class InstallJRock {
     // Anything of JRock still running, by the command line that started it. A second
     // JRock in one folder writes the same log and the same prompt file, and the two
     // overwrite each other - so this is asked before anything is started.
-    private static List<String> runningJRock() {
+    // One of them: the pid to stop it by, what the process is called, which sample it is,
+    // and the folder it was started in.
+    private static final class Running {
+        final long pid;
+        final String program, sample;
+        final Path work;
+
+        Running(long pid, String program, String sample, Path work) {
+            this.pid = pid; this.program = program; this.sample = sample; this.work = work;
+        }
+
+        String label() {
+            return sample + " (" + program + " " + pid
+                    + (work == null || work.getFileName() == null ? ""
+                       : ", in " + work.getFileName()) + ")";
+        }
+    }
+
+    private static List<Running> runningJRock() {
         List<String> lines = new ArrayList<>();
         if (isWindows()) {
             // Single quotes only, and a concatenation rather than interpolation: Windows
@@ -1697,7 +1777,7 @@ public final class InstallJRock {
             lines.addAll(run("/bin/sh", "-c", "ps -ax -o pid=,comm=,command= "
                     + "| sed 's/  */|/; s/  */|/'"));
         }
-        List<String> running = new ArrayList<>();
+        List<Running> running = new ArrayList<>();
         for (String line : lines) {
             String[] parts = line.split("\\|", 3);
             if (parts.length < 3) continue;
@@ -1714,10 +1794,108 @@ public final class InstallJRock {
                     || command.matches("(?s).*JRock[A-Za-z0-9]*\\.java.*");
             if (!jvm || !ours || command.contains("InstallJRock")) continue;
             Path work = flagIn(command, "--working-dir");
-            running.add(name + " " + pid + (work == null || work.getFileName() == null ? ""
-                    : " in " + work.getFileName()));
+            long number;
+            try {
+                number = Long.parseLong(pid);
+            } catch (NumberFormatException ex) {
+                continue;        // not a process this can do anything about
+            }
+            running.add(new Running(number, name, which(command), work));
         }
         return running;
+    }
+
+    // Which JRock a command line is: the sample's own name where it has one, and the
+    // program itself where it does not.
+    //
+    // The source file first, then a class name standing on its own - and NOT a name
+    // inside a path, which is the trap here: every one of these command lines has
+    // "...\JRockAssistant\..." in it somewhere, so a plain search for JRock-something
+    // reported eight processes all called "Assistant". A sample's name is either
+    // JRockPapers.java or the bare class JRockPapers at the end of the line; a folder's
+    // name has a separator on one side of it.
+    private static String which(String command) {
+        Matcher file = Pattern.compile("JRock([A-Za-z0-9]+)\\.java").matcher(command);
+        if (file.find()) return file.group(1);
+        Matcher clazz = Pattern.compile("(?<![\\\\/\\w])JRock([A-Za-z0-9]+)(?![\\\\/\\w.])")
+                .matcher(command);
+        if (clazz.find()) return clazz.group(1);
+        return "JRock";
+    }
+
+    private static String runningList(List<Running> running) {
+        List<String> labels = new ArrayList<>();
+        for (Running one : running) labels.add(one.label());
+        return String.join(", ", labels);
+    }
+
+    // Stops them, and says how many went.
+    //
+    // By pid and not by command line, which is the one thing Java can do about another
+    // process on every platform: ProcessHandle.of(pid) finds it, destroy() asks it to go
+    // and destroyForcibly() stops asking. (The LOOKING is done by a shell above, because
+    // on Windows ProcessHandle tells you nothing about a process it did not start -
+    // measured here: 294 processes, 0 command lines, including this program's own.)
+    //
+    // Asked politely first and then not: half a second is long enough to find out whether
+    // a Swing program with a modal dialog open is going to answer. Nothing of a session
+    // rides on it - JRock writes its log as it goes and autosaves the prompt.
+    private static int stopJRocks() {
+        List<Running> running = runningJRock();
+        if (running.isEmpty()) return 0;
+        List<ProcessHandle> handles = new ArrayList<>();
+        for (Running one : running) {
+            ProcessHandle.of(one.pid).ifPresent(handles::add);
+        }
+        for (ProcessHandle handle : handles) handle.destroy();
+        sleep(500);
+        for (ProcessHandle handle : handles) {
+            if (handle.isAlive()) handle.destroyForcibly();
+        }
+        sleep(300);
+        int stopped = 0;
+        for (ProcessHandle handle : handles) {
+            if (!handle.isAlive()) stopped++;
+        }
+        say("Stopped " + stopped + " of " + running.size() + " running: "
+                + runningList(running));
+        return stopped;
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // The offer, made where it matters: at the copy that cannot be done while they run.
+    // Returns the reason to stay on the page, or null to carry on.
+    private static String stopFirstIfRunning() {
+        List<Running> running = runningJRock();
+        if (running.isEmpty()) return null;
+        int answer = javax.swing.JOptionPane.showConfirmDialog(window,
+                running.size() + " JRock "
+                + (running.size() == 1 ? "process is" : "processes are") + " still running:"
+                + "\n\n" + runningList(running)
+                + "\n\nWindows will not let jrock.jar be replaced while they have it open, "
+                + "so this install cannot go on while they do.\n\nStop them now and carry "
+                + "on? Nothing of a session is lost - JRock writes its log as it goes and "
+                + "autosaves the prompt. They are started again by the start script on the "
+                + "last page.",
+                "JRock is running", javax.swing.JOptionPane.YES_NO_OPTION,
+                javax.swing.JOptionPane.WARNING_MESSAGE);
+        if (answer != javax.swing.JOptionPane.YES_OPTION) {
+            return "Close the running JRocks yourself, then press Next again.";
+        }
+        stopJRocks();
+        List<Running> left = runningJRock();
+        if (!left.isEmpty()) {
+            return left.size() + " would not stop (" + runningList(left) + "). Close "
+                    + "them by hand, then press Next again.";
+        }
+        return null;
     }
 
     // JRock, and the AGENTS - the ones that loop. A flow is a single run that asks for a
@@ -1982,13 +2160,78 @@ public final class InstallJRock {
         return paragraph(words, ALARM, 6, 2);
     }
 
+    // A PARAGRAPH WRAPS TO THE WIDTH IT HAS, which is why this is a text area and not an
+    // HTML label.
+    //
+    // A label wraps only where its HTML names a width, and a width in HTML is in CSS
+    // pixels, which Swing scales by the display: "width:700px" asks for 910 device pixels
+    // on a 130% screen. The window is then narrower than the text in it and there is no
+    // horizontal scrollbar to reach the rest - page 1 read "...already installed:
+    // JRockBrowser, JRockPapers, JRockLocation, JRockPushToTalk, JRockThunderbird, J" and
+    // stopped at the window's edge, mid-name.
+    //
+    // A text area wraps to the width it is actually given, whatever the display is doing,
+    // and breaks inside a word when the word is wider than that - which a path, or the
+    // tail of a comma-separated list of class names, always is.
     private static javax.swing.JComponent paragraph(String words, java.awt.Color colour,
                                                     int above, int below) {
-        javax.swing.JLabel label = new javax.swing.JLabel("<html><div style='width:"
-                + TEXT_WIDTH + "px'>" + escape(words) + "</div></html>");
-        if (colour != null) label.setForeground(colour);
-        label.setBorder(javax.swing.BorderFactory.createEmptyBorder(above, 0, below, 0));
-        return row(label);
+        javax.swing.JTextArea area = wrapping(words);
+        if (colour != null) area.setForeground(colour);
+        area.setBorder(javax.swing.BorderFactory.createEmptyBorder(above, 0, below, 0));
+        return growing(area);
+    }
+
+    // The text area every wrapping line on a page is: plain, transparent, out of the Tab
+    // order, and carrying the look of a label rather than of a form field.
+    //
+    // Its maximum height is ANSWERED WHEN ASKED rather than set while the page is built.
+    // BoxLayout hands leftover vertical space to whatever will take it, so a maximum is
+    // needed - but the height these prefer is a function of the width they are given, and
+    // they have none until the page is laid out: a maximum stored at build time freezes
+    // the paragraph at the one line it preferred while nobody had told it anything. Asked
+    // at layout time, it is the height the words actually need.
+    private static javax.swing.JTextArea wrapping(String words) {
+        javax.swing.JTextArea area = new javax.swing.JTextArea(words) {
+            // THE HEIGHT IS A FUNCTION OF THE WIDTH, and the width is not known until the
+            // page is laid out. So both answers are worked out when they are asked for:
+            // the area is sized to the width it has been given, which makes the text
+            // re-wrap, and the height that wrapping needs is what it then reports.
+            //
+            // Measured before this: the paragraph reported the height of the single line
+            // it preferred while its width was still zero, BoxLayout gave it exactly
+            // that, and the second and third lines were drawn below the bottom of it -
+            // which is a page whose text is cut off horizontally AND vertically.
+            @Override public java.awt.Dimension getPreferredSize() {
+                int width = getWidth();
+                if (width <= 0 && getParent() != null) width = getParent().getWidth();
+                if (width <= 0) return super.getPreferredSize();
+                setSize(width, Short.MAX_VALUE);
+                java.awt.Dimension wrapped = super.getPreferredSize();
+                return new java.awt.Dimension(width, wrapped.height);
+            }
+
+            // And the maximum is that same height, so BoxLayout hands the slack at the
+            // bottom of the page to the glue instead of stretching a paragraph.
+            @Override public java.awt.Dimension getMaximumSize() {
+                return new java.awt.Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setEditable(false);      // but selectable: a path can still be copied out
+        area.setFocusable(false);
+        area.setOpaque(false);
+        java.awt.Font label = javax.swing.UIManager.getFont("Label.font");
+        if (label != null) area.setFont(label);
+        return area;
+    }
+
+    // A row aligned to the left margin and left to cap its own height, for the components
+    // above that answer that question themselves (see wrapping). row() is for everything
+    // else: a field or a button knows its height before it is laid out.
+    private static <T extends javax.swing.JComponent> T growing(T component) {
+        component.setAlignmentX(0f);
+        return component;
     }
 
     // A path, a label, a command: monospaced, and broken onto further lines when it is
@@ -2022,12 +2265,16 @@ public final class InstallJRock {
         return html.append(escape(text.substring(from))).append("</html>").toString();
     }
 
+    // A tick or a cross and what it is about - wrapping, because one of these lines is
+    // the names of everything already installed, which is as long as the install is. It
+    // was a plain label, which wraps nowhere at all, and on a ten-agent install it ran
+    // off the right of the window.
     private static javax.swing.JComponent found(boolean yes, String what) {
-        javax.swing.JLabel label = new javax.swing.JLabel((yes ? "\u2713  " : "\u2717  ")
-                + escape(what));
-        label.setForeground(yes ? BRAND : ALARM);
-        label.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 4, 2, 0));
-        return row(label);
+        javax.swing.JTextArea area = wrapping((yes ? "\u2713  " : "\u2717  ") + what);
+        area.setForeground(yes ? BRAND : ALARM);
+        area.setFont(area.getFont().deriveFont(java.awt.Font.BOLD));
+        area.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 4, 2, 0));
+        return growing(area);
     }
 
     private static javax.swing.JComponent check(String label, boolean on,
@@ -2044,6 +2291,17 @@ public final class InstallJRock {
         button.setOpaque(false);
         button.addActionListener(e -> set.accept(true));
         return row(button);
+    }
+
+    // A button that does something on this page rather than opening a link or going on.
+    private static javax.swing.JComponent action(String label, Runnable what) {
+        javax.swing.JButton button = new javax.swing.JButton(label);
+        button.addActionListener(e -> what.run());
+        javax.swing.JPanel holder = new javax.swing.JPanel(new java.awt.FlowLayout(
+                java.awt.FlowLayout.LEFT, 0, 2));
+        holder.setOpaque(false);
+        holder.add(button);
+        return row(holder);
     }
 
     private static javax.swing.JComponent link(String label, String url) {

@@ -2775,6 +2775,14 @@ sequenceDiagram
   reading an unfiled scan would be reading a picture), while in the incoming folder everything
   readable is readable **now** — nothing there arrived as paper, so there is nothing to convert
   first. That is what makes that folder *always filed by design*.
+
+  **Both are rows in the window**, each with its own *Browse…* and *Use*, and both are
+  remembered in `jrock-papers.txt` (`folder=`, `incoming=`). They were not, and that was two
+  bugs in one: the incoming folder could only be named with `--incoming` on the command line, and
+  the settings file **read** `incoming=` while never writing it — so the folder documents are
+  saved into was forgotten by the next start and silently went back to `Documents\Incoming`.
+  `#folder` now answers with both folders too, since the difference between them is the shape of
+  this agent: one is written by a scanner, the other is where everything saved goes.
 - **A file that is not already text goes through a model once.** Asked about a `.docx`, a PDF, a
   spreadsheet or a photograph in the incoming folder, the agent includes it in **its own JRock**
   as the kind it is and asks for clean Markdown — the same bargain the Thunderbird agent strikes
@@ -4234,11 +4242,19 @@ written again.
 Nine pages, in this order:
 
 1. **What was unpacked** — `jrock.jar` and `samples/` have to be in the folder it was started
-   from, which is where a release unpacks to. Missing, it says so and waits for Retry.
+   from, which is where a release unpacks to. Missing, it says so and waits for Retry. On an
+   update it also says **what is running right now**, named one by one — *JRock (javaw.exe
+   17880), Browser, Location, Papers, PushToTalk, Thunderbird, Timer, Weather* — with a **Stop
+   them all now** button, because Windows will not let a file be replaced while a process has it
+   open and `jrock.jar` is open in every one of them. Nothing of a session is lost by stopping
+   them: JRock writes its log as it goes and autosaves the prompt, and the last page's start
+   script puts them all back.
 2. **Where everything goes** — default `~/Documents/JRockAssistant`, with the tree above drawn
    on the page. The jar is copied there with its **SHA-256 and MD5** written beside it, computed
    from the copy that just landed. The page says why the **folder name** matters: it is what
-   every Explorer entry is labelled with.
+   every Explorer entry is labelled with. This is the first write, so it is where the question
+   above is asked again if it has to be: *N processes are still running — stop them and carry
+   on?* A **no** keeps the page rather than failing halfway through a copy.
 3. **Ghostscript and xpdf** — looked for on `PATH`, with [where to get them](#pdf-conversion-ghostscript)
    and a **Retry** when you have. Or continue without: everything else works, and JRock names
    the missing tool if you ever ask it for that conversion.
@@ -4270,7 +4286,16 @@ Nine pages, in this order:
 7. **Settings for the agents and flows** — every folder that runs a JRock of its own is offered
    a copy of `jrock-config.txt`, and the key as a **separate tick**: an agent cannot ask a model
    without one, and JRock itself never copies a key into a folder it was not typed for, so this
-   is a choice rather than a given. A file already in one of those folders is left alone, with
+   is a choice rather than a given.
+
+   The page now says **what will happen to each file in each folder, before it happens** —
+   `jrock-config.txt - KEPT as it is - this folder has its own`, or `copied, because there is
+   none yet` — and the ticks read *Fill in a missing jrock-config.txt (never replaces one)*.
+   The behaviour was always that; the words were not. "Copy jrock-config.txt into each of them"
+   is a sentence somebody can reasonably read as *replace the settings of every agent I have set
+   up*, and the answer to "will it?" belongs on the page rather than in the log afterwards.
+
+   A file already in one of those folders is left alone, with
    one exception that cannot lose anything: an **empty** `jrock-config.txt` or `bedrock-key.txt`
    is written over. That is not a corner case — the home folder's own key file starts empty, so
    an install done before the key was typed leaves an empty key in every agent folder, and
