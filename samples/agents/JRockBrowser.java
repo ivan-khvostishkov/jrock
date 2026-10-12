@@ -13,11 +13,11 @@
 // the PNG it wrote, with no JRock, no model and no window. It is the way to see what the
 // browser did without spending a request on it.
 //
-// SIX HOSTS AND ONE PAGE, AND NOTHING ELSE. duckduckgo.com, businessinsider.com,
-// zdnet.com, techcrunch.com, scmp.com, arstechnica.com - and Wikipedia's Current events
-// portal, which is allowed as a PAGE while its host is not allowed at all. A list in
-// this file, not a setting, not a line in a request, and not something a model can add
-// to. The web is the one thing an agent reaches that nobody in the room controls, so
+// SEVEN HOSTS AND ONE PAGE, AND NOTHING ELSE. duckduckgo.com, businessinsider.com,
+// zdnet.com, techcrunch.com, scmp.com, arstechnica.com, theverge.com - and Wikipedia's
+// Current events portal, which is allowed as a PAGE while its host is not allowed at
+// all. A list in this file, not a setting, not a line in a request, and not something a
+// model can add to. The web is the one thing an agent reaches that nobody in the room controls, so
 // what it may reach is written down where it can be read.
 //
 // The check is made TWICE, and the second time is the one that matters:
@@ -135,6 +135,7 @@ public final class JRockBrowser {
         "techcrunch.com",
         "scmp.com",
         "arstechnica.com",
+        "theverge.com",
     };
 
     // ONE PAGE, NOT A HOST. Wikipedia's Current events portal is a news summary of the
@@ -366,6 +367,7 @@ public final class JRockBrowser {
         { "techcrunch.com", "techcrunch", "tech crunch", "crunch" },
         { "scmp.com", "scmp", "south china morning post", "south china", "morning post" },
         { "arstechnica.com", "arstechnica", "ars technica", "ars" },
+        { "theverge.com", "theverge", "the verge", "verge" },
         { "https://en.wikipedia.org/wiki/Portal:Current_events", "current events",
           "wikipedia current events", "wikipedia", "wiki current events", "wiki news",
           "portal current events", "what is happening in the world" },
@@ -584,7 +586,7 @@ public final class JRockBrowser {
     // parsed for meaning, and the addresses stay inside - the model asked for "the one
     // about the Cray-1 replica" and gets the page, not a URL.
     //
-    // Links off the six hosts are dropped BEFORE anything is matched, so "follow the
+    // Links off the list are dropped BEFORE anything is matched, so "follow the
     // advertisement" cannot resolve to one. What is left is scored on the words of the
     // description, and a tie goes to the shorter link text - a headline that says exactly
     // the words asked for beats a nav item that happens to contain them.
@@ -1310,7 +1312,7 @@ public final class JRockBrowser {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        window = new javax.swing.JFrame("JRock - Browser (six hosts, read-only)");
+        window = new javax.swing.JFrame("JRock - Browser (7 hosts, read-only)");
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
@@ -1333,7 +1335,7 @@ public final class JRockBrowser {
 
         askField = new javax.swing.JTextField(46);
         askField.setFont(small);
-        askField.setToolTipText("An address on one of the six hosts, or words to search for");
+        askField.setToolTipText("An address on one of the hosts on the list, or words to search for");
         javax.swing.JButton page = new javax.swing.JButton("Read page");
         javax.swing.JButton search = new javax.swing.JButton("Search");
         page.addActionListener(e -> ask("#page " + askField.getText().trim()));
@@ -1458,7 +1460,7 @@ public final class JRockBrowser {
 
     // ---- Settings --------------------------------------------------------------
     // Three lines at most, beside this agent: which browser, which debugging port, and
-    // whether its window shows. The six hosts are NOT here - they are the one thing this
+    // whether its window shows. The hosts are NOT here - they are the one thing this
     // agent will not take from a file.
     private static void readSettings() {
         Path file = ownDirectory().resolve(SETTINGS);

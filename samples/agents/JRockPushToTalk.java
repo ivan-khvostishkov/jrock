@@ -272,8 +272,8 @@ public final class JRockPushToTalk {
             "^\\W*I need your mail:\\s*(.*\\S)\\W*$",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
-    // The answer that asks for something off the web. Six hosts, and the browser agent
-    // refuses anything else - twice, before and after the page loads.
+    // The answer that asks for something off the web. The browser agent keeps the list
+    // of hosts and refuses anything else - twice, before and after the page loads.
     //
     // TWO LAYERS, AND THEY CARRY DIFFERENT THINGS. Between this agent and the browser
     // agent: addresses, Markdown, and what to open said in words. Between the operator

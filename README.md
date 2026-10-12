@@ -2352,8 +2352,9 @@ java -cp jrock.jar JRockBrowser.java --shot zdnet.com    # the photographs, and 
 java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation section"
 ```
 
-- **Six hosts and one page, and nothing else, ever.** `duckduckgo.com`,
-  `businessinsider.com`, `zdnet.com`, `techcrunch.com`, `scmp.com`, `arstechnica.com` — a list
+- **Seven hosts and one page, and nothing else, ever.** `duckduckgo.com`,
+  `businessinsider.com`, `zdnet.com`, `techcrunch.com`, `scmp.com`, `arstechnica.com`,
+  `theverge.com` — a list
   in the agent's own source, not a setting, not a line in a request, and not something a model
   can add to. The web is the one thing an agent reaches that nobody in the room controls, so
   what it may reach is written down where it can be read.
