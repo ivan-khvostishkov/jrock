@@ -2639,12 +2639,17 @@ Protocol is JSON over a WebSocket, and a WebSocket client has been in the JDK si
 
 ### A seventh agent: papers, in and out (`JRockPapers.java`)
 
-The letters that come through the door — what the scanner has put in its folder, what arrived
-when, and once a letter has been filed, what it says.
+The post that comes through the door, and the documents that arrive by every other route — what
+the scanner has put in its folder, what arrived when, what a filed letter says, and what was
+kept as a document of its own.
 
-**Letters, and that is the name.** The [Thunderbird
+**Papers, and that is the name.** The [Thunderbird
 agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) reads
-e-mail; this one reads the post. "Mail" would have meant both and so neither.
+e-mail; this one reads what is on paper. *"Mail"* would have meant both and so neither — and
+*"Letters"*, which this agent was called first, stopped being true the moment it also handled
+the documents nobody posted. A scan is a **letter**, a kept answer or a downloaded file is a
+**document**, *papers* is the word that covers both, and the agent says which of the two it is
+reading out by the folder it came from.
 
 ```sh
 java -cp jrock.jar JRockPapers.java --folder D:\HPNetworkScan
@@ -2669,7 +2674,7 @@ sequenceDiagram
         participant PTT as JRockPushToTalk
         participant PM as its JRock (model)
     end
-    participant Let as JRockPapers, 127.0.0.1:47475
+    participant Pap as JRockPapers, 127.0.0.1:47475
     box One letter, one lifetime
         participant Flow as JRockDocInventory #45;#45;auto
         participant FM as its own JRock (model)
@@ -2681,9 +2686,9 @@ sequenceDiagram
     rect rgb(220, 235, 255)
         PTT->>PM: recording + appendix
         PM-->>PTT: "I need the post: recent"
-        PTT->>Let: #35;recent
-        Note over Let: lists the folder - no model, no key
-        Let-->>PTT: 1 document, 2 files - one letter in two passes
+        PTT->>Pap: #35;recent
+        Note over Pap: lists the folder - no model, no key
+        Pap-->>PTT: 1 document, 2 files - one letter in two passes
         PTT->>PM: that answer as the next prompt
     end
     rect rgb(255, 245, 200)
@@ -2693,15 +2698,15 @@ sequenceDiagram
     end
     rect rgb(220, 235, 255)
         PM-->>PTT: "I need the post: file it"
-        PTT->>Let: #35;inventory
-        Let->>Flow: java -cp jrock.jar JRockDocInventory.java #45;#45;auto front.pdf back.pdf
+        PTT->>Pap: #35;inventory
+        Pap->>Flow: java -cp jrock.jar JRockDocInventory.java #45;#45;auto front.pdf back.pdf
         Flow->>FM: starts it, takes it as an automation
         FM-->>Flow: duplex merge (automationMergeDuplex)
         Note over Flow,FM: pass 1 Markdown + DOCX, pass 2 plain text, pass 3 the name
         Flow->>Flow: renames every file of the document
-        Flow-->>Let: AUTO-RESULT name=... scanned=... files=3
+        Flow-->>Pap: AUTO-RESULT name=... scanned=... files=3
         Note over FM: its window closes with the flow
-        Let-->>PTT: Filed: 2026-10-02-DHL-Shipping...-1234567890
+        Pap-->>PTT: Filed: 2026-10-02-DHL-Shipping...-1234567890
         PTT->>PM: that answer as the next prompt
     end
     rect rgb(255, 245, 200)
@@ -2711,8 +2716,8 @@ sequenceDiagram
     end
     rect rgb(220, 235, 255)
         PM-->>PTT: "I need the post: Shipping Confirmation"
-        PTT->>Let: #35;file Shipping Confirmation
-        Let-->>PTT: CONTENT <name>.txt + the letter's text
+        PTT->>Pap: #35;file Shipping Confirmation
+        Pap-->>PTT: CONTENT <name>.txt + the letter's text
         Note over PTT: written into PTTFiles/papers/ and INCLUDED as a document
         PTT->>PM: "say what this letter is about" + the .txt
     end
