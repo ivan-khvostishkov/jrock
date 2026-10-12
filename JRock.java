@@ -3355,6 +3355,76 @@ public class JRock {
     // Ctrl, and a touch screen has neither - so the names have to go in by hand, and by
     // hand on a phone means pasted. The chooser's own syntax for several is each name in
     // double quotes, separated by spaces: "a.png" "b.png".
+    // THE AUDIO DEVICES ARE LISTED WHEN SOMEBODY OPENS THE LIST OF THEM. Once, and then
+    // not again until the Configure dialog is closed.
+    //
+    // They used to be listed by trying to USE one: press Narrate with no speaker set, and
+    // the devices were enumerated into this dropdown together with a dialog telling you to
+    // come back here and choose. That is a peculiar way to answer "which speakers has this
+    // machine got?", and it left the dropdown EMPTY until you had done it - a dropdown
+    // with nothing in it being the one thing a dropdown must never be.
+    //
+    // Not at startup and not when the dialog opens, because asking is not free: it opens
+    // every mixer the system has and asks each whether it can play or record, which
+    // measured 488 ms cold here (and 20 ms warm - Java Sound caches, the first question
+    // pays for all of them). Nothing should spend half a second on a list nobody has asked
+    // to see. The first time the popup opens is exactly when it has been asked for, so
+    // that is when it happens, behind a wait cursor; the list then stands until the dialog
+    // is closed, so opening it ten times costs one enumeration. A speaker plugged in while
+    // the dialog is open is picked up by closing the dialog and opening it again.
+    //
+    // Whatever was typed or chosen goes back in afterwards: these fields are editable, and
+    // refreshing the list must not take a name out of one.
+    private static void listOnOpen(javax.swing.JComboBox<String> box,
+                                   java.util.function.Supplier<java.util.List<String>> list) {
+        boolean[] listed = { false };
+        box.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent event) {
+                if (listed[0]) return;
+                listed[0] = true;
+                Object chosen = box.getEditor().getItem();
+                java.awt.Window dialog = javax.swing.SwingUtilities.getWindowAncestor(box);
+                java.awt.Cursor was = dialog == null ? null : dialog.getCursor();
+                if (dialog != null) dialog.setCursor(java.awt.Cursor.getPredefinedCursor(
+                        java.awt.Cursor.WAIT_CURSOR));
+                int before = box.getItemCount();
+                try {
+                    java.util.List<String> found = list.get();
+                    box.setModel(new javax.swing.DefaultComboBoxModel<>(
+                            found.toArray(new String[0])));
+                    box.setSelectedItem(chosen);
+                    // The popup was sized for the list it had when it was opened, so when
+                    // the list has actually changed shape - which the first time is almost
+                    // always, from none to all of them - it is opened again at its new size.
+                    if (found.size() != before) {
+                        javax.swing.SwingUtilities.invokeLater(() -> {
+                            // By now the dropdown may be gone - a device picked, Escape
+                            // pressed, the dialog closed - and a combo box that is not on
+                            // the screen cannot show a popup: it throws.
+                            if (!box.isShowing()) return;
+                            box.hidePopup();
+                            box.showPopup();
+                        });
+                    }
+                } finally {
+                    if (dialog != null) dialog.setCursor(was);
+                }
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent event) {
+                // Nothing: the list stands for as long as the dialog does.
+            }
+
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent event) {
+                // Nothing, and deliberately not a retry: a list asked for and then
+                // dismissed has still been listed.
+            }
+        });
+    }
+
     private static void addCopyPasteMenu(javax.swing.text.JTextComponent field, LogView log) {
         if (field == null) return;
         javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
@@ -4677,10 +4747,9 @@ public class JRock {
             addCopyPasteMenu((javax.swing.text.JTextComponent) modelEditor, null);
         }
 
-        // Narrate's output device: free text like the model, over a list that is empty
-        // until Narrate has been pressed with no device set - which is the one moment
-        // the devices are enumerated (see narrateSelection). Empty by default, and
-        // emptying it is how a device is unset and the list made again.
+        // Narrate's output device: free text like the model, over a list that is filled
+        // the first time somebody opens it (see listOnOpen). Empty by default, and
+        // emptying it is how a device is unset.
         //
         // Missing altogether in the browser, which plays the narration itself and gives
         // nobody a choice of where (see narrateDeviceChoosable).
@@ -4694,8 +4763,9 @@ public class JRock {
             deviceF.getEditor().getEditorComponent()
                     .setFont(deviceF.getFont().deriveFont(java.awt.Font.PLAIN));
             deviceF.setToolTipText("The speaker Narrate plays on, and only that one: "
-                    + "JRock never switches to another. Empty it and press Narrate to "
-                    + "list the devices again.");
+                    + "JRock never switches to another. Open the list to see what this "
+                    + "machine has; empty the field to unset it.");
+            listOnOpen(deviceF, () -> outputDevices = outputDeviceNames());
             java.awt.Component deviceEditor = deviceF.getEditor().getEditorComponent();
             if (deviceEditor instanceof javax.swing.text.JTextComponent) {
                 addCopyPasteMenu((javax.swing.text.JTextComponent) deviceEditor, null);
@@ -4784,8 +4854,8 @@ public class JRock {
             });
         }
 
-        // The microphone Ctrl+Space records from, the same way: listed only by Ctrl+Space
-        // pressed with none set (see startRecording), empty by default.
+        // The microphone Ctrl+Space records from, the same way: listed when the list is
+        // opened (see listOnOpen), empty by default.
         javax.swing.JComboBox<String> micF = null;
         if (recordDeviceChoosable()) {
             micF = new javax.swing.JComboBox<>(inputDevices.toArray(new String[0]));
@@ -4796,8 +4866,9 @@ public class JRock {
             micF.getEditor().getEditorComponent()
                     .setFont(micF.getFont().deriveFont(java.awt.Font.PLAIN));
             micF.setToolTipText("The microphone Ctrl+Space records from, and only that "
-                    + "one: JRock never switches to another. Empty it and press Ctrl+Space "
-                    + "to list the microphones again.");
+                    + "one: JRock never switches to another. Open the list to see what "
+                    + "this machine has; empty the field to unset it.");
+            listOnOpen(micF, () -> inputDevices = inputDeviceNames());
             java.awt.Component micEditor = micF.getEditor().getEditorComponent();
             if (micEditor instanceof javax.swing.text.JTextComponent) {
                 addCopyPasteMenu((javax.swing.text.JTextComponent) micEditor, null);

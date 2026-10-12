@@ -1817,9 +1817,9 @@ the voice, so the microphone doesn't record the last answer as the next question
   The file is read again every turn: edit it, and the next question goes with the new one.
   Without it the agent does not start.
 - **The microphone and the speaker are JRock's to choose.** If either is not set, the agent's
-  window says so. Press Ctrl+Space (or Narrate) in JRock's own window once to list the devices
-  into Configure, pick one, and carry on. An answer that could not be read aloud still counts as
-  answered: it is on the screen.
+  window says so. Open **Configure** in JRock's own window, open the **Narrate on** or
+  **Record from** dropdown to see what this machine has, pick one, and carry on. An answer that
+  could not be read aloud still counts as answered: it is on the screen.
 - **A turn that brings no answer says so out loud**, in one fixed phrase: **"Error. Should I
   try again?"** — for a send that failed, a reply that never came, and a reply that arrived
   empty, which is a failed turn to anyone listening however well the request itself went.
@@ -2007,8 +2007,8 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
   on the port is reported in the window. Alarms can still be set there by hand.
 - **Run it in a folder of its own.** JRock keeps one log per folder and writes it whole, so two
   JRocks in one folder, such as this one and push-to-talk's, overwrite each other's log. A
-  folder with no key is fine. Set its **Narrate on** once: press Narrate in its JRock's log
-  menu to list the devices, then pick one in Configure.
+  folder with no key is fine. Set its **Narrate on** once, in its own JRock's Configure: the
+  dropdown lists the speakers when you open it.
 
 ### A third agent: location (`JRockLocation.java`)
 
@@ -2946,7 +2946,13 @@ rather than repeated on every row.
 - **Narrate on** and **Record from** (Windows / desktop) — the one speaker
   [Narrate](#narrate-windows-and-the-browser) plays on and the one microphone
   [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a
-  dropdown, empty until the feature lists the devices, and never fall back to the default.
+  dropdown, and neither ever falls back to the default. **The dropdown fills itself the first
+  time you open it**, which is the moment you have asked what this machine has — not when JRock
+  starts and not when this dialog opens, because asking opens every mixer the system has and
+  takes about half a second cold. Once listed, the list stands until the dialog is closed, so
+  opening it ten times costs one enumeration; something plugged in while the dialog is open is
+  picked up by closing it and opening it again. Whatever is typed in the field survives the
+  list being made.
 - **Narrate with** (Windows, and the browser) — **the voices** Narrate may read in, by their
   names, on a plain line with an **Add** dropdown beside it. **As many as you like, separated by
   commas: the language of the text picks between them.** `Microsoft David Desktop, Microsoft
@@ -3051,10 +3057,11 @@ when it finishes.
 
 - **The speaker is yours to set, and nobody else's.** Windows moves its default output to
   whatever was plugged in last, so JRock does not use that default. A first run has no device set.
-  Press Narrate and nothing is read: a message asks you to set up the output device, and the
-  devices are listed into **Configure → Narrate on:**. That field is free text over a dropdown,
-  like the model. Pick one, press OK, and it is kept as `narrate-device$` in
-  `JRock/jrock-config.txt`. To list the devices again, empty the field and press Narrate.
+  Open **Configure → Narrate on:** and the dropdown lists what this machine has; pick one,
+  press OK, and it is kept as `narrate-device$` in `JRock/jrock-config.txt`. (Pressing Narrate
+  with nothing set also says so and lists them, which is how it used to be found out.) That
+  field is free text over a dropdown, like the model, and emptying it is how a device is
+  unset.
 - **A device that is not there is a failure, and no fallback.** If the speaker is disconnected
   (a Bluetooth speaker switched off, headphones unplugged), Narrate says so in the log and reads
   nothing. It does not switch to another device. The same happens if the device disappears during
