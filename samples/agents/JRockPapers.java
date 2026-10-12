@@ -816,14 +816,46 @@ public final class JRockPapers {
                 + "#inventory.";
     }
 
-    private static void serve(Socket client) throws IOException {
-        InputStream in = client.getInputStream();
-        StringBuilder line = new StringBuilder();
-        for (int c; (c = in.read()) >= 0 && c != '\n'; ) {
-            if (c != '\r') line.append((char) c);
-            if (line.length() > 2000) break;
+    // How long a request may be.
+    //
+    // Generous, because #save carries a whole document - a kept answer with its
+    // headings, its lists and whatever length it happens to have.
+    private static final int REQUEST_MAX = 1_000_000;
+
+    // ONE REQUEST, DECODED AS UTF-8. The agents speak UTF-8 to each other, and a request
+    // carries words: a letter's name, a question, a whole document. Reading it a byte at
+    // a time into chars would be reading it as Latin-1, which turns the two bytes of a
+    // Cyrillic letter into two characters of their own - "Ð¡" for "С" - and that then
+    // goes to a model, into a file name, or into a saved file as the mojibake it has
+    // become.
+    //
+    // Longer than REQUEST_MAX is refused rather than cut: half a document, saved under a
+    // name that says it is the whole one, is worse than an error.
+    private static String readRequest(InputStream in) throws IOException {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        for (int b; (b = in.read()) != -1; ) {
+            if (b == '\n') break;
+            if (bytes.size() >= REQUEST_MAX) {
+                throw new IOException("the request is longer than " + REQUEST_MAX
+                        + " bytes");
+            }
+            bytes.write(b);
         }
-        String request = line.toString().trim();
+        return new String(bytes.toByteArray(), StandardCharsets.UTF_8)
+                .replaceAll("\r$", "").trim();
+    }
+
+    private static void serve(Socket client) throws IOException {
+        String request;
+        try {
+            request = readRequest(client.getInputStream());
+        } catch (IOException tooLong) {
+            String why = "Stopped: " + tooLong.getMessage() + ".";
+            client.getOutputStream().write(why.getBytes(StandardCharsets.UTF_8));
+            client.getOutputStream().flush();
+            later(() -> say(why));
+            return;
+        }
         later(() -> say("Asked: " + request));
         String out;
         try {
