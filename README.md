@@ -1943,7 +1943,8 @@ the voice, so the microphone doesn't record the last answer as the next question
   *"I need your mail: message 0d613e"*, read out to somebody who asked what their post says, is
   the machine talking to itself while they are still waiting.
 - **The web.** When the whole answer is *"I need the web: …"* — `site zdnet.com`,
-  `search <words>`, `follow <what to open> on <address>`, `links on <address>` — the agent asks
+  `search <words>`, `docs <question with the product in it>`,
+  `follow <what to open> on <address>`, `links on <address>` — the agent asks
   the [browser agent](#a-sixth-agent-the-web-by-looking-at-it-jrockbrowserjava) on
   `127.0.0.1:47474` and puts the Markdown it gets back into the next prompt. The slowest of
   them: a browser, a render, six photographs and a model. **Two layers, carrying
@@ -2550,9 +2551,78 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
 |---|---|
 | `#page zdnet.com` | a site's front page — by domain, or by name: `#page South China Morning Post` |
 | `#search quantum computing` | a DuckDuckGo search |
+| `#docs how do I set a baseline grid in indesign` | a question looked up in a product's own documentation, by walking its labels |
 | `#follow the AI link on https://www.zdnet.com/news/` | the matching link on that page, found in its DOM |
 | `#links on https://www.zdnet.com/` | what else can be opened there, in words |
 | `#hosts` | the list |
+
+#### Looking something up in documentation (`#docs`)
+
+Three of the allowed path prefixes are documentation — **InDesign (desktop)**, **Lightroom
+(mobile)** and the **Bedrock user guide** — and a question is answered from them by *walking*,
+not by searching:
+
+```
+#docs how do I set a baseline grid in indesign
+  Looking in Adobe InDesign (desktop): page 1 of at most 5…
+  Following "Use a baseline grid" (21).
+  Looking in Adobe InDesign (desktop): page 2 of at most 5…
+  -> helpx.adobe.com/indesign/desktop/layout-and-grid-tools/grids/use-a-baseline-grid.html
+     (2 of 5 page fetches)
+```
+
+- **Why a walk and not a search.** Documentation *has* a search box, and it is JavaScript asking
+  a service that answers in JSON — nothing this agent can use, since it reads pages from pictures
+  and runs no page's script. But documentation is also the one kind of site built as a tree whose
+  branches are **labelled**: *"Grids and guides"* → *"Create baseline grids"*. The labels are the
+  index, and following them is what a person does with the same page. (On these three sites the
+  labels of the articles themselves are on the front page, so the walk is short — see below.)
+- **Which documentation is named in the question**, not in a separate argument: *"…in indesign"*,
+  *"bedrock: what is a guardrail"*. The longest matching name wins, so *"lightroom mobile"* is not
+  read as *"lightroom"* with a stray *"mobile"* left in the question — and the product's name then
+  comes **out** of the question before anything is scored, because it is on every link in its own
+  documentation and would score the nav bar as highly as the page being looked for.
+- **Five page fetches, at most.** Every step is a page load in a real browser, and a tree this
+  deep is a tree whose answer is not down this branch. Reaching the cap ends the walk with
+  whatever it has rather than failing — an operator waiting on a voice assistant would rather have
+  the page five steps in than a refusal.
+
+  In practice **all three sets answer in two**, and that is worth knowing rather than hiding:
+  their front pages already list the articles, so the first page is the index and the second is
+  the answer. Measured — `use-a-baseline-grid.html`, `thread-text-frames.html`,
+  `create-masks.html`, `guardrails.html`: two fetches each. The cap is there for the branches
+  that do nest, and the rule below is what stops a flat index from eating all five.
+- **Each step must match the question *strictly better* than the last.** This is the rule that
+  keeps it a walk down a tree rather than a tour of one floor: *"Test your guardrail"* → *"Create
+  your guardrail"* is a step sideways between pages that match a question about guardrails exactly
+  as well. Without it the walk spent all five fetches on siblings and stopped on the last one it
+  happened to see — which is how a question about what a guardrail **is** ended up on the page
+  about deleting one. It is also what makes one step enough on a site that renders its whole
+  navigation tree on every page, as the AWS user guide does (**377** followable links on the front
+  page): everything is already visible, so there is nothing deeper to find.
+- **Plurals are taken off both sides.** Documentation is written in the plural (*"Guardrails"*,
+  *"Denied topics"*, *"Grids and guides"*) and asked about in the singular (*"a guardrail"*,
+  *"block a topic"*). Unstemmed those meet as a *near* miss, worth 2 where an exact word is worth
+  8, so the page whose title is precisely the answer loses to any page that repeats a word of the
+  question: *"block a topic with a guardrail"* chose *"Test your guardrail"* before this and
+  *"Bedrock Guardrails"* → `guardrails.html` after it. Only in the walk — the scoring itself is
+  left alone, because `#follow` is calibrated on news headlines, where *Tesla* and *Teslas* are
+  different claims.
+- **Ties go to the page nearer the top of the set**: fewer path segments, then a shorter address.
+  That is how documentation is filed — an overview sits above the pages it introduces — so a
+  question matching both means the overview.
+- **It cannot leave that documentation.** Every step is re-checked after it loads, and a link is
+  only considered if it is under the **same** prefix: a link to Photoshop's help or to Adobe's
+  front page is allowed by the list and is not an answer to a question about InDesign.
+- **Only the page it stops on is photographed**, and only then is a model asked to read it. The
+  pages walked through are read for their links alone — the pictures are the expensive part, a
+  dozen per page and a model call to read them.
+- **The trail comes back with the answer** (`Walked: Use a baseline grid`), because the words of
+  the question are what chose the page: if it stopped somewhere unhelpful, that line is what says
+  why, and asking again in the documentation's own words is what fixes it.
+
+`--docs "<question>"` runs the walk alone — no pictures, no model, no JRock and no window — and
+prints every step, which is how the examples above were measured.
 
 **Addresses are for programs, not for saying out loud.** The answer carries the address the
 browser ended on — the agent asking is a program, and it needs it to say *"the AI link on

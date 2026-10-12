@@ -769,7 +769,13 @@ public final class JRockPushToTalk {
         for (String[] shape : new String[][] {
                 { "follow", "#follow" }, { "open", "#follow" }, { "click", "#follow" },
                 { "search", "#search" }, { "links", "#links" }, { "site", "#page" },
-                { "page", "#page" }, { "hosts", "#hosts" } }) {
+                { "page", "#page" }, { "hosts", "#hosts" },
+                // Documentation, which is a walk through a product's own labels rather
+                // than a page or a search: "docs how do I set a baseline grid in
+                // indesign". The words a model reaches for when the question is about a
+                // program it knows has a manual.
+                { "docs", "#docs" }, { "documentation", "#docs" }, { "manual", "#docs" },
+                { "help", "#docs" }, { "look up", "#docs" } }) {
             if (lower.equals(shape[0])) return shape[1];
             if (lower.startsWith(shape[0] + " ")) {
                 return shape[1] + " " + asked.substring(shape[0].length()).trim();

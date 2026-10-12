@@ -258,10 +258,12 @@ public final class JRockBrowser {
         String shot = null;
         String linksOn = null;
         String wanted = null;
+        String lookUp = null;
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("--shot") && i + 1 < args.length) shot = args[++i];
             else if (args[i].equals("--links") && i + 1 < args.length) linksOn = args[++i];
             else if (args[i].equals("--wanted") && i + 1 < args.length) wanted = args[++i];
+            else if (args[i].equals("--docs") && i + 1 < args.length) lookUp = args[++i];
         }
         readSettings();
 
@@ -322,6 +324,27 @@ public final class JRockBrowser {
             return;
         }
 
+        // --docs: the walk, printed. Which pages a question walks through in a product's
+        // documentation and which one it stops on - no pictures, no model, no JRock and
+        // no window, so the thing being checked is the walking and nothing else.
+        if (lookUp != null) {
+            try {
+                Walk walk = walk(lookUp, System.out::println);
+                System.out.println("\nIn: " + walk.set);
+                System.out.println("Asked: " + walk.wanted);
+                System.out.println("Walked: " + (walk.trail.isEmpty() ? "(nowhere - the "
+                        + "front page is where it stopped)" : String.join(" -> ", walk.trail)));
+                System.out.println("Stopped on: " + walk.landed);
+                System.out.println("Page fetches: " + walk.fetched + " of "
+                        + DOCS_FETCHES_MAX);
+            } catch (Stop stop) {
+                System.out.println("Stopped: " + stop.getMessage());
+            } finally {
+                closeBrowser();
+            }
+            return;
+        }
+
         // JRock of its own, taken as an automation: the prompt read-only, the mic muted,
         // and the window there to watch the work.
         JRock.main(args);
@@ -372,12 +395,18 @@ public final class JRockBrowser {
                             + "on, as #follow the AI link on https://www.zdnet.com/news/");
                 }
                 return follow(rest);
+            case "#docs":
+                if (rest.isEmpty()) {
+                    throw new Stop("#docs wants a question with the product in it, as "
+                            + "#docs how do I set a baseline grid in indesign");
+                }
+                return docs(rest);
             case "#links":
                 return links(rest);
             default:
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
-                        + "#page <site or address>, #search <words>, #follow <what to "
-                        + "open>, #links or #hosts.");
+                        + "#page <site or address>, #search <words>, #docs <question with "
+                        + "the product in it>, #follow <what to open>, #links or #hosts.");
         }
     }
 
@@ -488,6 +517,10 @@ public final class JRockBrowser {
                     .append(" - ask for it as \"current events\". Nothing can be followed "
                             + "from it: every link on it leads off the list.");
         }
+        out.append("\nThree of those parts are documentation, and #docs looks a question "
+                + "up in one of them by walking its own labels, up to "
+                + DOCS_FETCHES_MAX + " page fetches deep:");
+        for (String[] set : DOCS) out.append("\n- ").append(set[1]);
         return out.append("\nEach can be asked for by domain or by name - \"zdnet\", "
                 + "\"ars technica\", \"venturebeat\", \"data science in your pocket\", "
                 + "\"indesign\", \"lightroom\", \"bedrock\". A search goes to DuckDuckGo. "
@@ -624,7 +657,18 @@ public final class JRockBrowser {
         note.accept("Using the tab for " + site + ".");
 
         String landed = fetchInto(live, tab, url, note);
+        return photograph(live, tab, landed, note);
+    }
 
+    // The second half of a fetch: the page ALREADY in that tab, measured and taken in
+    // A4-shaped pieces.
+    //
+    // Its own method because a documentation walk navigates several pages and
+    // photographs only the one it arrives at (see docs): the pictures are the expensive
+    // part - a dozen of them per page, and a model call to read them - and the pages
+    // walked through on the way are read for their links alone.
+    private static Page photograph(WebSocket live, String tab, String landed,
+                                   java.util.function.Consumer<String> note) {
         String metrics = call(live, tab, "Page.getLayoutMetrics", "{}");
         int width = Math.max(VIEW_WIDTH, (int) jsonNumber(metrics, "width"));
         int whole = Math.max(VIEW_HEIGHT, (int) jsonNumber(metrics, "height"));
@@ -668,6 +712,289 @@ public final class JRockBrowser {
         // the operator's to deal with in that window, and then to ask again.
         lastSite = site(landed);
         return new Page(landed, lastSite, title, pieces, width, whole, cut);
+    }
+
+    // ---- Looking something up in documentation ---------------------------------
+    // A question, and the page of a product's documentation that answers it: the set's
+    // own front page read for its links, the best one followed, and that page read for
+    // ITS links, until the question stops matching anything deeper. Then - and only then
+    // - the page is photographed and read.
+    //
+    // WHY A WALK AND NOT A SEARCH. Documentation has a search box, and it is JavaScript
+    // asking a service that answers in JSON: nothing this agent can use, since it reads
+    // pages from their pictures and runs no page's script. But documentation is also the
+    // one kind of site built as a tree whose branches are LABELLED - "Text", "Grids and
+    // guides", "Create baseline grids" - so the labels are the index, and following them
+    // is what a person does with the same page.
+    //
+    // FIVE FETCHES, AND NOT ONE MORE. Every step is a page load in a real browser, and a
+    // tree this deep is a tree whose answer is not down this branch anyway. The cap is
+    // the loop's only exit that is not "nothing deeper matches": it ends the walk with
+    // whatever it has rather than failing, because the page five steps in is still an
+    // answer about the question and an operator waiting on a voice assistant would
+    // rather have it than a refusal.
+    private static final int DOCS_FETCHES_MAX = 5;
+
+    // The documentation sets, by the page each one starts at. What they are CALLED is in
+    // NAMES with every other name, so "indesign", "lightroom docs" and "bedrock user
+    // guide" need saying in only one place; this table is what counts as documentation.
+    private static final String[][] DOCS = {
+        { "https://helpx.adobe.com/indesign/desktop.html", "Adobe InDesign (desktop)" },
+        { "https://helpx.adobe.com/lightroom/mobile.html", "Adobe Lightroom (mobile)" },
+        { "https://docs.aws.amazon.com/bedrock/latest/userguide/",
+          "the Amazon Bedrock user guide" },
+    };
+
+    // Where a walk ended up, and how it got there. The tab is in it because the page is
+    // still on screen in it: what reads the page comes next, and photographs this.
+    private static final class Walk {
+        final WebSocket live;
+        final String tab, landed, set, wanted;
+        final List<String> trail;
+        final int fetched;
+
+        Walk(WebSocket live, String tab, String landed, String set, String wanted,
+             List<String> trail, int fetched) {
+            this.live = live; this.tab = tab; this.landed = landed;
+            this.set = set; this.wanted = wanted;
+            this.trail = trail; this.fetched = fetched;
+        }
+    }
+
+    // The walk, and then the page it stopped on, read.
+    private static String docs(String asked) {
+        Walk walk = walk(asked, note -> later(() -> say(note)));
+        later(() -> say("Reading the page from its picture…"));
+        Page page = photograph(walk.live, walk.tab, walk.landed,
+                note -> later(() -> say(note)));
+        String markdown = toMarkdown(page);
+        return "Documentation: " + walk.set
+                + "\nSite: " + page.site
+                + (page.title.isEmpty() ? "" : "\nPage: " + page.title)
+                + "\nAsked: " + walk.wanted
+                + "\nWalked: " + (walk.trail.isEmpty()
+                        ? "the front page of the set, which is where the question stopped "
+                          + "matching anything deeper"
+                        : String.join(" → ", walk.trail))
+                + "   (" + walk.fetched + " of " + DOCS_FETCHES_MAX + " page fetches)"
+                + "\nURL: " + page.url + "   (for your next request - never read an "
+                + "address out loud)\n\n" + markdown
+                + (page.cut ? "\n\n(The page went on past " + SLICES_MAX + " pieces, so "
+                        + "this is the top of it.)" : "")
+                + "\n\n(If this is the wrong page, the words of the question are what "
+                + "chose it: ask again with the words the documentation would use, or "
+                + "#links to see what the page it stopped on offers.)";
+    }
+
+    // The walk itself: no pictures, no model, and every step reported through note - so
+    // --docs can run it on its own and show where it went.
+    private static Walk walk(String asked, java.util.function.Consumer<String> note) {
+        String question = asked.trim();
+        // Which documentation, said anywhere in the question: "how do I set a baseline
+        // grid in indesign" names it at the end, "bedrock: what is a guardrail" at the
+        // front. The longest matching name wins, so "lightroom mobile" is not read as
+        // "lightroom" with the word "mobile" left in the question.
+        String root = null;
+        String label = null;
+        String named = "";
+        for (String[] set : DOCS) {
+            for (String[] names : NAMES) {
+                if (!names[0].equals(set[0])) continue;
+                for (int i = 1; i < names.length; i++) {
+                    if (!containsWords(question, names[i])) continue;
+                    if (names[i].length() <= named.length()) continue;
+                    root = set[0];
+                    label = set[1];
+                    named = names[i];
+                }
+            }
+        }
+        if (root == null) {
+            StringBuilder out = new StringBuilder("that did not say which documentation to "
+                    + "look in. These are the ones this agent has:");
+            for (String[] one : DOCS) out.append("\n- ").append(one[1]);
+            throw new Stop(out.append("\nName one in the question, as \"#docs how do I "
+                    + "set a baseline grid in indesign\".").toString());
+        }
+        // The product's name comes OUT of the question before anything is scored: it is
+        // on every link in its own documentation, so leaving it in would score the nav
+        // bar as highly as the page being looked for.
+        String wanted = withoutWords(question, named);
+        if (words(wanted).isEmpty()) {
+            throw new Stop("that named " + label + " but not what to look up in it.");
+        }
+
+        final String set = label;          // settled, and said in the notes below
+        WebSocket live = browserSocket(note);
+        String tab = tab(live, site(root));
+        String prefix = allowedPrefix(URI.create(root));
+        List<String> trail = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        String here = root;
+        String landed;
+        int fetched = 0;
+        int followed = 0;      // the score of the link that brought us to this page
+        while (true) {
+            note.accept("Looking in " + set + ": page " + (fetched + 1) + " of at most "
+                    + DOCS_FETCHES_MAX + "…");
+            landed = fetchInto(live, tab, here, note);
+            fetched++;
+            seen.add(bare(landed));
+            // Checked again after loading, as everywhere else: documentation redirects
+            // constantly - a version, a language, a product that was renamed - and a
+            // redirect out of this set is where the walk stops.
+            checkedHost(landed, " after it loaded");
+            if (!prefix.equals(allowedPrefix(URI.create(landed)))) {
+                note.accept("That left " + prefix + ", so the walk stops here.");
+                break;
+            }
+            if (fetched >= DOCS_FETCHES_MAX) break;
+
+            Link best = null;
+            int bestScore = 0;
+            for (Link link : linksOn(live, tab)) {
+                if (seen.contains(bare(link.href))) continue;        // been there
+                // Inside THIS documentation and no other: a link to Photoshop's help, or
+                // to Adobe's front page, is allowed by the list and is not an answer to
+                // a question about InDesign.
+                if (!prefix.equals(allowedPrefix(URI.create(link.href)))) continue;
+                int score = score(stemmed(link.text), stemmed(wanted));
+                if (score > bestScore || (score == bestScore && score > 0
+                        && best != null && nearerTheTop(link, best))) {
+                    best = link;
+                    bestScore = score;
+                }
+            }
+            // Nothing deeper is about the question: this page is the answer, or as close
+            // as this documentation gets to one.
+            if (best == null || bestScore < SCORE_FLOOR) break;
+            // And nothing deeper is a BETTER match than the link that got us here.
+            // STRICTLY better, which is the rule that keeps this a walk down a tree
+            // rather than a tour of one floor of it: "Grids and guides" then "Create
+            // baseline grids" goes deeper, while "Test your guardrail" then "Create your
+            // guardrail" is a step sideways between pages that match the question exactly
+            // as well. Without this the walk spent all five fetches on siblings and
+            // stopped on the last one it happened to see, which is how a question about
+            // what a guardrail IS ended up on the page about deleting one.
+            //
+            // It is also what makes one step enough on a site that renders its whole
+            // navigation tree on every page, as the AWS user guide does: everything is
+            // already visible from the front page, so there is nothing deeper to find.
+            if (bestScore <= followed) break;
+            followed = bestScore;
+            trail.add(best.text);
+            note.accept("Following \"" + best.text + "\" (" + bestScore + ").");
+            here = best.href;
+        }
+        return new Walk(live, tab, landed, set, wanted, trail, fetched);
+    }
+
+    // Both sides of a documentation score, with plurals taken off.
+    //
+    // Because documentation is written in the plural and asked about in the singular:
+    // the heading is "Guardrails", "Denied topics", "Grids and guides", and the question
+    // is "a guardrail", "block a topic", "the baseline grid". Unstemmed, those meet as a
+    // NEAR miss - worth 2 where an exact word is worth 8 - so a page whose title is
+    // precisely the answer loses to any page that happens to repeat a word of the
+    // question. Measured: "block a topic with a guardrail" chose "Test your guardrail"
+    // over "Denied topics" before this, and the other way round after it.
+    //
+    // Only in the walk. The scoring itself is left alone, because #follow is calibrated
+    // against it on news headlines, where "Tesla" and "Teslas" are different claims.
+    private static String stemmed(String text) {
+        StringBuilder out = new StringBuilder();
+        for (String word : words(text)) {
+            if (out.length() > 0) out.append(' ');
+            out.append(singular(word));
+        }
+        return out.toString();
+    }
+
+    private static String singular(String word) {
+        if (word.length() > 4 && word.endsWith("ies")) {
+            return word.substring(0, word.length() - 3) + "y";   // policies -> policy
+        }
+        if (word.length() > 4 && (word.endsWith("ses") || word.endsWith("xes")
+                || word.endsWith("zes") || word.endsWith("ches") || word.endsWith("shes"))) {
+            return word.substring(0, word.length() - 2);         // boxes -> box
+        }
+        if (word.length() > 3 && word.endsWith("s") && !word.endsWith("ss")) {
+            return word.substring(0, word.length() - 1);         // grids -> grid
+        }
+        return word;
+    }
+
+    // Which of two equally-matching links to take: the one nearer the top of the
+    // documentation, and then the one with less said on it.
+    //
+    // Nearer the top means fewer path segments and then a shorter address, because that
+    // is how documentation is filed - an overview sits above the pages it introduces
+    // ("/guardrails.html" over "/guardrails-permissions-kms.html"), and a question that
+    // matches both of them equally means the overview. The words on the link break a
+    // remaining tie, shorter first: a label that is nothing but the topic beats one that
+    // mentions it in passing.
+    private static boolean nearerTheTop(Link link, Link than) {
+        int depth = segments(link.href);
+        int theirs = segments(than.href);
+        if (depth != theirs) return depth < theirs;
+        if (link.href.length() != than.href.length()) {
+            return link.href.length() < than.href.length();
+        }
+        return link.text.length() < than.text.length();
+    }
+
+    private static int segments(String url) {
+        String path = URI.create(bare(url)).getPath();
+        if (path == null || path.isEmpty()) return 0;
+        int segments = 0;
+        for (String part : path.split("/")) {
+            if (!part.isEmpty()) segments++;
+        }
+        return segments;
+    }
+
+    // An address with its fragment cut off: two links to the same page, one of them at a
+    // heading on it, are the same page for the purpose of not reading it twice.
+    private static String bare(String url) {
+        int hash = url.indexOf('#');
+        return hash < 0 ? url : url.substring(0, hash);
+    }
+
+    // Are all the words of a name in this text, as whole words? Word by word rather than
+    // as a substring, so "ai news" is not found inside "said newsagent".
+    private static boolean containsWords(String text, String name) {
+        Set<String> have = words(text);
+        Set<String> wanted = words(name);
+        if (wanted.isEmpty()) return false;
+        return have.containsAll(wanted);
+    }
+
+    // What a preposition is doing at either end of a question once the product has been
+    // taken out of it: "a baseline grid in indesign" loses "indesign" and would keep the
+    // "in", which is a word the question does not end with in any language.
+    private static final Set<String> HANGING = new LinkedHashSet<>(java.util.Arrays.asList(
+            "in", "on", "for", "of", "about", "from", "with", "at", "into", "to", "the",
+            "a", "an", "and", "or", "my", "its"));
+
+    // The same text with a name's words taken out of it, which is how a question keeps
+    // its question and loses the product it is about.
+    private static String withoutWords(String text, String name) {
+        Set<String> drop = words(name);
+        List<String> kept = new ArrayList<>();
+        for (String word : text.split("\\s+")) {
+            String plain = word.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+            if (plain.isEmpty() || drop.contains(plain)) continue;
+            kept.add(word);
+        }
+        while (!kept.isEmpty() && hanging(kept.get(kept.size() - 1))) {
+            kept.remove(kept.size() - 1);
+        }
+        while (!kept.isEmpty() && hanging(kept.get(0))) kept.remove(0);
+        return String.join(" ", kept).replaceAll("^[\\s:,\\-]+|[\\s:,\\-]+$", "").trim();
+    }
+
+    private static boolean hanging(String word) {
+        return HANGING.contains(word.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", ""));
     }
 
     // ---- Following a link, by what it says -------------------------------------
@@ -1421,7 +1748,10 @@ public final class JRockBrowser {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        window = new javax.swing.JFrame("JRock - Browser (7 hosts, read-only)");
+        // Counted rather than written: the title said "7 hosts" for as long as there
+        // were seven, and the list has grown twice since.
+        window = new javax.swing.JFrame("JRock - Browser (" + ALLOWED.length
+                + " hosts, read-only)");
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
@@ -1453,6 +1783,10 @@ public final class JRockBrowser {
             String typed = askField.getText().trim();
             ask(typed.startsWith("http") ? "#page " + typed : "#search " + typed);
         });
+        javax.swing.JButton look = new javax.swing.JButton("Look up\u2026");
+        look.setToolTipText("Look the question up in documentation - name the product in "
+                + "it, as \"how do I set a baseline grid in indesign\"");
+        look.addActionListener(e -> ask("#docs " + askField.getText().trim()));
         javax.swing.JButton follow = new javax.swing.JButton("Follow\u2026");
         follow.addActionListener(e -> ask("#follow " + askField.getText().trim()));
         javax.swing.JButton what = new javax.swing.JButton("Links");
@@ -1465,6 +1799,7 @@ public final class JRockBrowser {
         buttons.setOpaque(false);
         buttons.add(page);
         buttons.add(search);
+        buttons.add(look);
         buttons.add(follow);
         buttons.add(what);
         buttons.add(which);
@@ -1589,6 +1924,10 @@ public final class JRockBrowser {
     // after a few days of this - and walking it is not something a window should wait
     // for. Until then the line says the path, which is the part that was asked for.
     private static void showProfile() {
+        // --shot, --links and --docs start the same browser with no window of ours to
+        // put this line in. They print what they find instead, so there is nothing to
+        // fill in and nothing to complain about.
+        if (profileLine == null) return;
         Path folder = profileFolder();
         boolean there = Files.isDirectory(folder);
         profileLine.setText("Browser profile (its own cookies, cache and sign-ins, kept "
