@@ -85,11 +85,15 @@ public final class Screenshots {
         Files.createDirectories(out);
 
         // A presentable path, because the window puts the folder in its title bar and the
-        // session report prints the whole thing. So: a FIXED name under the temp folder
-        // rather than createTempDirectory's random digits, emptied first so a second run
-        // starts from nothing. /tmp/jrock-demo/Demo reads like a demo; a path with
-        // 7369205562358503319 in it reads like a mistake.
-        Path work = Paths.get(System.getProperty("java.io.tmpdir"), "jrock-demo", "Demo");
+        // session report PRINTS THE WHOLE THING - which makes the path part of the picture.
+        // So: a fixed name rather than createTempDirectory's random digits, emptied first
+        // so a second run starts from nothing, and the parent is an argument so a runner
+        // can ask for a clean one. /tmp/jrock-demo/Demo reads like a demo; macOS's own
+        // temp folder (/var/folders/zz/.../T) reads like a crash dump, and Windows puts
+        // the account name in its own, which is nobody's business in a README.
+        Path under = args.length > 2 ? Paths.get(args[2])
+                : Paths.get(System.getProperty("java.io.tmpdir"));
+        Path work = under.resolve("jrock-demo").resolve("Demo");
         deleteTree(work.getParent());
         Path jrockDir = work.resolve("JRock");
         Files.createDirectories(jrockDir);

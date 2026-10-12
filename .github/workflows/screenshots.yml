@@ -67,6 +67,11 @@ jobs:
                 samples/agents/*.java samples/flows/*.java
 
       # A display, on the one runner that has none. Xvfb is also what the GUI tests use.
+      # The third argument is where the demo folder goes, and it is given here because the
+      # session report prints that path INTO the picture: /tmp/jrock-demo/Demo rather than
+      # macOS's own /var/folders/zz/.../T, which reads like a crash dump. Windows is left
+      # with its default (the account's temp folder), since what its pictures are for is
+      # showing that the window looks the same, not for pasting paths into a README.
       - name: Take the screenshots (Linux, under Xvfb)
         if: matrix.runner == 'ubuntu-latest'
         run: |
@@ -74,13 +79,13 @@ jobs:
           sudo apt-get install -y -qq xvfb
           xvfb-run -a --server-args="-screen 0 1600x1200x24" \
             java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
-                 screenshots ${{ matrix.name }}
+                 screenshots ${{ matrix.name }} /tmp
 
       - name: Take the screenshots (macOS)
         if: matrix.runner == 'macos-latest'
         run: |
           java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
-               screenshots ${{ matrix.name }}
+               screenshots ${{ matrix.name }} /tmp
 
       - name: Take the screenshots (Windows)
         if: matrix.runner == 'windows-latest'

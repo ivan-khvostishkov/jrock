@@ -4362,10 +4362,13 @@ Three decisions worth knowing about:
   `Screenshots.java`. The questions are deliberately ones whose answers do not go stale: ask what
   today's date means for the due date and the answer has today's date in it, which the next
   build's picture would contradict.
-- **A throwaway folder with a presentable name.** `jrock-demo/Demo` under the temp folder: the
-  window puts the folder in its title bar and the report prints the whole path, and
-  `/tmp/jrock-demo/Demo` reads like a demo where `createTempDirectory`'s random digits read like
-  a mistake. It is emptied before each run, so every picture is of a first start.
+- **A throwaway folder with a presentable name.** `jrock-demo/Demo`, emptied before each run so
+  every picture is of a first start. The window puts the folder in its title bar and the session
+  report prints the whole path, which makes the path part of the picture — so where it goes is
+  the third argument, and the Unix runners are given `/tmp`: `/tmp/jrock-demo/Demo` reads like a
+  demo, where `createTempDirectory`'s random digits and macOS's `/var/folders/zz/…/T` do not.
+  Run locally without that argument and the pictures carry **your own temp path, account name and
+  all** — fine on your machine, worth knowing before pasting one into a file everybody reads.
 
 **Not built:** the two browser pictures and the touch menu (JRock Web, which is a page and not a
 window), the Explorer context menu (a shell menu, not JRock's), and the Ghostscript PDF scene,
