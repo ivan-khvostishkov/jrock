@@ -3,11 +3,9 @@
 //
 // NO JROCK AT ALL, and that is the point of it. It needs no model, no Bedrock key and no
 // window of JRock's: an alarm clock that made a text-generation program start up in order
-// to ring is a strange alarm clock. It used to start one for a single setting - the
-// speaker in Configure > Narrate on - and reading another program's configuration through
-// an API is the wrong way round twice over: a setting belongs to the program it belongs
-// to, and an API should offer an ACTION rather than hand out somebody else's state. So the
-// speaker is chosen HERE, in this window, and remembered here (see SETTINGS).
+// to ring is a strange alarm clock. The speaker it rings on is chosen in this window and
+// remembered beside it (see SETTINGS) - a setting belongs to the program whose setting it
+// is.
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
@@ -305,8 +303,8 @@ public final class JRockTimer {
     }
 
     // One chord per alarm, in the order they were set: C major, G major, E major, and
-    // round again from the fourth. Three notes each, around the fifth octave where the
-    // single beep used to be, so a chord carries across a room as that beep did.
+    // round again from the fourth. Three notes each, around the fifth octave, which
+    // carries across a room.
     private static final double[][] CHORDS = {
         { 523.25, 659.26, 783.99 },     // C major: C5, E5, G5
         { 783.99, 987.77, 1174.66 },    // G major: G5, B5, D6

@@ -2,31 +2,26 @@
 // has put in a folder, what arrived when, and - once a letter has been filed - what it
 // says.
 //
-// PAPERS, and that is the name. The Thunderbird agent reads e-mail; this one reads the
-// post that comes through the door, which is a different thing with a different rhythm
-// and a different pile. "Mail" would have meant both and so neither - and "Letters",
-// which this agent was called first, stopped being true the moment it also handled the
-// documents nobody posted. A scan is a letter, a kept answer or a file dropped in the
-// incoming folder is a document, and papers covers both (see kindOfPlace).
+// PAPERS, NOT MAIL. The Thunderbird agent reads e-mail; this one reads what is on paper.
+// A scan is a letter, a kept answer or a file dropped in the incoming folder is a
+// document, and the answer says which it is (see kindOfPlace).
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
 //     java -cp jrock.jar JRockPapers.java [--folder <where the scanner writes>]
 //     java -cp jrock.jar JRockPapers.java --print recent
 //
-// A NEW SHAPE: AN AGENT WITH NO JROCK OF ITS OWN, THAT DRIVES A FLOW.
+// NO JROCK OF ITS OWN: AN AGENT THAT DRIVES A FLOW.
 //
-// Every other agent here starts a JRock and holds it for as long as it runs. This one
-// starts none: looking at a folder needs no model, and a window that did nothing but sit
-// there would be a window to close. What it does instead, when a letter has to be filed,
-// is start the DOC INVENTORY FLOW - samples/flows/JRockDocInventory.java, with --auto -
-// as a process of its own. That flow starts a JRock, merges the two passes if there are
-// two, reads the letter, names it, renames every file of it, prints one line saying what
-// it did, and exits. Its window closes with it.
+// Listing folders and reading text files needs no model and no key, so this agent starts
+// no JRock. Anything that needs one - filing a scan, converting a document, making a
+// document out of a kept answer - it hands to the DOC INVENTORY FLOW
+// (samples/flows/JRockDocInventory.java, with --auto) as a process of its own. The flow
+// opens a JRock, does the work, prints one line saying what it did, and exits with its
+// window.
 //
-// So the long-running thing has no model and no key, and the thing with the model lives
-// for one letter. An agent for what is always true, a flow for what happens once - which
-// is the distinction the two words have carried all along, now in one chain.
+// So the part that runs all day holds no key, and the part that uses a model lives for
+// one document.
 //
 // What it answers, over TCP on 127.0.0.1:PORT - one line in, read until closed:
 //
@@ -124,10 +119,8 @@ public final class JRockPapers {
     // folder: a file in it can be ASKED about whatever it arrived as.
     // What can be read out, which is what the doc inventory flow converts and nothing
     // else: text, the word-processor documents, a PDF, and a picture of a page. A
-    // spreadsheet is off this list - it was on it when a model of this agent's own did
-    // the reading, and the flow does not take one - so a .xlsx in the folder is listed
-    // and said to be a kind that cannot be read out, instead of being promised and then
-    // refused.
+    // spreadsheet is not on it, so a .xlsx in the folder is listed and said to be a kind
+    // that cannot be read out rather than promised and then refused.
     private static final String[] READABLE = {
         ".txt", ".md", ".docx", ".rtf", ".pdf", ".png", ".jpg", ".jpeg", ".gif",
     };
@@ -1012,11 +1005,9 @@ public final class JRockPapers {
                     row.getPreferredSize().height));
             north.add(row);
         }
-        // The status line is NOT capped at the height it happens to have while the window
-        // is being built, which is the height of the single space it holds then. That cap
-        // is the other half of what the operator photographed: a sentence needing three
-        // lines was given the room for one, so the last line was cut off at the bottom as
-        // well as the right. It grows as it needs to, and the list below gives up the room.
+        // The status line is NOT capped at the height it has while the window is being
+        // built, which is the height of the single space in it. It grows to the lines its
+        // sentence needs, and the list below gives up the room.
         status.setAlignmentX(0f);
         north.add(status);
 
@@ -1165,31 +1156,19 @@ public final class JRockPapers {
     // ---- Keeping a document ------------------------------------------------------
     // Markdown in, a named document in the incoming folder out.
     //
-    // WHY THIS AGENT AND NOT PUSH-TO-TALK. Push-to-talk used to do this itself: select
-    // the last answer in its own JRock and export it. That is this agent's business -
-    // documents are what it is for - and doing it here has three consequences worth the
-    // move. The document lands in the folder the operator synchronises rather than in a
-    // subfolder of a voice agent. It is named by the doc inventory flow, like everything
-    // else here, instead of carrying a timestamp. And the markdown arrives as a MESSAGE
-    // between two agents, which is the same way every other document already travels.
+    // WHY THIS AGENT. Documents are what it is for: a kept answer lands in the folder
+    // the operator synchronises, named by the same flow that names a scanned letter, and
+    // the markdown travels between two agents as every other document here does.
     //
     // The route is the markdown ONTO THE DISK and then the flow, which is the only thing
-    // here that turns one kind of document into another. The agent writes a .txt - the
-    // text it was handed, unchanged, where anybody can see it - and the flow takes a
-    // .txt standing on its own as a document in its own right: it exports it as a DOCX
-    // with its pictures placed, names both and renames them. One run, the same run a
-    // scanned letter gets.
+    // here that turns one kind of document into another. The agent writes the text it was
+    // handed to a .txt, where anybody can see it; the flow takes a .txt standing on its
+    // own as a document in its own right, exports it as a DOCX with its pictures placed,
+    // and names both files.
     //
-    // A .txt and not a .md, deliberately: markdown and plain text are both human
-    // readable, JRock's exporter lays out whichever it finds, and one text extension is
-    // one fewer kind of file for everything downstream to have an opinion about.
-    //
-    // It used to be done here, through a JRock of this agent's own: the markdown into the
-    // prompt, automationExportPromptDocx, then the flow to name the result. That worked
-    // and it was the odd one out - this agent started a window to write a file, while
-    // every other conversion it needs is the flow's. Nothing of the result changed in the
-    // move: the DOCX is written by the same exporter either way, because the flow calls
-    // it too.
+    // A .txt and not a .md: markdown and plain text are both human readable, the exporter
+    // lays out whichever it finds, and one text extension is enough for everything
+    // downstream.
     private static String save(String markdown) {
         String words = markdown == null ? "" : markdown.trim();
         if (words.isEmpty()) {
@@ -1241,18 +1220,12 @@ public final class JRockPapers {
     // The text of one file: itself when it is text, and otherwise the .txt the doc
     // inventory flow writes beside it - the flow being run first if nobody has.
     //
-    // WHY THE FLOW AND NOT A MODEL OF THIS AGENT'S OWN. It used to be the latter: a
-    // JRock started here, the document included as the kind it is, a model asked for
-    // clean Markdown. Which meant this agent read a DOCUMENT one way and a SCAN another -
-    // a scan has always been read from the .txt the flow had already written - so there
-    // were two routes to "what does this say", one of them paying for a send on every
-    // asking, and the two could disagree about the same file.
-    //
-    // There is one route now. The flow converts, names and writes the text; this agent
-    // reads files. What that gains, beyond one answer instead of two: a document asked
-    // about twice is converted once, the conversion is the same one a letter gets, the
-    // text stays on the disk where the operator can see what was read, and nothing here
-    // needs a key, a model or a window of its own.
+    // WHY THE FLOW AND NOT A MODEL OF THIS AGENT'S OWN. One route to "what does this
+    // say", for a scan and for a document alike: the flow converts, names and writes the
+    // text, and this agent reads files. So a document asked about twice is converted
+    // once, the conversion is the one a letter gets, the text stays on the disk where the
+    // operator can see what was read, and nothing here needs a key, a model or a window
+    // of its own.
     //
     // The flow takes a PDF, a DOCX, an RTF, a TXT or an image, and nothing else - which
     // is now also exactly what this agent will read out (see READABLE).
