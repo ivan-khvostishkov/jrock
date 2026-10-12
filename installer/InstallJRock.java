@@ -55,7 +55,7 @@
 //
 // What it MAY remove is two kinds of pointer, and only when you say so: its own Explorer
 // right-click entries (page 8 clears every JRock entry on the machine before writing the
-// new ones, and clears them even when you install none) and its own shortcuts (page 4,
+// new ones, and clears them even when you install none) and its own shortcuts (page 3,
 // where unticking one that is there takes it away). A pointer is not data: the entries
 // are written down into a .reg that puts every one of them back, and a shortcut is one
 // line of this installer away from being written again.
@@ -121,6 +121,7 @@ public final class InstallJRock {
     // Where to send anybody missing the two outside tools.
     private static final String GS_URL = "https://ghostscript.com/releases/gsdnld.html";
     private static final String XPDF_URL = "https://www.xpdfreader.com/download.html";
+    private static final String SQLITE_URL = "https://sqlite.org/download.html";
 
     // The registry names. This installer is the only thing that writes them - JRock
     // itself knows nothing about the registry, which is what keeps every line of it
@@ -374,13 +375,15 @@ public final class InstallJRock {
         System.out.println("Ghostscript:         " + or(ghostscript(), "NOT on PATH"));
         System.out.println("xpdf pdftohtml:      " + or(onPath("pdftohtml"), "NOT on PATH"));
         System.out.println("xpdf pdftotext:      " + or(onPath("pdftotext"), "NOT on PATH"));
+        System.out.println("sqlite3:             " + or(onPath("sqlite3"), "NOT on PATH")
+                + "   (the Thunderbird agent's)");
         System.out.println("javaw/java:          " + or(launcher(), "NOT found"));
         System.out.println("Previous install:    "
                 + (previouslyInstalled.isEmpty() && home == null ? "none found"
                    : "folder " + home));
         if (!previouslyInstalled.isEmpty()) {
             System.out.println("  installed already: " + previouslyInstalled.size()
-                    + " (page 5 would offer these, and only these)");
+                    + " (page 4 would offer these, and only these)");
             for (Map.Entry<String, Path> one : previouslyInstalled.entrySet()) {
                 System.out.println("    " + one.getKey()
                         + (one.getValue() == null ? "" : "  working in " + one.getValue()));
@@ -495,6 +498,15 @@ public final class InstallJRock {
         List<Sample> some = new ArrayList<>();
         for (Sample s : found) if (s.kind == kind) some.add(s);
         return some;
+    }
+
+    // The one sample this installer asks about by name: the tools it needs are not the
+    // tools anything else here needs.
+    private static final String THUNDERBIRD = "JRockThunderbird";
+
+    private static boolean installing(String stem) {
+        for (Sample s : selected()) if (s.stem.equals(stem)) return true;
+        return false;
     }
 
     private static List<Sample> selected() {
@@ -692,7 +704,7 @@ public final class InstallJRock {
                     }));
                 }
                 panel.add(note("So this run is an UPDATE of that install: its folder is "
-                        + "the folder below, and page 5 offers what is installed rather "
+                        + "the folder below, and page 4 offers what is installed rather "
                         + "than the whole catalogue - the full list is one radio button "
                         + "away if you want to change the set. Nothing of your work will "
                         + "be removed."));
@@ -737,40 +749,7 @@ public final class InstallJRock {
             }
         }));
 
-        // 3. The two outside tools.
-        steps.add(new Step("Ghostscript and xpdf", panel -> {
-            Path gs = ghostscript();
-            Path html = onPath("pdftohtml");
-            Path txt = onPath("pdftotext");
-            panel.add(text("JRock converts PDFs with two tools it does not ship. "
-                    + "Everything else works without them."));
-            panel.add(found(gs != null, "Ghostscript" + (gs == null ? "" : " - " + gs)
-                    + " - PDF pages as images, and merging duplex scans"));
-            panel.add(found(html != null && txt != null, "xpdf"
-                    + (html == null || txt == null ? "" : " - " + html.getParent())
-                    + " - PDF as HTML or as text"));
-            if (gs == null) panel.add(link("Ghostscript downloads", GS_URL));
-            if (html == null || txt == null) {
-                panel.add(link("xpdf command line tools", XPDF_URL));
-            }
-            if (gs == null || html == null || txt == null) {
-                panel.add(note("Install what is missing, add it to PATH, then press Retry. "
-                        + "Or press Next without them - JRock says which tool is missing "
-                        + "if you ever ask it for that conversion, and installing them "
-                        + "later needs nothing from this installer."));
-            }
-        }, () -> {
-            boolean all = ghostscript() != null && onPath("pdftohtml") != null
-                    && onPath("pdftotext") != null;
-            if (!all) {
-                toolsSkipped = true;
-                say("Ghostscript or xpdf not on PATH: the PDF conversions will say so "
-                        + "when asked.");
-            }
-            return null;
-        }));
-
-        // 4. Shortcuts - installed when ticked, and taken away when not.
+        // 3. Shortcuts - installed when ticked, and taken away when not.
         steps.add(new Step("Shortcuts", panel -> {
             Path menuAt = shortcutFile(Place.MENU);
             Path deskAt = shortcutFile(Place.DESKTOP);
@@ -808,7 +787,7 @@ public final class InstallJRock {
             return null;
         }));
 
-        // 5. Which agents and flows, and where each agent works.
+        // 4. Which agents and flows, and where each agent works.
         steps.add(new Step("Agents and flows", panel -> {
             panel.add(check("Install the agents and flows", withSamples, v -> {
                 withSamples = v;
@@ -883,6 +862,59 @@ public final class InstallJRock {
             return writeStartScript();
         }));
 
+        // 5. The outside tools - after the agents, because which ones are wanted
+        // depends on which agents are going in.
+        steps.add(new Step("Ghostscript, xpdf and sqlite3", panel -> {
+            Path gs = ghostscript();
+            Path html = onPath("pdftohtml");
+            Path txt = onPath("pdftotext");
+            boolean mail = installing(THUNDERBIRD);
+            Path sqlite = mail ? onPath("sqlite3") : null;
+            panel.add(text("JRock converts PDFs with two tools it does not ship, and the "
+                    + "Thunderbird agent reads your calendar and mail index with a third. "
+                    + "Everything else works without them."));
+            panel.add(found(gs != null, "Ghostscript" + (gs == null ? "" : " - " + gs)
+                    + " - PDF pages as images, and merging duplex scans"));
+            panel.add(found(html != null && txt != null, "xpdf"
+                    + (html == null || txt == null ? "" : " - " + html.getParent())
+                    + " - PDF as HTML or as text"));
+            if (mail) {
+                panel.add(found(sqlite != null, "sqlite3"
+                        + (sqlite == null ? "" : " - " + sqlite)
+                        + " - the Thunderbird agent's calendar and mail index"));
+            } else {
+                panel.add(note("sqlite3 is not looked for: it belongs to the Thunderbird "
+                        + "agent, which is not in the set on the page before this."));
+            }
+            if (gs == null) panel.add(link("Ghostscript downloads", GS_URL));
+            if (html == null || txt == null) {
+                panel.add(link("xpdf command line tools", XPDF_URL));
+            }
+            if (mail && sqlite == null) {
+                panel.add(link("sqlite3 command line tools", SQLITE_URL));
+            }
+            if (gs == null || html == null || txt == null || (mail && sqlite == null)) {
+                panel.add(note("Install what is missing, add it to PATH, then press Retry. "
+                        + "Or press Next without them: JRock and the agents say which tool "
+                        + "is missing when something is asked of them that needs one, and "
+                        + "installing it later needs nothing from this installer."));
+            }
+        }, () -> {
+            boolean pdf = ghostscript() != null && onPath("pdftohtml") != null
+                    && onPath("pdftotext") != null;
+            if (!pdf) {
+                toolsSkipped = true;
+                say("Ghostscript or xpdf not on PATH: the PDF conversions will say so "
+                        + "when asked.");
+            }
+            if (installing(THUNDERBIRD) && onPath("sqlite3") == null) {
+                toolsSkipped = true;
+                say("sqlite3 not on PATH: the Thunderbird agent will say so when asked "
+                        + "for the calendar or the mail.");
+            }
+            return null;
+        }));
+
         // 6. The settings, and the key.
         steps.add(new Step("Settings and the key", panel -> {
             panel.add(text("Two files in " + home.resolve(PRODUCT) + ":"));
@@ -890,9 +922,9 @@ public final class InstallJRock {
                     + "checkboxes"));
             panel.add(value("bedrock-key.txt - the Bedrock API key, and nothing else"));
             panel.add(note("Next opens the config in whatever opens a .txt here. Save and "
-                    + "close it, then the key file opens the same way. An existing file of "
-                    + "either kind is kept as it is - this installer never overwrites your "
-                    + "settings."));
+                    + "close it, then the key file opens the same way."));
+            panel.add(strong("An existing file of either kind is kept as it is - this "
+                    + "installer never overwrites your settings."));
         }, () -> {
             try {
                 Path jrock = home.resolve(PRODUCT);
@@ -1961,10 +1993,25 @@ public final class InstallJRock {
         if (path == null) return null;
         String[] names = isWindows() ? new String[] { name + ".exe", name + ".cmd", name }
                                      : new String[] { name };
+        List<Path> places = new ArrayList<>();
         for (String dir : path.split(Pattern.quote(java.io.File.pathSeparator))) {
             if (dir.isBlank()) continue;
+            try {
+                // Quotes are legal in a PATH entry and illegal in a path: that entry is
+                // dropped rather than allowed to end the search.
+                places.add(Paths.get(dir.replace("\"", "")));
+            } catch (java.nio.file.InvalidPathException notAPath) {
+                continue;
+            }
+        }
+        // And the two folders a user keeps their own tools in, which PATH may name in a
+        // session this program did not inherit.
+        Path home = Paths.get(System.getProperty("user.home", "."));
+        places.add(home.resolve(".local").resolve("bin"));
+        places.add(home.resolve("bin"));
+        for (Path dir : places) {
             for (String candidate : names) {
-                Path at = Paths.get(dir).resolve(candidate);
+                Path at = dir.resolve(candidate);
                 if (Files.isRegularFile(at)) return at;
             }
         }
@@ -2154,6 +2201,13 @@ public final class InstallJRock {
 
     private static javax.swing.JComponent note(String words) {
         return paragraph(words, MUTED, 8, 8);
+    }
+
+    private static javax.swing.JComponent strong(String words) {
+        javax.swing.JTextArea area = wrapping(words);
+        area.setFont(area.getFont().deriveFont(java.awt.Font.BOLD));
+        area.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 0, 8, 0));
+        return growing(area);
     }
 
     private static javax.swing.JComponent alarm(String words) {

@@ -1402,30 +1402,56 @@ public final class JRockThunderbird {
         return "'" + value.replace("'", "''") + "'";
     }
 
-    // sqlite3: on PATH, then beside this file, then in the working directory - the three
-    // places it is reasonable to have put it. Found once and remembered.
+    // sqlite3: on PATH, then in ~/.local/bin and ~/bin, then beside this file, then in the
+    // working directory. Found once and remembered.
     private static Path sqlite3() {
         Path found = sqlite;
         if (found != null) return found;
         String exe = isWindows() ? "sqlite3.exe" : "sqlite3";
         List<Path> tried = new ArrayList<>();
+        int entries = 0;
         for (String dir : System.getenv().getOrDefault("PATH", "")
                 .split(Pattern.quote(java.io.File.pathSeparator))) {
             if (dir.isBlank()) continue;
-            tried.add(Paths.get(dir).resolve(exe));
+            entries++;
+            try {
+                // Quotes are legal in a PATH entry and illegal in a path, so an entry
+                // like "C:\Program Files\x" is dropped rather than allowed to end the
+                // search: the tool may well be in one of the entries after it.
+                tried.add(Paths.get(dir.replace("\"", "")).resolve(exe));
+            } catch (java.nio.file.InvalidPathException notAPath) {
+                continue;
+            }
         }
+        // PATH is not the only place worth looking, because a process keeps the PATH it
+        // was started with: a tool put in ~/.local/bin after this window opened - or
+        // after the login that opened it - is on PATH everywhere except here. That
+        // folder, and ~/bin, are where a user keeps their own tools on every platform.
+        Path home = Paths.get(System.getProperty("user.home", "."));
+        tried.add(home.resolve(".local").resolve("bin").resolve(exe));
+        tried.add(home.resolve("bin").resolve(exe));
         tried.add(ownDirectory().resolve(exe));
         tried.add(Paths.get("").toAbsolutePath().resolve(exe));
         for (Path at : tried) {
             if (Files.isRegularFile(at)) {
                 sqlite = at;
+                System.out.println("sqlite3: " + at);
                 return at;
             }
         }
-        throw new Stop("sqlite3 was not found - on PATH, beside this agent, or in the "
-                + "working directory. Download the command-line tools from "
-                + "https://sqlite.org/download.html and put sqlite3" + (isWindows() ? ".exe" : "")
-                + " in one of those places.");
+        // What was looked at, because "not found" about a tool that IS installed is a
+        // message nobody can act on. The extra places are named; PATH is counted.
+        StringBuilder where = new StringBuilder();
+        for (int i = tried.size() - 4; i < tried.size(); i++) {
+            where.append("\n    ").append(tried.get(i));
+        }
+        throw new Stop("sqlite3 was not found. " + entries + " PATH entries were searched, "
+                + "and these places:" + where + "\n\nIf it is installed and on PATH, this "
+                + "window was started before that entry was added - a process keeps the "
+                + "PATH it was given, so starting the agent again picks it up. Otherwise "
+                + "the command-line tools are at https://sqlite.org/download.html, and "
+                + "sqlite3" + (isWindows() ? ".exe" : "") + " goes in any of the places "
+                + "above.");
     }
 
     // What the window says about the schema it just read, or null when it is the one this
