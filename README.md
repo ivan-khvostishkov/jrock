@@ -2698,9 +2698,89 @@ sequenceDiagram
 
 ### Multi-agent collaboration
 
-The agents are separate programs, each with a JRock of its own, and they talk over loopback TCP
-in plain lines of text. Only push-to-talk talks to a person: it hears the operator through the
-microphone and answers through the speaker. Everything else is **robot to robot**:
+Everything at once, and who may say what to whom. The arrows are the real ones — every line in
+this diagram is a socket, a spawned process or an API call that exists in the source:
+
+```mermaid
+%%{init: {"flowchart": {"curve": "step", "nodeSpacing": 35, "rankSpacing": 75}}}%%
+flowchart LR
+    Op(["Operator"])
+
+    subgraph talks ["Talks to a person"]
+        direction TB
+        PTT["Push-to-talk<br/>its own JRock"]
+    end
+
+    subgraph agents ["Agents - they loop, and only listen"]
+        direction TB
+        TIM["Timer<br/>:47470<br/>no JRock"]
+        LOC["Location<br/>:47471<br/>its own JRock"]
+        WX["Weather<br/>:47472<br/>its own JRock"]
+        TB["Thunderbird<br/>:47473<br/>its own JRock"]
+        BR["Browser<br/>:47474<br/>its own JRock"]
+        LET["Letters<br/>:47475<br/>no JRock"]
+    end
+
+    subgraph flows ["Flows - one run each, from a right-click"]
+        direction TB
+        DOC["Doc inventory<br/>its own JRock"]
+        TR["Translate to...<br/>its own JRock"]
+    end
+
+    subgraph outside ["Not this machine's own programs"]
+        direction TB
+        MODEL["The model<br/>bedrock-mantle"]
+        WEB["The sites on the list<br/>and open-meteo"]
+        THUND["Thunderbird<br/>its files and command line"]
+        CHROME["A Chromium<br/>DevTools protocol"]
+        TOOLS["Ghostscript, xpdf, sqlite3"]
+        DISK["The scanner folder<br/>and Documents"]
+    end
+
+    Op -->|"speaks"| PTT
+    PTT -->|"reads aloud"| Op
+    Op -->|"right-click"| DOC
+    Op -->|"right-click"| TR
+
+    PTT -->|"hh:mm:ss"| TIM
+    PTT -->|"#35;here"| LOC
+    PTT -->|"a place"| WX
+    PTT -->|"calendar, mail, #35;new, #35;reply"| TB
+    PTT -->|"#35;page, #35;search, #35;follow"| BR
+    PTT -->|"#35;recent, #35;file, #35;inventory"| LET
+
+    LET -->|"--auto, then AUTO-RESULT back"| DOC
+
+    PTT --> MODEL
+    LOC --> MODEL
+    WX --> MODEL
+    TB --> MODEL
+    BR --> MODEL
+    DOC --> MODEL
+    TR --> MODEL
+
+    PTT -->|"the checked address"| WEB
+    LOC --> WEB
+    BR --> CHROME
+    CHROME --> WEB
+    TB --> THUND
+    TB --> TOOLS
+    DOC --> TOOLS
+    DOC --> DISK
+    LET --> DISK
+    TR --> DISK
+```
+
+Three things that diagram is for. **Only push-to-talk connects to anything** — every other agent
+opens a socket on the loopback interface and waits, so the question "which agent could have
+started this?" has one answer. **Two agents have no JRock at all**: the timer, which makes its
+own sounds, and the letters agent, which drives a flow and otherwise reads a folder. And **every
+agent that needs a model has its own** — one JRock per program, one folder per JRock, so two of
+them never write the same log or the same prompt file.
+
+The agents are separate programs and they talk over loopback TCP in plain lines of text. Only
+push-to-talk talks to a person: it hears the operator through the microphone and answers through
+the speaker. Everything else is **robot to robot**:
 - the sentences the model says for a program to recognise (it is told to say them in English,
   word for word),
 - the lines between the agents,
