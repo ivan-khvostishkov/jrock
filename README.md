@@ -1606,6 +1606,22 @@ it. A folder that will not move or will not delete (a sync client holding a page
 a scanner watching the folder) is **one sentence in the report and nothing more**: the letter is
 filed, and turning that into a failed automation would be a lie about what happened.
 
+**And the two scans a two-sided letter was merged from are deleted**, last of all and only
+once everything before it has gone right. Every page of both is in the merged document — the
+merge refuses a pair whose page counts differ, so nothing of either can be missing from it —
+and that document is the one that was read, named and renamed. What is left otherwise is two
+files holding the same pages under names that mean nothing, in the folder the operator looks at
+to see what has **not** been dealt with: two leftovers there are a letter that still looks
+unfiled, and *"file it"* on them would file the same letter again from scratch.
+
+The gate is everything-went-right, not nearly. The pair was merged; every file of the document
+was renamed; the renamed document is there and is **bigger than either pass on its own**, which
+a truncated merge would not be; and the folder tidy-up had nothing to report. Anything else and
+both scans stay, because whatever is interfering with one file in that folder is a reason not
+to delete another beside it. A delete that fails is a sentence in the report, like the folder's.
+Interactively it is **asked** — and the question says that this does not go through the Recycle
+Bin, because it does not; `--auto` deletes them, which is what `--auto` is for.
+
 File names in its dialogs each get **a line of their own**, indented, never sharing a line with
 prose: `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890.pdf` is an ordinary name here, and
 three of those wrapped into a paragraph is a dialog as wide as the desktop with nothing to

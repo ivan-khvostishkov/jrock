@@ -254,7 +254,15 @@ public final class JRockDocInventory {
         // PDF before anything is read, named after the front pass. JRock does the
         // interleave - its own duplex merge, through the automation API - because that
         // is where Ghostscript and the page pairing already live.
+        //
+        // The two passes are kept in hand: once the merged document has been read, named
+        // and renamed, they are two files holding the same pages under names that mean
+        // nothing, and the last step offers to delete them (see the end of this method).
+        Path frontPass = null;
+        Path backPass = null;
         if (told.second != null) {
+            frontPass = chosen;
+            backPass = told.second;
             chosen = mergeDuplex(chosen, told.second, told);
         }
 
@@ -388,6 +396,7 @@ public final class JRockDocInventory {
         // beside every letter that was ever filed.
         Path html = dir.resolve(chosen.getFileName() + ".html");
         String folderNote = "";
+        boolean tidyWrong = false;   // something in this folder would not move or delete
         if (Files.isDirectory(html)) {
             // Whatever happens to it, this is working material and the document is
             // already named: a folder that will not move or will not delete - a sync
@@ -402,6 +411,7 @@ public final class JRockDocInventory {
                         Files.move(html, moved);
                         folderNote = "the folder " + moved.getFileName() + " kept";
                     } catch (IOException ex) {
+                        tidyWrong = true;
                         folderNote = "the folder " + html.getFileName()
                                 + " kept under its own name - it could not be renamed: "
                                 + ex.getMessage();
@@ -414,6 +424,7 @@ public final class JRockDocInventory {
                     deleteTree(html);
                     folderNote = "the folder " + html.getFileName() + " deleted";
                 } catch (IOException ex) {
+                    tidyWrong = true;
                     folderNote = "the folder " + html.getFileName()
                             + " could not be deleted: " + ex.getMessage();
                 }
@@ -432,13 +443,74 @@ public final class JRockDocInventory {
         java.util.List<Path> renamed = new java.util.ArrayList<>();
         for (Path file : files) renamed.add(renameTo(file, base));
         System.out.println("Renamed to " + named(renamed));
+
+        // ---- The two passes the document was merged from -------------------
+        // Deleted last, and only once everything before it has gone right.
+        //
+        // A two-sided letter arrives as two scans; the merge puts every page of both into
+        // one PDF, and refuses a pair whose page counts differ, so nothing of either can
+        // be missing from it. That one PDF is what was read, named and renamed. What is
+        // left over is two files holding the same pages under names that mean nothing -
+        // and the scanner folder is where the operator looks to see what has NOT been
+        // dealt with: two leftovers there are a letter that still looks unfiled, and
+        // "file it" on them would file the same letter a second time from scratch.
+        //
+        // THE GATE IS EVERYTHING-WENT-RIGHT, NOT NEARLY. The pair was merged; the merge
+        // reported no problem (or this method would have stopped); every file of the
+        // document was renamed, which is this line above; the renamed document is there
+        // and is bigger than either pass on its own, which a truncated merge would not
+        // be; and the folder tidy-up had nothing to report. Anything else and both scans
+        // stay, because whatever is interfering with one file in this folder is a reason
+        // not to delete another one beside it.
+        //
+        // Interactively it is asked, as the rename and the folder are - and the question
+        // says that this does not go through the Recycle Bin, because it does not.
+        // --auto deletes them, which is what the operator asked --auto for.
+        String scansNote = "";
+        if (frontPass != null && !renamed.isEmpty()) {
+            Path filed = renamed.get(0);              // the document itself: files.get(0)
+            long whole = sizeOf(filed);
+            long front = sizeOf(frontPass);
+            long back = sizeOf(backPass);
+            if (tidyWrong) {
+                scansNote = "the two scans kept - the folder beside them would not tidy up";
+            } else if (front <= 0 || back <= 0 || whole <= front || whole <= back) {
+                // Either a pass has already gone, or the merged document is no bigger
+                // than one of them: not the shape of a merge that holds both.
+                scansNote = "the two scans kept - " + filed.getFileName()
+                        + " is not bigger than both of them";
+            } else if (askDeleteScans(frontPass, backPass, filed)) {
+                java.util.List<String> gone = new java.util.ArrayList<>();
+                java.util.List<String> stayed = new java.util.ArrayList<>();
+                for (Path oneScan : java.util.Arrays.asList(frontPass, backPass)) {
+                    try {
+                        Files.delete(oneScan);
+                        gone.add(oneScan.getFileName().toString());
+                    } catch (IOException ex) {
+                        stayed.add(oneScan.getFileName() + " (" + ex.getMessage() + ")");
+                    }
+                }
+                scansNote = gone.isEmpty() ? "" : String.join(" and ", gone) + " deleted";
+                if (!stayed.isEmpty()) {
+                    scansNote += (scansNote.isEmpty() ? "" : "; ") + "could not delete "
+                            + String.join(", ", stayed);
+                }
+            } else {
+                scansNote = "the two scans kept";
+            }
+            System.out.println(scansNote);
+        }
+        String scansPart = scansNote.isEmpty() ? "" : "; " + scansNote;
+        String scansLine = scansNote.isEmpty() ? "" : "\n" + capitalised(scansNote) + ".";
+
         if (!asking) {
             // The one line the letters agent reads out of all this output.
             System.out.println(autoResult(base, renamed.isEmpty() ? document
                     : renamed.get(0), renamed.size()));
         }
-        return new Result("renamed to " + named(renamed) + folderPart,
-                "Renamed to\n\n" + listed(renamed) + "\nin " + dir + "." + "\n" + folderLine);
+        return new Result("renamed to " + named(renamed) + folderPart + scansPart,
+                "Renamed to\n\n" + listed(renamed) + "\nin " + dir + "." + "\n" + folderLine
+                        + scansLine);
     }
 
     // ---- The command line --------------------------------------------------
@@ -1032,6 +1104,17 @@ public final class JRockDocInventory {
         out.write(s.getBytes(StandardCharsets.ISO_8859_1));
     }
 
+    // A file's size, or -1 when there is no file there to measure. Used to check that a
+    // merged document really is bigger than each pass it was made from before the passes
+    // are deleted, so a truncated merge cannot take its own originals with it.
+    private static long sizeOf(Path file) {
+        try {
+            return Files.size(file);
+        } catch (IOException notThere) {
+            return -1;
+        }
+    }
+
     // Deletes a folder and everything in it, deepest first.
     private static void deleteTree(Path root) throws IOException {
         java.util.List<Path> all = new java.util.ArrayList<>();
@@ -1142,6 +1225,24 @@ public final class JRockDocInventory {
     // Whether to keep the HTML folder pass one read the PDF from. Its pages are for the
     // model, not for people - the DOCX and the TXT are the readable copies - so whether
     // it stays is the user's call; a folder kept is renamed with the files.
+    // Whether the two passes a duplex document was merged from may go. Every page of both
+    // is in the document that has just been named, so what is being deleted is the
+    // duplicate and not the letter - but it is still the only other copy on this disk,
+    // which is why the question says what it says.
+    private static boolean askDeleteScans(Path front, Path back, Path filed) {
+        if (!asking) {
+            System.out.println("Delete the two scans it was merged from? yes (auto: "
+                    + front.getFileName() + " and " + back.getFileName()
+                    + " - every page of both is in " + filed.getFileName() + ")");
+            return true;
+        }
+        return ask("This document was merged from two scans:\n\n    " + front.getFileName()
+                + "\n    " + back.getFileName() + "\n\nEvery page of both is in\n\n    "
+                + filed.getFileName() + "\n\nDelete the two scans? They do NOT go to the "
+                + "Recycle Bin.\n\nNo keeps them - and they will go on looking like a "
+                + "letter nobody has filed.", "Delete the two scans?");
+    }
+
     private static boolean askKeepFolder(Path folder, String newName) {
         if (!asking) {
             // The one question --auto does not answer with a yes. Every other question
