@@ -1444,11 +1444,10 @@ public class JRock {
     //
     // One empty task, and the wait is exact rather than a guess: invokeAndWait returns
     // only after everything queued BEFORE it has run, and the whole report was queued by
-    // initSession. It replaced a poll for "Ready." in the log text, which was wrong twice
-    // - a restored log already ends with the previous session's Ready, and reading the
-    // entry list from this thread while the event thread appended to it threw
-    // ConcurrentModificationException, which is exactly the kind of thing that only shows
-    // up when the thing is run.
+    // initSession. Waiting for the words "Ready." in the log would be wrong twice over -
+    // a restored log already ends with the previous session's, and reading the entry list
+    // from this thread while the event thread appends to it is a
+    // ConcurrentModificationException.
     private static void cliAwaitReady() {
         try {
             SwingUtilities.invokeAndWait(() -> { });
@@ -2273,10 +2272,11 @@ public class JRock {
         private void appendStyled(String line, java.awt.Color color, boolean follow) {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setForeground(attrs, color);
-            // What was selected before the line arrived. A selection is somebody reading
-            // - about to copy a path, an error, a hash - and setCaretPosition below both
-            // scrolls the pane AND collapses the selection, so a reply landing underneath
-            // used to take their place and their text away at once.
+            // What was selected before the line arrived. A selection is somebody
+            // reading - about to copy a path, an error, a hash - and setCaretPosition
+            // below both scrolls the pane AND collapses the selection, so following the
+            // end while something is selected would take the reader's place and their
+            // text at once.
             int from = pane.getSelectionStart();
             int to = pane.getSelectionEnd();
             boolean selecting = from != to;
@@ -3671,12 +3671,6 @@ public class JRock {
     // THE AUDIO DEVICES ARE LISTED WHEN SOMEBODY OPENS THE LIST OF THEM. Once, and then
     // not again until the Configure dialog is closed.
     //
-    // They used to be listed by trying to USE one: press Narrate with no speaker set, and
-    // the devices were enumerated into this dropdown together with a dialog telling you to
-    // come back here and choose. That is a peculiar way to answer "which speakers has this
-    // machine got?", and it left the dropdown EMPTY until you had done it - a dropdown
-    // with nothing in it being the one thing a dropdown must never be.
-    //
     // Not at startup and not when the dialog opens, because asking is not free: it opens
     // every mixer the system has and asks each whether it can play or record, which
     // measured 488 ms cold here (and 20 ms warm - Java Sound caches, the first question
@@ -4027,10 +4021,9 @@ public class JRock {
     // One burst, then silence, until told to stop. On the jrock-crackle thread.
     //
     // THE LINE IS CLOSED IN BETWEEN. A speaker hisses while its output stream is active,
-    // whatever is in the stream, so a held-open line under a sound that is silence 99% of
-    // the time is audible as a hiss - which is what the operator heard when this lived in
-    // push-to-talk and held its line. Opening the device costs about 100 ms here, which
-    // is invisible inside a gap that is random to begin with.
+    // whatever is in the stream, so a line held open under a sound that is silence 99% of
+    // the time is audible as a hiss. Opening the device costs about 100 ms here, which is
+    // invisible inside a gap that is random to begin with.
     private static void cracklePlay() {
         String device = narrateDevice;
         double cutoff = crackleCutoff(crackleTone);
@@ -4637,13 +4630,13 @@ public class JRock {
     // automation goes on), or why nothing is being said. One already playing is stopped
     // first, as two voices at once would talk over each other.
     //
-    // IT TAKES NO TEXT, AND THAT IS THE POINT. It used to be handed a string, which meant
-    // a program could speak words that appear nowhere - and a spoken answer with no record
-    // of it is the one kind this machine must not produce. An agent now says what it
-    // means to say the way a person would: put it in the log (automationNote), select it
+    // IT TAKES NO TEXT, AND THAT IS THE POINT. A call that could be handed a string
+    // could speak words that appear nowhere, and a spoken answer with no record of it is
+    // the one kind this machine must not produce. An agent says what it means to say the
+    // way a person would: put it in the log (automationNote), select it
     // (automationSelectInLog), narrate, and let the selection go
-    // (automationClearSelection). The transcript then holds everything JRock has ever
-    // said out loud, in order, with the rest of the conversation around it.
+    // (automationClearSelection). The transcript then holds everything JRock has said out
+    // loud, in order, with the rest of the conversation around it.
     //
     // Unlike the menu item, an unset device is a refusal and not the "set up the output
     // device" dialog, for the reason automationStartRecording gives.
@@ -5411,14 +5404,11 @@ public class JRock {
         // its own (see NARRATE_SCRIPT). Empty is the default and means "whichever voice
         // here speaks the language", which is what JRock does unasked.
         //
-        // Two controls, where this was one editable dropdown. A dropdown IS the value to
-        // anyone looking at one, so picking a second voice looked like it had thrown the
-        // first away - the appending it actually did was discoverable only from a
-        // tooltip, and a line cleared by hand came back as soon as the field lost focus,
-        // because the dropdown still held the old selection. Now the line is a text field
-        // and behaves like one - type in it, clear it, Tab away from it - and the thing
-        // that adds to it is labelled Add and goes straight back to blank, so it never
-        // looks like the answer to "which voice?" either.
+        // TWO CONTROLS, because the value is a LIST and a dropdown is a single choice:
+        // a dropdown holding one voice says that voice is the answer, while this setting
+        // is "these voices, in this order". So the value is a text field that behaves like
+        // one - type in it, clear it, Tab away from it - and the dropdown beside it is
+        // labelled Add, adds one name to the field, and goes straight back to blank.
         javax.swing.JTextField voiceF = null;
         javax.swing.JComboBox<String> addVoiceF = null;
         if (narrateAvailable()) {
@@ -5844,9 +5834,9 @@ public class JRock {
 
         // Prompts & agents directory. Applied only when the field was EDITED, which is
         // what leaves "prompts follow the working directory" intact for someone who
-        // opened this dialog to change the working directory and nothing else: the
-        // field showed them the old working directory, and taking that at face value
-        // would silently pin prompts to a folder they just moved away from.
+        // opened this dialog to change the working directory and nothing else - the field
+        // shows the working directory it had when the dialog opened, and taking that at
+        // face value would pin prompts to a folder they have just moved away from.
         //
         // Deliberately after the working directory above, so "same as the working
         // directory" is judged against the new one.

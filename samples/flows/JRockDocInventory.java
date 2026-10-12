@@ -336,18 +336,12 @@ public final class JRockDocInventory {
         } else if (pass == PASS_NAME && alone(document)) {
             // A TXT THAT IS NOBODY'S PLAIN-TEXT COPY IS A DOCUMENT OF ITS OWN, and gets
             // the DOCX the others get. No send: the text is already the text, and the
-            // exporter reads Markdown - which is what makes this work for a kept answer
-            // as well as for a plain note. Markdown or ASCII, a .txt is human-readable
-            // either way and JRock's writer lays out whichever it finds.
-            //
-            // Which is how the papers agent keeps an answer now: it writes the markdown
-            // it was handed as <stamp>.txt and runs this flow, instead of starting a
-            // JRock of its own to export a DOCX. One document type fewer, one JRock
-            // fewer, and the same exporter either way.
+            // exporter reads Markdown - so this works for a note and for an answer the
+            // papers agent was asked to keep, which arrives as markdown in a .txt.
             //
             // Only when the TXT stands alone. A .txt BESIDE a document is that
-            // document's plain text - this chain wrote it in pass two - and exporting a
-            // DOCX from it would be making a second document out of a copy.
+            // document's plain text, written by pass two, and exporting a DOCX from it
+            // would be making a second document out of a copy.
             String markdown = readText(document);
             if (markdown.isBlank()) {
                 throw new Stop(document.getFileName() + " is empty, so there is no "
@@ -411,14 +405,11 @@ public final class JRockDocInventory {
         // it would stay under - and a folder kept is renamed with the rest.
         //
         // NAMED THE WAY JROCK'S OWN INCLUDE NAMES IT: the whole file name with ".html"
-        // after it, "scan0167.Merged.pdf.html". This used to look for the stem alone,
-        // which is what that include used to write - and then it changed, for its own
-        // good reason (a stem would turn "report.pdf" into "report.txt", a name a text
-        // file of the user's own can already have). Nothing failed when it did: this
-        // looked for a folder that is never there any anymore, so it asked nothing, moved
-        // nothing, deleted nothing and - the part that made it hard to find - said
-        // nothing in the log either. What it left behind was a folder of page images
-        // beside every letter that was ever filed.
+        // after it, "scan0167.Merged.pdf.html" - not the stem, which would turn
+        // "report.pdf" into a folder called "report" and collide with the user's own
+        // files. Look for the wrong name and there is nothing to ask about, nothing to
+        // rename and nothing in the log: a folder of page images stays beside every
+        // letter that is filed.
         Path html = dir.resolve(chosen.getFileName() + ".html");
         String folderNote = "";
         boolean tidyWrong = false;   // something in this folder would not move or delete

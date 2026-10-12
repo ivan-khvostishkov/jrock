@@ -1874,11 +1874,10 @@ public final class InstallJRock {
 
     // Stops them, and says how many went.
     //
-    // By pid and not by command line, which is the one thing Java can do about another
-    // process on every platform: ProcessHandle.of(pid) finds it, destroy() asks it to go
-    // and destroyForcibly() stops asking. (The LOOKING is done by a shell above, because
-    // on Windows ProcessHandle tells you nothing about a process it did not start -
-    // measured here: 294 processes, 0 command lines, including this program's own.)
+    // By pid, which is the one thing Java can do about another process on every
+    // platform: ProcessHandle.of(pid) finds it, destroy() asks it to go, and
+    // destroyForcibly() stops asking. The LOOKING is done by a shell above, because on
+    // Windows ProcessHandle reports no command line for a process it did not start.
     //
     // Asked politely first and then not: half a second is long enough to find out whether
     // a Swing program with a modal dialog open is going to answer. Nothing of a session
@@ -2230,14 +2229,10 @@ public final class InstallJRock {
     //
     // A label wraps only where its HTML names a width, and a width in HTML is in CSS
     // pixels, which Swing scales by the display: "width:700px" asks for 910 device pixels
-    // on a 130% screen. The window is then narrower than the text in it and there is no
-    // horizontal scrollbar to reach the rest - page 1 read "...already installed:
-    // JRockBrowser, JRockPapers, JRockLocation, JRockPushToTalk, JRockThunderbird, J" and
-    // stopped at the window's edge, mid-name.
-    //
-    // A text area wraps to the width it is actually given, whatever the display is doing,
-    // and breaks inside a word when the word is wider than that - which a path, or the
-    // tail of a comma-separated list of class names, always is.
+    // on a 130% screen, and the wizard has no horizontal scrollbar to reach what falls off
+    // the right. A text area wraps to the width it is actually given, whatever the display
+    // is doing, and breaks inside a word when the word is wider than that - which a path,
+    // or a long list of class names, always is.
     private static javax.swing.JComponent paragraph(String words, java.awt.Color colour,
                                                     int above, int below) {
         javax.swing.JTextArea area = wrapping(words);
@@ -2257,15 +2252,12 @@ public final class InstallJRock {
     // at layout time, it is the height the words actually need.
     private static javax.swing.JTextArea wrapping(String words) {
         javax.swing.JTextArea area = new javax.swing.JTextArea(words) {
-            // THE HEIGHT IS A FUNCTION OF THE WIDTH, and the width is not known until the
-            // page is laid out. So both answers are worked out when they are asked for:
-            // the area is sized to the width it has been given, which makes the text
-            // re-wrap, and the height that wrapping needs is what it then reports.
-            //
-            // Measured before this: the paragraph reported the height of the single line
-            // it preferred while its width was still zero, BoxLayout gave it exactly
-            // that, and the second and third lines were drawn below the bottom of it -
-            // which is a page whose text is cut off horizontally AND vertically.
+            // THE HEIGHT IS A FUNCTION OF THE WIDTH, and the width is not known until
+            // the page is laid out. So both answers are worked out when they are asked
+            // for: the area is sized to the width it has been given, which makes the
+            // text re-wrap, and the height that wrapping needs is what it reports. A
+            // height worked out while the width is still zero is the height of one
+            // line, and the lines after the first are drawn below the bottom of it.
             @Override public java.awt.Dimension getPreferredSize() {
                 int width = getWidth();
                 if (width <= 0 && getParent() != null) width = getParent().getWidth();
@@ -2331,9 +2323,7 @@ public final class InstallJRock {
     }
 
     // A tick or a cross and what it is about - wrapping, because one of these lines is
-    // the names of everything already installed, which is as long as the install is. It
-    // was a plain label, which wraps nowhere at all, and on a ten-agent install it ran
-    // off the right of the window.
+    // the names of everything already installed, which is as long as the install is.
     private static javax.swing.JComponent found(boolean yes, String what) {
         javax.swing.JTextArea area = wrapping((yes ? "\u2713  " : "\u2717  ") + what);
         area.setForeground(yes ? BRAND : ALARM);
