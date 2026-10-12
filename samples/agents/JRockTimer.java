@@ -1,25 +1,24 @@
-// A JRock agent (it loops, and is started with JRock): a timer and alarm clock, and the
-// first agent that other agents talk to.
+// A JRock agent (it loops): a timer and alarm clock, and the first agent that other
+// agents talk to.
 //
-// Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
-// the class path:
+// NO JROCK AT ALL, and that is the point of it. It needs no model, no Bedrock key and no
+// window of JRock's: an alarm clock that made a text-generation program start up in order
+// to ring is a strange alarm clock. It used to start one for a single setting - the
+// speaker in Configure > Narrate on - and reading another program's configuration through
+// an API is the wrong way round twice over: a setting belongs to the program it belongs
+// to, and an API should offer an ACTION rather than hand out somebody else's state. So the
+// speaker is chosen HERE, in this window, and remembered here (see SETTINGS).
+//
+// Run it the way JRock itself runs - no build step, no Maven, one file:
 //
 //     java -cp jrock.jar JRockTimer.java [--working-dir <dir>]
 //
-// The jar is wherever the installer put it - one folder up from samples/flows/,
-// two up from an agent's own folder - and -cp names it. Take the flags as
-// JRock's own and expect a typed static call rather than reflection: all of
-// that is samples/flows/JRockDocInventory.java's opening comment, and it is
-// true of every agent and every flow. Read that file first.
+// The jar on the class path is the installer's own habit rather than a need - nothing in
+// this file calls into it any more - and the flags are accepted and ignored, so the
+// right-click entry and the start script can treat this agent like all the others. All of
+// that is samples/flows/JRockDocInventory.java's opening comment; read that file first.
 //
-// It needs no Bedrock API key: nothing here calls a model, which makes it a demo that runs
-// on any machine. What it takes from JRock is one setting, the speaker in Configure >
-// Narrate on (JRock.automationNarrateDevice) - the sounds are its own, made here, and
-// played on that device with Java Sound, never on the Windows default.
-//
-//   1. JRock is started and taken as an automation: its prompt read-only and Mic always
-//      on muted, so this JRock never records what is said to another one.
-//   2. A small window opens beside JRock's: a time, hh:mm:ss, and Set. Set, and one
+//   1. A small window opens: a time, hh:mm:ss, and Set. Set, and one
 //      beep in the alarm's own chord says it is on. The list under it counts down to
 //      every alarm set since the window opened - nothing is kept across runs.
 //   3. At the time, the alarm rings once and the list shows it rang. Remove (or Delete,
@@ -59,6 +58,9 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -116,27 +118,27 @@ public final class JRockTimer {
     private static final java.util.concurrent.ExecutorService SOUND =
             java.util.concurrent.Executors.newSingleThreadExecutor(r -> daemon(r, "jrock-timer-sound"));
 
+    // THE SPEAKER, this agent's own setting, remembered beside this file. Not JRock's,
+    // and not the system default either: an alarm that rings somewhere other than where
+    // its owner is listening has not rung. Empty until one is picked, which is the one
+    // thing the window says out loud when it starts (see the chord in main).
+    private static final String SETTINGS = "jrock-timer.txt";
+    private static volatile String speaker = "";
+
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField timeField;
+    private static javax.swing.JComboBox<String> speakerBox;
     private static javax.swing.JTextArea status;
     private static javax.swing.DefaultListModel<Alarm> alarms;   // EDT only
     private static javax.swing.JList<Alarm> list;
     private static volatile ServerSocket server;
 
     public static void main(String[] args) {
-        JRock.main(args);
-        // Ready, or ready but without a key - which this agent does not need. Only no
-        // window at all is a reason not to start.
-        String notReady = JRock.automationAwaitReady(READY_TIMEOUT_MS);
-        String problem = JRock.automationWindow() == null ? notReady
-                : JRock.automationBegin("timer agent");
-        if (problem != null) {
-            System.out.println("Stopped: " + problem);
-            onEdt(() -> javax.swing.JOptionPane.showMessageDialog(JRock.automationWindow(),
-                    "The timer agent could not start:\n\n" + problem,
-                    "Timer", javax.swing.JOptionPane.ERROR_MESSAGE));
-            return;
-        }
+        // The flags are JRock's and this agent has no JRock: they are read for the log and
+        // then left alone, so that one right-click entry and one start script can treat
+        // every agent the same way.
+        for (String arg : args) System.out.println("Ignoring JRock's flag: " + arg);
+        readSettings();
         onEdt(JRockTimer::showWindow);
         String listening = listen();
         later(() -> say(listening));
@@ -384,14 +386,14 @@ public final class JRockTimer {
         return new byte[(int) (RATE * ms / 1000) * 2];
     }
 
-    // Plays pcm on JRock's Narrate on device, a slice at a time so stop() is looked at
-    // every 50 ms. On the SOUND thread. Returns whether it could play - a device not set,
-    // or not there, is said on the status line and is false.
+    // Plays pcm on the speaker chosen in this window, a slice at a time so stop() is
+    // looked at every 50 ms. On the SOUND thread. Returns whether it could play - a device
+    // not set, or not there, is said on the status line and is false.
     private static boolean play(byte[] pcm, java.util.function.BooleanSupplier stop) {
-        String device = JRock.automationNarrateDevice();
+        String device = speaker;
         if (device == null || device.isEmpty()) {
-            later(() -> say("No sound: no speaker is set. Press Narrate in JRock's log menu "
-                    + "to list them, and pick one in Configure > Narrate on."));
+            later(() -> say("No sound: no speaker is set. Pick one in Speaker, above - "
+                    + "the list fills itself when you open it."));
             return false;
         }
         javax.sound.sampled.Mixer mixer = outputMixer(device);
@@ -453,7 +455,6 @@ public final class JRockTimer {
                 if (s != null) {
                     try { s.close(); } catch (IOException ignored) { }
                 }
-                daemon(() -> JRock.automationEnd("timer agent closed"), "jrock-timer-end").start();
             }
         });
 
@@ -479,6 +480,57 @@ public final class JRockTimer {
         top.setOpaque(false);
         top.add(timeField, java.awt.BorderLayout.CENTER);
         top.add(setButton, java.awt.BorderLayout.EAST);
+
+        // The speaker, chosen here rather than taken from another program's settings.
+        // Picking one plays its chord at once: "which speaker is this?" is a question
+        // only the ears can answer, and the answer should not have to wait for an alarm.
+        speakerBox = new javax.swing.JComboBox<>();
+        speakerBox.setFont(base.deriveFont(java.awt.Font.PLAIN, 12f));
+        speakerBox.setToolTipText("Where the alarms ring. Open the list and it asks this "
+                + "machine what it has, every time - so something plugged in a minute ago "
+                + "is in it.");
+        speakerBox.addItem("");
+        if (!speaker.isEmpty()) speakerBox.addItem(speaker);
+        speakerBox.setSelectedItem(speaker);
+        speakerBox.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
+                speakerList();
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
+                // Nothing: the list is made on the way in, not on the way out.
+            }
+
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
+                // Nothing.
+            }
+        });
+        speakerBox.addActionListener(e -> {
+            if (filling) return;   // the list being refilled is nobody choosing anything
+            Object picked = speakerBox.getSelectedItem();
+            String now = picked == null ? "" : picked.toString();
+            if (now.equals(speaker)) return;
+            speaker = now;
+            writeSettings();
+            if (speaker.isEmpty()) {
+                say("No speaker set: nothing will be heard when an alarm rings.");
+                return;
+            }
+            say("Alarms will ring on " + speaker + ".");
+            SOUND.submit(() -> play(chord(CHORDS[0], 140, 0.5), () -> false));
+        });
+
+        javax.swing.JPanel speakerRow = new javax.swing.JPanel(new java.awt.BorderLayout(8, 0));
+        speakerRow.setOpaque(false);
+        speakerRow.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 0, 0, 0));
+        javax.swing.JLabel speakerLabel = new javax.swing.JLabel("Speaker:");
+        speakerLabel.setFont(base.deriveFont(java.awt.Font.PLAIN, 12f));
+        speakerLabel.setForeground(MUTED);
+        speakerRow.add(speakerLabel, java.awt.BorderLayout.WEST);
+        speakerRow.add(speakerBox, java.awt.BorderLayout.CENTER);
 
         // A WRAPPING TEXT AREA AND NOT A LABEL. A label wraps only where its HTML names a
         // width in CSS pixels, and Swing scales those by the display: "width:300px" asked
@@ -531,10 +583,18 @@ public final class JRockTimer {
         bottom.setOpaque(false);
         bottom.add(remove);
 
-        javax.swing.JPanel north = new javax.swing.JPanel(new java.awt.BorderLayout());
+        javax.swing.JPanel north = new javax.swing.JPanel();
+        north.setLayout(new javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS));
         north.setOpaque(false);
-        north.add(top, java.awt.BorderLayout.NORTH);
-        north.add(status, java.awt.BorderLayout.CENTER);
+        for (javax.swing.JComponent row : new javax.swing.JComponent[] { top, speakerRow }) {
+            row.setAlignmentX(0f);
+            row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
+                    row.getPreferredSize().height));
+            north.add(row);
+        }
+        // Not capped: it wraps, and a wrapped line's height depends on its width.
+        status.setAlignmentX(0f);
+        north.add(status);
 
         javax.swing.JPanel content = new javax.swing.JPanel(new java.awt.BorderLayout());
         content.setBackground(BACKGROUND);
@@ -550,14 +610,7 @@ public final class JRockTimer {
 
         window.pack();
         window.setMinimumSize(window.getSize());
-        // Beside JRock's window rather than on top of it, so both can be watched.
-        java.awt.Window jrock = JRock.automationWindow();
-        if (jrock != null) {
-            java.awt.Rectangle at = jrock.getBounds();
-            window.setLocation(Math.max(0, at.x - window.getWidth()), at.y);
-        } else {
-            window.setLocationRelativeTo(null);
-        }
+        window.setLocationRelativeTo(null);
         window.setVisible(true);
         // NOTHING THAT CAN BE CHANGED HAS THE FOCUS WHEN THIS OPENS. Swing gives it to
         // the first focusable component, which in these windows is a field, a checkbox or
@@ -616,6 +669,109 @@ public final class JRockTimer {
     }
 
     // ---- Plumbing --------------------------------------------------------------
+    // ---- The speaker, chosen here -----------------------------------------------
+    // THE LIST IS MADE EVERY TIME IT IS OPENED, and deliberately not once like JRock's
+    // Configure dropdown. That one lives in a dialog somebody opens to change a setting
+    // and closes again, so listing once per dialog is a fair bargain for half a second.
+    // This window is open for days: a headset plugged in this afternoon has to be in the
+    // list this afternoon, and nobody is going to restart an alarm clock to see it. The
+    // cost is the same half-second only on the first open of a session - Java Sound
+    // caches the enumeration, and every later one measured about 20 ms.
+    private static void speakerList() {
+        Object chosen = speakerBox.getSelectedItem();
+        String keep = chosen == null ? "" : chosen.toString();
+        java.util.List<String> found = outputDeviceNames();
+        boolean gone = !keep.isEmpty() && !found.contains(keep);
+        filling = true;
+        try {
+            speakerBox.removeAllItems();
+            speakerBox.addItem("");
+            for (String name : found) speakerBox.addItem(name);
+            // THE ONE CHOSEN BEFORE STAYS IN THE LIST even when the machine has not got
+            // it at the moment: a headset switched off for the night is still the
+            // operator's choice. A dropdown cannot hold a selection that is not one of
+            // its items - it quietly takes the first one instead - so without this line
+            // opening the list would re-point the alarms at nothing, and the operator
+            // would have no way of knowing until one failed to ring.
+            if (gone) speakerBox.addItem(keep);
+            speakerBox.setSelectedItem(keep);
+        } finally {
+            filling = false;
+        }
+        if (gone) {
+            say("\"" + keep + "\" is not connected now - it is still the one chosen, so "
+                    + "alarms will be heard again when it is back. Pick another to move "
+                    + "them.");
+        }
+    }
+
+    // True while the list is being refilled: Swing fires the same event for that as for a
+    // person choosing, and refilling must neither change the speaker nor beep about it.
+    private static boolean filling;
+
+    // The speakers this machine has, by the name Java Sound gives them - the same names
+    // JRock's own Configure shows, because both ask the same question of the same system.
+    private static java.util.List<String> outputDeviceNames() {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        javax.sound.sampled.Line.Info playback =
+                new javax.sound.sampled.Line.Info(javax.sound.sampled.SourceDataLine.class);
+        for (javax.sound.sampled.Mixer.Info info
+                : javax.sound.sampled.AudioSystem.getMixerInfo()) {
+            // Never the "Primary Sound Driver" alias: it is whatever Windows feels like
+            // at the time, and an alarm has to ring where it was told to ring.
+            if (info.getName().equals("Primary Sound Driver")) continue;
+            try {
+                if (javax.sound.sampled.AudioSystem.getMixer(info).isLineSupported(playback)
+                        && !names.contains(info.getName())) {
+                    names.add(info.getName());
+                }
+            } catch (RuntimeException goneAlready) {
+                // A device unplugged while it was being asked about: not in the list.
+            }
+        }
+        return names;
+    }
+
+    // ---- Settings ---------------------------------------------------------------
+    // One line beside this agent's own file, so the speaker chosen once is the speaker
+    // tomorrow. Nothing of JRock's is read or written: this is this agent's setting.
+    private static void readSettings() {
+        Path file = ownDirectory().resolve(SETTINGS);
+        if (!Files.isRegularFile(file)) return;
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                String text = line.trim();
+                if (text.startsWith("speaker=")) {
+                    speaker = text.substring("speaker=".length()).trim();
+                }
+            }
+        } catch (IOException ex) {
+            System.out.println("Could not read " + file + ": " + ex.getMessage());
+        }
+    }
+
+    private static void writeSettings() {
+        Path file = ownDirectory().resolve(SETTINGS);
+        String text = "' JRock timer agent\nspeaker=" + speaker + "\n";
+        try {
+            Files.write(file, text.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            later(() -> say("Could not remember the speaker in " + file + ": "
+                    + ex.getMessage()));
+        }
+    }
+
+    // The folder this agent's own file is in - where its settings go. Not the working
+    // directory: a right-click entry runs an agent IN the folder that was clicked.
+    private static Path ownDirectory() {
+        String source = System.getProperty("jdk.launcher.sourcefile");
+        if (source != null && !source.isBlank()) {
+            Path parent = Paths.get(source).toAbsolutePath().normalize().getParent();
+            if (parent != null) return parent;
+        }
+        return Paths.get("").toAbsolutePath().normalize();
+    }
+
     private static Thread daemon(Runnable body, String name) {
         Thread t = new Thread(body, name);
         t.setDaemon(true);

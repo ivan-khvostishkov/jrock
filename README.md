@@ -1965,15 +1965,61 @@ the voice, so the microphone doesn't record the last answer as the next question
 
 ### A second agent: timer and alarm (`JRockTimer.java`)
 
-The one to show first: **no Bedrock API key needed**, since nothing in it calls a model.
+The one to show first: **no Bedrock API key needed, and no JRock either**. Nothing in it calls
+a model, and nothing in it calls into JRock — an alarm clock that made a text-generation program
+start up in order to ring would be a strange alarm clock.
 
 ```
 java -cp jrock.jar JRockTimer.java --working-dir D:\Timer
 ```
 
-It starts JRock and takes it as an automation, which mutes Mic always on, so this JRock never
-records what you say to another one. Then it opens a small window: a time and **Set**, with the
-alarms set since it opened listed underneath, each counting down. Nothing is kept across runs.
+It used to start a JRock for a single setting: the speaker in **Configure → Narrate on**, read
+through the automation API. That was the wrong way round twice over — a setting belongs to the
+program whose setting it is, and an API should offer an **action** (*narrate this*) rather than
+hand out somebody else's state. So the speaker is chosen **in this window** and remembered
+beside the agent in `jrock-timer.txt`, the jar on the class path is habit rather than need, and
+JRock's flags are accepted and ignored so that one right-click entry and one start script can
+treat every agent alike.
+
+It opens a small window: a time and **Set**, the speaker, and the alarms set since it opened
+listed underneath, each counting down. Nothing is kept across runs but the speaker.
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    participant T as JRockTimer, 127.0.0.1:47470
+    participant S as The speaker it was told to use
+    participant PTT as JRockPushToTalk
+
+    rect rgb(220, 235, 255)
+        Note over T: starts: reads jrock-timer.txt, opens its window
+        T->>S: one C chord - "the sound works, and it comes out here"
+    end
+    rect rgb(255, 245, 200)
+        Op->>T: opens the Speaker list
+        T->>T: asks this machine what it has, every time
+        Op->>T: picks one
+        T->>S: that chord again, on the new speaker
+        T->>T: writes it to jrock-timer.txt
+    end
+    rect rgb(220, 235, 255)
+        PTT->>T: "07:30:00" over TCP (the model heard "wake me at half seven")
+        T-->>PTT: "1"
+        Note over T: at 07:30:00
+        T->>S: its own chord, its own number of beeps
+        T->>Op: the row turns red and says it rang
+    end
+```
+
+- **The speaker is this agent's own, and the list is made every time it is opened.** JRock's
+  Configure dialog lists the devices once per dialog, which is fair for a dialog somebody opens
+  and closes; this window is open for days, so a headset plugged in this afternoon has to be in
+  the list this afternoon. Measured: 581 ms on the first open of a session and 48 ms, then
+  32 ms, on the ones after it — Java Sound caches the enumeration, so only the first open pays.
+  Picking one plays its chord at once, because *which speaker is this?* is a question only the
+  ears can answer. And the one chosen before **stays in the list when the machine has not got
+  it at the moment** — a headset switched off for the night is still the choice, and a dropdown
+  that quietly forgot it would re-point the alarms at nothing.
 
 - **The time is when the alarm rings**, 24-hour `hh:mm:ss`: `07:30:00` is today if that is
   still to come, and otherwise tomorrow. `+hh:mm:ss` is a timer instead: `+00:05:00` rings in
@@ -1981,9 +2027,9 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
 - **It beeps once when it starts**, a C chord at half an alarm's volume, before any alarm
   exists. Partly because an agent started by a right-click or by the installer may have its
   window behind another one — but mostly because **it proves the sound works**. Everything else
-  here is silent until an alarm comes due, so a speaker that is not set in Configure, or set to
-  something no longer plugged in, is otherwise discovered when an alarm fails to wake you. If it
-  cannot play, the window says why *now*: *"No sound: the speaker … is not connected"*.
+  here is silent until an alarm comes due, so a speaker that is not set, or set to something no
+  longer plugged in, is otherwise discovered when an alarm fails to wake you. If it cannot play,
+  the window says why *now*: *"No sound: the speaker … is not connected"*.
 - **Every alarm rings its own sound**, because more than one can be set and from across the
   room the sound is the only thing that says *which* has gone off. The chord and the number of
   beeps both move with the alarm: the **first** rings a **C** chord **three** times, the
