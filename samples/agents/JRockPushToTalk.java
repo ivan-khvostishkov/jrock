@@ -328,6 +328,13 @@ public final class JRockPushToTalk {
             + "(?:the message |message )?([0-9a-fA-F]{6}):\\s*(.+)",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
+    // A NOTE TO SELF: "I'm making a note: <the note>". Everything after the colon is
+    // the note itself, over as many lines as it takes, which is why this is DOTALL.
+    private static final java.util.regex.Pattern NOTE = java.util.regex.Pattern.compile(
+            "I(?:['\u2019]m| am) (?:making|taking|writing) (?:a|the) note(?: to self)?:"
+            + "\\s*(.+)",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
     // The answer before this one, which is what the save sentence saves.
     private static volatile String lastAnswer;
 
@@ -617,12 +624,13 @@ public final class JRockPushToTalk {
         String event = eventIn(reply);
         String moved = movedIn(reply);
         String drafted = draftIn(reply);
+        String noted = noteIn(reply);
         String saved = savedIn(reply);
         // What the NEXT save would save: this answer, unless this answer was itself a
         // command about the last one.
         if (saved == null && drafted == null) lastAnswer = reply;
         if (handsFreeTurn && !handsFree) {
-            return join(note, alarm, event, moved, drafted, saved);
+            return join(note, alarm, event, moved, drafted, noted, saved);
         }
         // An answer of nothing at all - a reply that arrived empty - is a failed turn to
         // anyone listening, however well the request itself went: reading it out loud
@@ -635,12 +643,12 @@ public final class JRockPushToTalk {
         // hear - the one they already know means "say it again".
         if (reply.isBlank() || stuck != null) {
             if (stuck != null) report("that turn ended without an answer: " + stuck + ".");
-            return join(note, alarm, event, moved, drafted, saved,
+            return join(note, alarm, event, moved, drafted, noted, saved,
                     reply.isBlank() ? "The reply was empty." : "No answer: " + stuck + ".",
                     sayFailed());
         }
         String silent = sayAloud(reply);
-        return join(note, alarm, event, moved, drafted, saved,
+        return join(note, alarm, event, moved, drafted, noted, saved,
                 silent == null ? null : "Not read aloud: " + silent);
     }
 
@@ -669,6 +677,44 @@ public final class JRockPushToTalk {
     // of them is passed through for the agent to refuse with a reason - the same rule the
     // calendar requests follow, and for the same reason: a guess here would be a wrong
     // answer read aloud in a confident voice.
+    // How many days a span said in words comes to: "a week", "3 weeks", "six months",
+    // "half a year", "a year". Nobody dictates "one hundred and eighty days".
+    private static long spanInDays(String asked) {
+        java.util.regex.Matcher weeks = java.util.regex.Pattern
+                .compile("(\\d{1,2}|a|one|two|three|four|five|six)\\s*week").matcher(asked);
+        java.util.regex.Matcher months = java.util.regex.Pattern
+                .compile("(\\d{1,2}|a|one|two|three|four|five|six|nine|twelve)\\s*month")
+                .matcher(asked);
+        if (asked.contains("half a year") || asked.contains("six months")) return 183;
+        if (asked.contains("a year") || asked.contains("12 months")
+                || asked.contains("this year") || asked.contains("last year")) {
+            return 365;
+        }
+        if (months.find()) return Math.min(366, 31 * count(months.group(1)));
+        if (weeks.find()) return Math.min(366, 7 * count(weeks.group(1)));
+        if (asked.contains("fortnight")) return 14;
+        return 0;
+    }
+
+    private static long count(String said) {
+        switch (said) {
+            case "a": case "one": return 1;
+            case "two": return 2;
+            case "three": return 3;
+            case "four": return 4;
+            case "five": return 5;
+            case "six": return 6;
+            case "nine": return 9;
+            case "twelve": return 12;
+            default:
+                try {
+                    return Math.max(1, Long.parseLong(said));
+                } catch (NumberFormatException notANumber) {
+                    return 1;
+                }
+        }
+    }
+
     private static String mailRequest(String about) {
         String asked = about.toLowerCase(java.util.Locale.ROOT).trim();
         java.util.regex.Matcher with = java.util.regex.Pattern
@@ -694,6 +740,13 @@ public final class JRockPushToTalk {
         if (with.matches()) return "#with " + with.group(1).trim();
         if (asked.contains("today")) return "#mail";
         if (days.find()) return "#mail " + days.group(1);
+        // A SPAN SAID IN WEEKS, MONTHS OR YEARS. The agent counts in days and will go
+        // back a year, so nothing here was ever the limit - but a model that says "six
+        // months" to a mapping which only knew the word "day" fell through to today's
+        // mail, and the operator asking about something from the spring got this
+        // morning's post instead. The words it is likely to use, turned into days.
+        long span = spanInDays(asked);
+        if (span > 0) return "#mail " + span;
         return "#mail";
     }
 
@@ -1032,6 +1085,26 @@ public final class JRockPushToTalk {
         if (prepared[0] == null) return "Draft not prepared: " + prepared[1];
         report("mail: " + prepared[0].replace("\n", " "));
         return prepared[0].split("\n", 2)[0].trim();
+    }
+
+    // Opens a note to self in Thunderbird, if the answer says it is making one. Returns
+    // null when it does not, and otherwise what became of it.
+    //
+    // The Thunderbird agent does the work and the words go as they are: it is the one
+    // that knows the operator's own address, and it takes the markdown off before the
+    // note becomes a mail body. Nothing is sent here either - the compose window opens
+    // and the last keystroke is the operator's, as with every other mail this machine
+    // writes.
+    private static String noteIn(String answer) {
+        java.util.regex.Matcher m = NOTE.matcher(answer);
+        if (!m.find()) return null;
+        String words = m.group(1).trim();
+        if (words.isEmpty()) return "Note not made: there was nothing in it.";
+        String[] made = askAgent(CALENDAR_PORT, "#note " + words.replace("\n", " "),
+                "Thunderbird", "JRockThunderbird.java");
+        if (made[0] == null) return "Note not made: " + made[1];
+        report("note: " + made[0].replace("\n", " "));
+        return made[0].split("\n", 2)[0].trim();
     }
 
     // Saves the answer BEFORE this one as a DOCX in the working folder, if the answer says

@@ -2289,6 +2289,7 @@ So *"have I answered that?"* is a **fact out of the index** rather than a guess 
 | `#senders 5` | who wrote in the last five days, with how many each and when they last did |
 | `#message <id or words>` | **one message's own text**, as Markdown: who, when, what was attached, and what they wrote |
 | `#reply <id> <text>` | a draft reply in Thunderbird's compose window, addressed and titled — never sent |
+| `#note <what to remember>` | a **note to self**: a mail from your own address to the same address, plain text, opened and not sent |
 | `#mailboxes` | the accounts in the index, how much of each, and **how fresh the index is** |
 
 ```
@@ -2676,6 +2677,24 @@ sequenceDiagram
   by itself is the default because it is the one that cannot go wrong: a two-sided letter filed
   as two single-sided ones is two files to tidy up, while two letters merged are a document
   that is half somebody else's.
+- **A note to self is a mail.** *"I'm making a note: the boiler service is due in March"* opens
+  a compose window addressed **from your own address to the same address**, with the note as the
+  whole body and `Note: ` and its first line as the subject. Why mail rather than a file
+  somewhere: your mailbox is the thing you already search, on every device you own, so a note
+  that lands there is a note you will find again — and nothing else here has that property. No
+  date and no `.ics`: `#new` is for a thing that happens at a time, this is for a thing to keep.
+  **The Markdown is taken off** before it becomes a body — a model asked for a note writes like
+  a model, and asterisks, backticks and heading hashes in a mail are litter; the words stay, the
+  typography goes, and `3 * 4 * 5` survives because emphasis needs no space inside its marks.
+  The address is the one picked in the window, at both ends, so a note cannot reach anybody
+  else, and the last keystroke is yours.
+- **Mail can be asked for over any span up to a year**, not just the last few days: *"anything
+  from the spring"*, *"did I ever hear back from them"*. The agent always could — `#mail 183` is
+  183 days and the cap is 366 — but nothing told the **model** it could, and the words it would
+  use were not understood: *"six months"* fell through to today's post. Weeks, months, half a
+  year and a year now turn into the days the agent counts in, and the appendix says to reach for
+  a long span whenever the question is not about something recent. Forty lines come back at the
+  most, newest first, and the answer says when there were more.
 - **Filing takes minutes, and nothing waits for ever.** The flow behind it is Ghostscript, xpdf
   and three model passes over a scanned page, so a minute or two is an ordinary letter and
   push-to-talk waits **twelve minutes** for this one request while telling the operator what is

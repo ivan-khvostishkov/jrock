@@ -44,6 +44,7 @@
 //          #tentative [days]              the maybes (tentative, unanswered, optional)
 //          #tentative 2026-12-01 2026-12-31  the same over a span
 //          #calendars                     the calendars, and how many events each holds
+//          #note <what to remember>      a note to self, by mail, with no date in it
 //          #new 2026-10-15 14:00 Dentist  a new event, by post (see below)
 //          #new 2026-12-24 Christmas Eve  the same, for a whole day
 //          #move a3f91c 2026-10-20 14:30  move an appointment of your own - and only
@@ -377,6 +378,8 @@ public final class JRockThunderbird {
                 return message(line.substring(what.length()).trim(), zone);
             case "#reply":
                 return reply(line.substring(what.length()).trim(), zone);
+            case "#note":
+                return note(line.substring(what.length()).trim());
             case "#unanswered":
                 return unanswered(daysIn(parts, 1, UNANSWERED_DAYS), zone);
             case "#with":
@@ -2815,6 +2818,86 @@ public final class JRockThunderbird {
     // of the reply. So this can write to the people who have written to the operator, and
     // to nobody else - the same rule the calendar's #move follows.
     //
+    // A NOTE TO SELF: a mail from the operator's own address to the same address, with
+    // nothing in it but what they said. No date, no .ics, no calendar - #new is for a
+    // thing that happens at a time, and this is for a thing to keep.
+    //
+    // Which is why it goes into mail at all rather than into a file somewhere: the
+    // operator's mailbox is already the thing they search, on every device they own, and
+    // a note that arrives there is a note they will find again. Nothing else here has
+    // that property.
+    //
+    // PLAIN TEXT, and deliberately scrubbed: what arrives has been through a model and
+    // may carry Markdown it was never asked for - asterisks, backticks, heading marks,
+    // bullet dashes - which in a mail body is just litter. The words are kept; the
+    // typography goes (see plainWords).
+    //
+    // The address is the one picked in this window, at both ends, exactly as #new does -
+    // so a note cannot reach anybody else, whatever a model says. The compose window
+    // opens and the last keystroke is the operator's, as everywhere else in this agent.
+    private static String note(String asked) {
+        String words = plainWords(asked);
+        if (words.isEmpty()) {
+            throw new Stop("#note wants the note itself, as #note call the dentist about "
+                    + "the crown next week.");
+        }
+        String me = eventEmail.trim();
+        if (me.isEmpty()) {
+            throw new Stop("no address is set for notes. Pick one in the agent's window "
+                    + "under \"New events from/to\" - a note goes from it to itself.");
+        }
+        Path thunderbird = thunderbird();
+        if (thunderbird == null) {
+            throw new Stop("Thunderbird was not found, and it is what the note goes into.");
+        }
+        // The subject is the first line, or the first few words of a single paragraph:
+        // a note with no subject is a note nobody finds by searching.
+        String firstLine = words.split("\n", 2)[0].trim();
+        String subject = firstLine.length() <= 70 ? firstLine
+                : firstLine.substring(0, 70).replaceAll("\\s+\\S*$", "") + "...";
+        String identity = identityOf(me);
+        String compose = "from=" + encode(me)
+                + ",to=" + encode(me)
+                + (identity == null ? "" : ",preselectid=" + identity)
+                + ",subject=" + encode("Note: " + subject)
+                + ",body=" + encode(words.replace("\n", "\r\n"));
+        try {
+            new ProcessBuilder(thunderbird.toString(), "-compose", compose)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+        } catch (IOException ex) {
+            throw new Stop("Thunderbird would not start: " + ex.getMessage());
+        }
+        later(() -> say("A note to " + me + " is open in Thunderbird - Ctrl+Enter sends it."));
+        return "Note prepared - the compose window is open, from " + me + " to itself, "
+                + "subject \"Note: " + subject + "\". Nothing is sent until the operator "
+                + "presses Ctrl+Enter.";
+    }
+
+    // Markdown taken off a line of prose, leaving the words: a model asked for a note
+    // writes like a model, and a mail body is not a document. Bullets become dashes
+    // nobody minds, emphasis and code marks go, headings lose their hashes, and a link
+    // keeps its text rather than its brackets.
+    private static String plainWords(String text) {
+        if (text == null) return "";
+        String out = text.replace("\r", "");
+        out = out.replaceAll("!\\[([^\\]]*)\\]\\([^)]*\\)", "$1");   // an image: its words
+        out = out.replaceAll("\\[([^\\]]*)\\]\\([^)]*\\)", "$1");    // a link: its text
+        out = out.replaceAll("(?m)^\\s{0,3}#{1,6}\\s*", "");          // heading marks
+        out = out.replaceAll("(?m)^\\s{0,3}>\\s?", "");               // quote marks
+        out = out.replaceAll("(?m)^(\\s*)[*+]\\s+", "$1- ");          // bullets, tidied
+        out = out.replaceAll("```+", "").replaceAll("`", "");        // code marks
+        out = out.replaceAll("\\*\\*([^*]+)\\*\\*", "$1");            // bold
+        // Emphasis, with the rule CommonMark itself uses: no space just inside the
+        // marks. Without it "3 * 4 * 5 is twelve" comes out as "3  4  5 is twelve",
+        // which a note about arithmetic would not survive.
+        out = out.replaceAll("(?<![*\\w])\\*(\\S|\\S[^*\\n]*\\S)\\*(?![*\\w])", "$1");
+        out = out.replaceAll("(?<![_\\w])_(\\S|\\S[^_\\n]*\\S)_(?![_\\w])", "$1");
+        out = out.replaceAll("[ \\t]+\\n", "\n").replaceAll("\n{3,}", "\n\n");
+        return out.trim();
+    }
+
     // Not threaded, and that is a real limitation: Thunderbird's command line has no
     // In-Reply-To, so this is a new message with "Re: " on it rather than a reply inside
     // the thread. It goes to the right person with the right subject, and the thread it
