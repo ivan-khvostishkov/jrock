@@ -160,7 +160,8 @@ public final class InstallJRock {
     // page that offers only what is installed would hide the new one altogether. The
     // folder the old name was working in is kept, so its settings and its log carry over.
     private static final Map<String, String> RENAMED = Map.of(
-            "JRockCalendarEvents", "JRockThunderbird");
+            "JRockCalendarEvents", "JRockThunderbird",
+            "JRockLetters", "JRockPapers");
 
     private enum Kind { AGENT, FLOW }
 

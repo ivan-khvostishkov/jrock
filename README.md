@@ -1676,7 +1676,7 @@ two-sided batch, which are merged into one document first through JRock's own du
 of it twice. Every question answers itself the way the person at the keyboard almost always
 answers it — yes, rename them — and the result is **printed in a line a program can read**
 (`AUTO-RESULT name=… scanned=… files=…`) instead of shown in a dialog a program cannot dismiss.
-It is how the [letters agent](#a-seventh-agent-the-paper-post-jrocklettersjava) files a scan the
+It is how the [papers agent](#a-seventh-agent-the-paper-post-jrockpapersjava) files a scan the
 moment it arrives, with the operator three rooms away.
 
 **And `--auto` ends the process when it is done**, window and all. That is not tidiness: a JVM
@@ -1686,7 +1686,7 @@ it, which is right. With nobody there to close it, the agent that started the fl
 **process** and not merely for its answer: it reads the flow's output until the stream ends, and
 a stream ends when the process does. A flow that files a letter and then sits there is therefore
 indistinguishable from one still working, which is exactly how a filed letter once came back to
-the operator as *"the letters agent did not answer"*.
+the operator as *"the papers agent did not answer"*.
 
 **`-cp jrock.jar` has to name a jar that is there.** Nothing downloads it: the
 [installer](#the-installer-installerinstalljrockjava) puts one in the folder it installs into
@@ -2523,7 +2523,7 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   wrapping text area rather than an HTML label, because a label wraps only where its HTML names
   a width in **CSS** pixels — which Swing scales by the display, so `width:680px` asks for 886
   device pixels and a narrower window simply cuts the line off. Measured on a 130% screen: the
-  letters agent wanted 939 px in a window with 818, and showed two lines of three. A text area
+  papers agent wanted 939 px in a window with 818, and showed two lines of three. A text area
   wraps to the width it actually has, and breaks **inside** a word when the word is wider than
   that — which a file name or an address, being one long token with no space in it, always is.
 - **One tab per site**, kept. A second page on a site reuses its tab, and since the only sites
@@ -2566,7 +2566,7 @@ and its own JRock log.
 Protocol is JSON over a WebSocket, and a WebSocket client has been in the JDK since 11
 (`java.net.http.WebSocket`), so this is one file with no dependencies like everything else here.
 
-### A seventh agent: the paper post (`JRockLetters.java`)
+### A seventh agent: papers, in and out (`JRockPapers.java`)
 
 The letters that come through the door — what the scanner has put in its folder, what arrived
 when, and once a letter has been filed, what it says.
@@ -2576,8 +2576,8 @@ agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdja
 e-mail; this one reads the post. "Mail" would have meant both and so neither.
 
 ```sh
-java -cp jrock.jar JRockLetters.java --folder D:\HPNetworkScan
-java -cp jrock.jar JRockLetters.java --folder D:\HPNetworkScan --print recent
+java -cp jrock.jar JRockPapers.java --folder D:\HPNetworkScan
+java -cp jrock.jar JRockPapers.java --folder D:\HPNetworkScan --print recent
 ```
 
 **A new shape: an agent with no JRock of its own, that drives a flow.** Every other agent here
@@ -2598,7 +2598,7 @@ sequenceDiagram
         participant PTT as JRockPushToTalk
         participant PM as its JRock (model)
     end
-    participant Let as JRockLetters, 127.0.0.1:47475
+    participant Let as JRockPapers, 127.0.0.1:47475
     box One letter, one lifetime
         participant Flow as JRockDocInventory #45;#45;auto
         participant FM as its own JRock (model)
@@ -2695,10 +2695,34 @@ sequenceDiagram
   year and a year now turn into the days the agent counts in, and the appendix says to reach for
   a long span whenever the question is not about something recent. Forty lines come back at the
   most, newest first, and the answer says when there were more.
+- **Two folders, read the same way: the scanner's, and `Documents\Incoming`.** The scanner's
+  is where paper arrives; the incoming one is where documents arrive by **every other route** —
+  something downloaded, something copied off a phone, and anything this agent was asked to keep.
+  `#incoming` lists it newest first, whatever is in it, and anything in it can be asked for by
+  name like a filed letter. The rule in each folder differs, and the difference is the point: a
+  scan is readable once it has been **filed** (the `.txt` beside it is the flow's receipt, and
+  reading an unfiled scan would be reading a picture), while in the incoming folder everything
+  readable is readable **now** — nothing there arrived as paper, so there is nothing to convert
+  first. That is what makes that folder *always filed by design*.
+- **A file that is not already text goes through a model once.** Asked about a `.docx`, a PDF, a
+  spreadsheet or a photograph in the incoming folder, the agent includes it in **its own JRock**
+  as the kind it is and asks for clean Markdown — the same bargain the Thunderbird agent strikes
+  with an attachment, for the same reason: a DOCX is a zip of XML and a PDF is drawing
+  instructions, and neither is something to read aloud. What comes back is prose; nothing raw
+  ever leaves.
+- **Keeping an answer is this agent's job now, not push-to-talk's.** *"I'm saving the last
+  answer to a file"* sends the Markdown here, and here it becomes a document: the text goes into
+  this agent's JRock **prompt**, the prompt is exported as a DOCX with its pictures placed
+  (`automationExportPromptDocx`), and then the **doc inventory flow names it** — so a kept
+  answer is named by the same machinery as a scanned letter rather than carrying a timestamp.
+  Three things follow from the move: the document lands in the folder the operator
+  synchronises, it is named rather than stamped, and the Markdown travels between two agents as
+  every other document here already does. A naming that fails is not a save that failed: the
+  answer says what the file is called either way.
 - **Filing takes minutes, and nothing waits for ever.** The flow behind it is Ghostscript, xpdf
   and three model passes over a scanned page, so a minute or two is an ordinary letter and
   push-to-talk waits **twelve minutes** for this one request while telling the operator what is
-  happening — every other question the letters agent answers, it answers at once. The flow gets
+  happening — every other question the papers agent answers, it answers at once. The flow gets
   **twenty minutes** of its own, and that limit is now kept by a thread of its own that ends the
   process. It has to be: the agent reads the flow's output until the stream ends, and a stream
   ends when the process does, so a flow that will not exit is not slow but permanent — and the
@@ -2755,7 +2779,7 @@ flowchart LR
         WX["Weather<br/>:47472<br/>its own JRock"]
         TB["Thunderbird<br/>:47473<br/>its own JRock"]
         BR["Browser<br/>:47474<br/>its own JRock"]
-        LET["Letters<br/>:47475<br/>no JRock"]
+        LET["Papers<br/>:47475<br/>its own JRock"]
     end
 
     subgraph flows ["Flows - one run each, from a right-click"]
@@ -2784,7 +2808,7 @@ flowchart LR
     PTT -->|"a place"| WX
     PTT -->|"calendar, mail, #35;new, #35;reply"| TB
     PTT -->|"#35;page, #35;search, #35;follow"| BR
-    PTT -->|"#35;recent, #35;file, #35;inventory"| LET
+    PTT -->|"#35;recent, #35;file, #35;inventory, #35;save"| LET
 
     LET -->|"--auto, then AUTO-RESULT back"| DOC
 
@@ -2805,13 +2829,14 @@ flowchart LR
     DOC --> TOOLS
     DOC --> DISK
     LET --> DISK
+    LET --> MODEL
     TR --> DISK
 ```
 
 Three things that diagram is for. **Only push-to-talk connects to anything** — every other agent
 opens a socket on the loopback interface and waits, so the question "which agent could have
 started this?" has one answer. **Two agents have no JRock at all**: the timer, which makes its
-own sounds, and the letters agent, which drives a flow and otherwise reads a folder. And **every
+own sounds, and the papers agent, which drives a flow and otherwise reads a folder. And **every
 agent that needs a model has its own** — one JRock per program, one folder per JRock, so two of
 them never write the same log or the same prompt file.
 

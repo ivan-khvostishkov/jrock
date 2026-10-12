@@ -8,8 +8,8 @@
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
-//     java -cp jrock.jar JRockLetters.java [--folder <where the scanner writes>]
-//     java -cp jrock.jar JRockLetters.java --print recent
+//     java -cp jrock.jar JRockPapers.java [--folder <where the scanner writes>]
+//     java -cp jrock.jar JRockPapers.java --print recent
 //
 // A NEW SHAPE: AN AGENT WITH NO JROCK OF ITS OWN, THAT DRIVES A FLOW.
 //
@@ -89,13 +89,13 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-public final class JRockLetters {
+public final class JRockPapers {
 
     // The next port after the browser's.
     private static final int PORT = 47475;
 
     // Where this agent keeps the one thing it is told: the folder the scanner writes to.
-    private static final String SETTINGS = "jrock-letters.txt";
+    private static final String SETTINGS = "jrock-papers.txt";
 
     // The flow it drives, and the flag that stops it asking.
     private static final String FLOW = "JRockDocInventory.java";
@@ -105,6 +105,30 @@ public final class JRockLetters {
     // What a scanner writes, and what a filed letter is read from.
     private static final String SCAN_EXT = ".pdf";
     private static final String TEXT_EXT = ".txt";
+
+    // THE OTHER FOLDER, and the symmetry is the point. The scanner's folder is where
+    // paper ARRIVES; this is where documents arrive by every other route - a DOCX this
+    // agent was asked to keep, something downloaded, something copied off a phone - and
+    // where this agent writes. One folder in, one folder out, both of them read.
+    //
+    // Default: Documents\Incoming. Not inside this agent's own folder, and that is
+    // deliberate: a folder somebody synchronises has to be somewhere they would look for
+    // it, and the inside of an agent's working directory is not that place.
+    private static final String INCOMING_DEFAULT = "Incoming";
+
+    // The kinds of file in there this agent can read out. Anything JRock can include as
+    // text or as a document, which is what makes "always filed by design" true of that
+    // folder: a file in it can be ASKED about whatever it arrived as.
+    private static final String[] READABLE = {
+        ".txt", ".md", ".docx", ".rtf", ".pdf", ".xlsx", ".png", ".jpg", ".jpeg", ".gif",
+    };
+
+    // How long its own JRock gets to come up, and how long one refining pass may take.
+    private static final long READY_TIMEOUT_MS = 120_000;
+    private static final long REPLY_TIMEOUT_MS = 10 * 60_000;
+
+    // The prompt that turns a document into clean Markdown, beside this file.
+    private static final String PROMPT_TO_MARKDOWN = "jrock-prompt-papers-to-markdown.txt";
 
     // Nothing here measures how alike two scans are, on purpose: see the note at the top
     // of this file. Which files make up one letter is said by the operator, not inferred.
@@ -132,7 +156,9 @@ public final class JRockLetters {
             DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ENGLISH);
 
     private static volatile Path folder;
+    private static volatile Path incoming;
     private static volatile Process flowRunning;
+    private static volatile boolean started;   // its JRock, started once and kept
 
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField folderField;
@@ -146,6 +172,8 @@ public final class JRockLetters {
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("--folder") && i + 1 < args.length) {
                 folder = Paths.get(args[++i]);
+            } else if (args[i].equals("--incoming") && i + 1 < args.length) {
+                incoming = Paths.get(args[++i]);
             } else if (args[i].equals("--print") && i + 1 < args.length) {
                 printing = args[++i];
             }
@@ -164,10 +192,10 @@ public final class JRockLetters {
             return;
         }
 
-        onEdt(JRockLetters::showWindow);
+        onEdt(JRockPapers::showWindow);
         String said = listen();
         later(() -> listening.setText(said));
-        System.out.println("Letters agent is ready. " + said);
+        System.out.println("Papers agent is ready. " + said);
     }
 
     // ---- Answering -------------------------------------------------------------
@@ -195,9 +223,14 @@ public final class JRockLetters {
                 return text(rest);
             case "#inventory":
                 return fileIt(rest);
+            case "#incoming":
+                return incomingList(count(rest, LIST_MAX));
+            case "#save":
+                return save(rest);
             default:
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
-                        + "#recent [minutes], #scans [n], #filed [n], #file <name>, "
+                        + "#recent [minutes], #scans [n], #filed [n], #incoming [n], "
+                        + "#save <markdown>, #file <name>, "
                         + "#inventory [name] or #folder.");
         }
     }
@@ -262,11 +295,18 @@ public final class JRockLetters {
     // Every PDF in the folder, newest first. Not recursive: a scanner writes where it is
     // told to write, and a folder tree would turn "what just arrived" into a search.
     private static List<Scan> scansIn(Path at) {
+        return filesIn(at, SCAN_EXT);
+    }
+
+    // The same for any one extension, or for ALL files when ext is null - which is what
+    // the incoming folder wants: a document that arrived there is a document, whatever
+    // it arrived as.
+    private static List<Scan> filesIn(Path at, String ext) {
         List<Scan> scans = new ArrayList<>();
         try (java.util.stream.Stream<Path> files = Files.list(at)) {
             for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
                 String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-                if (!name.endsWith(SCAN_EXT)) continue;
+                if (ext != null && !name.endsWith(ext)) continue;
                 try {
                     scans.add(new Scan(file, Files.getLastModifiedTime(file).toInstant(),
                             Files.size(file)));
@@ -392,6 +432,12 @@ public final class JRockLetters {
     // second answer to the same question.
     private static String text(String asked) {
         Path at = scanFolder();
+        // BOTH FOLDERS, and a different rule in each. In the scanner's folder a document
+        // is readable once it has been FILED, which is what the .txt beside it means: the
+        // flow put it there, and reading a scan that has not been through it would be
+        // reading a picture. In the incoming folder everything readable is readable now -
+        // nothing arrived there as paper, so there is nothing to convert first. Which is
+        // what makes that folder "always filed by design".
         List<Path> texts = new ArrayList<>();
         try (java.util.stream.Stream<Path> files = Files.list(at)) {
             for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
@@ -403,13 +449,19 @@ public final class JRockLetters {
         } catch (IOException ex) {
             throw new Stop("could not read " + at + ": " + ex.getMessage());
         }
+        Path other = incomingFolder();
+        if (Files.isDirectory(other)) {
+            for (Scan file : filesIn(other, null)) {
+                if (readable(file.file)) texts.add(file.file);
+            }
+        }
         List<Path> matches = new ArrayList<>();
         for (Path file : texts) {
             if (matches(file.getFileName().toString(), asked)) matches.add(file);
         }
         if (matches.isEmpty()) {
-            StringBuilder out = new StringBuilder("No filed letter matches \"" + asked
-                    + "\". Filed letters there:");
+            StringBuilder out = new StringBuilder("Nothing matches \"" + asked
+                    + "\" in either folder. What there is:");
             int shown = 0;
             for (Path file : texts) {
                 if (shown++ >= 20) break;
@@ -425,13 +477,22 @@ public final class JRockLetters {
             // is a question, not an answer.
             if (matches.get(1).getFileName().toString().length()
                     == best.getFileName().toString().length()) {
-                StringBuilder out = new StringBuilder(matches.size() + " filed letters "
+                StringBuilder out = new StringBuilder(matches.size() + " documents "
                         + "match \"" + asked + "\". Which one:");
                 for (Path file : matches) out.append("\n- ").append(file.getFileName());
                 return out.toString();
             }
         }
         Path file = matches.get(0);
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        // Not text? Then it goes through this agent's own JRock first: included as the
+        // kind it is and asked for as Markdown, which is the same bargain the Thunderbird
+        // agent strikes with an attachment. Nothing raw goes back to whoever asked - a
+        // DOCX is a zip, a PDF is a picture, and neither is something to read aloud.
+        if (!name.endsWith(TEXT_EXT) && !name.endsWith(".md")) {
+            return "CONTENT " + kindOfPlace(file) + " " + file.getFileName() + "\n"
+                    + refined(file);
+        }
         String body;
         try {
             body = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
@@ -444,7 +505,11 @@ public final class JRockLetters {
         // on. Everything after the first line is the letter itself, to be written to a
         // file and included rather than pasted into a prompt - and the kind is what tells
         // it whether it is holding a letter or an e-mail.
-        return "CONTENT letter " + file.getFileName() + "\n" + body
+        // The KIND comes from the folder it was in, because that is what it means: a
+        // thing off the scanner is a letter somebody posted, and a thing in the incoming
+        // folder is a document that arrived some other way. Whoever asked uses the kind
+        // to decide what to say about it.
+        return "CONTENT " + kindOfPlace(file) + " " + file.getFileName() + "\n" + body
                 + (cut ? "\n\n(Cut off after " + TEXT_MAX + " characters.)" : "");
     }
 
@@ -556,11 +621,26 @@ public final class JRockLetters {
         later(() -> say("Filing " + document.size()
                 + (document.size() == 1 ? " scan" : " scans (two passes)")
                 + " through the doc inventory flow - its own JRock window will open."));
+        String resultLine = runFlow(command, at);
+        String name = valueIn(resultLine, "name=");
+        String scanned = valueIn(resultLine, "scanned=");
+        String files = valueIn(resultLine, "files=");
+        return "Filed: " + name + "\nScanned: " + scanned + "\nFiles renamed: " + files
+                + "\nAsk what it says by any part of that name.";
+    }
+
+    // THE FLOW, RUN AND READ: the command, started in dir, with its one result line
+    // returned. Throws Stop with the reason when there is no result line to return.
+    //
+    // Shared by the two things here that end in a named document - a letter off the
+    // scanner, and a document this agent was asked to keep - because naming is the
+    // same job either way and the flow is the only thing that does it.
+    private static String runFlow(List<String> command, Path dir) {
         StringBuilder out = new StringBuilder();
         String resultLine = null;
         try {
             Process flowProcess = new ProcessBuilder(command)
-                    .directory(at.toFile())
+                    .directory(dir.toFile())
                     .redirectErrorStream(true)
                     .start();
             flowRunning = flowProcess;
@@ -631,14 +711,10 @@ public final class JRockLetters {
 
         if (resultLine == null) {
             String why = lastLine(out.toString());
-            throw new Stop("the inventory flow filed nothing"
+            throw new Stop("the inventory flow did nothing"
                     + (why.isEmpty() ? "." : ": " + why));
         }
-        String name = valueIn(resultLine, "name=");
-        String scanned = valueIn(resultLine, "scanned=");
-        String files = valueIn(resultLine, "files=");
-        return "Filed: " + name + "\nScanned: " + scanned + "\nFiles renamed: " + files
-                + "\nAsk what it says by any part of that name.";
+        return resultLine;
     }
 
     private static String valueIn(String line, String key) {
@@ -725,7 +801,7 @@ public final class JRockLetters {
                     if (server == null || server.isClosed()) return;
                 }
             }
-        }, "jrock-letters-listener");
+        }, "jrock-papers-listener");
         t.start();
         return "Listening on 127.0.0.1:" + PORT + " for #recent, #scans, #file and "
                 + "#inventory.";
@@ -760,7 +836,7 @@ public final class JRockLetters {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        window = new javax.swing.JFrame("JRock - Letters (the paper post)");
+        window = new javax.swing.JFrame("JRock - Papers");
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
@@ -940,7 +1016,7 @@ public final class JRockLetters {
             }
             String shown = out;
             later(() -> show(shown));
-        }, "jrock-letters-ask").start();
+        }, "jrock-papers-ask").start();
     }
 
     private static void show(String text) {
@@ -960,6 +1036,200 @@ public final class JRockLetters {
         System.out.println(text);
     }
 
+    // ---- The other folder: what arrives by every route but paper ---------------
+    // Where documents go and come from. Settable, remembered, and made when it is first
+    // needed - an agent that writes into a folder somebody synchronises should not be the
+    // reason the folder does not exist yet.
+    private static Path incomingFolder() {
+        Path at = incoming;
+        if (at == null) {
+            Path home = Paths.get(System.getProperty("user.home", "."));
+            Path documents = Files.isDirectory(home.resolve("Documents"))
+                    ? home.resolve("Documents") : home;
+            at = documents.resolve(INCOMING_DEFAULT);
+            incoming = at;
+        }
+        return at;
+    }
+
+    // What is in it, newest first - whatever it is. Not only this agent's own DOCX files:
+    // anything dropped, downloaded or copied in there is listed, because from the
+    // operator's side that folder is simply "the documents that came in".
+    private static String incomingList(int many) {
+        Path at = incomingFolder();
+        if (!Files.isDirectory(at)) {
+            return "Nothing has arrived yet: " + at + " does not exist. It is made the "
+                    + "first time something is saved there.";
+        }
+        List<Scan> files = filesIn(at, null);
+        if (files.isEmpty()) return "Nothing in " + at + " yet.";
+        ZoneId zone = ZoneId.systemDefault();
+        StringBuilder out = new StringBuilder("In " + at.getFileName() + ", newest first ("
+                + files.size() + (files.size() > many ? ", showing " + many : "") + "):");
+        int shown = 0;
+        for (Scan file : files) {
+            if (shown++ >= many) break;
+            out.append("\n- ").append(file.name()).append("  ")
+                    .append(ZonedDateTime.ofInstant(file.at, zone).format(STAMP))
+                    .append("  ").append(file.megabytes())
+                    .append(readable(file.file) ? "" : "  (not a kind that can be read out)");
+        }
+        return out.append("\nAsk for any of them by name to have it read out.").toString();
+    }
+
+    private static boolean readable(Path file) {
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        for (String ext : READABLE) {
+            if (name.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
+    // ---- Keeping a document ------------------------------------------------------
+    // Markdown in, a named document in the incoming folder out.
+    //
+    // WHY THIS AGENT AND NOT PUSH-TO-TALK. Push-to-talk used to do this itself: select
+    // the last answer in its own JRock and export it. That is this agent's business -
+    // documents are what it is for - and doing it here has three consequences worth the
+    // move. The document lands in the folder the operator synchronises rather than in a
+    // subfolder of a voice agent. It is named by the doc inventory flow, like everything
+    // else here, instead of carrying a timestamp. And the markdown arrives as a MESSAGE
+    // between two agents, which is the same way every other document already travels.
+    //
+    // The route is JRock's prompt: set it, export it as a DOCX with its pictures placed,
+    // which is exactly what a person does by hand with Ctrl+A and the export item. The
+    // prompt is a sheet of paper here - nothing is sent and no model is asked.
+    private static String save(String markdown) {
+        String words = markdown == null ? "" : markdown.trim();
+        if (words.isEmpty()) {
+            throw new Stop("#save wants the document itself, as markdown, after the "
+                    + "command.");
+        }
+        Path at = incomingFolder();
+        try {
+            Files.createDirectories(at);
+        } catch (IOException ex) {
+            throw new Stop("could not make " + at + ": " + ex.getMessage());
+        }
+        startJRock("saving a document");
+        String stamp = java.time.LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm"));
+        Path file = free(at, "saved-" + stamp, ".docx");
+        check(JRock.automationClearPrompt());
+        check(JRock.automationSetPrompt(words));
+        String problem = JRock.automationExportPromptDocx(file.toString());
+        if (problem != null) throw new Stop("the document was not written: " + problem);
+        later(() -> say("Saved " + file.getFileName() + " - naming it now."));
+
+        // And then named properly, by the one thing here that names documents. A failure
+        // to rename is not a failure to save: the document is on the disk either way, and
+        // the answer says what it is called.
+        String named = file.getFileName().toString();
+        try {
+            List<String> command = new ArrayList<>(List.of(java(), "-cp",
+                    jar().toString(), flow().toString(), AUTO_FLAG, file.toString()));
+            String renamed = valueIn(runFlow(command, at), "name=");
+            if (!renamed.isEmpty()) named = renamed;
+        } catch (Stop stop) {
+            return "Saved in " + at.getFileName() + " as " + named + ", but it could not "
+                    + "be named: " + stop.getMessage();
+        }
+        return "Saved in " + at.getFileName() + " as " + named + ".";
+    }
+
+    // A name in dir that is not taken: "<stem><ext>", or the same with -2, -3...
+    private static Path free(Path dir, String stem, String ext) {
+        Path file = dir.resolve(stem + ext);
+        for (int n = 2; Files.exists(file) && n < 100; n++) {
+            file = dir.resolve(stem + "-" + n + ext);
+        }
+        return file;
+    }
+
+    // ---- A document, read out --------------------------------------------------
+    // Any file the incoming folder holds, as Markdown: included as the kind it is and
+    // put through this agent's own model once.
+    //
+    // Which is the same thing the Thunderbird agent does with an attachment, and for the
+    // same two reasons. A DOCX is a zip of XML and a PDF is a set of instructions for
+    // drawing: neither is text, and whoever asked wants to be told what the document
+    // says, not what it is made of. And a model that has just read it can lay it out as
+    // prose, which is what gets read aloud at the other end.
+    private static String refined(Path file) {
+        Path prompt = ownDirectory().resolve(PROMPT_TO_MARKDOWN);
+        String instructions = Files.isRegularFile(prompt) ? read(prompt) : null;
+        if (instructions == null || instructions.isBlank()) {
+            instructions = "Below is a document. Write out what it says as clean Markdown: "
+                    + "its headings, its paragraphs, its lists and its tables, in the "
+                    + "document's own language. Keep every number, date, name and "
+                    + "reference exactly as written. Do not summarise and do not add "
+                    + "anything that is not in it.";
+        }
+        startJRock("reading a document");
+        check(JRock.automationClearPrompt());
+        check(JRock.automationSetPrompt(instructions.replaceAll("\\s+$", "") + "\n\n"));
+        String kind = kindOf(file);
+        String problem = JRock.automationInclude(file.toString(), kind);
+        if (problem != null) {
+            throw new Stop("could not include " + file.getFileName() + " (" + kind + "): "
+                    + problem);
+        }
+        String[] sent = JRock.automationSend(REPLY_TIMEOUT_MS);
+        if (!"1".equals(sent[0])) throw new Stop("the model did not answer: " + sent[3]);
+        String markdown = read(Paths.get(JRock.automationMessageFile("assistant", sent[2])));
+        if (markdown == null || markdown.isBlank()) {
+            throw new Stop("the model's answer was empty.");
+        }
+        return markdown;
+    }
+
+    // "letter" for the scanner's folder, "document" for the incoming one: the kind says
+    // where a thing came from, which is what tells the asking agent how to talk about it.
+    private static String kindOfPlace(Path file) {
+        Path parent = file.toAbsolutePath().getParent();
+        Path in = incomingFolder().toAbsolutePath();
+        return parent != null && parent.equals(in) ? "document" : "letter";
+    }
+
+    // How JRock should be asked to include this file: the include kinds, by extension.
+    private static String kindOf(Path file) {
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".pdf")) return "pdfhtml";
+        if (name.endsWith(".docx")) return "docx";
+        if (name.endsWith(".rtf")) return "rtf";
+        if (name.endsWith(".xlsx")) return "xlsx";
+        if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")
+                || name.endsWith(".gif")) {
+            return "imgref";
+        }
+        return "txt";
+    }
+
+    private static String read(Path file) {
+        try {
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            return null;
+        }
+    }
+
+    // ---- Its own JRock -----------------------------------------------------------
+    // Started once, when something first needs it, and not before: listing a folder
+    // needs no model, and a window that did nothing but sit there would be a window to
+    // close. Saving a document needs one (its prompt is the paper), and so does reading
+    // out a file that is not already text.
+    private static void startJRock(String what) {
+        if (started) return;
+        started = true;
+        JRock.main(new String[0]);
+        check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
+        check(JRock.automationBegin("papers agent: " + what));
+    }
+
+    private static void check(String problem) {
+        if (problem != null) throw new Stop(problem);
+    }
+
     // ---- Settings --------------------------------------------------------------
     private static void readSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
@@ -970,6 +1240,9 @@ public final class JRockLetters {
                 if (text.startsWith("folder=")) {
                     String at = text.substring("folder=".length()).trim();
                     if (!at.isEmpty()) folder = Paths.get(at);
+                } else if (text.startsWith("incoming=")) {
+                    String at = text.substring("incoming=".length()).trim();
+                    if (!at.isEmpty()) incoming = Paths.get(at);
                 }
             }
         } catch (IOException ex) {
@@ -979,7 +1252,7 @@ public final class JRockLetters {
 
     private static void writeSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
-        String out = "' JRock letters agent\n"
+        String out = "' JRock papers agent\n"
                 + (folder == null ? "" : "folder=" + folder + "\n");
         try {
             Files.write(file, out.getBytes(StandardCharsets.UTF_8));
@@ -997,7 +1270,7 @@ public final class JRockLetters {
         }
         try {
             java.security.CodeSource code =
-                    JRockLetters.class.getProtectionDomain().getCodeSource();
+                    JRockPapers.class.getProtectionDomain().getCodeSource();
             if (code != null && code.getLocation() != null) {
                 Path at = Paths.get(code.getLocation().toURI()).toAbsolutePath().normalize();
                 Path parent = Files.isDirectory(at) ? at : at.getParent();
@@ -1037,6 +1310,6 @@ public final class JRockLetters {
         }
     }
 
-    private JRockLetters() {
+    private JRockPapers() {
     }
 }

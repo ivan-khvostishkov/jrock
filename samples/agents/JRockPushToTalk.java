@@ -138,20 +138,20 @@ public final class JRockPushToTalk {
     private static final String LISTENING_HANDS_FREE =
             "Hands-free: just talk, it sends when you stop. Ctrl or the button ends it.";
 
-    // WHERE THIS AGENT'S FILES GO: one folder, so that one folder can be synchronised.
+    // WHERE THE DOCUMENTS THIS AGENT IS HANDED GO: one folder, so that one folder can
+    // be synchronised. The letters and the messages the other agents pass over - a
+    // scanned letter as text, one e-mail as Markdown - are written here and then included
+    // in the prompt, so that the transcript holds a token and a file rather than ten
+    // thousand characters of letter.
     //
-    // Everything push-to-talk writes for the operator to keep lands here - an answer
-    // saved as a DOCX, and the letters and messages the other agents hand over - because
-    // the reason for asking was a good one: a folder that syncs to a phone turns "save
-    // that answer" said across a room into a document in a pocket, with nothing else of
-    // JRock's going along with it.
-    //
-    // Which is the other half of it. NOT the working folder and not JRock's own folder
-    // inside it: those hold the API key, the conversation and the log, and a folder meant
-    // for a cloud service should contain what was asked for and nothing besides.
+    // NOT the saved answers any more: those belong to the papers agent, which has the
+    // folder for documents and the flow that names them (see savedIn). What is left here
+    // is working material - the thing a question was asked ABOUT - and it is still worth
+    // keeping out of the working folder and out of JRock's own, which hold the API key,
+    // the conversation and the log.
     private static final String FILES_DIR = "PTTFiles";
     private static final String MAIL_SUB = "mail";
-    private static final String LETTERS_SUB = "letters";
+    private static final String LETTERS_SUB = "papers";
 
     // What goes after every recording, expected beside this file; and the placeholder in
     // it that becomes the time the question was asked.
@@ -363,14 +363,14 @@ public final class JRockPushToTalk {
     private static final int WEATHER_PORT = 47472;
     private static final int CALENDAR_PORT = 47473;
     private static final int BROWSER_PORT = 47474;
-    private static final int LETTERS_PORT = 47475;
+    private static final int PAPERS_PORT = 47475;
     private static final int AGENT_CONNECT_MS = 3000;
     private static final int AGENT_TIMEOUT_MS = 180_000;
 
-    // Filing a letter is not a lookup: the letters agent drives the doc inventory flow,
+    // Filing a letter is not a lookup: the papers agent drives the doc inventory flow,
     // and a scanned letter through Ghostscript, xpdf and three model passes takes
     // minutes. Only the request that files one waits this long - everything else the
-    // letters agent answers, it answers at once.
+    // papers agent answers, it answers at once.
     private static final int FILING_TIMEOUT_MS = 12 * 60_000;
     private static final String FILING_REQUEST = "#inventory";
 
@@ -552,7 +552,7 @@ public final class JRockPushToTalk {
                 }
                 answer = sendAndRead("Sent the mail, waiting for the reply\u2026");
             } else if (post.matches()) {
-                // The paper post, off the letters agent - which has no model of its own:
+                // The paper post, off the papers agent - which has no model of its own:
                 // it looks in the scanner's folder, and drives the doc inventory flow
                 // when a letter has to be filed.
                 String about = post.group(1).trim();
@@ -564,8 +564,8 @@ public final class JRockPushToTalk {
                     later(() -> setState(State.ANSWERING,
                             "Filing the letter - this takes a few minutes…"));
                 }
-                String[] letters = askAgent(LETTERS_PORT, postAsked, "letters",
-                        "JRockLetters.java",
+                String[] letters = askAgent(PAPERS_PORT, postAsked, "papers",
+                        "JRockPapers.java",
                         postAsked.startsWith(FILING_REQUEST) ? FILING_TIMEOUT_MS
                                                              : AGENT_TIMEOUT_MS);
                 if (letters[0] == null) {
@@ -779,9 +779,9 @@ public final class JRockPushToTalk {
         return "#page " + asked;
     }
 
-    // What the model asked of the post, as the letters agent's own request. The leading
+    // What the model asked of the post, as the papers agent's own request. The leading
     // word decides and the rest is passed through as written - a letter's name as the
-    // operator said it, which the letters agent matches against the file names itself.
+    // operator said it, which the papers agent matches against the file names itself.
     private static String postRequest(String about) {
         String asked = about.trim();
         String lower = asked.toLowerCase(java.util.Locale.ROOT);
@@ -789,6 +789,9 @@ public final class JRockPushToTalk {
                 { "recent", "#recent" }, { "new", "#recent" }, { "arrived", "#recent" },
                 { "scans", "#scans" }, { "all", "#scans" },
                 { "filed", "#filed" },
+                // "arrived" is already the scanner's folder, above, and the first match
+                // wins: a second one here would be a line that never runs.
+                { "incoming", "#incoming" }, { "documents", "#incoming" },
                 { "file it", "#inventory" }, { "inventory", "#inventory" },
                 { "file", "#file" }, { "read", "#file" }, { "what", "#file" },
                 { "folder", "#folder" } }) {
@@ -1129,18 +1132,16 @@ public final class JRockPushToTalk {
         if (keep == null || keep.isBlank()) {
             return "Nothing saved: there is no earlier answer in this conversation.";
         }
-        String name = java.time.LocalDateTime.now().format(
-                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm")) + "-ptt.docx";
-        java.nio.file.Path file;
-        try {
-            file = filesDir(null).resolve(name);
-        } catch (IOException ex) {
-            return "Not saved: " + FILES_DIR + " could not be made (" + ex.getMessage() + ").";
-        }
-        String problem = JRock.automationExportDocx(keep, file.toString());
-        if (problem != null) return "Not saved: " + problem;
-        report("saved the previous answer to " + file);
-        return "Saved to " + FILES_DIR + "/" + name + ".";
+        // THE PAPERS AGENT KEEPS IT, and this agent only hands it over. Documents are
+        // what that agent is for: it has the folder the operator synchronises, it has the
+        // flow that names things, and it already reads everything in there back out. This
+        // one has a microphone and a model, which is a different job - and the markdown
+        // travels between them as every other document here already does.
+        String[] saved = askAgent(PAPERS_PORT, "#save " + keep, "papers",
+                "JRockPapers.java");
+        if (saved[0] == null) return "Not saved: " + saved[1];
+        report("papers: " + saved[0].replace("\n", " "));
+        return saved[0].split("\n", 2)[0].trim();
     }
 
     // Puts in the calendar what an answer says it is putting there, if it says so.
