@@ -1290,21 +1290,36 @@ public final class JRockPushToTalk {
     private static final long ROOM_RUN_GAP_MIN_MS = 15;
     private static final long ROOM_RUN_GAP_MAX_MS = 70;
 
-    // A ramp either side, short because there is no held sound to ease in or out: all it
-    // has to do is keep a crackle that happens to be sounding when the answer arrives
-    // from being cut off square, which is the one way this could click.
-    private static final double ROOM_FADE_IN_MS = 120;
-    private static final double ROOM_FADE_OUT_MS = 120;
-    private static final long ROOM_SLICE_MS = 50;      // one write, and how often stop is seen
+    // A few milliseconds of silence at the end of a burst, so the device is never closed
+    // in the middle of a crackle's decay.
+    private static final double ROOM_TAIL_MS = 5;
 
-    // How much sound the line may hold ahead of itself - three slices, where Java Sound's
-    // own default here is half a second. Everything already in that buffer still has to
-    // play before the room is quiet, so the default would leave the fan running for half
-    // a second INTO the answer; measured, a turn ended 682 ms after it was told to stop
-    // and now ends in about 350. Too small would risk the fan stuttering whenever the
-    // machine is busy, which it always is at exactly this moment.
-    private static final int ROOM_BUFFER_BYTES = (int) (ROOM_RATE * ROOM_SLICE_MS * 3 / 1000) * 2;
+    // How often the gap is looked at while it is being waited out, which is how quickly
+    // the room goes when the answer arrives. A burst is tens of milliseconds, so what
+    // the answer actually waits for is this.
+    private static final long ROOM_WAKE_MS = 25;
 
+    // How long the turn waits for the room to be gone before it speaks. Generous for
+    // what it covers - a sleep that checks every ROOM_WAKE_MS, or the tail of a burst
+    // that is tens of milliseconds long - and the only cost of being generous is a
+    // thread that is already finished.
+    private static final long ROOM_STOP_WAIT_MS = 600;
+
+    // THE LINE IS CLOSED IN BETWEEN, and that is not a tidiness detail either.
+    //
+    // A speaker hisses while its output stream is ACTIVE, whatever is in the stream - and
+    // the operator heard exactly that: crackles over a constant background. It was not in
+    // the signal (between crackles this writes zeros, and zeros are what the device got)
+    // and it was not the sample rate (JRock narrates through the same 22050 Hz mono
+    // format on the same mixer). It is what the amplifier does when a stream is open and
+    // nothing is coming down it - inaudible under speech, which is why narration sounds
+    // clean, and plain as day under a sound that is silence 99% of the time.
+    //
+    // So the line is not held open. The thread sleeps through the gap with nothing open
+    // at all, opens the device for the ~20 ms a burst lasts, and closes it again: a
+    // device that is not playing cannot hiss. It costs about 95 ms to open this one
+    // (measured, worst of nine: 102), which is invisible in a gap that is random to
+    // begin with.
     private static volatile Thread room;
     private static volatile boolean roomStop;
 
@@ -1325,24 +1340,24 @@ public final class JRockPushToTalk {
         playing.start();
     }
 
-    // Stops it, and waits for the fade out - a tenth of a second or two, so the fan is
-    // gone before the first word rather than under it. Called before anything is said
-    // out loud, and again when the turn ends, whichever comes first; doing it twice does
-    // nothing the second time.
+    // Stops it, and waits for the thread to notice - which in a gap is one ROOM_WAKE_MS
+    // and nothing is open anyway, and during a burst is the few milliseconds the burst
+    // has left. Called before anything is said out loud, and again when the turn ends,
+    // whichever comes first; doing it twice does nothing the second time.
     private static synchronized void roomOff() {
         Thread playing = room;
         if (playing == null) return;
         roomStop = true;
         try {
-            playing.join((long) ROOM_FADE_OUT_MS + 500);
+            playing.join(ROOM_STOP_WAIT_MS);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
         room = null;
     }
 
-    // The sound itself, on the ptt-room thread: generated and written in 50 ms slices
-    // until roomStop, then faded out and the line closed.
+    // The sound itself, on the ptt-room thread: a gap with nothing open, then one burst
+    // through a line that is opened and closed around it, until roomStop.
     private static void roomPlay() {
         String device = JRock.automationNarrateDevice();
         if (device == null || device.isEmpty()) {
@@ -1354,73 +1369,91 @@ public final class JRockPushToTalk {
             roomQuiet("the speaker \"" + device + "\" is not connected");
             return;
         }
+        java.util.Random rnd = new java.util.Random();
+        while (!roomStop) {
+            long gap = (long) (ROOM_GAP_MIN_MS
+                    + rnd.nextDouble() * (ROOM_GAP_MAX_MS - ROOM_GAP_MIN_MS));
+            for (long waited = 0; waited < gap && !roomStop; waited += ROOM_WAKE_MS) {
+                try {
+                    Thread.sleep(Math.min(ROOM_WAKE_MS, gap - waited));
+                } catch (InterruptedException ended) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+            if (roomStop) return;
+            if (!roomBurst(mixer, device, burst(rnd))) return;
+        }
+    }
+
+    // One burst, start to finish: the device opened, the crackles written, the device
+    // closed again. False when it could not be played at all, which ends the room for
+    // this turn rather than trying again every second.
+    private static boolean roomBurst(javax.sound.sampled.Mixer mixer, String device,
+                                     byte[] pcm) {
         javax.sound.sampled.SourceDataLine line = null;
         try {
             line = (javax.sound.sampled.SourceDataLine) mixer.getLine(
                     new javax.sound.sampled.DataLine.Info(
                             javax.sound.sampled.SourceDataLine.class, ROOM_FORMAT));
             try {
-                line.open(ROOM_FORMAT, ROOM_BUFFER_BYTES);
+                line.open(ROOM_FORMAT, Math.max(pcm.length, 2048));
             } catch (IllegalArgumentException tooSmall) {
                 line.open(ROOM_FORMAT);   // a device with a mind of its own about buffers
             }
             line.start();
             roomSilent = null;
-            java.util.Random rnd = new java.util.Random();
-            int frames = (int) (ROOM_RATE * ROOM_SLICE_MS / 1000);
-            byte[] pcm = new byte[frames * 2];
-            double low = 0;                     // the filter, for a scratch with body
-            double level = 0;                   // the fade, 0 to 1 and back
-            double up = 1000 / (ROOM_RATE * ROOM_FADE_IN_MS);
-            double down = 1000 / (ROOM_RATE * ROOM_FADE_OUT_MS);
-            long i = 0;                         // frames played
-            long began = -1;                    // the frame this crackle began on
-            int lasts = 0;                      // and how many frames it lasts
-            double loud = 0;                    // and how loud this one is
-            int leftInRun = 0;                  // crackles still to come in this run
-            long next = frames(rnd, ROOM_GAP_MIN_MS, ROOM_GAP_MAX_MS);
-            while (true) {
-                for (int s = 0; s < frames; s++, i++) {
-                    level = roomStop ? Math.max(0, level - down) : Math.min(1, level + up);
-                    if (i >= next) {
-                        began = i;
-                        lasts = (int) frames(rnd, ROOM_CRACKLE_MIN_MS, ROOM_CRACKLE_MAX_MS);
-                        loud = ROOM_SOFTEST + rnd.nextDouble() * (ROOM_LOUDEST - ROOM_SOFTEST);
-                        if (leftInRun <= 0 && rnd.nextDouble() < ROOM_RUN_CHANCE) {
-                            leftInRun = 1 + rnd.nextInt(3);   // a scratch, not a click
-                        }
-                        boolean inRun = leftInRun > 0;
-                        if (inRun) leftInRun--;
-                        next = i + lasts + (inRun
-                                ? frames(rnd, ROOM_RUN_GAP_MIN_MS, ROOM_RUN_GAP_MAX_MS)
-                                : frames(rnd, ROOM_GAP_MIN_MS, ROOM_GAP_MAX_MS));
-                    }
-                    double v = 0;
-                    if (began >= 0 && i - began < lasts) {
-                        // No attack and a decay that squares away: a scratch, where a
-                        // fade in and out either side would be a soft little pop.
-                        double leftOf = 1 - (i - began) / (double) lasts;
-                        low += (rnd.nextDouble() * 2 - 1 - low) * ROOM_CUTOFF;
-                        v = low * leftOf * leftOf * loud;
-                    }
-                    int sample = (int) (Math.max(-1, Math.min(1, v)) * level
-                            * ROOM_GAIN * Short.MAX_VALUE);
-                    pcm[2 * s] = (byte) sample;
-                    pcm[2 * s + 1] = (byte) (sample >> 8);
-                }
-                line.write(pcm, 0, pcm.length);
-                if (roomStop && level <= 0) break;
-            }
+            line.write(pcm, 0, pcm.length);
             line.drain();
+            line.stop();
+            return true;
         } catch (javax.sound.sampled.LineUnavailableException | RuntimeException ex) {
             roomQuiet("could not play on " + device + " (" + ex.getMessage() + ")");
+            return false;
         } finally {
             if (line != null) line.close();
         }
     }
 
-    // Somewhere between two lengths in milliseconds, in frames - which is the unit
-    // everything in the loop above counts in.
+    // One burst as PCM: a single crackle, or now and then a run of two to four of them
+    // tens of milliseconds apart - which is what a scratch on a line sounds like rather
+    // than one tidy click - and a few milliseconds of silence to close on.
+    //
+    // Each crackle is noise with no attack to speak of and a decay that squares away to
+    // nothing, through one low pass so that it keeps its edge without being a digital
+    // click, and each gets its own level, so a handful stand out and the rest are barely
+    // there. Generated whole here because a burst is milliseconds long: it is written in
+    // one go, to a line that is open for no longer than it takes.
+    private static byte[] burst(java.util.Random rnd) {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        int crackles = rnd.nextDouble() < ROOM_RUN_CHANCE ? 2 + rnd.nextInt(3) : 1;
+        double low = 0;
+        for (int c = 0; c < crackles; c++) {
+            int lasts = (int) frames(rnd, ROOM_CRACKLE_MIN_MS, ROOM_CRACKLE_MAX_MS);
+            double loud = ROOM_SOFTEST + rnd.nextDouble() * (ROOM_LOUDEST - ROOM_SOFTEST);
+            for (int i = 0; i < lasts; i++) {
+                double leftOf = 1 - i / (double) lasts;
+                low += (rnd.nextDouble() * 2 - 1 - low) * ROOM_CUTOFF;
+                sample(out, low * leftOf * leftOf * loud);
+            }
+            if (c < crackles - 1) {
+                long quiet = frames(rnd, ROOM_RUN_GAP_MIN_MS, ROOM_RUN_GAP_MAX_MS);
+                for (long i = 0; i < quiet; i++) sample(out, 0);
+            }
+        }
+        for (int i = 0; i < ROOM_RATE * ROOM_TAIL_MS / 1000; i++) sample(out, 0);
+        return out.toByteArray();
+    }
+
+    // One frame, as the two bytes of a signed little-endian 16-bit sample.
+    private static void sample(java.io.ByteArrayOutputStream out, double v) {
+        int sample = (int) (Math.max(-1, Math.min(1, v)) * ROOM_GAIN * Short.MAX_VALUE);
+        out.write((byte) sample);
+        out.write((byte) (sample >> 8));
+    }
+
+    // Somewhere between two lengths in milliseconds, in frames - which is the unit a
+    // crackle is measured in.
     private static long frames(java.util.Random rnd, double fromMs, double toMs) {
         return (long) (ROOM_RATE * (fromMs + rnd.nextDouble() * (toMs - fromMs)) / 1000);
     }

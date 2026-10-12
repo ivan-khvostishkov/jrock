@@ -1848,6 +1848,17 @@ the voice, so the microphone doesn't record the last answer as the next question
   plays, so there are no sound files to ship and no licence to check, and gone before the first
   word rather than under it. If no speaker is set, or the one set is not there, there is simply
   no sound: one line in JRock's log and the turn carries on.
+
+  **And the gaps are silent because nothing is open in them.** A speaker hisses while its output
+  stream is *active*, whatever is in the stream — which is why the first version of this sounded
+  like crackles over a constant background even though the code writes exact zeros between them,
+  and why narration sounds clean on the same device through the same 22050 Hz mono format: speech
+  masks a noise floor that silence exposes. It cannot be turned down from in here, so the line is
+  not held open. The thread sleeps through the gap with the device **closed**, opens it for the
+  twenty-odd milliseconds a burst lasts, and closes it again. Opening this machine's monitor
+  speakers costs about 95 ms, which is invisible in a gap that is random to begin with — and the
+  room now goes quiet **26 ms** after the answer arrives, against 383 ms when a line was being
+  drained, because there is nothing left to drain.
 - **Closing the agent's window** ends the automation and gives JRock back to you, the
   conversation included.
 - **Alarms.** An answer that says *"Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss"* — the
