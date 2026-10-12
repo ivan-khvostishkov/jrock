@@ -3122,10 +3122,10 @@ public class JRock {
         // out as a document a word processor - or a layout application - can open.
         javax.swing.JMenuItem exportRtfItem =
                 addMenuItem(logMenu, "Export selected Markdown as RTF...",
-                        () -> exportSelectedMarkdown(frame, log, false));
+                        () -> exportSelectedMarkdown(frame, log, input, false));
         javax.swing.JMenuItem exportDocxItem =
                 addMenuItem(logMenu, "Export selected Markdown with images as DOCX...",
-                        () -> exportSelectedMarkdown(frame, log, true));
+                        () -> exportSelectedMarkdown(frame, log, input, true));
         // Where there is a voice for it: Windows' own, or the browser's own in a tab
         // (see narrateAvailable, narrateInBrowser). One
         // item for both directions: while a narration is playing it stops it, which is
@@ -3158,8 +3158,20 @@ public class JRock {
                 boolean selected = log.selectedText() != null;
                 saveLogItem.setText(selected ? "Save selected text as..." : "Save log copy as...");
                 printLogItem.setText(selected ? "Print selected text..."  : "Print...");
-                exportRtfItem.setEnabled(selected);
-                exportDocxItem.setEnabled(selected);
+                // EITHER SELECTION WILL DO, and the prompt's is the interesting one: the
+                // way to make a document out of an answer with a correction in it is to
+                // copy the answer into the prompt, change the line that is wrong, select
+                // it and export THAT. Until now the only exportable text was the log's,
+                // which is a transcript and cannot be edited at all.
+                String exportable = exportSelection(log, input);
+                exportRtfItem.setEnabled(exportable != null);
+                exportDocxItem.setEnabled(exportable != null);
+                String from = input.getSelectedText() == null
+                        || input.getSelectedText().isEmpty() ? "log" : "prompt";
+                exportRtfItem.setText("Export selected Markdown as RTF... (from the "
+                        + from + ")");
+                exportDocxItem.setText("Export selected Markdown with images as DOCX... "
+                        + "(from the " + from + ")");
                 openUrlItem.setEnabled(selected && log.selectedUrl() != null);
                 if (openFileItem != null) {
                     openFileItem.setEnabled(localPathIn(log.selectedText()) != null);
@@ -3969,6 +3981,38 @@ public class JRock {
         // not the operator's, and a selection left in the pane stops it following the
         // conversation (see selectNothing).
         onEdt(live.log::selectNothing);
+        return failure == null ? null : "could not export " + target + ": " + failure;
+    }
+
+    // THE PROMPT as a DOCX: what it holds, or its selection when it has one, written to
+    // file as "Export selected Markdown with images as DOCX..." writes it. Returns null,
+    // or why nothing was written.
+    //
+    // The prompt and not the log, and that is the whole of the difference. An agent that
+    // has a document to keep does not have to find it in a transcript first: it sets the
+    // prompt (automationSetPrompt), which is one call and leaves the text visible and
+    // editable, and then asks for it as a file. Nothing is sent, nothing is cleared, and
+    // no model is involved - the prompt here is being used as a sheet of paper.
+    //
+    // Which is what the papers agent needs: markdown in, a DOCX in the folder somebody
+    // synchronises, and the operator able to see exactly what was written. Selecting it
+    // all by hand first is unnecessary - with no selection this takes the lot - but a
+    // selection is honoured, so half a prompt can be exported too.
+    public static String automationExportPromptDocx(String file) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        String[] markdown = { null };
+        onEdt(() -> {
+            String picked = live.input.getSelectedText();
+            markdown[0] = picked == null || picked.isEmpty() ? live.input.getText() : picked;
+        });
+        if (markdown[0] == null || markdown[0].isBlank()) {
+            return "the prompt is empty, so there is nothing to export.";
+        }
+        Path target = Paths.get(file).toAbsolutePath().normalize();
+        String failure = writeMarkdownExport(live.log, markdown[0], true, false,
+                "DOCX (A4 portrait)", target);
         return failure == null ? null : "could not export " + target + ": " + failure;
     }
 
@@ -12851,8 +12895,9 @@ public class JRock {
     // photograph is the case for it - both are laid out to fit the text frame, and on a
     // portrait page that frame is the narrow way round. Two filters with the same
     // extension, so the name typed is unaffected by which one is picked.
-    private static void exportSelectedMarkdown(JFrame frame, LogView log, boolean asDocx) {
-        String selection = log.selectedText();
+    private static void exportSelectedMarkdown(JFrame frame, LogView log,
+                                               javax.swing.JTextArea input, boolean asDocx) {
+        String selection = exportSelection(log, input);
         if (selection == null) return;   // the menu item is disabled without one
         String ext = asDocx ? "docx" : "rtf";
         String kind = asDocx ? "DOCX" : "RTF";
@@ -12891,6 +12936,24 @@ public class JRock {
                     "Could not export to " + target + ":\n" + failure,
                     "Export failed", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    // The text an export would take: the PROMPT's selection when it has one, and the
+    // log's otherwise. Null when neither has anything.
+    //
+    // The prompt wins, and the reason is the use that asked for this. An answer is almost
+    // right: a date wrong, a paragraph too many, a heading to add. The log is a transcript
+    // and cannot be edited, so what anybody does is copy the answer into the prompt, fix
+    // the line, and want a document out of THAT - without sending anything, without paying
+    // for a second answer, and without a word processor in between. A selection somebody
+    // has just made by hand in an editable box is a clearer statement of "this is what I
+    // mean" than one sitting in a transcript, so when both have one, that one is used.
+    //
+    // Nothing is sent and nothing is cleared: the prompt is read, not consumed.
+    private static String exportSelection(LogView log, javax.swing.JTextArea input) {
+        String typed = input == null ? null : input.getSelectedText();
+        if (typed != null && !typed.isEmpty()) return typed;
+        return log.selectedText();
     }
 
     // Writes markdown to target as an RTF or a DOCX (with the session's includes, so its

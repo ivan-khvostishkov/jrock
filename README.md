@@ -1289,6 +1289,15 @@ Two more PDF filters, desktop only, use the **Xpdf command line tools** by Derek
 https://www.xpdfreader.com/ — `pdftohtml` and `pdftotext` must be on your PATH. They hand a model
 the PDF's text, in reading order, rather than pictures of it.
 
+**The selection may be the prompt's, not only the log's.** Both export items take whichever
+selection there is, and the **prompt's wins** when both have one — which is the whole point of
+it. An answer is almost right: a date wrong, a paragraph too many, a heading to add. The log is
+a transcript and cannot be edited, so what anybody actually does is copy the answer into the
+prompt, fix the line, select it and want a document out of **that** — without sending anything,
+without paying for a second answer, and without a word processor in between. The menu items say
+which source they are about to use (*"…from the prompt"*, *"…from the log"*), and nothing is
+sent or cleared: the prompt is read, not consumed.
+
 - **PDF as HTML folder, with xpdf** runs `pdftohtml -nofonts <pdf> <folder>`, then includes the
   folder as [**Include directory...**](#multimodal-includes-ctrli) does: each `pageN.html` (and
   `index.html`) as `@txt`, each page's background `pageN.png` as `@img`.
@@ -2962,6 +2971,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![...](<name>)` (or `![](<hash>)`) placed as the image that include names. |
+| `automationExportPromptDocx(String file)` | The same, for **what the prompt holds** - or its selection, when it has one. No model, no send, nothing cleared: the prompt is a sheet of paper here. An agent with a document to keep sets the prompt and asks for it as a file, so what was written is on the screen as well as on the disk. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationNarrateDevice()` | The **Narrate on** speaker's name, or `""` when none is set — for an agent that plays sounds of its own on it. Needs no `automationBegin`. |
 | `automationMergeDuplex(front, back, out)` | **Merge two-sided scans**: the same interleave as the window menu — front 1, back N, front 2, back N−1 — with the two dialogs replaced by three arguments. Both passes must have the same page count, or one of them is not the file it was taken for; refused rather than guessed at, since the mistake it makes is every back page against the wrong front. No dialog either way: an automation that cannot press OK must not be shown one. The two scans are left exactly as they were. |
