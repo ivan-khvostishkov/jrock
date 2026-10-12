@@ -141,6 +141,21 @@ public final class JRockTimer {
         String listening = listen();
         later(() -> say(listening));
         System.out.println("Timer is ready. " + listening);
+
+        // A chord on starting, before any alarm exists.
+        //
+        // It says the agent is up, which is worth something on its own when it was
+        // started by a right-click or by the installer and its window may be behind
+        // another. What it says that matters more: THE SOUND WORKS. Everything else here
+        // is silent until an alarm comes due, so a speaker that is not set, or set to
+        // something that is no longer plugged in, is a thing you would otherwise find out
+        // when an alarm failed to wake you - and play() says why on the status line, now,
+        // while there is time to fix it.
+        //
+        // The first alarm's own chord, half the volume of a confirmation and shorter:
+        // recognisably this agent's voice rather than a system noise, and recognisably
+        // not an alarm going off.
+        SOUND.submit(() -> play(chord(CHORDS[0], 140, 0.5), () -> false));
     }
 
     // ---- Setting an alarm ------------------------------------------------------

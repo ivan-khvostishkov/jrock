@@ -1971,6 +1971,12 @@ alarms set since it opened listed underneath, each counting down. Nothing is kep
 - **The time is when the alarm rings**, 24-hour `hh:mm:ss`: `07:30:00` is today if that is
   still to come, and otherwise tomorrow. `+hh:mm:ss` is a timer instead: `+00:05:00` rings in
   five minutes.
+- **It beeps once when it starts**, a C chord at half an alarm's volume, before any alarm
+  exists. Partly because an agent started by a right-click or by the installer may have its
+  window behind another one — but mostly because **it proves the sound works**. Everything else
+  here is silent until an alarm comes due, so a speaker that is not set in Configure, or set to
+  something no longer plugged in, is otherwise discovered when an alarm fails to wake you. If it
+  cannot play, the window says why *now*: *"No sound: the speaker … is not connected"*.
 - **Every alarm rings its own sound**, because more than one can be set and from across the
   room the sound is the only thing that says *which* has gone off. The chord and the number of
   beeps both move with the alarm: the **first** rings a **C** chord **three** times, the
