@@ -2422,10 +2422,24 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   profile is kept between runs, so the second attempt is the page itself. A paywall or a login
   works the same way — whatever the operator can reach in that window, the agent can then read.
 - **One tab per site**, kept. A second page on a site reuses its tab, and since the only sites
-  there are are the six, there can never be a seventh tab. Per site rather than one in total
+  there are are the seven, there can never be an eighth tab. Per site rather than one in total
   because a consent answered on one and a sign-in on another are both worth keeping.
-- **Its browser is not yours.** A profile of the agent's own, beside its working folder. What is
-  signed in there is what was signed in there, deliberately, in that window.
+- **Its browser is not yours, and the window says where it lives.** The agent starts a Chromium
+  of its own — Edge, Chrome, Brave or Vivaldi, whichever it finds — with
+  `--user-data-dir=jrock-browser-profile` beside its working folder, e.g.
+  `…\JRockAssistant\Agents\Browser\jrock-browser-profile`. That folder is the whole of what
+  that browser knows: its cookies, its cache, its history, its local storage. A different
+  `--user-data-dir` is a different browser as far as Chromium is concerned, so **nothing of your
+  own browsing is visible to it** and what is signed in there is what was signed in there, in
+  that window, deliberately.
+
+  The agent's window shows the **full path and how big it has got** — measured on a thread of
+  its own, because a browser cache is tens of thousands of files (327 MB after a few days here)
+  and a window should not wait for a disk walk. Both numbers are there for the two questions
+  worth asking about a profile: where is it, and how do I make it forget everything? The answer
+  to the second is to delete that folder — the next page then starts from a browser that has
+  never been anywhere, consent walls and all. Nothing deletes it by itself, because the whole
+  point of keeping it is that a consent answered once stays answered.
 
 | | |
 |---|---|

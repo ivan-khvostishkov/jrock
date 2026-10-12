@@ -203,6 +203,7 @@ public final class JRockBrowser {
     private static volatile Process browser;
     private static volatile WebSocket socket;
     private static volatile Path profileDir;
+    private static javax.swing.JTextField profileLine;
     // ONE TAB PER SITE, kept. Asking for another page on a site it already has reuses
     // that site's tab, so there is never a second arstechnica.com window to wonder about -
     // and because the only sites there are are the six on the list, the number of tabs
@@ -928,6 +929,23 @@ public final class JRockBrowser {
         return have[1];
     }
 
+    // WHERE THE BROWSER'S OWN PROFILE IS. A folder beside this agent's own files,
+    // "jrock-browser-profile", which is the whole of what the browser this agent starts
+    // knows: its cookies, its cache, its history, its local storage. Not a line of it is
+    // shared with the operator's own browser - a different --user-data-dir is a different
+    // browser as far as Chromium is concerned - so what is signed in here is what was
+    // signed in HERE, and nothing this agent does can read a session of theirs.
+    //
+    // Kept rather than thrown away, which is the point of naming it: it is why "deal with
+    // the consent wall once and ask again" survives a restart. It is also a cache, so it
+    // grows; deleting the folder is how it is reset, and the next page starts from a
+    // browser that has never been anywhere. Both of those are reasons the window says
+    // where it is rather than leaving it to be found (see showProfile).
+    private static Path profileFolder() {
+        return profileDir != null ? profileDir
+                : Paths.get("").toAbsolutePath().resolve("jrock-browser-profile");
+    }
+
     // The browser, started once and kept: a second page in the same minute should not
     // wait for a cold start.
     //
@@ -948,9 +966,7 @@ public final class JRockBrowser {
                     + "- one of them has to be installed, because the DevTools Protocol is "
                     + "what this agent reads pages with.");
         }
-        Path keep = profileDir == null
-                ? Paths.get("").toAbsolutePath().resolve("jrock-browser-profile")
-                : profileDir;
+        Path keep = profileFolder();
         try {
             Files.createDirectories(keep);
             profileDir = keep;
@@ -958,6 +974,7 @@ public final class JRockBrowser {
             throw new Stop("the browser's profile folder could not be made at " + keep
                     + ": " + ex.getMessage());
         }
+        later(JRockBrowser::showProfile);   // it exists now, and has a size
         List<String> command = new ArrayList<>(List.of(program.toString(),
                 "--remote-debugging-port=" + debugPort,
                 "--user-data-dir=" + profileDir,
@@ -1386,6 +1403,16 @@ public final class JRockBrowser {
         scroll.setBorder(javax.swing.BorderFactory.createTitledBorder(
                 "What an agent is told"));
 
+        // Always on screen, because "which browser is this and what does it know?" is a
+        // fair question to have an answer to without reading the log - and because the
+        // answer to "how do I make it forget everything?" is this path.
+        profileLine = new javax.swing.JTextField();
+        profileLine.setFont(small);
+        profileLine.setForeground(MUTED);
+        profileLine.setEditable(false);       // a field, so the path can be copied out
+        profileLine.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 2, 6, 2));
+        profileLine.setOpaque(false);
+
         status = new javax.swing.JLabel(" ");
         status.setFont(small);
         status.setForeground(MUTED);
@@ -1400,7 +1427,7 @@ public final class JRockBrowser {
         north.setLayout(new javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS));
         north.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                askRow, allowed, status }) {
+                askRow, allowed, profileLine, status }) {
             row.setAlignmentX(0f);
             row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                     row.getPreferredSize().height));
@@ -1425,9 +1452,51 @@ public final class JRockBrowser {
             window.setLocationRelativeTo(null);
         }
         window.setVisible(true);
+        showProfile();
         say("Ready. A page is read by photographing it in A4 pieces and asking this JRock "
                 + "what it says. The browser's own window is left on the page: consent "
                 + "walls and sign-ins are yours to answer there, once.");
+    }
+
+    // The profile line: where the browser's own cookies and cache live, and how much of
+    // them there are. On the event thread.
+    //
+    // The size is measured on a thread of its own and filled in when it arrives: a
+    // browser cache is tens of thousands of files and hundreds of megabytes - 284 MB
+    // after a few days of this - and walking it is not something a window should wait
+    // for. Until then the line says the path, which is the part that was asked for.
+    private static void showProfile() {
+        Path folder = profileFolder();
+        boolean there = Files.isDirectory(folder);
+        profileLine.setText("Browser profile (its own cookies, cache and sign-ins, kept "
+                + "between runs; delete the folder to forget everything): " + folder
+                + (there ? "" : "  - not made yet"));
+        if (!there) return;
+        daemon(() -> {
+            long bytes = folderBytes(folder);
+            later(() -> profileLine.setText("Browser profile (its own cookies, cache and "
+                    + "sign-ins, kept between runs; delete the folder to forget "
+                    + "everything): " + folder + "  - " + (bytes / (1024 * 1024)) + " MB"));
+        }, "browser-profile-size").start();
+    }
+
+    // Every byte under a folder, deepest first, with anything unreadable skipped: a
+    // browser writes and deletes files in its own cache while this walks it, and a
+    // number that is a few files out is still the number that was wanted.
+    private static long folderBytes(Path folder) {
+        long[] total = { 0 };
+        try (java.util.stream.Stream<Path> all = Files.walk(folder)) {
+            all.forEach(one -> {
+                try {
+                    if (Files.isRegularFile(one)) total[0] += Files.size(one);
+                } catch (IOException gone) {
+                    // A cache file that went while this was looking at it.
+                }
+            });
+        } catch (IOException ex) {
+            return total[0];
+        }
+        return total[0];
     }
 
     // The window asking the same thing an agent would, so what the operator can try is
