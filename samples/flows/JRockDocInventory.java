@@ -113,7 +113,7 @@ public final class JRockDocInventory {
     // The flow is the same flow; what changes is that every question answers itself the
     // way the person at the keyboard almost always answers it - yes, rename them - and
     // that the result is PRINTED in a line a program can read instead of shown in a
-    // dialog a program cannot dismiss. It is how the letters agent files a scan the
+    // dialog a program cannot dismiss. It is how the papers agent files a scan the
     // moment it arrives, with the operator three rooms away.
     //
     // Two documents are allowed with it, and only with it: the two passes of a
@@ -205,11 +205,11 @@ public final class JRockDocInventory {
         // somebody closed it. Interactively that is exactly right - the window holds the
         // log and the conversation, and the operator closes it when they have read it.
         // Under --auto nobody is there to close anything, and whoever started this is
-        // waiting for the PROCESS to end and not merely for its answer: the letters agent
+        // waiting for the PROCESS to end and not merely for its answer: the papers agent
         // reads this output until the stream ends, which it only does when the process
         // does. So it read the result line, printed "Flow: Finished", and then waited for
         // ever on a process that was never going to exit - with every later request to
-        // that agent queued behind it, and push-to-talk reporting "the letters agent did
+        // that agent queued behind it, and push-to-talk reporting "the papers agent did
         // not answer" three minutes after the letter had in fact been filed.
         //
         // Read off the command line rather than off `asking`, so that an automation that
@@ -504,7 +504,7 @@ public final class JRockDocInventory {
         String scansLine = scansNote.isEmpty() ? "" : "\n" + capitalised(scansNote) + ".";
 
         if (!asking) {
-            // The one line the letters agent reads out of all this output.
+            // The one line the papers agent reads out of all this output.
             System.out.println(autoResult(base, renamed.isEmpty() ? document
                     : renamed.get(0), renamed.size()));
         }

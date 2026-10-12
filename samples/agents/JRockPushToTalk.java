@@ -151,7 +151,7 @@ public final class JRockPushToTalk {
     // the conversation and the log.
     private static final String FILES_DIR = "PTTFiles";
     private static final String MAIL_SUB = "mail";
-    private static final String LETTERS_SUB = "papers";
+    private static final String PAPERS_SUB = "papers";
 
     // What goes after every recording, expected beside this file; and the placeholder in
     // it that becomes the time the question was asked.
@@ -831,7 +831,7 @@ public final class JRockPushToTalk {
         String body = split.length > 1 ? split[1] : "";
         boolean mail = kind.startsWith("message") || kind.startsWith("mail");
         try {
-            java.nio.file.Path dir = filesDir(mail ? MAIL_SUB : LETTERS_SUB);
+            java.nio.file.Path dir = filesDir(mail ? MAIL_SUB : PAPERS_SUB);
             String safe = name.replaceAll("[^A-Za-z0-9._-]", "-");
             if (!safe.contains(".")) safe += mail ? ".md" : ".txt";
             java.nio.file.Path file = dir.resolve(safe);

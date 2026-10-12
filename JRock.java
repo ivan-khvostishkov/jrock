@@ -11205,7 +11205,7 @@ public class JRock {
     //
     // It waits for ever and it takes the rest of the machinery with it. A "pdfhtml"
     // include is what the doc inventory flow starts with, and that flow is often driven
-    // by an agent rather than by a person: the letters agent files the paper post from a
+    // by an agent rather than by a person: the papers agent files the paper post from a
     // sentence said across a room, and whoever asked is listening for an answer that
     // cannot come while this dialog is up.
     //
