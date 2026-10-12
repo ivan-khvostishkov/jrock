@@ -1289,6 +1289,15 @@ Two more PDF filters, desktop only, use the **Xpdf command line tools** by Derek
 https://www.xpdfreader.com/ — `pdftohtml` and `pdftotext` must be on your PATH. They hand a model
 the PDF's text, in reading order, rather than pictures of it.
 
+**Nothing is said aloud that is not written down.** `automationNarrate()` takes no text: it
+reads whatever is selected in the log, exactly as the menu item does. An agent that wants to say
+something therefore writes it into the log (`automationNote`), selects it
+(`automationSelectInLog`), narrates, and lets the selection go (`automationClearSelection`) —
+four calls where there was one, and the reason is the transcript. A spoken answer with no record
+of it is the one kind of output this machine cannot account for afterwards; now the log holds
+everything JRock has ever said out loud, in order, with the conversation around it, and the
+window shows the very words while they are being spoken.
+
 **The selection may be the prompt's, not only the log's.** Both export items take whichever
 selection there is, and the **prompt's wins** when both have one — which is the whole point of
 it. An answer is almost right: a date wrong, a paragraph too many, a heading to add. The log is
@@ -2056,7 +2065,7 @@ sequenceDiagram
   the list, and stops it if it is still beeping. The agent makes the sounds itself, with no files,
   and plays them with Java Sound on JRock's [**Narrate on**](#narrate-windows-and-the-browser) speaker, never
   on the Windows default. That device name is the only thing it takes from JRock's settings
-  (`JRock.automationNarrateDevice()`). If no speaker is set, or it isn't connected, the window
+  (its own `jrock-timer.txt`). If no speaker is set, or it isn't connected, the window
   says so, and the alarm still shows.
 - **Other agents set alarms** over TCP, on `127.0.0.1:47470` only. Connect, send the time as
   above and a newline, and read one line back: `1` means the alarm is set, `0` means it isn't.
@@ -2966,14 +2975,15 @@ thread** — they say so rather than deadlocking if you do.
 | `automationListen(boolean on)` | Lifts the mute `automationBegin` put on Mic always on (`true`), or puts it back (`false`). **Turns Mic always on on** if it is off — an agent asking to listen was told to by the operator, and a checkbox in another window is not a second opinion worth having about that; `automationEnd` puts the tick back as they left it, and nothing is written to the config. Refuses only when no microphone is set. |
 | `automationAwaitHeard(long millis)` | Waits for Mic always on to hear someone and for what was said to reach the prompt. Returns `{"1", null}` when it has, `{"0", null}` when nobody spoke in time, `{"0", why not}` when it cannot. A recording under way is waited out, not cut off. |
 | `automationMicReady()` | Whether there is a microphone to listen on **right now** — `null` when there is, and otherwise why not, including the one answer a listening loop cannot work out for itself: the microphone set is **not connected**. A quiet room and an unplugged microphone look identical to `automationAwaitHeard`, and they mean opposite things. |
-| `automationNarrate(String markdown)` | Narrate selected text, for any text: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when no device is set or it isn't connected. (Windows) |
+| `automationNarrate()` | Reads **the log's selection** aloud: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when nothing is selected, when no device is set, or when it isn't connected. **Takes no text** — see below. (Windows) |
+| `automationSelectInLog(String text)` | Selects the last place that text appears in the log, which is where `automationNote` has just put it. Refuses when it is not there (*Dialog only* hides gray lines). |
+| `automationClearSelection()` | Lets the selection go and follows the end of the conversation again — the log scrolls nowhere while a selection exists. |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
 | `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
 | `automationExportDocx(String markdown, String file)` | Export selected Markdown with images as DOCX, for any text: selects it in the log where it is shown, and writes `file` as A4 portrait with every `![...](<name>)` (or `![](<hash>)`) placed as the image that include names. |
 | `automationExportPromptDocx(String file)` | The same, for **what the prompt holds** - or its selection, when it has one. No model, no send, nothing cleared: the prompt is a sheet of paper here. An agent with a document to keep sets the prompt and asks for it as a file, so what was written is on the screen as well as on the disk. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
-| `automationNarrateDevice()` | The **Narrate on** speaker's name, or `""` when none is set — for an agent that plays sounds of its own on it. Needs no `automationBegin`. |
 | `automationMergeDuplex(front, back, out)` | **Merge two-sided scans**: the same interleave as the window menu — front 1, back N, front 2, back N−1 — with the two dialogs replaced by three arguments. Both passes must have the same page count, or one of them is not the file it was taken for; refused rather than guessed at, since the mistake it makes is every back page against the wrong front. No dialog either way: an automation that cannot press OK must not be shown one. The two scans are left exactly as they were. |
 | `automationNote(String line)` | One line in JRock's log, from the agent driving it. An agent is started by `javaw` and **has no standard output at all**, and its own window has one status line the next turn overwrites — so this is the only place a reason can still be read an hour later. Needs no `automationBegin`. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
@@ -3099,6 +3109,16 @@ rather than repeated on every row.
 
 **Audio**
 
+- **Crackle while waiting** (Windows / desktop) — a crackle on that same speaker **while a
+  model is thinking**, or *(none)*. Seconds pass between a question and its answer; in a window
+  being watched that is plain enough, but hands-free, across a room, silence says nothing about
+  whether the question was even heard. Five tones — *deep, low, middle, high, sharp* — and the
+  choice is there for a reason worth stating: one machine runs several JRocks, one per agent,
+  **sharing a speaker**, so a tone each turns *"something is thinking"* into *"the browser is
+  thinking"*. Tested before it was built: three processes, three tones, one device, 28 opens and
+  not one refusal — Java Sound asks for shared streams, so Windows mixes them. Picking a tone
+  plays it, because the only way to choose between five sounds is to hear them. The line is
+  **closed between crackles**, since a speaker hisses whenever its output stream is active.
 - **Narrate on** and **Record from** (Windows / desktop) — the one speaker
   [Narrate](#narrate-windows-and-the-browser) plays on and the one microphone
   [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a

@@ -1012,6 +1012,9 @@ public class JRock {
     // The one output device Narrate plays on, by its exact name - or absent, which is
     // "not set" (see the Narrate section for why there is no default to fall back on).
     private static final String CONFIG_NARRATE_DEVICE = "narrate-device";
+    // Which crackle is played on that speaker while a model is thinking, by its tone
+    // name - or absent, which is none at all (see CRACKLE_TONES).
+    private static final String CONFIG_CRACKLE = "crackle";
     // The voice Narrate reads in, by its Windows name - or absent, which is "whichever
     // one speaks the language of the text".
     private static final String CONFIG_NARRATE_VOICE = "narrate-voice";
@@ -1112,6 +1115,7 @@ public class JRock {
             // no device has none, and Narrate says so rather than using the last one's.
             String device = settings.get(CONFIG_NARRATE_DEVICE);
             narrateDevice = (device == null) ? "" : device.trim();
+            crackleTone = crackleToneOf(settings.get(CONFIG_CRACKLE));
             String voice = settings.get(CONFIG_NARRATE_VOICE);
             narrateVoice = (voice == null) ? "" : voice.trim();
             String mic = settings.get(CONFIG_RECORD_DEVICE);
@@ -1174,6 +1178,7 @@ public class JRock {
         appendSetting(text, CONFIG_MODEL, MODEL_ID);
         appendSetting(text, CONFIG_IMAGES_DPI, String.valueOf(imagesDpi));
         appendSetting(text, CONFIG_NARRATE_DEVICE, narrateDevice);   // blank: left out
+        appendSetting(text, CONFIG_CRACKLE, crackleTone);            // blank: left out
         appendSetting(text, CONFIG_NARRATE_VOICE, narrateVoiceName(narrateVoice));
         appendSetting(text, CONFIG_RECORD_DEVICE, recordDevice);     // likewise
         if (transcribeAvailable()) {
@@ -2725,6 +2730,8 @@ public class JRock {
                     ? "Calling " + pathOf(endpoint()) + " (extend: " + history.size() + " prior turns"
                       + (historyLimit > 0 ? ", History limit " + historyLimit : "") + ") ..."
                     : "Calling " + pathOf(endpoint()) + " ...");
+            // The line is not quite silent while the answer is on its way (see crackleOn).
+            crackleOn();
             new SwingWorker<String[], Void>() {
                 @Override
                 protected String[] doInBackground() {
@@ -2748,6 +2755,7 @@ public class JRock {
 
                 @Override
                 protected void done() {
+                    crackleOff();   // quiet before a word of the answer is said or shown
                     // Whatever comes out of the block below, one of the two is what an
                     // automation waiting on this send is told (see sendFinished).
                     String failure = "the reply was lost.";
@@ -3629,12 +3637,218 @@ public class JRock {
         return live == null ? null : live.frame;
     }
 
-    // The speaker set in Configure > Narrate on, by the name Java Sound gives it, or ""
-    // when none is set. Only the name, for an agent that plays sounds of its own on the
-    // device the user chose for JRock's voice; read it each time, since Configure can
-    // change it meanwhile. Needs no automation to be running.
-    public static String automationNarrateDevice() {
-        return narrateDevice;
+    // ---- The crackle, while a model is thinking ---------------------------------
+    // A sound JRock makes about ITSELF: a request has gone out and the answer is not
+    // back. Seconds pass, and in a window that is being watched that is plain enough -
+    // but hands-free, across a room, with the operator not looking at anything, silence
+    // says nothing about whether the question was even heard.
+    //
+    // It belongs here rather than in an agent, and that is the point of moving it. The
+    // speaker is JRock's setting, the waiting is JRock's waiting, and an agent asking for
+    // the device so that it could make the noise itself was reading another program's
+    // configuration in order to do that program's job. Now any JRock can do it, which
+    // means push-to-talk gets it for nothing and so does a window somebody is typing in.
+    //
+    // THE TONE IS A CHOICE, and the reason is the operator's: several agents on one
+    // machine, each with its own JRock and its own folder, all playing on the same
+    // speaker. Give each folder a different tone and the crackle says WHICH of them is
+    // working. Tested before it was built - three processes, three tones, one device, 28
+    // opens and not one refusal: Java Sound asks for shared streams, so Windows mixes
+    // them.
+    //
+    // A crackle is filtered noise, so "pitch" is the filter's corner: the number below is
+    // how far towards the input each sample moves, which is a dull thud at 0.10 and a
+    // sharp tick at 0.80.
+    private static final String[][] CRACKLE_TONES = {
+        { "deep",   "0.10" },
+        { "low",    "0.20" },
+        { "middle", "0.35" },
+        { "high",   "0.55" },
+        { "sharp",  "0.80" },
+    };
+
+    // The loudest a crackle gets, as a fraction of the scale. Each one is milliseconds
+    // long, so what is heard is far quieter than the figure looks.
+    private static final double CRACKLE_GAIN = 0.025;
+    private static final double CRACKLE_SOFTEST = 0.25;   // and most are quieter than that
+    private static final double CRACKLE_MIN_MS = 1;
+    private static final double CRACKLE_MAX_MS = 25;
+    private static final double CRACKLE_RUN_CHANCE = 0.33;   // a scratch, not a tick
+    private static final long CRACKLE_RUN_GAP_MIN_MS = 15;
+    private static final long CRACKLE_RUN_GAP_MAX_MS = 70;
+    private static final long CRACKLE_GAP_MIN_MS = 500;
+    private static final long CRACKLE_GAP_MAX_MS = 5_000;
+    private static final long CRACKLE_WAKE_MS = 25;
+    private static final double CRACKLE_TAIL_MS = 5;
+    private static final float CRACKLE_RATE = 22050f;
+    private static final javax.sound.sampled.AudioFormat CRACKLE_FORMAT =
+            new javax.sound.sampled.AudioFormat(CRACKLE_RATE, 16, 1, true, false);
+
+    // What "no crackle" is called in the dropdown. Not an empty row: a list whose first
+    // item is blank looks like a list that has not loaded.
+    private static final String CRACKLE_NONE = "(none)";
+
+    private static volatile String crackleTone = "";
+    private static volatile Thread crackleThread;
+    private static volatile boolean crackleStop;
+    private static volatile String crackleSilent;   // why there is none, said once
+
+    /** The tone named, or "" for none: anything unknown reads as none. */
+    private static String crackleToneOf(String name) {
+        if (name == null) return "";
+        String want = name.trim().toLowerCase(java.util.Locale.ROOT);
+        for (String[] tone : CRACKLE_TONES) {
+            if (tone[0].equals(want)) return tone[0];
+        }
+        return "";
+    }
+
+    private static double crackleCutoff(String tone) {
+        for (String[] one : CRACKLE_TONES) {
+            if (one[0].equals(tone)) return Double.parseDouble(one[1]);
+        }
+        return 0.35;
+    }
+
+    // Starts the crackle, if a tone is set and one is not going already. Returns at once.
+    private static synchronized void crackleOn() {
+        if (crackleTone.isEmpty() || narrateDevice.isEmpty()) return;
+        if (!narrateDeviceChoosable()) return;      // the browser plays its own way
+        if (crackleThread != null) return;
+        crackleStop = false;
+        Thread playing = new Thread(JRock::cracklePlay, "jrock-crackle");
+        playing.setDaemon(true);
+        crackleThread = playing;
+        playing.start();
+    }
+
+    // Stops it, and does NOT wait: this is called from the event thread the moment a
+    // reply lands, and a burst has 30 ms left at the most. Waiting for it would be the
+    // window freezing just as the answer arrives.
+    private static synchronized void crackleOff() {
+        if (crackleThread == null) return;
+        crackleStop = true;
+        crackleThread = null;
+    }
+
+    // One burst, then silence, until told to stop. On the jrock-crackle thread.
+    //
+    // THE LINE IS CLOSED IN BETWEEN. A speaker hisses while its output stream is active,
+    // whatever is in the stream, so a held-open line under a sound that is silence 99% of
+    // the time is audible as a hiss - which is what the operator heard when this lived in
+    // push-to-talk and held its line. Opening the device costs about 100 ms here, which
+    // is invisible inside a gap that is random to begin with.
+    private static void cracklePlay() {
+        String device = narrateDevice;
+        double cutoff = crackleCutoff(crackleTone);
+        javax.sound.sampled.Mixer mixer = outputMixer(device);
+        if (mixer == null) {
+            crackleQuiet("the speaker \"" + device + "\" is not connected");
+            return;
+        }
+        java.util.Random rnd = new java.util.Random();
+        while (!crackleStop) {
+            long gap = (long) (CRACKLE_GAP_MIN_MS
+                    + rnd.nextDouble() * (CRACKLE_GAP_MAX_MS - CRACKLE_GAP_MIN_MS));
+            for (long waited = 0; waited < gap && !crackleStop; waited += CRACKLE_WAKE_MS) {
+                try {
+                    Thread.sleep(Math.min(CRACKLE_WAKE_MS, gap - waited));
+                } catch (InterruptedException ended) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+            if (crackleStop) return;
+            javax.sound.sampled.SourceDataLine line = null;
+            try {
+                byte[] pcm = crackleBurst(rnd, cutoff);
+                line = (javax.sound.sampled.SourceDataLine) mixer.getLine(
+                        new javax.sound.sampled.DataLine.Info(
+                                javax.sound.sampled.SourceDataLine.class, CRACKLE_FORMAT));
+                try {
+                    line.open(CRACKLE_FORMAT, Math.max(pcm.length, 2048));
+                } catch (IllegalArgumentException tooSmall) {
+                    line.open(CRACKLE_FORMAT);
+                }
+                line.start();
+                crackleSilent = null;
+                line.write(pcm, 0, pcm.length);
+                line.drain();
+                line.stop();
+            } catch (javax.sound.sampled.LineUnavailableException | RuntimeException ex) {
+                crackleQuiet("could not play on " + device + " (" + ex.getMessage() + ")");
+                return;
+            } finally {
+                if (line != null) line.close();
+            }
+        }
+    }
+
+    // One burst: a crackle, or now and then a run of two to four of them tens of
+    // milliseconds apart, which is what a scratch on a line sounds like rather than one
+    // tidy click - and a few milliseconds of silence to close the device on.
+    private static byte[] crackleBurst(java.util.Random rnd, double cutoff) {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        int crackles = rnd.nextDouble() < CRACKLE_RUN_CHANCE ? 2 + rnd.nextInt(3) : 1;
+        double low = 0;
+        for (int c = 0; c < crackles; c++) {
+            int lasts = (int) crackleFrames(rnd, CRACKLE_MIN_MS, CRACKLE_MAX_MS);
+            double loud = CRACKLE_SOFTEST + rnd.nextDouble() * (1 - CRACKLE_SOFTEST);
+            for (int i = 0; i < lasts; i++) {
+                double leftOf = 1 - i / (double) lasts;
+                low += (rnd.nextDouble() * 2 - 1 - low) * cutoff;
+                crackleSample(out, low * leftOf * leftOf * loud);
+            }
+            if (c < crackles - 1) {
+                long quiet = crackleFrames(rnd, CRACKLE_RUN_GAP_MIN_MS, CRACKLE_RUN_GAP_MAX_MS);
+                for (long i = 0; i < quiet; i++) crackleSample(out, 0);
+            }
+        }
+        for (int i = 0; i < CRACKLE_RATE * CRACKLE_TAIL_MS / 1000; i++) crackleSample(out, 0);
+        return out.toByteArray();
+    }
+
+    private static void crackleSample(java.io.ByteArrayOutputStream out, double v) {
+        int sample = (int) (Math.max(-1, Math.min(1, v)) * CRACKLE_GAIN * Short.MAX_VALUE);
+        out.write((byte) sample);
+        out.write((byte) (sample >> 8));
+    }
+
+    private static long crackleFrames(java.util.Random rnd, double fromMs, double toMs) {
+        return (long) (CRACKLE_RATE * (fromMs + rnd.nextDouble() * (toMs - fromMs)) / 1000);
+    }
+
+    // One burst on a named device, for the Configure dialog to play while somebody is
+    // choosing a tone. Silent about failures: the dialog is not the place to be told that
+    // a speaker is unplugged, and the log says so the first time a request waits.
+    private static void crackleOnce(String device, double cutoff) {
+        javax.sound.sampled.Mixer mixer = outputMixer(device);
+        if (mixer == null) return;
+        javax.sound.sampled.SourceDataLine line = null;
+        try {
+            byte[] pcm = crackleBurst(new java.util.Random(), cutoff);
+            line = (javax.sound.sampled.SourceDataLine) mixer.getLine(
+                    new javax.sound.sampled.DataLine.Info(
+                            javax.sound.sampled.SourceDataLine.class, CRACKLE_FORMAT));
+            line.open(CRACKLE_FORMAT, Math.max(pcm.length, 2048));
+            line.start();
+            line.write(pcm, 0, pcm.length);
+            line.drain();
+            line.stop();
+        } catch (javax.sound.sampled.LineUnavailableException | RuntimeException quiet) {
+            // Nothing: a sample nobody hears is not a failure worth a dialog.
+        } finally {
+            if (line != null) line.close();
+        }
+    }
+
+    // One line in the log the first time it cannot play, and again only if the reason
+    // changes: a request that goes out without a crackle is not a request that failed.
+    private static void crackleQuiet(String why) {
+        if (why.equals(crackleSilent)) return;
+        crackleSilent = why;
+        Ui live = ui;
+        if (live != null) live.log.gray("No crackle while waiting: " + why + ".");
     }
 
     // Enters automation mode: the prompt goes read-only, Send is held between steps,
@@ -4125,15 +4339,22 @@ public class JRock {
         return null;
     }
 
-    // Reads markdown aloud, as Narrate selected text does with a selection: the Markdown
-    // taken out, a voice in the language of the text, on the device set in Configure >
-    // Narrate on. Returns null once the narration has started - it plays on while the
-    // automation goes on - or why nothing is being said. One already playing is stopped
+    // Reads THE LOG'S SELECTION aloud - exactly what "Narrate selected text" does, and
+    // nothing else. Returns null once the narration has started (it plays on while the
+    // automation goes on), or why nothing is being said. One already playing is stopped
     // first, as two voices at once would talk over each other.
+    //
+    // IT TAKES NO TEXT, AND THAT IS THE POINT. It used to be handed a string, which meant
+    // a program could speak words that appear nowhere - and a spoken answer with no record
+    // of it is the one kind this machine must not produce. An agent now says what it
+    // means to say the way a person would: put it in the log (automationNote), select it
+    // (automationSelectInLog), narrate, and let the selection go
+    // (automationClearSelection). The transcript then holds everything JRock has ever
+    // said out loud, in order, with the rest of the conversation around it.
     //
     // Unlike the menu item, an unset device is a refusal and not the "set up the output
     // device" dialog, for the reason automationStartRecording gives.
-    public static String automationNarrate(String markdown) {
+    public static String automationNarrate() {
         String problem = requireAutomation();
         if (problem != null) return problem;
         if (!narrateAvailable()) {
@@ -4150,13 +4371,53 @@ public class JRock {
                 return "the output device \"" + narrateDevice + "\" is not connected.";
             }
         }
-        String text = narrationText(markdown == null ? "" : markdown);
-        if (text.isBlank()) return "there is nothing to narrate - the text is only markup.";
         Ui live = ui;
+        String[] selected = { null };
+        onEdt(() -> selected[0] = live.log.selectedText());
+        if (selected[0] == null) {
+            return "nothing is selected in the log - put what is to be said there and "
+                    + "select it first (automationNote, automationSelectInLog).";
+        }
+        String text = narrationText(selected[0]);
+        if (text.isBlank()) return "there is nothing to narrate - the text is only markup.";
         onEdt(() -> {
             automationStopNarration();
             narrate(live.frame, live.log, text);
         });
+        return null;
+    }
+
+    // Selects the last place that text appears in the log, which is where a line just
+    // written with automationNote is. Returns null, or why it could not be found - in
+    // "Dialog only" mode a gray line is not shown at all, and what is not shown cannot
+    // be selected or narrated.
+    //
+    // The pair of this and automationClearSelection exists so that narration has a
+    // SOURCE rather than an argument: the window shows what is being said while it is
+    // being said, and the transcript keeps it afterwards.
+    public static String automationSelectInLog(String text) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        if (text == null || text.isBlank()) return "there is no text to select.";
+        Ui live = ui;
+        boolean[] found = { false };
+        onEdt(() -> found[0] = live.log.selectLast(text.trim()));
+        return found[0] ? null
+                : "that text is not in the log as it stands (Dialog only hides gray lines).";
+    }
+
+    // Lets the selection go, and follows the end of the conversation again. Returns null.
+    //
+    // Not tidiness: the log deliberately scrolls NOWHERE while a selection exists, so
+    // that a reply landing underneath cannot take away text somebody is in the middle of
+    // copying. A selection left behind by a program therefore stops the window following
+    // the conversation - which the operator watching it reads as a window that has
+    // stopped working.
+    public static String automationClearSelection() {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        onEdt(live.log::selectNothing);
         return null;
     }
 
@@ -4816,6 +5077,39 @@ public class JRock {
             }
         }
 
+        // The crackle while a model is thinking, on that same speaker: off, or one of
+        // five tones. A plain dropdown and not free text, because unlike a device name
+        // there is nothing to type - and picking one PLAYS it, since the only way to
+        // choose between five sounds is to hear them.
+        //
+        // Why a choice at all: one machine runs several JRocks, one per agent, and they
+        // share a speaker. A tone each turns "something is thinking" into "the browser is
+        // thinking", which is worth five lines of table.
+        javax.swing.JComboBox<String> crackleF = null;
+        if (narrateDeviceChoosable()) {
+            crackleF = new javax.swing.JComboBox<>();
+            crackleF.setName("crackle");
+            crackleF.addItem(CRACKLE_NONE);
+            for (String[] tone : CRACKLE_TONES) crackleF.addItem(tone[0]);
+            crackleF.setSelectedItem(crackleTone.isEmpty() ? CRACKLE_NONE : crackleTone);
+            crackleF.setFont(crackleF.getFont().deriveFont(java.awt.Font.PLAIN));
+            crackleF.setToolTipText("A crackle on the speaker above while a model is "
+                    + "thinking, so a wait is audible across a room. Pick a different tone "
+                    + "in each agent's folder and the sound says which one is working.");
+            javax.swing.JComboBox<String> listen = crackleF;
+            crackleF.addActionListener(e -> {
+                Object picked = listen.getSelectedItem();
+                String tone = picked == null || CRACKLE_NONE.equals(picked) ? ""
+                        : picked.toString();
+                if (tone.isEmpty() || narrateDevice.isEmpty()) return;
+                // One burst, now, on the device as it is set in this dialog: hearing it
+                // is the whole reason for choosing by name.
+                String device = narrateDevice;
+                double cutoff = crackleCutoff(tone);
+                new Thread(() -> crackleOnce(device, cutoff), "jrock-crackle-sample").start();
+            });
+        }
+
         // The voices Narrate may read in: a plain line of names, comma-separated, with a
         // dropdown beside it that only ADDS to it.
         //
@@ -5130,6 +5424,7 @@ public class JRock {
         javax.swing.JPanel audio = new javax.swing.JPanel(new java.awt.GridBagLayout());
         row = 0;
         if (deviceF != null) addRow(audio, c, row++, "Narrate on:", deviceF);
+        if (crackleF != null) addRow(audio, c, row++, "Crackle while waiting:", crackleF);
         if (voiceF != null) {
             // The dropdown to the right of the line it writes into, and labelled: a
             // control that changes another one has to say which way round that works.
@@ -5314,6 +5609,11 @@ public class JRock {
 
         // Narrate's device: taken as it stands, empty included - unlike the model, an
         // empty field here means something, "no device", and is how one is unset.
+        if (crackleF != null) {
+            Object picked = crackleF.getSelectedItem();
+            crackleTone = picked == null || CRACKLE_NONE.equals(picked) ? ""
+                    : crackleToneOf(picked.toString());
+        }
         if (deviceF != null) {
             Object device = deviceF.getEditor().getItem();
             narrateDevice = (device == null) ? "" : device.toString().trim();

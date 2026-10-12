@@ -91,6 +91,43 @@ class JRockAutomationDocTest extends JRockGuiFixture {
         }
     }
 
+    @Test
+    @DisplayName("narration reads the log's selection, so nothing is said that is not written down")
+    void narratesWhatIsWrittenDownAndNothingElse() throws Exception {
+        awaitReadyCount(1);
+        assertThat(JRock.automationBegin("narrate test")).isNull();
+        try {
+            String words = "Error. Should I try again?";
+
+            // With nothing selected there is nothing to read: narration takes no text any
+            // more, so an agent cannot speak words that appear nowhere. (What it says it
+            // cannot do depends on the machine - a build runner has no voice at all - so
+            // what is asserted is the refusal, not its wording.)
+            assertThat(JRock.automationNarrate())
+                    .describedAs("narrating with nothing selected").isNotNull();
+
+            // The three steps an agent takes instead of handing over a string.
+            assertThat(JRock.automationNote(words)).isNull();
+            assertThat(JRock.automationSelectInLog(words)).isNull();
+            assertThat(logPane().text())
+                    .describedAs("what was to be said is in the transcript").contains(words);
+            assertThat(logPane().target().getSelectedText())
+                    .describedAs("and it is what is selected").contains(words);
+
+            // And the selection is let go of afterwards, or the log would stop following
+            // the conversation it has just read out.
+            assertThat(JRock.automationClearSelection()).isNull();
+            assertThat(logPane().target().getSelectedText())
+                    .describedAs("the selection after clearing it").isNull();
+
+            // A line that was never logged cannot be selected, so it cannot be said.
+            assertThat(JRock.automationSelectInLog("something nobody ever wrote"))
+                    .describedAs("selecting text that is not in the log").isNotNull();
+        } finally {
+            JRock.automationEnd("done");
+        }
+    }
+
     private static Map<String, byte[]> unzip(byte[] zip) throws Exception {
         Map<String, byte[]> parts = new HashMap<>();
         try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(zip))) {

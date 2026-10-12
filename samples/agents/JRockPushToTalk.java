@@ -441,27 +441,12 @@ public final class JRockPushToTalk {
         });
     }
 
-    // A turn, with the room noise underneath it: the microphone has stopped, so from
-    // here on the waiting is audible (see the room, below) until something is said out
-    // loud. Every path out of a turn goes through here, which is why the fan goes off in
-    // a finally rather than at the end of the answer: a turn that throws is a turn where
-    // the operator is about to hear "Error. Should I try again?", and hearing it over a
-    // fan that never stopped is worse than the error.
-    private static String answer(boolean handsFreeTurn) {
-        roomOn();
-        try {
-            return answering(handsFreeTurn);
-        } finally {
-            roomOff();
-        }
-    }
-
     // Sends the prompt as it stands, shows the reply in place of the last one and reads
     // it aloud, while the button is free again - unless it is a hands-free turn and
     // hands-free has ended while the reply was on its way. On the worker. Returns null,
     // or what to say about a narration that could not play - the turn has succeeded all
     // the same.
-    private static String answering(boolean handsFreeTurn) {
+    private static String answer(boolean handsFreeTurn) {
         String prompt = JRock.automationPromptText();
         if (prompt == null) throw new Stop("the prompt could not be read.");
         String after = read(appendix.toString());
@@ -654,8 +639,7 @@ public final class JRockPushToTalk {
                     reply.isBlank() ? "The reply was empty." : "No answer: " + stuck + ".",
                     sayFailed());
         }
-        roomOff();   // the fan stops, and then the answer is read - not both at once
-        String silent = JRock.automationNarrate(reply);
+        String silent = sayAloud(reply);
         return join(note, alarm, event, moved, drafted, saved,
                 silent == null ? null : "Not read aloud: " + silent);
     }
@@ -876,6 +860,29 @@ public final class JRockPushToTalk {
         return null;
     }
 
+    // SAYS SOMETHING OUT LOUD, THROUGH THE LOG. Returns null when it was said, or why
+    // it could not be - which the status line reports and the turn survives.
+    //
+    // Four calls, and the shape of them is the point: JRock's narration reads the log's
+    // SELECTION and takes no text, so anything said out loud has to be written down
+    // first. Which is the right way round. This agent speaks for a model whose words
+    // nobody else hears; a spoken answer with no record of it would be the one kind of
+    // output this machine cannot account for afterwards. Now the transcript holds
+    // everything that was ever said, in order, with the conversation around it - and the
+    // window shows the very words while they are being spoken.
+    //
+    // The selection goes afterwards, because the log scrolls nowhere while one exists:
+    // leaving it would stop the window following the conversation it is reading out.
+    private static String sayAloud(String words) {
+        String problem = JRock.automationNote(words);
+        if (problem != null) return problem;
+        problem = JRock.automationSelectInLog(words);
+        if (problem != null) return problem;
+        String silent = JRock.automationNarrate();
+        JRock.automationClearSelection();
+        return silent;
+    }
+
     // Says FAILED_ALOUD out loud, and returns what the status line should add about
     // saying it - null when it was said, the reason when it could not be (no speaker set
     // on this JRock, or the one set is not connected).
@@ -885,8 +892,7 @@ public final class JRockPushToTalk {
     // the moment it happens. A narration already playing is stopped first by
     // automationNarrate, so the phrase never queues behind half an old answer.
     private static String sayFailed() {
-        roomOff();   // whatever brought us here, the waiting is over
-        String silent = JRock.automationNarrate(FAILED_ALOUD);
+        String silent = sayAloud(FAILED_ALOUD);
         return silent == null ? null : "Not read aloud: " + silent;
     }
 
@@ -1249,259 +1255,6 @@ public final class JRockPushToTalk {
             // Offset 0 of an empty document.
         }
         answerArea.setCaretPosition(0);
-    }
-
-    // ---- The room ----------------------------------------------------------
-    // An open line, while the model thinks.
-    //
-    // A spoken question takes seconds to answer - a send, sometimes a fetch and another
-    // send - and hands-free the operator is not looking at the window. Silence over
-    // those seconds says nothing: whether the microphone heard the end of the sentence,
-    // whether anything was sent, whether this is the pause before "Error. Should I try
-    // again?". So for exactly as long as the answer is on its way, the line is not quite
-    // silent: a crackle every second or so, the way an analogue line crackles, and
-    // nothing at all in between.
-    //
-    // SPARSE, not continuous, and that is the whole design. A held sound - a fan, a hum,
-    // a hiss - is a sound somebody is listening THROUGH, and after a few turns it is
-    // tiring and in the way of the voice. A few scratches a second apart say the same
-    // thing ("the line is open, something is happening") while leaving the room quiet,
-    // and they sit far enough under a voice that the answer never has to compete.
-    //
-    // Deliberately not a beep or a chime either. Whoever is talking should go on feeling
-    // they are talking to somebody, and a notification sound is a program announcing
-    // itself in the middle of a conversation; a line that crackles is just a line.
-    //
-    // Made here, a slice at a time, rather than shipped as a file: noise needs no files
-    // and no licence, and an endless wait needs an endless sound.
-    private static final float ROOM_RATE = 22050f;
-    private static final javax.sound.sampled.AudioFormat ROOM_FORMAT =
-            new javax.sound.sampled.AudioFormat(ROOM_RATE, 16, 1, true, false);
-
-    // The loudest a crackle gets, as a fraction of the scale: a fortieth. Each one is a
-    // few milliseconds, so what is heard is far quieter than the figure looks - a
-    // transient that is gone before it registers as a level at all.
-    private static final double ROOM_GAIN = 0.025;
-
-    // And most of them are quieter than that. The level of each crackle is picked
-    // between these two, so a handful stand out and the rest are barely there, which is
-    // what keeps it from sounding like a pattern.
-    private static final double ROOM_SOFTEST = 0.25;
-    private static final double ROOM_LOUDEST = 1.0;
-
-    // A crackle is a burst of noise, 1 to 25 ms of it, with no attack to speak of and a
-    // decay that squares away to nothing. Through one low pass - 0.35 of the way to the
-    // input each sample, so it keeps its edge - because unfiltered white noise is a
-    // digital click and a scratch has some body to it.
-    private static final double ROOM_CRACKLE_MIN_MS = 1;
-    private static final double ROOM_CRACKLE_MAX_MS = 25;
-    private static final double ROOM_CUTOFF = 0.35;
-
-    // How long the line is silent between them: half a second to five, picked afresh
-    // every time. Never a steady tick, which would be a metronome and would be back to
-    // being a sound somebody listens through.
-    //
-    // Twice what it was, at the operator's word: one crackle a second or so reads as a
-    // line that is doing something, and about one every two and a half seconds still
-    // does - while being half as much of it to sit through for a turn that takes half a
-    // minute. The sound says "the line is open", and it only has to say it now and then.
-    private static final long ROOM_GAP_MIN_MS = 500;
-    private static final long ROOM_GAP_MAX_MS = 5_000;
-
-    // And now and then a crackle brings company: a third of them are a run of two to
-    // four, tens of milliseconds apart, which is what a scratch on a line actually
-    // sounds like rather than one tidy click.
-    private static final double ROOM_RUN_CHANCE = 0.33;
-    private static final long ROOM_RUN_GAP_MIN_MS = 15;
-    private static final long ROOM_RUN_GAP_MAX_MS = 70;
-
-    // A few milliseconds of silence at the end of a burst, so the device is never closed
-    // in the middle of a crackle's decay.
-    private static final double ROOM_TAIL_MS = 5;
-
-    // How often the gap is looked at while it is being waited out, which is how quickly
-    // the room goes when the answer arrives. A burst is tens of milliseconds, so what
-    // the answer actually waits for is this.
-    private static final long ROOM_WAKE_MS = 25;
-
-    // How long the turn waits for the room to be gone before it speaks. Generous for
-    // what it covers - a sleep that checks every ROOM_WAKE_MS, or the tail of a burst
-    // that is tens of milliseconds long - and the only cost of being generous is a
-    // thread that is already finished.
-    private static final long ROOM_STOP_WAIT_MS = 600;
-
-    // THE LINE IS CLOSED IN BETWEEN, and that is not a tidiness detail either.
-    //
-    // A speaker hisses while its output stream is ACTIVE, whatever is in the stream - and
-    // the operator heard exactly that: crackles over a constant background. It was not in
-    // the signal (between crackles this writes zeros, and zeros are what the device got)
-    // and it was not the sample rate (JRock narrates through the same 22050 Hz mono
-    // format on the same mixer). It is what the amplifier does when a stream is open and
-    // nothing is coming down it - inaudible under speech, which is why narration sounds
-    // clean, and plain as day under a sound that is silence 99% of the time.
-    //
-    // So the line is not held open. The thread sleeps through the gap with nothing open
-    // at all, opens the device for the ~20 ms a burst lasts, and closes it again: a
-    // device that is not playing cannot hiss. It costs about 95 ms to open this one
-    // (measured, worst of nine: 102), which is invisible in a gap that is random to
-    // begin with.
-    private static volatile Thread room;
-    private static volatile boolean roomStop;
-
-    // Why there is no room sound, as last reported: said once in the log and then only
-    // when the reason changes, the same way the missing microphone is. A turn that
-    // cannot make the noise is not a turn that failed - nobody is owed a fan - so it is
-    // never said out loud and never reaches the status line.
-    private static volatile String roomSilent;
-
-    // Starts the room, if it is not already going. Returns at once: the sound is made on
-    // a thread of its own, because the turn has a model to wait for.
-    private static synchronized void roomOn() {
-        if (room != null) return;
-        roomStop = false;
-        Thread playing = new Thread(JRockPushToTalk::roomPlay, "ptt-room");
-        playing.setDaemon(true);
-        room = playing;
-        playing.start();
-    }
-
-    // Stops it, and waits for the thread to notice - which in a gap is one ROOM_WAKE_MS
-    // and nothing is open anyway, and during a burst is the few milliseconds the burst
-    // has left. Called before anything is said out loud, and again when the turn ends,
-    // whichever comes first; doing it twice does nothing the second time.
-    private static synchronized void roomOff() {
-        Thread playing = room;
-        if (playing == null) return;
-        roomStop = true;
-        try {
-            playing.join(ROOM_STOP_WAIT_MS);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-        }
-        room = null;
-    }
-
-    // The sound itself, on the ptt-room thread: a gap with nothing open, then one burst
-    // through a line that is opened and closed around it, until roomStop.
-    private static void roomPlay() {
-        String device = JRock.automationNarrateDevice();
-        if (device == null || device.isEmpty()) {
-            roomQuiet("no speaker is set in JRock's Configure > Narrate on");
-            return;
-        }
-        javax.sound.sampled.Mixer mixer = outputMixer(device);
-        if (mixer == null) {
-            roomQuiet("the speaker \"" + device + "\" is not connected");
-            return;
-        }
-        java.util.Random rnd = new java.util.Random();
-        while (!roomStop) {
-            long gap = (long) (ROOM_GAP_MIN_MS
-                    + rnd.nextDouble() * (ROOM_GAP_MAX_MS - ROOM_GAP_MIN_MS));
-            for (long waited = 0; waited < gap && !roomStop; waited += ROOM_WAKE_MS) {
-                try {
-                    Thread.sleep(Math.min(ROOM_WAKE_MS, gap - waited));
-                } catch (InterruptedException ended) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-            if (roomStop) return;
-            if (!roomBurst(mixer, device, burst(rnd))) return;
-        }
-    }
-
-    // One burst, start to finish: the device opened, the crackles written, the device
-    // closed again. False when it could not be played at all, which ends the room for
-    // this turn rather than trying again every second.
-    private static boolean roomBurst(javax.sound.sampled.Mixer mixer, String device,
-                                     byte[] pcm) {
-        javax.sound.sampled.SourceDataLine line = null;
-        try {
-            line = (javax.sound.sampled.SourceDataLine) mixer.getLine(
-                    new javax.sound.sampled.DataLine.Info(
-                            javax.sound.sampled.SourceDataLine.class, ROOM_FORMAT));
-            try {
-                line.open(ROOM_FORMAT, Math.max(pcm.length, 2048));
-            } catch (IllegalArgumentException tooSmall) {
-                line.open(ROOM_FORMAT);   // a device with a mind of its own about buffers
-            }
-            line.start();
-            roomSilent = null;
-            line.write(pcm, 0, pcm.length);
-            line.drain();
-            line.stop();
-            return true;
-        } catch (javax.sound.sampled.LineUnavailableException | RuntimeException ex) {
-            roomQuiet("could not play on " + device + " (" + ex.getMessage() + ")");
-            return false;
-        } finally {
-            if (line != null) line.close();
-        }
-    }
-
-    // One burst as PCM: a single crackle, or now and then a run of two to four of them
-    // tens of milliseconds apart - which is what a scratch on a line sounds like rather
-    // than one tidy click - and a few milliseconds of silence to close on.
-    //
-    // Each crackle is noise with no attack to speak of and a decay that squares away to
-    // nothing, through one low pass so that it keeps its edge without being a digital
-    // click, and each gets its own level, so a handful stand out and the rest are barely
-    // there. Generated whole here because a burst is milliseconds long: it is written in
-    // one go, to a line that is open for no longer than it takes.
-    private static byte[] burst(java.util.Random rnd) {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        int crackles = rnd.nextDouble() < ROOM_RUN_CHANCE ? 2 + rnd.nextInt(3) : 1;
-        double low = 0;
-        for (int c = 0; c < crackles; c++) {
-            int lasts = (int) frames(rnd, ROOM_CRACKLE_MIN_MS, ROOM_CRACKLE_MAX_MS);
-            double loud = ROOM_SOFTEST + rnd.nextDouble() * (ROOM_LOUDEST - ROOM_SOFTEST);
-            for (int i = 0; i < lasts; i++) {
-                double leftOf = 1 - i / (double) lasts;
-                low += (rnd.nextDouble() * 2 - 1 - low) * ROOM_CUTOFF;
-                sample(out, low * leftOf * leftOf * loud);
-            }
-            if (c < crackles - 1) {
-                long quiet = frames(rnd, ROOM_RUN_GAP_MIN_MS, ROOM_RUN_GAP_MAX_MS);
-                for (long i = 0; i < quiet; i++) sample(out, 0);
-            }
-        }
-        for (int i = 0; i < ROOM_RATE * ROOM_TAIL_MS / 1000; i++) sample(out, 0);
-        return out.toByteArray();
-    }
-
-    // One frame, as the two bytes of a signed little-endian 16-bit sample.
-    private static void sample(java.io.ByteArrayOutputStream out, double v) {
-        int sample = (int) (Math.max(-1, Math.min(1, v)) * ROOM_GAIN * Short.MAX_VALUE);
-        out.write((byte) sample);
-        out.write((byte) (sample >> 8));
-    }
-
-    // Somewhere between two lengths in milliseconds, in frames - which is the unit a
-    // crackle is measured in.
-    private static long frames(java.util.Random rnd, double fromMs, double toMs) {
-        return (long) (ROOM_RATE * (fromMs + rnd.nextDouble() * (toMs - fromMs)) / 1000);
-    }
-
-    // One log line the first time the room cannot be played, and again only if the
-    // reason changes - a turn still works without it.
-    private static void roomQuiet(String why) {
-        if (why.equals(roomSilent)) return;
-        roomSilent = why;
-        report("no sound while the model thinks: " + why + ".");
-    }
-
-    // The output mixer of exactly that name, as JRock looks it up for Narrate: no near
-    // matches, and never the "Primary Sound Driver" alias for the Windows default.
-    private static javax.sound.sampled.Mixer outputMixer(String name) {
-        javax.sound.sampled.Line.Info playback =
-                new javax.sound.sampled.Line.Info(javax.sound.sampled.SourceDataLine.class);
-        for (javax.sound.sampled.Mixer.Info info : javax.sound.sampled.AudioSystem.getMixerInfo()) {
-            if (!info.getName().equals(name) || name.equals("Primary Sound Driver")) continue;
-            javax.sound.sampled.Mixer mixer = javax.sound.sampled.AudioSystem.getMixer(info);
-            if (mixer.isLineSupported(playback)) return mixer;
-        }
-        return null;
     }
 
     // ---- The look ----------------------------------------------------------
