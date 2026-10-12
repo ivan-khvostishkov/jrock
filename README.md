@@ -1295,11 +1295,21 @@ the PDF's text, in reading order, rather than pictures of it.
 - **PDF as text, with xpdf** runs `pdftotext -enc UTF-8 <pdf> <name>.txt` and includes that file
   as `@txt`, as it is.
 
-The output goes **beside the PDF, named after it**: `report.pdf` gives the folder `report` or the
-file `report.txt`. JRock asks before creating it. If it is already there, JRock asks whether to
-include it as it is instead — so a conversion done once, and perhaps edited since, is reused, and
-nothing you have is overwritten. The command and the tool's own output are echoed to the log. If a
-tool isn't found on your PATH, JRock logs a note, shows a dialog, and opens xpdf's download page.
+The output goes **beside the PDF, named after the whole of its name**: `report.pdf` gives the
+folder `report.pdf.html` or the file `report.pdf.txt` — extension and all, deliberately, because
+the stem alone would turn `report.pdf` into `report.txt`, and that is a name a text file of your
+own can already have. Everything an include is made from shares one folder, so a conversion must
+not be able to land on top of something that was put there.
+
+JRock asks before creating it, and if it is already there it asks whether to include it as it is
+instead — so a conversion done once, and perhaps edited since, is reused, and nothing you have is
+overwritten. **Under an automation it does not ask**, and answers both questions with yes itself:
+an automation that stops for a dialog is not an automation, and the program that asked for the
+conversion can mean nothing else by asking. Nothing can be lost by it either — a new folder is
+written beside the PDF under the PDF's own name, and one already there is reused untouched — and
+the log records that the question was answered and that nobody was asked. The command and the
+tool's own output are echoed to the log. If a tool isn't found on your PATH, JRock logs a note
+and, when a person is there to read it, shows a dialog and opens xpdf's download page.
 
 ### RTF and DOCX conversion (no external tool)
 
@@ -1558,7 +1568,8 @@ It reads three prompts out of its own directory and runs them as a chain, each p
 the one before it wrote beside the document, under the document's own name:
 
 1. **Markdown, then a DOCX.** A PDF is converted to HTML by xpdf's `pdftohtml`, into the folder
-   `document/` — with the [same dialogs as the include filter](#pdf-as-html-or-text-xpdf): create
+   `document/` — with the [same dialogs as the include filter](#pdf-as-html-or-text-xpdf) when a
+   person is there to answer them, and **answered for you under an automation** (see below): create
    the folder, or include the one already there — and each page image goes in with its
    `![...](<file name>)` reference. An image is a one-page document and goes in as itself, with its
    reference; it also gets a **PDF copy to print from**, `document.pdf`: one A4 page, the image
@@ -1587,7 +1598,13 @@ every direction: pick any and the others are found beside it. The rename at the 
 same name, together or not at all. Half a document renamed is the mess this automation exists to
 clear up, not to make. **The HTML folder** is asked about on its own: its pages are working
 material for the model, and the DOCX and the TXT are the copies people read, so you choose to
-**delete it**, or keep it and have it renamed with the files.
+**delete it**, or keep it and have it renamed with the files. It is found under the name the
+include actually gives it — the whole file name with `.html` after it,
+`scan0167.Merged.pdf.html` — and `--auto` is the one question it answers with **no**, because
+nobody filing a letter by voice from across a room is asking for a folder of page images beside
+it. A folder that will not move or will not delete (a sync client holding a page open, a viewer,
+a scanner watching the folder) is **one sentence in the report and nothing more**: the letter is
+filed, and turning that into a failed automation would be a lie about what happened.
 
 File names in its dialogs each get **a line of their own**, indented, never sharing a line with
 prose: `2026-06-14-DHL-FollowUpOnParcelDelivery-1234567890.pdf` is an ordinary name here, and
@@ -1627,6 +1644,15 @@ answers it — yes, rename them — and the result is **printed in a line a prog
 (`AUTO-RESULT name=… scanned=… files=…`) instead of shown in a dialog a program cannot dismiss.
 It is how the [letters agent](#a-seventh-agent-the-paper-post-jrocklettersjava) files a scan the
 moment it arrives, with the operator three rooms away.
+
+**And `--auto` ends the process when it is done**, window and all. That is not tidiness: a JVM
+with a window open does not exit when `main` returns, because Swing's event thread is not a
+daemon — so interactively the window stays, holding the log and the conversation, until you close
+it, which is right. With nobody there to close it, the agent that started the flow waits for the
+**process** and not merely for its answer: it reads the flow's output until the stream ends, and
+a stream ends when the process does. A flow that files a letter and then sits there is therefore
+indistinguishable from one still working, which is exactly how a filed letter once came back to
+the operator as *"the letters agent did not answer"*.
 
 **`-cp jrock.jar` has to name a jar that is there.** Nothing downloads it: the
 [installer](#the-installer-installerinstalljrockjava) puts one in the folder it installs into
@@ -2504,6 +2530,19 @@ sequenceDiagram
   by itself is the default because it is the one that cannot go wrong: a two-sided letter filed
   as two single-sided ones is two files to tidy up, while two letters merged are a document
   that is half somebody else's.
+- **Filing takes minutes, and nothing waits for ever.** The flow behind it is Ghostscript, xpdf
+  and three model passes over a scanned page, so a minute or two is an ordinary letter and
+  push-to-talk waits **twelve minutes** for this one request while telling the operator what is
+  happening — every other question the letters agent answers, it answers at once. The flow gets
+  **twenty minutes** of its own, and that limit is now kept by a thread of its own that ends the
+  process. It has to be: the agent reads the flow's output until the stream ends, and a stream
+  ends when the process does, so a flow that will not exit is not slow but permanent — and the
+  limit that was checked *after* the reading could never be reached. That is what happened on 12
+  October: a letter was filed, named and renamed, the result line was read, and the agent then
+  waited on a process that was never going to exit, with every later request queued behind it
+  and the operator told that nothing had been filed. Killing a flow is safe at any point, since
+  it renames files one at a time and only after the model has answered: what is lost is a
+  conversion, never half a renamed document.
 - **Only `.txt` for content.** Asked what a letter says, it reads the `.txt` beside it and
   nothing else. It converts nothing: turning a PDF into text is the inventory flow's job — with
   Ghostscript, xpdf and a model — and doing it a second way here would be a second answer to
@@ -3922,7 +3961,7 @@ md5sum jrock.jar
 java -jar jrock.jar
 ```
 
-Current build hashes:
+Current build hashes (3.7.0's — 3.8.0's go here once CI has built it):
 
 ```
 4a7f9c3de1325dd04c6d95bd004667305120ad2b6e50426299c9a03fa6764fa0  jrock.jar

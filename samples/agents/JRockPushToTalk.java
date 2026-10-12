@@ -337,6 +337,13 @@ public final class JRockPushToTalk {
     private static final int AGENT_CONNECT_MS = 3000;
     private static final int AGENT_TIMEOUT_MS = 180_000;
 
+    // Filing a letter is not a lookup: the letters agent drives the doc inventory flow,
+    // and a scanned letter through Ghostscript, xpdf and three model passes takes
+    // minutes. Only the request that files one waits this long - everything else the
+    // letters agent answers, it answers at once.
+    private static final int FILING_TIMEOUT_MS = 12 * 60_000;
+    private static final String FILING_REQUEST = "#inventory";
+
     // The lever: on, JRock listens and the agent converses (see converse). Written on
     // the EDT, read by the worker's loop too. And, EDT only: whether that loop is
     // running, and whether Ctrl and Shift are down, so their auto-repeat is not taken
@@ -537,8 +544,15 @@ public final class JRockPushToTalk {
                 stuck = refuse(served, fetched++, "post", about);
                 if (stuck != null) break;
                 later(() -> setState(State.ANSWERING, "Looking at the post\u2026"));
-                String[] letters = askAgent(LETTERS_PORT, postRequest(about), "letters",
-                        "JRockLetters.java");
+                String postAsked = postRequest(about);
+                if (postAsked.startsWith(FILING_REQUEST)) {
+                    later(() -> setState(State.ANSWERING,
+                            "Filing the letter - this takes a few minutes…"));
+                }
+                String[] letters = askAgent(LETTERS_PORT, postAsked, "letters",
+                        "JRockLetters.java",
+                        postAsked.startsWith(FILING_REQUEST) ? FILING_TIMEOUT_MS
+                                                             : AGENT_TIMEOUT_MS);
                 if (letters[0] == null) {
                     note = "Post not read: " + letters[1];
                     break;
@@ -886,10 +900,24 @@ public final class JRockPushToTalk {
     // Returns { line, null }, or { null, why not }; an empty line is the agent's "don't
     // know". what and file name the agent in that.
     private static String[] askAgent(int port, String line, String what, String file) {
+        return askAgent(port, line, what, file, AGENT_TIMEOUT_MS);
+    }
+
+    // The same, with its own limit on how long the answer may take.
+    //
+    // Three minutes is generous for a LOOKUP - a calendar, a mailbox, a page off the web
+    // - and nowhere near enough for the one request that does work rather than reading:
+    // filing a letter drives the doc inventory flow, which is Ghostscript, xpdf and
+    // three model passes on a scanned page, and a few minutes is a normal letter. The
+    // only thing the short limit achieved there was telling the operator "the letters
+    // agent did not answer" while the letter was being filed, and then showing them the
+    // model's own request instead of an answer.
+    private static String[] askAgent(int port, String line, String what, String file,
+                                     int timeoutMs) {
         try (java.net.Socket agent = new java.net.Socket()) {
             agent.connect(new java.net.InetSocketAddress(
                     java.net.InetAddress.getLoopbackAddress(), port), AGENT_CONNECT_MS);
-            agent.setSoTimeout(AGENT_TIMEOUT_MS);
+            agent.setSoTimeout(timeoutMs);
             agent.getOutputStream().write((line.replaceAll("[\r\n]+", " ") + "\n")
                     .getBytes(StandardCharsets.UTF_8));
             agent.getOutputStream().flush();

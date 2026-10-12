@@ -197,6 +197,32 @@ public final class JRockDocInventory {
                     + "\n\nThe JRock log says where it got to.",
                     "Automation stopped", javax.swing.JOptionPane.ERROR_MESSAGE);
         }
+
+        // --auto ENDS THE PROCESS, and that is not a tidiness detail.
+        //
+        // main returning does not end a JVM with a window open: Swing's event thread is
+        // not a daemon, so this process lived on with JRock's window on screen until
+        // somebody closed it. Interactively that is exactly right - the window holds the
+        // log and the conversation, and the operator closes it when they have read it.
+        // Under --auto nobody is there to close anything, and whoever started this is
+        // waiting for the PROCESS to end and not merely for its answer: the letters agent
+        // reads this output until the stream ends, which it only does when the process
+        // does. So it read the result line, printed "Flow: Finished", and then waited for
+        // ever on a process that was never going to exit - with every later request to
+        // that agent queued behind it, and push-to-talk reporting "the letters agent did
+        // not answer" three minutes after the letter had in fact been filed.
+        //
+        // Read off the command line rather than off `asking`, so that an automation that
+        // stopped before it got as far as reading its flags still ends here.
+        if (java.util.Arrays.asList(args).contains(AUTO_FLAG)) {
+            try {
+                javax.swing.JFrame open = JRock.automationWindow();
+                if (open != null) onEdt(open::dispose);
+            } catch (RuntimeException closingAnyway) {
+                // The window is going with the process in the next line regardless.
+            }
+            System.exit(stopped == null ? 0 : 1);
+        }
     }
 
     // The whole chain, start to finish. Returns what to report, or null when there was
@@ -350,20 +376,47 @@ public final class JRockDocInventory {
         // The HTML folder, pass one's working material: the pages for the model to read,
         // not for anybody to open. Whether it stays is asked once it is clear which name
         // it would stay under - and a folder kept is renamed with the rest.
-        Path html = dir.resolve(stem(chosen));
+        //
+        // NAMED THE WAY JROCK'S OWN INCLUDE NAMES IT: the whole file name with ".html"
+        // after it, "scan0167.Merged.pdf.html". This used to look for the stem alone,
+        // which is what that include used to write - and then it changed, for its own
+        // good reason (a stem would turn "report.pdf" into "report.txt", a name a text
+        // file of the user's own can already have). Nothing failed when it did: this
+        // looked for a folder that is never there any anymore, so it asked nothing, moved
+        // nothing, deleted nothing and - the part that made it hard to find - said
+        // nothing in the log either. What it left behind was a folder of page images
+        // beside every letter that was ever filed.
+        Path html = dir.resolve(chosen.getFileName() + ".html");
         String folderNote = "";
         if (Files.isDirectory(html)) {
+            // Whatever happens to it, this is working material and the document is
+            // already named: a folder that will not move or will not delete - a sync
+            // client holding a page open, a viewer, a scanner watching the folder - is
+            // worth a sentence in the report and nothing more. Letting it out of here
+            // would turn a letter that IS filed into an automation that failed, which is
+            // the one outcome that would be a lie.
             if (askKeepFolder(html, rename ? base : null)) {
                 if (rename) {
                     Path moved = free(dir, base, "");
-                    Files.move(html, moved);
-                    folderNote = "the folder " + moved.getFileName() + " kept";
+                    try {
+                        Files.move(html, moved);
+                        folderNote = "the folder " + moved.getFileName() + " kept";
+                    } catch (IOException ex) {
+                        folderNote = "the folder " + html.getFileName()
+                                + " kept under its own name - it could not be renamed: "
+                                + ex.getMessage();
+                    }
                 } else {
                     folderNote = "the folder " + html.getFileName() + " kept";
                 }
             } else {
-                deleteTree(html);
-                folderNote = "the folder " + html.getFileName() + " deleted";
+                try {
+                    deleteTree(html);
+                    folderNote = "the folder " + html.getFileName() + " deleted";
+                } catch (IOException ex) {
+                    folderNote = "the folder " + html.getFileName()
+                            + " could not be deleted: " + ex.getMessage();
+                }
             }
             System.out.println(folderNote);
         }
@@ -1090,6 +1143,17 @@ public final class JRockDocInventory {
     // model, not for people - the DOCX and the TXT are the readable copies - so whether
     // it stays is the user's call; a folder kept is renamed with the files.
     private static boolean askKeepFolder(Path folder, String newName) {
+        if (!asking) {
+            // The one question --auto does not answer with a yes. Every other question
+            // here is some form of "carry on", and yes is what the person at the keyboard
+            // would say; this one is "leave a folder of page images beside the letter",
+            // and nobody filing by voice from across the room is asking for that - the
+            // DOCX and the TXT are the copies to read. The generic yes answered it three
+            // times on this machine, and the three folders are still there.
+            System.out.println("Keep the HTML folder? no (auto: " + folder.getFileName()
+                    + " is working material, and nobody is here to want it kept)");
+            return false;
+        }
         return ask("The folder\n\n    " + folder.getFileName() + "\n\nholds the HTML pages "
                 + "xpdf made of the PDF: working material for the model, not for people "
                 + "- the DOCX and the TXT are the copies to read.\n\nKeep it? "

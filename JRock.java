@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "3.7.0";
+    private static final String VERSION = "3.8.0";
 
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
@@ -10390,15 +10390,17 @@ public class JRock {
                         + "is not a " + what + ". Rename or move it, then try again.");
                 return;
             }
-            if (!confirmOnEdt(frame, "The " + what + " " + out + " already exists.\n\n"
-                    + "Include it as it is?", "Include existing " + what)) {
+            if (!confirmOrAutomated(frame, log, "The " + what + " " + out
+                    + " already exists.\n\nInclude it as it is?",
+                    "Include existing " + what)) {
                 log.gray("Not included: " + name + " (" + out + " already exists).");
                 return;
             }
             log.gray("Including the existing " + what + " " + out);
         } else {
-            if (!confirmOnEdt(frame, "Convert " + name + " with " + tool + " into a new "
-                    + what + " beside it?\n\n" + out, "Create " + what)) {
+            if (!confirmOrAutomated(frame, log, "Convert " + name + " with " + tool
+                    + " into a new " + what + " beside it?\n\n" + out,
+                    "Create " + what)) {
                 log.gray("Not converted: " + name + " (" + out + " not created).");
                 return;
             }
@@ -10447,6 +10449,31 @@ public class JRock {
         }
     }
 
+    // The same question, answered by the automation that asked for the conversion when
+    // there is one running - for the same reason urlRefused shows no dialog: under an
+    // automation there is nobody to press a button, and a modal question waits for ever.
+    //
+    // It waits for ever and it takes the rest of the machinery with it. A "pdfhtml"
+    // include is what the doc inventory flow starts with, and that flow is often driven
+    // by an agent rather than by a person: the letters agent files the paper post from a
+    // sentence said across a room, and whoever asked is listening for an answer that
+    // cannot come while this dialog is up.
+    //
+    // Yes is the only answer a program that has just asked for this conversion can mean,
+    // and neither question can lose anything by it: a new folder is written BESIDE the
+    // PDF under the PDF's own name, and a folder already there is reused exactly as it
+    // is. The log says which way it went and that nobody was asked, because a question
+    // answered on somebody's behalf should leave a record that it was.
+    private static boolean confirmOrAutomated(JFrame frame, LogView log, String message,
+                                              String title) {
+        if (automating) {
+            log.gray(title + ": yes, answered by the automation - nobody was asked ("
+                    + message.replaceAll("\\s+", " ").trim() + ")");
+            return true;
+        }
+        return confirmOnEdt(frame, message, title);
+    }
+
     // A Yes/No question, asked on the EDT from whichever thread; true for Yes.
     private static boolean confirmOnEdt(JFrame frame, String message, String title) {
         boolean[] yes = new boolean[1];
@@ -10463,6 +10490,11 @@ public class JRock {
         String url = "https://www.xpdfreader.com/download.html";
         log.gray(tool + " was not found on PATH. Install the Xpdf command line tools "
                 + "from " + url + ", then try again.");
+        // Nothing more under an automation: the reason is in the log, the include will
+        // report that it added nothing, and a dialog with nobody to close it - plus a
+        // browser opening on top of it - would hold the automation and whatever is
+        // waiting for it (see confirmOrAutomated).
+        if (automating) return;
         onEdt(() -> {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     tool + " is required to convert this PDF but was not found on your "
@@ -10821,6 +10853,11 @@ public class JRock {
         String exe = isWindows() ? "gswin64" : "gs";
         log.gray("Ghostscript (" + exe + ") was not found on PATH. Install it from "
                 + "https://ghostscript.com/ to " + task + ", then try again.");
+        // Nothing more under an automation: the reason is in the log, the include will
+        // report that it added nothing, and a dialog with nobody to close it - plus a
+        // browser opening on top of it - would hold the automation and whatever is
+        // waiting for it (see confirmOrAutomated).
+        if (automating) return;
         onEdt(() -> {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Ghostscript (" + exe + ") is required to " + task + " but was not "

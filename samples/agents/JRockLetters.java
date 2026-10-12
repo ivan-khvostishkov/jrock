@@ -121,6 +121,11 @@ public final class JRockLetters {
     // How long the flow gets: a PDF through Ghostscript, xpdf and three model passes.
     private static final long FLOW_TIMEOUT_MS = 20 * 60_000;
 
+    // And how long it gets to EXIT once its output has ended - a JVM closing a window.
+    // Short on purpose: by then the letter is filed and the answer is in hand, and the
+    // only thing left to do with a process that will not go is to end it.
+    private static final long FLOW_EXIT_MS = 20_000;
+
     private static final DateTimeFormatter STAMP =
             DateTimeFormatter.ofPattern("EEE d MMM HH:mm:ss", Locale.ENGLISH);
     private static final DateTimeFormatter CLOCK =
@@ -560,6 +565,34 @@ public final class JRockLetters {
                     .start();
             flowRunning = flowProcess;
             flowProcess.getOutputStream().close();
+
+            // THE CLOCK RUNS BESIDE THE READING, not after it.
+            //
+            // Reading the flow's output stops at the end of the stream, and a stream ends
+            // when the process does - so a flow that will not exit is not slow here, it
+            // is permanent: this thread never reaches the line that was supposed to time
+            // it out, and every later request to this agent waits behind it. That is
+            // precisely what a flow with a dialog up, or one leaving its window open, used
+            // to do - the letter was filed, the result line was read and printed, and the
+            // agent was wedged from then on.
+            //
+            // So the limit is enforced by a thread of its own that kills the process,
+            // which ends the stream, which ends the read. Killing a flow is safe at any
+            // point: it renames files one at a time and the model is asked before anything
+            // is renamed, so what is lost is a conversion, never a half-renamed document.
+            boolean[] overdue = { false };
+            Thread clock = new Thread(() -> {
+                try {
+                    if (!flowProcess.waitFor(FLOW_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                        overdue[0] = true;
+                        flowProcess.destroyForcibly();
+                    }
+                } catch (InterruptedException readingFinished) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "letters-flow-clock");
+            clock.setDaemon(true);
+            clock.start();
             try (java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.InputStreamReader(flowProcess.getInputStream(),
                             StandardCharsets.UTF_8))) {
@@ -574,10 +607,18 @@ public final class JRockLetters {
                     }
                 }
             }
-            if (!flowProcess.waitFor(FLOW_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                flowProcess.destroyForcibly();
+            clock.interrupt();
+            if (overdue[0]) {
                 throw new Stop("the inventory flow took longer than "
                         + FLOW_TIMEOUT_MS / 60_000 + " minutes and was stopped.");
+            }
+            // The stream has ended, so the process is on its way out; this is the last
+            // moment it could hold anything. A flow that printed its answer and then hung
+            // on to the JVM is still answered for - the letter is filed, and saying so
+            // matters more than the process - but it does not get to stay.
+            if (!flowProcess.waitFor(FLOW_EXIT_MS, TimeUnit.MILLISECONDS)) {
+                flowProcess.destroyForcibly();
+                System.out.println("flow: it would not exit after its output ended - stopped.");
             }
         } catch (IOException ex) {
             throw new Stop("the inventory flow would not start: " + ex.getMessage());
