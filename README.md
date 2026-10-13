@@ -4600,13 +4600,15 @@ Nine pages, in this order:
    set, since nothing else here reads your calendar and mail index. Or continue without any of
    them: everything else works, and JRock or the agent names the missing tool when something is
    asked of it that needs one.
-6. **Settings and the key** — **two ticks, both on**: whether Next stops to *open*
-   `jrock-config.txt` in whatever opens a `.txt`, waiting while you edit and save it, and then
-   `bedrock-key.txt` the same way. Both files are written either way — that is the page's work
-   — so unticking them is how an update goes past: the same jar into the same folder, where the
-   config is already right and the key is already in place, and two editors and two dialogs on
-   every run is what teaches somebody to press Next without reading it. With the key file still
-   empty afterwards,
+6. **Settings and the key** — **two ticks**: whether Next stops to *open* `jrock-config.txt` in
+   whatever opens a `.txt`, waiting while you edit and save it, and then `bedrock-key.txt` the
+   same way. **On for a fresh install, off for an update** — the same jar into the same folder,
+   where the config is the one being updated and the key is already in it, and two editors and
+   two dialogs on every run is what teaches somebody to press Next without reading it. Both files
+   are written either way; that is the page's actual work, and the ticks are there to be put back
+   on by anybody who does want to look. **The key's tick comes back on when there is no key in
+   the file yet**, update or not, that being the one thing this page exists to fix. With the key
+   file still empty afterwards,
    it says the key can go in later and what already works without one: merging duplex scans,
    converting and including documents, fetching a URL, exporting to DOCX or RTF, printing. Only
    asking a model needs the key.

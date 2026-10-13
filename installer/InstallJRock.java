@@ -89,6 +89,9 @@ public final class InstallJRock {
     // and not a path.
     private static final String ASSISTANT = "JRockAssistant";
     private static final String PRODUCT = "JRock";
+    // The two files page 6 writes, by the names JRock reads them under.
+    private static final String CONFIG_FILE = "jrock-config.txt";
+    private static final String KEY_FILE = "bedrock-key.txt";
     private static final String SHORTCUT = "JRock Assistant";
 
     // The two folders inside it: one per agent under Agents, all the flows in Flows.
@@ -240,9 +243,16 @@ public final class InstallJRock {
     // somebody asks for, and an installer that adds menu entries nobody wanted is an
     // installer people uninstall. Read rather than assumed, like the login entry.
     private static boolean cliMenu;
-    // Whether page 6 stops to OPEN the two files it writes. Both on, because a first
-    // install has to paste a key in somewhere; unticked they are still written, and
-    // Next simply goes on - which is what an update wants (see the page).
+    // Whether page 6 stops to OPEN the two files it writes.
+    //
+    // ON FOR A FRESH INSTALL, OFF FOR AN UPDATE (see defaults): a first install has to
+    // paste a key in somewhere and is worth a look at the config, while an update is the
+    // same jar into the same folder, where both files are already right - and being
+    // walked through two editors and two dialogs every time is what teaches somebody to
+    // press Next without reading it. The files are written either way.
+    //
+    // The key's tick comes back on, update or not, when there is no key in the file yet:
+    // that is the one thing this page exists to fix.
     private static boolean reviewConfig = true;
     private static boolean reviewKey = true;
     // Run everything at login. Unlike the other two this does NOT default to yes: adding
@@ -724,6 +734,17 @@ public final class InstallJRock {
             for (Sample s : found) preselect(s);
             updating = true;
             customise = true;
+            // AND PAGE 6 DOES NOT STOP, because on an update there is nothing to review:
+            // the config in that folder is the one being updated, and the key in it is
+            // the key. Both files are still written if they are missing - that is the
+            // page's work, and it happens either way - and the ticks are there to be put
+            // back on by anybody who does want to look.
+            //
+            // The key is the exception to its own rule: an install that never had one
+            // still needs somewhere to paste it, so that tick stays on until there is a
+            // key in the file. Which is the question the page is actually for.
+            reviewConfig = false;
+            reviewKey = isBlank(home.resolve(PRODUCT).resolve(KEY_FILE), true);
         }
     }
 
@@ -1099,8 +1120,8 @@ public final class InstallJRock {
             Path from = home.resolve(PRODUCT);
             for (Path dir : dirs) {
                 panel.add(value(dir.toString()));
-                panel.add(fate(dir, from, "jrock-config.txt", copySettings));
-                panel.add(fate(dir, from, "bedrock-key.txt", copyKey));
+                panel.add(fate(dir, from, CONFIG_FILE, copySettings));
+                panel.add(fate(dir, from, KEY_FILE, copyKey));
             }
             panel.add(note("An agent cannot ask a model without a key in its own folder. "
                     + "JRock itself never copies a key into a folder it was not typed for, "
@@ -1114,9 +1135,9 @@ public final class InstallJRock {
                 try {
                     Files.createDirectories(jrock);
                     if (copySettings) copyIfUnset(home.resolve(PRODUCT)
-                            .resolve("jrock-config.txt"), jrock.resolve("jrock-config.txt"));
+                            .resolve(CONFIG_FILE), jrock.resolve(CONFIG_FILE));
                     if (copyKey) copyIfUnset(home.resolve(PRODUCT)
-                            .resolve("bedrock-key.txt"), jrock.resolve("bedrock-key.txt"));
+                            .resolve(KEY_FILE), jrock.resolve(KEY_FILE));
                 } catch (IOException ex) {
                     return "Could not write into " + jrock + ": " + ex.getMessage();
                 }
@@ -1341,7 +1362,7 @@ public final class InstallJRock {
     // A starter config, and only when there is none: JRock writes every setting it knows
     // on its first run, so what belongs here is the header that says what the file is.
     private static Path starterConfig(Path jrock) throws IOException {
-        Path config = jrock.resolve("jrock-config.txt");
+        Path config = jrock.resolve(CONFIG_FILE);
         if (Files.exists(config)) {
             say("Kept the settings already in " + config);
             return config;
@@ -1369,7 +1390,7 @@ public final class InstallJRock {
     }
 
     private static Path starterKey(Path jrock) throws IOException {
-        Path key = jrock.resolve("bedrock-key.txt");
+        Path key = jrock.resolve(KEY_FILE);
         if (Files.exists(key)) {
             say("A " + key + " is already there and was left alone.");
             return key;
