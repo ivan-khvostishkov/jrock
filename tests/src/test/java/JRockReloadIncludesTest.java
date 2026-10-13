@@ -64,8 +64,11 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
         assertThat(includes()).describedAs("the includes after reloading them")
                 .isEqualTo(before);
-        assertThat(logLines()).describedAs("the log's lines")
-                .contains("Includes reloaded from the log: 2 of 2 referred to");
+        // The pane's text rather than one whole line of it, as the tests below do: the
+        // line names the scope as well now, and the counts are what this test is about.
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .contains("Includes reloaded from the log: 2 of 2 referred to")
+                .contains("(the last 10 requests;");
     }
 
     @Test
@@ -88,8 +91,11 @@ class JRockReloadIncludesTest extends JRockGuiFixture {
 
         assertThat(includes()).describedAs("the includes after the restart")
                 .isEqualTo(before);
-        assertThat(logLines()).describedAs("the log's lines")
-                .contains("Includes reloaded from the log: 2 of 2 referred to");
+        // The pane's text rather than one whole line of it, as the tests below do: the
+        // line names the scope as well now, and the counts are what this test is about.
+        assertThat(logPane().text()).describedAs("the log pane's text")
+                .contains("Includes reloaded from the log: 2 of 2 referred to")
+                .contains("(the last 10 requests;");
     }
 
     @Test

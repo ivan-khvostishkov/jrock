@@ -1230,8 +1230,27 @@ newest thing there is, and after a restart its recovered tokens are usually the 
 doing this. The session report gets one line for it, and none when nothing refers to an include:
 
 ```
-Includes reloaded from the log: 1 of 3 referred to, 1 with a missing file, 1 not recorded in the log - a send stops until each one is included again
+Includes reloaded from the log: 1 of 3 referred to, 1 with a missing file, 1 not recorded in the log - a send stops until each one is included again (the last 10 requests; "Reload all includes", in the prompt's menu, reads the whole log)
 ```
+
+**A start reads the last few requests, not the whole log** — the folder's
+[**History limit**](#configure-dialog-top-left-button) when it has one, since that is already
+your own answer to how much of this conversation still matters, and **ten** when it does not.
+The reason is an agent's folder rather than a person's: a
+[push-to-talk](#a-fourth-agent-push-to-talk-jrockpushtotalkjava) JRock records every turn and
+attaches it, so a month of talking is **hundreds of audio includes in one log** — and reading
+all of them back at every start is work done for files no question will ever mention again. The
+line says how far back it looked.
+
+**And *Reload all includes* in the prompt's menu reads the whole log**, for the conversation
+that reaches further back than that: every include line, every reference, from the first line of
+the log to the prompt as it stands. It is also the repair for a map lost some other way — a
+cleared log, a folder changed and changed back.
+
+The cut keeps the **gray lines above** the oldest request it keeps, which is the one thing it
+could get wrong: an include is recorded while the prompt is being composed, so the lines saying
+where a request's files are sit immediately *before* it, and cutting at the request itself would
+keep the token and throw away the path (`JRockReloadWindowTest`).
 
 **Nothing is hashed here**, deliberately. Whether each file is still the file it was is exactly
 what the send checks, one hash per token, and the answer can change between the two moments
@@ -3993,6 +4012,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   URL**](#fetching-a-url)), *Start recording* / *Stop recording* (the
   [**Ctrl+Space**](#recording-from-the-microphone-ctrlspace) toggle; not in the browser),
   *Mic always on* (see [**Mic always on**](#mic-always-on)),
+  *Reload all includes* (every include in the **whole** log, where a start reads only the last
+  few requests — see [**includes that outlive the
+  session**](#includes-that-outlive-the-session)),
   Load prompt from file..., Save prompt copy
   as..., then Cut / Copy / Paste / *Insert document number* / **Select all** / Undo / Redo.
   *Insert document number* types a random 10-digit number, never starting with 0, at the caret —
@@ -4298,6 +4320,13 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   Send with an included file deleted stops it, naming the file and the setting, before anything is
   called; and what a missing file and an unknown hash are reported as, with the prompt built as the
   one text part it is when the setting is off.
+- **`JRockReloadWindowTest`** checks **how far back** a start reads, which is the one way the
+  shorter reload could lose something: the cut has to keep the gray lines *above* the oldest
+  request it keeps, since an include is recorded while the prompt is being composed and the line
+  saying where the file is sits before the message that refers to it. Three cases, over a
+  synthetic timeline and no window at all: the last *N* requests with each one's include line,
+  a whole run of gray lines above the oldest kept request, and asking for more requests than
+  there are (or for all of them), which keeps the lot.
 - **`JRockMarkdownExportTest`** takes the other direction, without a window: it exports a
   Markdown selection and checks each format against something other than itself. The RTF must be
   all ASCII, must read back through the JDK's **own `RTFEditorKit`** with its bold run, bullet

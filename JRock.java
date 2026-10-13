@@ -2212,6 +2212,13 @@ public class JRock {
             return out;
         }
 
+        // The timeline as it stands NOW - everything loaded from disk and everything this
+        // session has added. What "Reload all includes" reads, where startup reads only
+        // what loadFromDisk returned. EDT only, like every other reader of the entries.
+        java.util.List<String[]> timelineNow() {
+            return timeline(entries);
+        }
+
         // The stamp of the most recent message of that role, or null when there is
         // none yet. This is the whole of the "reference" a send hands an automation
         // back (see automationSend): the stamp already IS the name of the file the
@@ -2568,7 +2575,7 @@ public class JRock {
         log.gray("Autosaving prompt to JRock/jrock-prompt.txt");
         // The includes the log and the prompt refer to, known again, so a conversation
         // goes on after a restart without attaching every file again.
-        reloadIncludes(input, log, restored);
+        reloadIncludes(input, log, restored, reloadRequests());
         // NOT UNDER --cli, at the operator's word, and it is the one optimisation worth
         // making there: the list is for the Configure dropdown and for seeing what this
         // key can reach, which is a window's business. In a shell it is a second HTTP
@@ -3662,6 +3669,12 @@ public class JRock {
             alwaysOnItem = item;
         }
         javax.swing.JCheckBoxMenuItem alwaysOnShown = alwaysOnItem;
+        // The repair for a conversation that outlived the session that started it, and
+        // now for one longer than the few requests a start reads back (see
+        // reloadIncludes): every include in the WHOLE log, read out of it rather than
+        // attached again one by one.
+        addMenuItem(promptMenu, "Reload all includes",
+                () -> reloadIncludes(input, log, log.timelineNow(), 0));
         addMenuItem(promptMenu, "Load prompt from file...",
                 () -> loadPromptInto(frame, input, log));
         addMenuItem(promptMenu, "Save prompt copy as...",
@@ -11369,14 +11382,26 @@ public class JRock {
     // missing is said where it matters, by the send that would have sent them.
     //
     // timeline is the log just loaded from disk (see loadFromDisk): the log pane's own
-    // entries are still the previous ones at this point - at startup, none at all.
+    // entries are still the previous ones at this point - at startup, none at all. The
+    // prompt menu's "Reload all includes" passes the entries as they stand instead (see
+    // timelineNow).
+    //
+    // HOW FAR BACK, which is the whole of the difference between the two callers. requests
+    // is how many of the LAST requests to read, or 0 for the lot.
+    //
+    // Startup reads a few, and the reason is an agent's folder rather than a person's. A
+    // push-to-talk JRock records every turn and attaches it: a month of talking is
+    // hundreds of audio includes in one log, and reading all of them back - every token,
+    // every include line, an existence check per file - is work done at every start for
+    // files no question will ever mention again. The last few requests are the ones a
+    // conversation is actually carried on from; everything older is one menu item away.
     private static void reloadIncludes(JTextArea input, LogView log,
-                                       java.util.List<String[]> timeline) {
+                                       java.util.List<String[]> timeline, int requests) {
         java.util.Map<String, Path> remembered = new java.util.HashMap<>();
         java.util.Map<String, String> kinds = new java.util.LinkedHashMap<>();   // hash -> img/txt
         java.util.Map<String, Path> wanted = new java.util.LinkedHashMap<>();    // hash -> path
 
-        java.util.List<String[]> steps = new ArrayList<>(timeline);
+        java.util.List<String[]> steps = new ArrayList<>(lastRequests(timeline, requests));
         steps.add(new String[] { ROLE_HUMAN, input.getText() });
         String lastIncluded = null;   // the hash of the include line just read
         for (String[] step : steps) {
@@ -11436,6 +11461,10 @@ public class JRock {
             INCLUDES.put(e.getKey(), path);
             if (Files.exists(path)) reloaded++; else missing++;
         }
+        // THE COUNTS FIRST AND THE SCOPE LAST, which is not only how it reads: the counts
+        // and their reasons are one sentence that tests and eyes both match on, and the
+        // note about how far back this looked belongs after it rather than wedged into
+        // the middle of it.
         log.gray("Includes reloaded from the log: " + fmtNum(reloaded)
                 + " of " + fmtNum(kinds.size()) + " referred to"
                 + (missing > 0 ? ", " + fmtNum(missing) + " with a missing file" : "")
@@ -11443,7 +11472,45 @@ public class JRock {
                 + (missing + unknown == 0 ? ""
                    : missingIncludeStopsSend
                    ? " - a send stops until each one is included again"
-                   : " - a send warns about each one and sends its token as text"));
+                   : " - a send warns about each one and sends its token as text")
+                + (requests > 0 ? " (the last " + requests
+                   + (requests == 1 ? " request" : " requests")
+                   + "; \"Reload all includes\", in the prompt's menu, reads the whole "
+                   + "log)" : ""));
+    }
+
+    // The tail of a timeline: everything from the start of the Nth request from the end,
+    // or all of it when requests is 0 or there are fewer than that.
+    //
+    // GRAY LINES AND ALL, and the cut reaches back over the ones ABOVE that request: an
+    // include is recorded by a gray line written while the prompt was being composed, so
+    // the lines that say where that request's files are sit immediately before it. Cutting
+    // at the request itself would keep the token and throw away the path.
+    private static java.util.List<String[]> lastRequests(java.util.List<String[]> timeline,
+                                                         int requests) {
+        if (requests <= 0) return timeline;
+        int seen = 0;
+        for (int i = timeline.size() - 1; i >= 0; i--) {
+            if (!ROLE_HUMAN.equals(timeline.get(i)[0]) || ++seen < requests) continue;
+            int from = i;
+            while (from > 0 && timeline.get(from - 1)[0] == null) from--;
+            return timeline.subList(from, timeline.size());
+        }
+        return timeline;
+    }
+
+    // How many requests back startup reads when no History limit says otherwise.
+    //
+    // Ten, because that is about as far back as a conversation is carried on from by
+    // hand, and because the limit it stands in for means "all of it" - which is the
+    // setting an agent's folder has, and an agent's log is the long one.
+    private static final int RELOAD_REQUESTS_DEFAULT = 10;
+
+    // The number startup uses: the History limit when this folder has one, since that is
+    // already the operator's own answer to "how much of this conversation still matters",
+    // and ten when it does not.
+    private static int reloadRequests() {
+        return historyLimit > 0 ? historyLimit : RELOAD_REQUESTS_DEFAULT;
     }
 
     // An image's dimensions, read straight out of its header.
