@@ -213,6 +213,10 @@ public final class JRockBrowser {
     private static final long SETTLE_POLL_MS = 400;
 
     // The window the browser renders in.
+    // The size the browser window is given when it cannot be maximized, and the floor the
+    // page's own measurements are taken against (see photograph): a page narrower than
+    // this is a page with empty room around it, and a picture of one is mostly margin.
+    // The page itself is laid out at whatever the window is - nothing pins it (see take).
     private static final int VIEW_WIDTH = 1240;
     private static final int VIEW_HEIGHT = 1000;
 
@@ -1474,8 +1478,21 @@ public final class JRockBrowser {
     // attached to again rather than replaced. And it is where the empty tabs are found and
     // closed, which is the only kind of tab this agent ever closes.
 
-    // One tab, in this agent's hands: attached to, told to report page and script events,
-    // and sized to the window pages are read in.
+    // One tab, in this agent's hands: attached to, and told to report page and script
+    // events.
+    //
+    // THE PAGE IS THE SIZE OF THE WINDOW, which is what clearing the metrics override
+    // means. This used to pin every tab to 1240x1000 whatever the window was doing, so a
+    // maximized browser showed the page laid out for 1240 pixels with a band of white
+    // beside it - the window the operator is watching, lying about the page in it. It is
+    // cleared rather than simply not set, because an override belongs to the TAB: one
+    // adopted from a browser a previous run left behind can still be carrying the last
+    // one, and nothing else would ever take it off.
+    //
+    // The pictures do not need it. Each piece is captured with captureBeyondViewport and
+    // an explicit clip out of the page's own layout metrics (see photograph), so what is
+    // photographed is the page at whatever width it is laid out at - and the A4 pieces are
+    // cut from that width rather than from a number in this file.
     private static String take(WebSocket live, String site, String id) {
         if (id.isEmpty()) throw new Stop("the browser named no tab to use.");
         String attached = jsonString(call(live, null, "Target.attachToTarget",
@@ -1483,9 +1500,7 @@ public final class JRockBrowser {
         if (attached.isEmpty()) throw new Stop("the browser would not open a tab.");
         call(live, attached, "Page.enable", "{}");
         call(live, attached, "Runtime.enable", "{}");
-        call(live, attached, "Emulation.setDeviceMetricsOverride",
-                "{\"width\":" + VIEW_WIDTH + ",\"height\":" + VIEW_HEIGHT
-                + ",\"deviceScaleFactor\":1,\"mobile\":false}");
+        call(live, attached, "Emulation.clearDeviceMetricsOverride", "{}");
         TABS.put(site, new String[] { id, attached });
         return attached;
     }
@@ -1594,6 +1609,12 @@ public final class JRockBrowser {
                 "--no-first-run", "--no-default-browser-check", "--disable-sync",
                 "--disable-extensions", "--disable-component-update",
                 "--disable-background-networking", "--no-service-autorun",
+                // MAXIMIZED, because this window is watched: hands-free, the operator's
+                // only view of what the agent is reading is the page in it, and a page in
+                // a 1240-pixel window is a page they have to lean into. The size is there
+                // for the platforms that take no notice of the flag, and as the size the
+                // window is restored to.
+                "--start-maximized",
                 "--window-size=" + VIEW_WIDTH + "," + VIEW_HEIGHT));
         if (headless) command.add("--headless=new");
         command.add("about:blank");
