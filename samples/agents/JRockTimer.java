@@ -125,7 +125,8 @@ public final class JRockTimer {
 
     // THE SMALLEST THIS WINDOW CAN BE, as a whole number of cells on JRock's 32x27
     // grid (JRock.CELL_W, JRock.CELL_H - one grid for every window in this project):
-    // 12 x 16 cells = 384 x 432, room for the clock, the two fields and the list.
+    // 12 x 12 cells = 384 x 324, room for the clock, the two fields, three alarms and
+    // the Remove button - the list taking whatever the window has beyond that.
     //
     // A NUMBER IN THIS FILE, and not whatever the layout worked out. This used to be
     // "pack(); setMinimumSize(getSize())", which makes the floor a figure nobody wrote
@@ -134,7 +135,7 @@ public final class JRockTimer {
     // was being built. pack() still asks for the size of what is in this window, and it
     // opens at whichever of the two is larger.
     private static final int WINDOW_MIN_CELLS_W = 12;
-    private static final int WINDOW_MIN_CELLS_H = 16;
+    private static final int WINDOW_MIN_CELLS_H = 12;
     private static final int WINDOW_MIN_W = WINDOW_MIN_CELLS_W * JRock.CELL_W;
     private static final int WINDOW_MIN_H = WINDOW_MIN_CELLS_H * JRock.CELL_H;
 
@@ -629,7 +630,14 @@ public final class JRockTimer {
             }
         });
         javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(list);
-        scroll.setPreferredSize(new java.awt.Dimension(320, 220));
+        // THE LIST IS WHAT GIVES WAY, and that is what makes this window short. It is
+        // the only part in the centre of the layout, so it takes every pixel the
+        // window has over what the rows above and the button below need - and asking
+        // for 220 of them made the smallest window two hundred pixels taller than
+        // anything in it required. Three rows is enough to see that an alarm is set
+        // and what it will sound like; a fourth is one drag of the window's edge away,
+        // and the scrollbar is there either way.
+        scroll.setPreferredSize(new java.awt.Dimension(320, 110));
 
         javax.swing.JButton remove = new javax.swing.JButton("Remove");
         remove.setToolTipText("Removes the selected alarm - and stops it, if it is ringing "
