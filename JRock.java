@@ -2891,7 +2891,8 @@ public class JRock {
                 + "button is held while a send - or a backup - is running.");
 
         // "Enter" mode: when on, plain Enter sends too. Off at startup and never
-        // remembered - deliberately, both times.
+        // remembered - deliberately, both times. Built here either way, because the key
+        // binding below reads it, and shown everywhere but the browser (see sendSide).
         //
         // Off, because Enter is the key a text area owes a new line to, and a window that
         // sends on Enter without being asked sends half-written prompts. Never
@@ -3179,8 +3180,16 @@ public class JRock {
         javax.swing.JPanel sendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         sendSide.add(send);
-        sendSide.add(javax.swing.Box.createHorizontalStrut(10));
-        sendSide.add(enterSends);
+        // NOT IN THE BROWSER. There it is a checkbox about a key, in a window that is
+        // mostly used where there is no keyboard to speak of: a phone's return key types
+        // a new line, Send is a tap, and a tick that changes what Enter does is a row of
+        // the bottom bar spent on a question nobody asked. Enter types a new line there,
+        // which is what the box says when it is unticked - and unticked is how it starts
+        // everywhere (see above), so nothing about the key changes by removing it.
+        if (!isCheerpJ()) {
+            sendSide.add(javax.swing.Box.createHorizontalStrut(10));
+            sendSide.add(enterSends);
+        }
         javax.swing.JPanel extendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
         // The microphone, whenever it is open - listening or recording, from a key, the

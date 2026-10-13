@@ -499,6 +499,12 @@ bill, and a guess is not one.
   already looking the question every new window raises — *what does Enter do here* — and the
   answer is "a new line, nothing else". It starts off, and stays off next time, so that answer
   never depends on a window that has already closed.
+  **Not in [JRock Web](#jrock-web-in-the-browser)**: there it is a checkbox about a key, in a
+  window that is mostly used where there is no keyboard to speak of — a phone's return key types
+  a new line, Send is a tap, and a tick that changes what Enter does is a row of the bottom bar
+  spent on a question nobody asked. Enter types a new line there, which is what the box says
+  when it is unticked, and unticked is how it starts everywhere.
+
   **Shift+Enter is a new line whichever way the checkbox is set**, so one key always types one
   and never sends — which is what makes the checkbox safe to tick. JRock binds it
   explicitly: a Swing text area has no binding for Shift+Enter at all and Windows sends no
