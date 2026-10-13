@@ -240,7 +240,9 @@ public final class JRockLocation {
 
     // THE SMALLEST THIS WINDOW CAN BE, as a whole number of cells on JRock's 32x27
     // grid (JRock.CELL_W, JRock.CELL_H - one grid for every window in this project):
-    // 16 x 16 cells = 512 x 432, room for the seven settings, which are the window.
+    // 18 x 16 cells = 576 x 432, room for the seven settings, which are the window -
+    // eighteen rather than sixteen because at sixteen the longest label ("Refresh GPS
+    // every") and the field beside it are squeezed into each other.
     //
     // A NUMBER IN THIS FILE, and not whatever the layout worked out. This used to be
     // "pack(); setMinimumSize(getSize())", which makes the floor a figure nobody wrote
@@ -248,7 +250,7 @@ public final class JRockLocation {
     // display scaling, and even the text that happened to be in a label while the window
     // was being built. pack() still asks for the size of what is in this window, and it
     // opens at whichever of the two is larger.
-    private static final int WINDOW_MIN_CELLS_W = 16;
+    private static final int WINDOW_MIN_CELLS_W = 18;
     private static final int WINDOW_MIN_CELLS_H = 16;
     private static final int WINDOW_MIN_W = WINDOW_MIN_CELLS_W * JRock.CELL_W;
     private static final int WINDOW_MIN_H = WINDOW_MIN_CELLS_H * JRock.CELL_H;
@@ -741,7 +743,7 @@ public final class JRockLocation {
         javax.swing.JPanel form = new javax.swing.JPanel(new java.awt.GridBagLayout());
         form.setOpaque(false);
         java.awt.GridBagConstraints g = new java.awt.GridBagConstraints();
-        g.insets = new java.awt.Insets(3, 0, 3, 8);
+        g.insets = new java.awt.Insets(3, 0, 3, 12);
         g.anchor = java.awt.GridBagConstraints.WEST;
         g.fill = java.awt.GridBagConstraints.HORIZONTAL;
         int row = 0;
@@ -763,7 +765,7 @@ public final class JRockLocation {
         javax.swing.JLabel previewTitle = new javax.swing.JLabel("Other agents get, for #here:");
         previewTitle.setFont(small);
         previewTitle.setForeground(MUTED);
-        previewTitle.setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 0, 2, 0));
+        previewTitle.setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 0, 2, 4));
         preview = new javax.swing.JLabel(" ");
         preview.setFont(base.deriveFont(java.awt.Font.PLAIN, 14f));
         // A WRAPPING TEXT AREA AND NOT A LABEL. A label wraps only where its HTML names a
@@ -793,27 +795,35 @@ public final class JRockLocation {
         listening.setForeground(MUTED);
         listening.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 0, 0, 0));
 
-        javax.swing.JPanel south = new javax.swing.JPanel();
-        south.setLayout(new javax.swing.BoxLayout(south, javax.swing.BoxLayout.Y_AXIS));
-        south.setOpaque(false);
+        // ONE COLUMN, TOP TO BOTTOM, AND NOTHING IN THE SOUTH. The form was north and
+        // these were south, which is two claims on the same height: a BorderLayout gives
+        // north what it asks for from the top and south what it asks for from the bottom,
+        // and when the window is shorter than the two of them together it does not shrink
+        // either - it lets them OVERLAP. Dragged to its smallest size, this window drew
+        // the Locate now button through the Longitude row and the place over the "Refresh
+        // GPS every" label.
+        //
+        // In one column they are laid out in order, and a window too short for all of it
+        // simply ends - the last line is cut off at the window's own edge, which is what
+        // a window too small for its contents should look like. The form is first, so what
+        // goes is the status line rather than a setting.
+        javax.swing.JPanel column = new javax.swing.JPanel();
+        column.setLayout(new javax.swing.BoxLayout(column, javax.swing.BoxLayout.Y_AXIS));
+        column.setOpaque(false);
+        form.setAlignmentX(0f);
+        form.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
+                form.getPreferredSize().height));
+        column.add(form);
         for (javax.swing.JComponent c : new javax.swing.JComponent[] {
                 buttons, previewTitle, preview, status, listening }) {
             c.setAlignmentX(0f);
-            south.add(c);
+            column.add(c);
         }
 
-        // THE FORM IN THE NORTH, AND NOTHING IN THE CENTRE. A BorderLayout gives north
-        // and south the height they ask for and the rest to the centre - so with the form
-        // in the centre it was the form that shrank whenever the lines below it grew, and
-        // a GridBagLayout with less height than it needs simply does not draw its last
-        // rows. Seven settings cannot be allowed to come and go with the length of a
-        // status line; in the north they always have their height, and anything short of
-        // room for all of it is taken off the bottom, where the window's own edge is.
         javax.swing.JPanel content = new javax.swing.JPanel(new java.awt.BorderLayout());
         content.setBackground(BACKGROUND);
         content.setBorder(javax.swing.BorderFactory.createEmptyBorder(18, 18, 14, 18));
-        content.add(form, java.awt.BorderLayout.NORTH);
-        content.add(south, java.awt.BorderLayout.SOUTH);
+        content.add(column, java.awt.BorderLayout.NORTH);
         window.setContentPane(content);
 
         // Every refresh, from GPS: #here found again and kept, so a client gets it at once.
