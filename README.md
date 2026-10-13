@@ -2535,6 +2535,34 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
 - **One tab per site**, kept. A second page on a site reuses its tab, and since the only sites
   there are are the ones on the list, there can never be a tab for anything else. Per site rather than one in total
   because a consent answered on one and a sign-in on another are both worth keeping.
+
+  **The browser's own tabs count**, which is what holds that promise over a day. The tab map is
+  one run's memory and the browser outlives the run — its profile is kept, the window survives
+  an agent that was killed rather than closed, and the operator opens tabs in it themselves. So
+  before opening anything the agent asks the browser what it has (`Target.getTargets`) and takes
+  the tab already on that site; failing that, a blank one, including the `about:blank` the
+  browser starts with. A search after a restart lands in the DuckDuckGo tab that was already
+  open, and the startup page is **not** re-navigated when it is already there — whatever is on
+  it, results or a half-answered consent dialogue, stays. A lost session repairs itself the same
+  way: the tab is still there, so it is attached to again rather than replaced. **Nothing of the
+  browser's is ever closed** — a tab is a window you can click in — so the count stops growing
+  rather than being tidied up.
+
+  **And the browser itself is adopted, not started twice.** A Chromium asked to open a profile
+  that is already open doesn't start a browser: the one holding that profile takes the request
+  and the process just started exits, so an agent that "starts" it per request was adding a tab
+  per request to a window nobody was counting. The agent now notes its browser's debugging
+  socket in the profile folder, finds it again on the next run, and connects without launching
+  anything. A browser it did not start is also not one it kills on the way out. The note's
+  address carries one running browser's own id, so a note left behind by a browser that has
+  since been killed matches nothing — and **your** browser, open on the same debugging port for
+  your own devtools, is never adopted.
+
+  **The tab being read is brought to the front** (`Target.activateTarget`). Not cosmetic: a tab
+  Chromium is not drawing has nothing to photograph, and `Page.captureScreenshot` on a
+  background tab never answers at all. It was invisible while every page got a tab of its own —
+  a new tab is in front already — and it is what you should see anyway: the window shows the
+  page being read.
 - **Its browser is not yours, and the window says where it lives.** The agent starts a Chromium
   of its own — Edge, Chrome, Brave or Vivaldi, whichever it finds — with
   `--user-data-dir=jrock-browser-profile` beside its working folder, e.g.

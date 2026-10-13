@@ -56,9 +56,14 @@
 // What it does, per request:
 //
 //   1. starts a browser of its own, once, with a WINDOW and a profile of its own that
-//      is KEPT between runs - ONE TAB PER SITE, so six tabs is the most there can ever
-//      be and a second page on a site reuses the tab it already has;
-//   2. navigates its one tab, and waits for the page to stop changing: readyState
+//      is KEPT between runs - or adopts the browser already running with that profile,
+//      tabs and all. ONE TAB PER SITE: a second page on a site reuses the tab it already
+//      has, so the tabs cannot outnumber the sites on the list however many pages are
+//      read. The browser's OWN tabs count as that site's tab - the one left open on
+//      duckduckgo.com by the last run is the one a search goes into - because a tab is
+//      several hundred megabytes and a browser that collects one per request is a
+//      machine running out of memory. Nothing of the browser's is ever closed here;
+//   2. navigates that site's tab, and waits for the page to stop changing: readyState
 //      complete AND the same measurements twice, which is what tells a page that has
 //      finished loading from one that is still filling itself in. TEN SECONDS at the
 //      most, whatever state it is in by then;
@@ -195,6 +200,12 @@ public final class JRockBrowser {
     // changing. Beside this file, like every other agent's settings.
     private static final String SETTINGS = "jrock-browser.txt";
 
+    // Which browser was left running, written into the browser's own profile folder: the
+    // debugging port and that browser's socket address. It is how a restarted agent finds
+    // the browser it had before, with its tabs, instead of opening a second one - see
+    // ownBrowser.
+    private static final String SOCKET_MARK = "jrock-browser-socket.txt";
+
     // How long a page gets to settle before it is photographed as it stands.
     private static final long LOAD_TIMEOUT_MS = 10_000;
     private static final long SETTLE_POLL_MS = 400;
@@ -234,15 +245,22 @@ public final class JRockBrowser {
     private static volatile WebSocket socket;
     private static volatile Path profileDir;
     private static javax.swing.JTextArea profileLine;
-    // ONE TAB PER SITE, kept. Asking for another page on a site it already has reuses
-    // that site's tab, so there is never a second arstechnica.com window to wonder about -
-    // and because the only sites there are are the six on the list, the number of tabs
-    // cannot grow past six however many pages are read.
+    // ONE TAB PER SITE, kept. Asking for another page on a site it already has reuses that
+    // site's tab, so there is never a second arstechnica.com tab to wonder about - and
+    // because the only sites there are are the ones on the list, the number of tabs cannot
+    // grow past that however many pages are read.
     //
     // Per site rather than one in total, because the operator may have answered a consent
     // wall on one and be signed in on another, and a single tab would throw one away to
     // show the other.
+    //
+    // Site -> { the browser's id for the tab, the session it is attached with }. This is
+    // what THIS RUN is using; the browser's own tabs outlive it, which is what adopt is
+    // for.
     private static final java.util.Map<String, String[]> TABS = new java.util.LinkedHashMap<>();
+    // Whether the browser on the debugging port is one this agent started or one it found
+    // already running with its profile. A found one is not ours to kill: see closeBrowser.
+    private static volatile boolean adoptedBrowser;
     // The site of the page read last, which is the one "follow the link that says..."
     // means. Nothing else would: a description with no page to look at is not a request.
     private static volatile String lastSite;
@@ -387,7 +405,15 @@ public final class JRockBrowser {
             try {
                 WebSocket live = browserSocket(note -> later(() -> say(note)));
                 String tab = tab(live, site(home));
-                fetchInto(live, tab, home, note -> later(() -> say(note)));
+                // A TAB ALREADY ON IT IS LEFT ALONE. Adopting a browser that was already
+                // running hands back the search tab it already has, and navigating it
+                // again would throw away whatever is on it - results the operator is
+                // reading, a consent dialogue they are halfway through answering - to put
+                // the same site there a second time.
+                String here = evaluate(live, tab, "location.href");
+                if (!site(home).equals(site(here))) {
+                    fetchInto(live, tab, home, note -> later(() -> say(note)));
+                }
                 later(() -> say("The browser is open on duckduckgo.com. Anything it asks "
                         + "for - a consent dialogue, a sign-in - can be answered in that "
                         + "window now, and it is remembered."));
@@ -1329,33 +1355,110 @@ public final class JRockBrowser {
         return landed;
     }
 
-    // The tab for one site: the one it already has, or a new one. Everything the operator
+    // The tab for one site: the one this run is using, the one the BROWSER already has, or
+    // a new one - in that order, and a new one is the last resort. Everything the operator
     // does in it - a consent answered, a sign-in - stays done for every page on that site
     // after it.
     private static String tab(WebSocket live, String site) {
         synchronized (TABS) {
+            String session = null;
             String[] have = TABS.get(site);
             if (have != null) {
                 try {
-                    // Still there? A tab the operator closed is one to make again.
-                    if ("1".equals(evaluate(live, have[1], "'1'"))) return have[1];
+                    // Still there? A tab the operator closed, or one whose session went
+                    // with a socket, is one to find again - and adopt below usually finds
+                    // it, still open and still on that site.
+                    if ("1".equals(evaluate(live, have[1], "'1'"))) session = have[1];
                 } catch (Stop gone) {
-                    TABS.remove(site);
+                    // It is not answering; the entry is stale either way.
                 }
+                if (session == null) TABS.remove(site);
             }
-            String made = call(live, null, "Target.createTarget", "{\"url\":\"about:blank\"}");
-            String id = jsonString(made, "targetId");
-            String attached = jsonString(call(live, null, "Target.attachToTarget",
-                    "{\"targetId\":\"" + id + "\",\"flatten\":true}"), "sessionId");
-            if (attached.isEmpty()) throw new Stop("the browser would not open a tab.");
-            call(live, attached, "Page.enable", "{}");
-            call(live, attached, "Runtime.enable", "{}");
-            call(live, attached, "Emulation.setDeviceMetricsOverride",
-                    "{\"width\":" + VIEW_WIDTH + ",\"height\":" + VIEW_HEIGHT
-                    + ",\"deviceScaleFactor\":1,\"mobile\":false}");
-            TABS.put(site, new String[] { id, attached });
-            return attached;
+            if (session == null) session = adopt(live, site);
+            if (session == null) {
+                String made = call(live, null, "Target.createTarget",
+                        "{\"url\":\"about:blank\"}");
+                session = take(live, site, jsonString(made, "targetId"));
+            }
+            // AND TO THE FRONT, because a tab that is not the one on top cannot be
+            // photographed: Chromium is not drawing it, so Page.captureScreenshot has
+            // nothing to send and never answers at all. A tab made here is in front
+            // already, which is why this was never needed while every page got a new one;
+            // a tab reused - the one this run has for the site, or the one the browser
+            // already had - is wherever the operator left it.
+            //
+            // It is also what the operator should see: the window shows the page being
+            // read, which is how they know what was read and can deal with a consent wall
+            // standing in front of it.
+            String[] held = TABS.get(site);
+            if (held != null) {
+                call(live, null, "Target.activateTarget",
+                        "{\"targetId\":\"" + held[0] + "\"}");
+            }
+            return session;
         }
+    }
+
+    // THE TABS THE BROWSER ALREADY HAS, ADOPTED - a tab on that site becomes that site's
+    // tab, and failing that a blank one does.
+    //
+    // This is what keeps the count down over a day. TABS is only this run's memory, and
+    // the browser outlives the run: its profile is kept, the window survives an agent that
+    // was killed rather than closed, and the operator opens tabs in it themselves.
+    // Remembering nothing about them means opening a second duckduckgo.com tab for the
+    // first search after a restart, a third after the next one, and a browser nobody
+    // closed ending up with a tab per request - which is a browser that runs the machine
+    // out of memory. Asking the browser what it has costs one call and ends that.
+    //
+    // It is also how a lost session repairs itself: the tab is still there, so it is
+    // attached to again rather than replaced.
+    //
+    // NOTHING IS EVER CLOSED HERE. A tab is a window the operator can click in - a consent
+    // answered, a sign-in, something half read - so a surplus one is left where it is and
+    // simply not added to.
+    private static String adopt(WebSocket live, String site) {
+        Set<String> ours = new LinkedHashSet<>();
+        for (String[] held : TABS.values()) ours.add(held[0]);
+        String blank = null;
+        for (String target : jsonObjects(call(live, null, "Target.getTargets", "{}"),
+                "targetInfos")) {
+            // Pages only: a worker, an extension's background page and the devtools
+            // window are all targets, and none of them is a tab to read a site in.
+            if (!"page".equals(jsonString(target, "type"))) continue;
+            String id = jsonString(target, "targetId");
+            String url = jsonString(target, "url");
+            if (id.isEmpty() || ours.contains(id) || url.startsWith("devtools://")) continue;
+            if (site.equals(site(url))) return take(live, site, id);
+            if (blank == null && blankTab(url)) blank = id;
+        }
+        // The tab the browser opens by itself when it starts, taken over rather than left
+        // to sit there while a second one is made beside it.
+        return blank == null ? null : take(live, site, blank);
+    }
+
+    // One tab, in this agent's hands: attached to, told to report page and script events,
+    // and sized to the window pages are read in.
+    private static String take(WebSocket live, String site, String id) {
+        if (id.isEmpty()) throw new Stop("the browser named no tab to use.");
+        String attached = jsonString(call(live, null, "Target.attachToTarget",
+                "{\"targetId\":\"" + id + "\",\"flatten\":true}"), "sessionId");
+        if (attached.isEmpty()) throw new Stop("the browser would not open a tab.");
+        call(live, attached, "Page.enable", "{}");
+        call(live, attached, "Runtime.enable", "{}");
+        call(live, attached, "Emulation.setDeviceMetricsOverride",
+                "{\"width\":" + VIEW_WIDTH + ",\"height\":" + VIEW_HEIGHT
+                + ",\"deviceScaleFactor\":1,\"mobile\":false}");
+        TABS.put(site, new String[] { id, attached });
+        return attached;
+    }
+
+    // A tab with nothing on it: the one the browser opens itself at startup, and whatever
+    // each Chromium calls its new-tab page.
+    private static boolean blankTab(String url) {
+        String at = url.toLowerCase(Locale.ROOT);
+        return at.isEmpty() || at.equals("about:blank") || at.startsWith("chrome://new")
+                || at.startsWith("edge://new") || at.startsWith("brave://new")
+                || at.startsWith("vivaldi://startpage");
     }
 
     // The tab a follow-up acts on: the site of the page read last.
@@ -1404,8 +1507,33 @@ public final class JRockBrowser {
     private static WebSocket browserSocket(java.util.function.Consumer<String> note) {
         WebSocket live = socket;
         Process running = browser;
-        if (live != null && running != null && running.isAlive()) return live;
+        if (live != null && (running != null && running.isAlive()
+                || adoptedBrowser && listening() != null)) {
+            return live;
+        }
         closeBrowser();
+
+        // THE BROWSER THAT IS ALREADY THERE, ADOPTED RATHER THAN STARTED AGAIN - with its
+        // tabs, which adopt then hands out per site.
+        //
+        // Starting a Chromium whose profile is already in use does not start a browser: it
+        // asks the running one to open the page and exits. So the process this agent would
+        // hold is dead a second later, every request after that would "start" the browser
+        // again, and each of those adds a tab to a window that is never counted. Finding it
+        // instead costs one request to the debugging port.
+        //
+        // ONLY IF IT IS OURS: see ownBrowser. Adopting somebody else's browser would be
+        // adopting the operator's own, with every session they are signed in to in it, and
+        // this agent's whole arrangement is that it never goes near those.
+        String found = ownBrowser();
+        if (found != null) {
+            profileDir = profileFolder();
+            later(JRockBrowser::showProfile);
+            adoptedBrowser = true;
+            note.accept("A browser with this agent's profile is already running on port "
+                    + debugPort + " - using it, and the tabs it already has.");
+            return connect(found, note);
+        }
 
         Path program = program();
         if (program == null) {
@@ -1431,6 +1559,13 @@ public final class JRockBrowser {
                 "--window-size=" + VIEW_WIDTH + "," + VIEW_HEIGHT));
         if (headless) command.add("--headless=new");
         command.add("about:blank");
+        // Whether anything is answering there BEFORE this starts one, which decides who
+        // owns what afterwards. A Chromium asked to open a profile that is already open
+        // does not start a browser: the one holding that profile takes the request and
+        // the process just started exits a moment later - too late to be noticed here,
+        // because the port answers at once. And a browser this agent did not start is
+        // never one for it to kill.
+        boolean wasAlreadyThere = listening() != null;
         note.accept("Starting " + program.getFileName() + (headless ? " (no window)"
                 : " with its window") + " on port " + debugPort + ", profile " + profileDir
                 + "\u2026");
@@ -1443,6 +1578,23 @@ public final class JRockBrowser {
             throw new Stop("the browser would not start: " + ex.getMessage());
         }
         String version = await("/json/version");
+        // STARTED, OR HANDED OVER. Either way the browser answering now is the one to
+        // work with; what this decides is that a handed-over one is not "started" again
+        // for every request after this, each time adding a tab to a window nobody is
+        // counting.
+        Process started = browser;
+        if (wasAlreadyThere || started != null && !started.isAlive()) {
+            browser = null;
+            adoptedBrowser = true;
+            note.accept("That profile was already open in a browser - using that one, and "
+                    + "the tabs it already has.");
+        }
+        return connect(version, note);
+    }
+
+    // The debugging socket of the browser that answered, and the agent's own hold on it.
+    private static WebSocket connect(String version,
+                                     java.util.function.Consumer<String> note) {
         String url = jsonString(version, "webSocketDebuggerUrl");
         if (url.isEmpty()) throw new Stop("the browser gave no debugging socket.");
         try {
@@ -1451,10 +1603,98 @@ public final class JRockBrowser {
         } catch (Exception ex) {
             throw new Stop("the browser's debugging socket would not open: " + ex);
         }
+        rememberBrowser(version);
         note.accept("Browser ready: " + jsonString(version, "Browser") + ".");
         return socket;
     }
 
+    // Is anything answering on the debugging port? One try and a short wait, which is what
+    // makes this a different question from await's: that one waits for a browser being
+    // started, this one asks about a browser that either is there already or is not.
+    private static String listening() {
+        try {
+            HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + debugPort + "/json/version"))
+                    .timeout(Duration.ofSeconds(2)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (answer.statusCode() == 200) return answer.body();
+        } catch (IOException ex) {
+            // Nothing there, which is an answer.
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+        return null;
+    }
+
+    // A BROWSER THIS AGENT STARTED AND LEFT RUNNING, as its /json/version - or null, which
+    // means there is nothing of ours on that port and one has to be started.
+    //
+    // Answered from a note this agent wrote itself when it last opened a browser: the port
+    // and that browser's debugging socket, in the profile folder, which is the folder only
+    // this agent's browsers use. The socket address carries the id of one running browser
+    // and no other, so the question "is the thing answering on 9222 the browser I started
+    // yesterday?" is answered by comparing two strings.
+    //
+    // IT HAS TO BE ASKED, because adopting the wrong browser would be adopting the
+    // OPERATOR'S OWN - somebody with Chrome open on the same debugging port for their own
+    // devtools has every session they are signed in to in it, and this agent's whole
+    // arrangement is that it never goes near those. A note left behind by a browser that
+    // has since been killed matches nothing: the next browser on that port has an id of
+    // its own.
+    //
+    // (Chromium's own DevToolsActivePort file would say this, and on Edge there is no such
+    // file when the port is given rather than chosen. Asking the browser for its command
+    // line needs --enable-automation, which sets navigator.webdriver and gets pages
+    // refused - a high price for a question this answers for nothing.)
+    private static String ownBrowser() {
+        List<String> lines;
+        try {
+            Path mark = profileFolder().resolve(SOCKET_MARK);
+            if (!Files.isRegularFile(mark)) return null;
+            lines = Files.readAllLines(mark, StandardCharsets.UTF_8);
+        } catch (IOException | RuntimeException ex) {
+            return null;
+        }
+        if (lines.size() < 2 || !lines.get(0).trim().equals(String.valueOf(debugPort))) {
+            return null;
+        }
+        String version = listening();
+        if (version == null) return null;
+        String socketAddress = lines.get(1).trim();
+        return !socketAddress.isEmpty()
+                && socketAddress.equals(jsonString(version, "webSocketDebuggerUrl"))
+                ? version : null;
+    }
+
+    // The note itself, written whenever a browser is in hand - so a run that is killed
+    // rather than closed leaves behind the one thing the next run needs to find its
+    // browser again instead of opening a second one.
+    private static void rememberBrowser(String version) {
+        String socketAddress = jsonString(version, "webSocketDebuggerUrl");
+        if (socketAddress.isEmpty()) return;
+        try {
+            Files.write(profileFolder().resolve(SOCKET_MARK),
+                    (debugPort + "\n" + socketAddress + "\n")
+                            .getBytes(StandardCharsets.UTF_8));
+        } catch (IOException | RuntimeException ex) {
+            // Then the next run starts a browser of its own, which is no worse than this
+            // agent has ever been.
+        }
+    }
+
+    private static void forgetBrowser() {
+        try {
+            Files.deleteIfExists(profileFolder().resolve(SOCKET_MARK));
+        } catch (IOException | RuntimeException ex) {
+            // The address in it names a browser that is gone, and nothing matches that.
+        }
+    }
+
+    // The socket goes, and the browser with it IF THIS AGENT STARTED IT. One it found
+    // already running is not its to end: the window belongs to whoever opened it, the
+    // pages in it are theirs, and the next run adopts it again rather than opening a
+    // second browser beside it. The tab map goes either way - a session belongs to the
+    // socket it was made on, and adopt finds those tabs again.
     private static void closeBrowser() {
         WebSocket live = socket;
         socket = null;
@@ -1462,6 +1702,8 @@ public final class JRockBrowser {
             TABS.clear();
         }
         lastSite = null;
+        boolean theirs = adoptedBrowser;
+        adoptedBrowser = false;
         if (live != null) {
             try {
                 live.sendClose(WebSocket.NORMAL_CLOSURE, "done");
@@ -1471,7 +1713,12 @@ public final class JRockBrowser {
         }
         Process running = browser;
         browser = null;
-        if (running != null) {
+        if (running != null && !theirs) {
+            // The note goes only if the browser goes. A process of ours that is ALREADY
+            // dead is the launcher of a browser that took the request and lives on (see
+            // browserSocket), and forgetting that one would be throwing away the address
+            // the next run needs to find it.
+            if (running.isAlive()) forgetBrowser();
             running.destroy();
             try {
                 if (!running.waitFor(5, TimeUnit.SECONDS)) running.destroyForcibly();
@@ -1622,6 +1869,40 @@ public final class JRockBrowser {
             out.append(c);
         }
         return out.toString();
+    }
+
+    // The objects of one JSON array, each as its own text. The browser's list of tabs is
+    // the only answer here that holds more than one thing worth reading, and a brace
+    // counter is the whole of what reading it takes - with strings skipped over, because a
+    // brace inside a page title is not a brace.
+    private static List<String> jsonObjects(String json, String key) {
+        List<String> out = new ArrayList<>();
+        int at = json.indexOf("\"" + key + "\"");
+        if (at < 0) return out;
+        int from = json.indexOf('[', at);
+        if (from < 0) return out;
+        int depth = 0;
+        int started = -1;
+        boolean inString = false;
+        for (int i = from + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inString) {
+                if (c == '\\') i++;
+                else if (c == '"') inString = false;
+            } else if (c == '"') {
+                inString = true;
+            } else if (c == '{') {
+                if (depth++ == 0) started = i;
+            } else if (c == '}') {
+                if (--depth == 0 && started >= 0) {
+                    out.add(json.substring(started, i + 1));
+                    started = -1;
+                }
+            } else if (c == ']' && depth == 0) {
+                break;
+            }
+        }
+        return out;
     }
 
     private static double jsonNumber(String json, String key) {
