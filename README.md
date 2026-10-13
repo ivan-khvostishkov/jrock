@@ -2071,6 +2071,26 @@ sequenceDiagram
   on the Windows default. That device name is the only thing it takes from JRock's settings
   (its own `jrock-timer.txt`). If no speaker is set, or it isn't connected, the window
   says so, and the alarm still shows.
+- **The alarms survive a restart.** An alarm is for a moment in the future, and the machine
+  between now and then is promised to nobody: Windows restarts for an update, the laptop is
+  shut, the window is closed by mistake. One set for eight tomorrow morning that a reboot at
+  midnight quietly cancels is worse than no alarm at all, because it was relied on. So every
+  waiting alarm is written into `jrock-timer.txt` **as it is set** — not only when the window
+  closes, which a killed process never reaches — and read back at startup into the list,
+  counting down again from where it was. What is written is the **absolute moment**, not the
+  time of day: `+00:05:00` set at 23:58 is due at 00:03, and a timer read back as five minutes
+  from whenever the agent next starts would be an alarm for a different moment.
+
+  **One that came due while nothing was running is dropped without a word.** Ringing it late is
+  the one thing it must not do — *"it is 07:30"* at nine in the morning is a machine talking
+  about yesterday — and there is nothing to be done about a moment that has passed, so nothing
+  is said about it either: a window that opens complaining about three of them is a window that
+  teaches you to close it. The numbering carries on from the restored alarms, so the next one
+  set does not take a chord and a beep count that one still waiting already has.
+- **Closing the window says so out loud**: two notes falling, where starting up is a chord
+  rising. This window has one button, a list and a close box, and closing it ends every alarm
+  that was waiting — so the time it is the wrong thing to click, it is audible. (Played on the
+  event thread: the sound thread is a daemon, and this is the last thing the process does.)
 - **Other agents set alarms** over TCP, on `127.0.0.1:47470` only. Connect, send the time as
   above and a newline, and read one line back: `1` means the alarm is set, `0` means it isn't.
   Then close the connection. [Push-to-talk](#the-first-agent-push-to-talk-jrockpushtotalkjava)
@@ -2590,6 +2610,17 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   background tab never answers at all. It was invisible while every page got a tab of its own —
   a new tab is in front already — and it is what you should see anyway: the window shows the
   page being read.
+- **It opens maximized, and the page is the size of the window.** Every tab used to be pinned
+  to 1240x1000 whatever the window was doing, so a maximized browser showed the page laid out
+  for 1240 pixels with a band of white beside it — the window you are watching, lying about the
+  page in it. The metrics override is now **cleared** rather than left unset, because an
+  override belongs to the tab and one adopted from a browser a previous run left behind can
+  still be carrying the last one. The pictures never needed it: each A4 piece is captured with
+  `captureBeyondViewport` and a clip out of the page's own layout metrics, so what is
+  photographed is the page at whatever width it is laid out at — measured, duckduckgo.com now
+  reads at **1504** pixels wide in 7 pieces on this screen where it read 1240 before. And
+  `--start-maximized`, because hands-free the page in that window is your only view of what the
+  agent is reading.
 - **Its browser is not yours, and the window says where it lives.** The agent starts a Chromium
   of its own — Edge, Chrome, Brave or Vivaldi, whichever it finds — with
   `--user-data-dir=jrock-browser-profile` beside its working folder, e.g.
@@ -3359,10 +3390,19 @@ rather than repeated on every row.
 - **Crackle while waiting** (Windows / desktop) — a crackle on that same speaker **while a
   model is thinking**, or *(none)*. Seconds pass between a question and its answer; in a window
   being watched that is plain enough, but hands-free, across a room, silence says nothing about
-  whether the question was even heard. Five tones — *deep, low, middle, high, sharp* — and the
-  choice is there for a reason worth stating: one machine runs several JRocks, one per agent,
-  **sharing a speaker**, so a tone each turns *"something is thinking"* into *"the browser is
-  thinking"*. Tested before it was built: three processes, three tones, one device, 28 opens and
+  whether the question was even heard. **Seven tones, and they are notes** — *C, D, E, F, G, A,
+  B flat*, one octave from middle C — because the choice is there for a reason worth stating: one
+  machine runs several JRocks, one per agent, **sharing a speaker**, so a tone each turns
+  *"something is thinking"* into *"the browser is thinking"*. They were five filter settings
+  (*deep, low, middle, high, sharp*), which is five shades of one click: a difference you can
+  hear with both of them in the same second, and never otherwise — and never otherwise is how
+  they are heard. A pitch answers *"which of them is that?"* on its own. Each burst of noise is
+  rung through a **resonator at the note's frequency**, a crackle on a string: it still sounds
+  like a crackle and it now has a note in it, with the filter's corner riding along so the low
+  notes stay duller and the high ones sharper. The loudness is set **after** the ringing, from
+  the peak the noise itself reached, because a resonator's gain depends on its frequency. The
+  five old names read as the nearest note, so a folder configured before this goes on
+  crackling. Tested before it was built: three processes, three tones, one device, 28 opens and
   not one refusal — Java Sound asks for shared streams, so Windows mixes them. The line is
   **closed between crackles**, since a speaker hisses whenever its output stream is active.
 
@@ -3512,10 +3552,11 @@ opens at.
 | Push-to-talk | 14 × 23 | 448 × 621 |
 | Timer | 12 × 16 | 384 × 432 |
 | Weather | 16 × 13 | 512 × 351 |
-| Location | 16 × 16 | 512 × 432 |
+| Location | 18 × 16 | 576 × 432 |
 | Browser | 20 × 16 | 640 × 432 |
 | Papers | 20 × 18 | 640 × 486 |
 | Thunderbird | 24 × 20 | 768 × 540 |
+| The installer | 25 × 24 | 800 × 648 (it opens at 28 × 30 = 896 × 810) |
 
 JRock's own window had **no minimum at all** before this and could be dragged to nothing; at
 384 × 297 it still holds Configure, the folder menu, *Dialog only*, *Clear log*, the log, the
@@ -4436,10 +4477,24 @@ Nine pages, in this order:
    in that folder. A real `.lnk` on Windows (written through `WScript.Shell`, the only way
    without a native library), a `.desktop` file on Linux, a `.command` script on macOS.
    **Unticking one that is already there removes it**, and the page says which file will go.
+
+   A third tick adds **JRock Assistant CLI** to the Start menu: the same folder, the same key,
+   the same log and the same prompt library, with the questions typed at a prompt and the
+   answers printed (JRock's own `--cli`). It points at **java.exe** rather than `javaw.exe`,
+   because that is what gets a console window — and a prompt nobody can see is not a prompt.
+   Off unless it is already there, read rather than assumed, like the login entry: an installer
+   that adds menu entries nobody asked for is an installer people uninstall.
 4. **Agents and flows** — all of them, or pick them one by one. **Where something is installed
    already**, this page offers *that* set and nothing else, ticked, each in the folder its
-   Explorer entry names; the full catalogue is one radio button away (*Show all 12 and let me
-   change the set*). An agent that is installed but not in this artifact is named on the page:
+   Explorer entry names; the full catalogue is one radio button away (*Show all 14 and let me
+   change the set*), and it opens with **what is installed already ticked** — or everything,
+   when nothing is. Leaving *Update these 10* alone installs **those ten**: page 1 reads the
+   artifact again every time it is left, which used to rebuild the catalogue from scratch and
+   quietly re-tick all fourteen while the page went on saying ten. A re-read now carries over
+   what was already decided, ticks and typed folders both.
+
+   The table has **no scrollbar of its own** either: a scrolling box inside a scrolling page is
+   two bars side by side, each moving a different thing. An agent that is installed but not in this artifact is named on the page:
    its right-click entry goes with the rest, and its files stay where they are. The table says
    whether each one loops or runs once, how many prompt files it brings, and the folder it works
    in — editable for an agent, `Flows\` for a flow. Each is copied with the prompt files its own
@@ -4451,8 +4506,13 @@ Nine pages, in this order:
    set, since nothing else here reads your calendar and mail index. Or continue without any of
    them: everything else works, and JRock or the agent names the missing tool when something is
    asked of it that needs one.
-6. **Settings and the key** — opens the new `jrock-config.txt` in whatever opens a `.txt`, waits
-   while you edit and save it, then opens `bedrock-key.txt` the same way. Still empty afterwards,
+6. **Settings and the key** — **two ticks, both on**: whether Next stops to *open*
+   `jrock-config.txt` in whatever opens a `.txt`, waiting while you edit and save it, and then
+   `bedrock-key.txt` the same way. Both files are written either way — that is the page's work
+   — so unticking them is how an update goes past: the same jar into the same folder, where the
+   config is already right and the key is already in place, and two editors and two dialogs on
+   every run is what teaches somebody to press Next without reading it. With the key file still
+   empty afterwards,
    it says the key can go in later and what already works without one: merging duplex scans,
    converting and including documents, fetching a URL, exporting to DOCX or RTF, printing. Only
    asking a model needs the key.
