@@ -2358,6 +2358,14 @@ Sun 11 Oct:
   operator asked for is the letter, not the plumbing it arrived in. One pass turns all three
   into a page of Markdown that can be read aloud, by
   `jrock-prompt-mail-to-markdown.txt` beside the agent.
+- **One piece of the furniture is kept: the unsubscribe link.** The rest of it goes — tracking
+  pixels, legal footers, "view this in your browser", the unsubscribe paragraph itself — but the
+  address behind the word *unsubscribe* is written out on a line of its own, `Unsubscribe: …`,
+  just before the summary. **Always that line, `Unsubscribe: none` included**, because a missing
+  line reads as "it was not looked for" rather than as an answer. That is what lets push-to-talk
+  answer *"can I get off this list?"* about a message it has in front of it, and it answers with
+  whether there is a way out rather than with the address — an address spoken aloud is a
+  sentence nobody can check.
 - **Three attachments at the most, the biggest left out first.** That order
   confirmation carries the invoice (75 kB) and the shop's terms and conditions (355 kB): one of
   those is what was asked about, the other is twenty pages of boilerplate that would be
