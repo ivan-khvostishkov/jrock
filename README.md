@@ -3835,7 +3835,20 @@ The model answers in Markdown. Select an answer in the log, right-click, and two
 write that answer out as a document: **Export selected Markdown as RTF...** and **Export
 selected Markdown with images as DOCX...**. Both are greyed out without a selection — there is
 nothing to export but a selection — and a save dialog gives the file the right extension whatever
-you type into it. Not mobile-only, and not desktop-only: it is the same code in a browser tab,
+you type into it.
+
+**The same two items are in the prompt's own menu**, on the prompt's selection. Each menu acts
+on its own side, and neither has to say which: they used to live in the log's menu alone and take
+whichever selection existed, the prompt's winning when both did, with the label changing to
+*"...(from the prompt)"* to admit it — which is a menu answering a question nobody asked it. The
+prompt's selection is the interesting one, and now it is reached from where the editing was done:
+the way to make a document out of an answer with a correction in it is to copy the answer into
+the prompt, change the line that is wrong, select it and export **that**. The log is a transcript
+and cannot be edited at all.
+
+**Ctrl+Shift+D** and **Ctrl+Shift+R** still take either — the prompt's selection when it has one,
+the log's otherwise. One pair of keys cannot belong to two menus, and what they act on is
+whichever selection there is. Not mobile-only, and not desktop-only: it is the same code in a browser tab,
 because both converters are built in and neither starts a process.
 
 - **RTF** is written by hand as plain ASCII: every character above it becomes a `\u` control
@@ -3972,7 +3985,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   selected text...*). A partial export doesn't count as saving the log, so Clear log still
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
-  greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)). On
+  greyed out without one — and they act on the **log's** selection, the prompt's own menu having
+  the same two items for the prompt's (see [**Markdown
+  export**](#markdown-export-rtf-and-docx)). On
   **Windows**, *Narrate selected text* reads the selection aloud, and is *Stop narrating* while
   it does (see [**Narrate**](#narrate-windows-and-the-browser)). *Open URL in new tab* (**Ctrl+Shift+U**)
   opens the address the
@@ -4017,6 +4032,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   *Reload all includes* (every include in the **whole** log, where a start reads only the last
   few requests — see [**includes that outlive the
   session**](#includes-that-outlive-the-session)),
+  *Export selected Markdown as RTF...* and *Export selected Markdown with images as DOCX...* —
+  the same two items the log's menu has, on the **prompt's** selection, which is the one a
+  correction is made in (see [**Markdown export**](#markdown-export-rtf-and-docx)),
   Load prompt from file..., Save prompt copy
   as..., then Cut / Copy / Paste / *Insert document number* / **Select all** / Undo / Redo.
   *Insert document number* types a random 10-digit number, never starting with 0, at the caret —
@@ -4199,7 +4217,7 @@ second variant** of its plain twin. The same list is in the window itself, behin
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+Shift+S | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
-| Ctrl+Shift+D | Export the selection as **DOCX** — the prompt's selection, or the log's |
+| Ctrl+Shift+D | Export the selection as **DOCX** — the prompt's selection, or the log's (each menu has its own item for its own side) |
 | Ctrl+Shift+R | The same selection as **RTF** |
 | Ctrl+P | Print log (or the selected text) / save as PDF |
 | Ctrl+D | Toggle Dialog only |

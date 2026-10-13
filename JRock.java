@@ -3366,7 +3366,7 @@ public class JRock {
                 "jrock-export-docx");
         frame.getRootPane().getActionMap().put("jrock-export-docx", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
-                exportSelectedMarkdown(frame, log, input, true);
+                exportSelectedMarkdown(frame, log, exportEitherSelection(log, input), true);
             }
         });
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
@@ -3375,7 +3375,7 @@ public class JRock {
                 "jrock-export-rtf");
         frame.getRootPane().getActionMap().put("jrock-export-rtf", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
-                exportSelectedMarkdown(frame, log, input, false);
+                exportSelectedMarkdown(frame, log, exportEitherSelection(log, input), false);
             }
         });
 
@@ -3571,10 +3571,10 @@ public class JRock {
         // out as a document a word processor - or a layout application - can open.
         javax.swing.JMenuItem exportRtfItem =
                 addMenuItem(logMenu, "Export selected Markdown as RTF...",
-                        () -> exportSelectedMarkdown(frame, log, input, false));
+                        () -> exportSelectedMarkdown(frame, log, logSelection(log), false));
         javax.swing.JMenuItem exportDocxItem =
                 addMenuItem(logMenu, "Export selected Markdown with images as DOCX...",
-                        () -> exportSelectedMarkdown(frame, log, input, true));
+                        () -> exportSelectedMarkdown(frame, log, logSelection(log), true));
         // Where there is a voice for it: Windows' own, or the browser's own in a tab
         // (see narrateAvailable, narrateInBrowser). One
         // item for both directions: while a narration is playing it stops it, which is
@@ -3607,20 +3607,13 @@ public class JRock {
                 boolean selected = log.selectedText() != null;
                 saveLogItem.setText(selected ? "Save selected text as..." : "Save log copy as...");
                 printLogItem.setText(selected ? "Print selected text..."  : "Print...");
-                // EITHER SELECTION WILL DO, and the prompt's is the interesting one: the
-                // way to make a document out of an answer with a correction in it is to
-                // copy the answer into the prompt, change the line that is wrong, select
-                // it and export THAT. Until now the only exportable text was the log's,
-                // which is a transcript and cannot be edited at all.
-                String exportable = exportSelection(log, input);
-                exportRtfItem.setEnabled(exportable != null);
-                exportDocxItem.setEnabled(exportable != null);
-                String from = input.getSelectedText() == null
-                        || input.getSelectedText().isEmpty() ? "log" : "prompt";
-                exportRtfItem.setText("Export selected Markdown as RTF... (from the "
-                        + from + ")");
-                exportDocxItem.setText("Export selected Markdown with images as DOCX... "
-                        + "(from the " + from + ")");
+                // THE LOG'S OWN SELECTION, because this is the log's menu. The prompt's
+                // selection is exported from the prompt's menu, which has the same two
+                // items (see promptMenu) - so neither of them has to say which side it is
+                // about to take, and an answer corrected in the prompt is exported from
+                // where the correcting was done.
+                exportRtfItem.setEnabled(selected);
+                exportDocxItem.setEnabled(selected);
                 openUrlItem.setEnabled(selected && log.selectedUrl() != null);
                 if (openFileItem != null) {
                     openFileItem.setEnabled(localPathIn(log.selectedText()) != null);
@@ -3675,6 +3668,16 @@ public class JRock {
         // attached again one by one.
         addMenuItem(promptMenu, "Reload all includes",
                 () -> reloadIncludes(input, log, log.timelineNow(), 0));
+        // THE SAME TWO EXPORTS AS THE LOG'S MENU, on the prompt's own selection - which is
+        // the interesting one: the way to make a document out of an answer with a
+        // correction in it is to copy the answer down here, change the line that is wrong,
+        // select it and export THAT. The log is a transcript and cannot be edited at all.
+        javax.swing.JMenuItem exportPromptRtf =
+                addMenuItem(promptMenu, "Export selected Markdown as RTF...",
+                        () -> exportSelectedMarkdown(frame, log, promptSelection(input), false));
+        javax.swing.JMenuItem exportPromptDocx =
+                addMenuItem(promptMenu, "Export selected Markdown with images as DOCX...",
+                        () -> exportSelectedMarkdown(frame, log, promptSelection(input), true));
         addMenuItem(promptMenu, "Load prompt from file...",
                 () -> loadPromptInto(frame, input, log));
         addMenuItem(promptMenu, "Save prompt copy as...",
@@ -3706,6 +3709,8 @@ public class JRock {
                 boolean selected = input.getSelectedText() != null;
                 cutItem.setEnabled(selected);
                 copyItem.setEnabled(selected);
+                exportPromptRtf.setEnabled(promptSelection(input) != null);
+                exportPromptDocx.setEnabled(promptSelection(input) != null);
                 undoItem.setEnabled(promptUndo.canUndo());
                 redoItem.setEnabled(promptUndo.canRedo());
                 if (recordItem != null) {
@@ -14382,9 +14387,8 @@ public class JRock {
     // portrait page that frame is the narrow way round. Two filters with the same
     // extension, so the name typed is unaffected by which one is picked.
     private static void exportSelectedMarkdown(JFrame frame, LogView log,
-                                               javax.swing.JTextArea input, boolean asDocx) {
-        String selection = exportSelection(log, input);
-        if (selection == null) return;   // the menu item is disabled without one
+                                               String selection, boolean asDocx) {
+        if (selection == null || selection.isEmpty()) return;   // the item is disabled
         String ext = asDocx ? "docx" : "rtf";
         String kind = asDocx ? "DOCX" : "RTF";
         String what = asDocx ? "Markdown with images" : "Markdown";
@@ -14436,10 +14440,32 @@ public class JRock {
     // mean" than one sitting in a transcript, so when both have one, that one is used.
     //
     // Nothing is sent and nothing is cleared: the prompt is read, not consumed.
-    private static String exportSelection(LogView log, javax.swing.JTextArea input) {
-        String typed = input == null ? null : input.getSelectedText();
-        if (typed != null && !typed.isEmpty()) return typed;
+    // TWO MENUS, TWO SOURCES, AND NO GUESSING BETWEEN THEM. Both export items used to
+    // live in the LOG's menu and take whichever selection existed, the prompt's winning
+    // when both did - with the item's own label saying which it was about to use ("...from
+    // the prompt"). Which is a menu that answers a question nobody asked it: an item in
+    // the log's menu should act on the log, and the prompt's selection is reached from the
+    // prompt's own menu, where the hand already is.
+    //
+    // So the log's menu exports the LOG's selection and the prompt's menu exports the
+    // PROMPT's, each greyed out when its own side has nothing selected. The keys keep
+    // taking either (see exportEitherSelection): one pair of keys cannot belong to two
+    // menus, and what they act on is whichever selection there is.
+    private static String logSelection(LogView log) {
         return log.selectedText();
+    }
+
+    private static String promptSelection(javax.swing.JTextArea input) {
+        String typed = input == null ? null : input.getSelectedText();
+        return typed == null || typed.isEmpty() ? null : typed;
+    }
+
+    // What the keyboard acts on: the prompt's selection when it has one, and the log's
+    // otherwise. The prompt wins because it is the one a correction is made in - the whole
+    // point of being able to export from there (see the README).
+    private static String exportEitherSelection(LogView log, javax.swing.JTextArea input) {
+        String typed = promptSelection(input);
+        return typed != null ? typed : logSelection(log);
     }
 
     // Writes markdown to target as an RTF or a DOCX (with the session's includes, so its
