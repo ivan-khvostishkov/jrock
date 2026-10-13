@@ -16,6 +16,13 @@ that comes *back* from a model is handled here already, while **not one model ca
 `bedrock-mantle` lists an image or an audio output modality**: every model it serves answers in
 text. The day one of them doesn't, nothing here will need to change.
 
+**JRock in the world of AI workbenches is like Vim in the world of text editors.** Keyboard
+first, one artifact you can carry anywhere, plain files on your own disk, and no server to ask
+permission from — small to start and deep when you need it, with the whole of it readable in one
+place. It asks something of you in return, as Vim does: the keys are worth learning
+([there are twenty](#keyboard-shortcuts)), the files are yours to keep, and nothing is hidden
+behind a service that could change its mind.
+
 ![A fresh JRock session: the startup report, one prompt, and one reply from xai.grok-4.3](images/simple-request.png)
 
 *A fresh session in `C:\demo\bedrock-api-lab`, which is also where the window title and its `BAL`
