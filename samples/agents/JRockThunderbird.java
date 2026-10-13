@@ -3431,7 +3431,7 @@ public final class JRockThunderbird {
         }
         synchronized (MODEL_LOCK) {
             check(JRock.automationClearPrompt());
-            check(JRock.automationLoadPrompt(prompt.toString()));
+            check(JRock.automationLoadPrompt(prompt));
             String text = JRock.automationPromptText();
             if (text == null) throw new Stop("the prompt could not be read.");
             StringBuilder without = new StringBuilder();
@@ -3449,7 +3449,7 @@ public final class JRockThunderbird {
                 Files.createDirectories(mailDir);
                 Path body = mailDir.resolve("message.md");
                 Files.write(body, markdown.getBytes(StandardCharsets.UTF_8));
-                check(JRock.automationInclude(body.toString(), "txt"));
+                check(JRock.automationInclude(body));
             } catch (IOException ex) {
                 throw new Stop("the message could not be written for including: "
                         + ex.getMessage());
@@ -3476,7 +3476,7 @@ public final class JRockThunderbird {
                 }
                 // "auto" so each kind goes in the way this folder's settings say: a PDF as
                 // page images or as text, a photograph as itself.
-                String problem = JRock.automationInclude(one.file.toString(), "auto");
+                String problem = JRock.automationInclude(one.file);
                 if (problem != null) {
                     later(() -> say("Could not include " + one.name + ": " + problem));
                 }
@@ -3487,15 +3487,15 @@ public final class JRockThunderbird {
                         + String.join(", ", leftOut) + ". Say at the end that they were "
                         + "not read.\n"));
             }
-            String[] sent = JRock.automationSend(MAIL_SEND_TIMEOUT_MS);
-            if (!"1".equals(sent[0])) {
+            JRock.Sent sent = JRock.automationSend(MAIL_SEND_TIMEOUT_MS);
+            if (!sent.ok()) {
                 throw new Stop("the message was not read: "
-                        + (sent[3] == null ? "no reason given" : sent[3]));
+                        + (sent.failure() == null ? "no reason given" : sent.failure()));
             }
-            String file = JRock.automationMessageFile("assistant", sent[2]);
+            java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
             if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
             try {
-                String refined = new String(Files.readAllBytes(Paths.get(file)),
+                String refined = new String(Files.readAllBytes(file),
                         StandardCharsets.UTF_8).trim();
                 if (refined.isEmpty()) throw new Stop("the reply was empty.");
                 return refined;

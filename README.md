@@ -1323,7 +1323,7 @@ the PDF's text, in reading order, rather than pictures of it.
 **Nothing is said aloud that is not written down.** `automationNarrate()` takes no text: it
 reads whatever is selected in the log, exactly as the menu item does. An agent that wants to say
 something therefore has it in the log, selects it (`automationSelectInLog`), narrates, and lets
-the selection go (`automationClearSelection`) — and the reason is the transcript. A spoken answer
+the selection go (`automationClearLogSelection`) — and the reason is the transcript. A spoken answer
 with no record of it is the one kind of output this machine cannot account for afterwards; now the
 log holds everything JRock has ever said out loud, in order, with the conversation around it, and
 the window shows the very words while they are being spoken.
@@ -3226,28 +3226,26 @@ String   automationAwaitReady(long timeoutMillis)
 void     automationEnd(String note)
 
 // The prompt
-String   automationLoadPrompt(String file)
-String   automationPromptText()
+String   automationLoadPrompt(Path file)                      // absolute, or a bare name here
+String   automationPromptText()                               // the text, or null
 String   automationSetPrompt(String text)
 String   automationClearPrompt()
-String   automationInclude(String file)                       // the kind is the file's own business
-String   automationInclude(String file, String kind)         // forcing one: txt, img, imgref, pdfhtml...
+String   automationInclude(Path file)                         // absolute; the folder decides how
 String   automationFetchUrl(String url)
 
 // Sending, and what came back
-String[] automationSend(long timeoutMillis)                  // {ok, operator stamp, assistant stamp, why not}
-String   automationMessageFile(String role, String stamp)
+Sent     automationSend(long timeoutMillis)                   // ok() / failure() / two moments
+Path     automationMessageFile(String role, LocalDateTime stamp)   // absolute, or null
 
 // Documents
 String   automationExportSelectionDocx(String file)           // the log's selection, left selected
-String   automationExportDocx(String markdown, String file)  // any text, including text in no log
-String   automationExportPromptDocx(String file)
+String   automationExportPromptDocx(String file)              // the prompt, or its selection
 String   automationMergeDuplex(String front, String back, String out)
 
 // Saying things, and being read afterwards
-String   automationNote(String agent, String line)            // the name is not optional
+String   automationNote(String line)                          // named by automationBegin
 String   automationSelectInLog(String text)
-String   automationClearSelection()
+String   automationClearLogSelection()
 String   automationNarrate()
 boolean  automationStopNarration()
 
@@ -3256,40 +3254,58 @@ String   automationStartRecording()
 String   automationStopRecording(long timeoutMillis)
 String   automationListen(boolean on)
 String   automationMicReady()
-String[] automationAwaitHeard(long timeoutMillis)            // {file, why not}
+Heard    automationAwaitHeard(long timeoutMillis)             // heard() / quiet() / failure()
 ```
 
-Every one of them returns `null` for *fine*; anything else is the sentence saying what went
-wrong. What each one does, in full:
+**What comes back.** A `String` return is `null` for *done*, and otherwise **the sentence saying
+why not** — in the language the log is written in, ready to put straight into a dialog or a status
+line. No error codes, and nothing thrown: a flow is a single `.java` file, and an exception
+halfway through leaves the document half made. Three calls answer a question instead of doing a
+thing (`automationPromptText`, `automationMessageFile`, `automationStopNarration`), and the two
+that come back with more than one fact have a type each:
+
+```java
+Sent  { boolean ok();  String failure();  LocalDateTime operator();  LocalDateTime assistant(); }
+Heard { boolean heard(); boolean quiet(); String failure(); }
+```
+
+`Sent.quiet()`'s absence is the point of `Heard` having one: listening has three outcomes —
+something was said, the room was silent for this timeout (go round again), or it cannot listen at
+all — and as a `String[]` the difference between the last two was `[1] == null`.
+
+**Paths, not path-shaped strings.** `automationLoadPrompt` and `automationInclude` take a `Path`,
+and `automationMessageFile` hands one back; `Path.get` is where a character no file name can hold
+fails, in the caller's own hands, so nothing in the middle parses anything. An include is
+**absolute** — what is included comes from wherever the caller found it — and a prompt file is
+absolute **or a bare file name of this folder**, which is `file.equals(file.getFileName())` and
+nothing more subtle than that. What each one does, in full:
 
 | Method | What it does |
 |---|---|
 | `automationAwaitReady(long millis)` | Blocks until the window is up and the model list is in. Returns why not — including the missing API key. |
 | `automationBegin(String what)` | Takes the window: prompt read-only, Send held, and a log line saying so. History is left as the checkbox has it. Mutes [Mic always on](#mic-always-on) as well: nobody types into the prompt now, so nobody speaks into it either. The includes the log refers to are already known: every start [reloads them](#includes-that-outlive-the-session). Refuses if an automation is already running. |
-| `automationLoadPrompt(String file)` | Ctrl+O, from a path. |
+| `automationLoadPrompt(Path file)` | Ctrl+O, from a path — **absolute**, or **a bare file name** of the folder this is running in, which is where an agent's own prompts are installed. Anything else is refused rather than resolved: what a relative path would be resolved against is the process's working directory, which an agent started from a right-click entry did not choose. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
-| `automationInclude(String file)` | **Ctrl+I, from a path** — and the kind is the file's own business: its extension and this folder's include settings decide, exactly as the include dialog would. What an agent wants nearly always: a PDF as images, as xpdf HTML or as xpdf text according to *Include a PDF as*, an RTF as Markdown or as its markup, a picture with or without its reference line, each from a copy under `JRock/includes/` or where it lies — all of which are settings of the folder, and nothing an agent should repeat in its own source. |
-| `automationInclude(String file, String kind)` | The same, **forcing one reading** — for a caller whose *prompt* depends on it. The doc inventory flow's first pass asks the model to copy `![](<hash>)` references for the page images, so it includes a PDF as `"pdfhtml"` whatever the folder says; with the setting deciding, the attachment and the instructions beside it could disagree. From a path: `"pdf"` (page images), `"img"`, `"imgref"`, `"txt"`, `"audio"`, `"rtf"`, `"docx"`, `"xlsx"`, and `"pdfhtml"` / `"pdftext"` (xpdf, beside the PDF, with the include dialog's own dialogs), whatever Configure says for the type — or `"auto"`, as the include dialog would. `"imgref"` and `"pdfhtml"` always write [Markdown references](#multimodal-includes-ctrli); otherwise they, and processed copies, follow Configure. Fails when nothing was included. |
+| `automationInclude(Path file)` | **Ctrl+I, from a path** — and the kind is the file's own business: its extension and this folder's include settings decide, exactly as the include dialog would. What an agent wants nearly always: a PDF as images, as xpdf HTML or as xpdf text according to *Include a PDF as*, an RTF as Markdown or as its markup, a picture with or without its reference line, each from a copy under `JRock/includes/` or where it lies — all of which are settings of the folder, and nothing an agent should repeat in its own source. |
 | `automationFetchUrl(String url)` | [Fetch URL](#fetching-a-url) (Ctrl+U), for a URL given: the page goes in at the cursor, as a link and an include. A refused URL is a returned reason, not a dialog. Fails when nothing was inserted. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
 | `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
 | `automationStopRecording(long millis)` | Stop recording (Ctrl+Space again), and waits until the recording is in the prompt — an `@audio` token, or the transcribed text with **Transcribe** on. Fails when nothing reached the prompt. |
 | `automationListen(boolean on)` | Lifts the mute `automationBegin` put on Mic always on (`true`), or puts it back (`false`). **Turns Mic always on on** if it is off — an agent asking to listen was told to by the operator, and a checkbox in another window is not a second opinion worth having about that; `automationEnd` puts the tick back as they left it, and nothing is written to the config. Refuses only when no microphone is set. |
-| `automationAwaitHeard(long millis)` | Waits for Mic always on to hear someone and for what was said to reach the prompt. Returns `{"1", null}` when it has, `{"0", null}` when nobody spoke in time, `{"0", why not}` when it cannot. A recording under way is waited out, not cut off. |
+| `automationAwaitHeard(long millis)` | Waits for a recording [**Mic always on**](#mic-always-on) made. Returns a **`Heard`**: `heard()` when something was said and has reached the prompt, `quiet()` when the room was silent for this timeout — go round again — and `failure()` when it cannot listen at all. Three outcomes, which is why it is a type and not a boolean. |
 | `automationMicReady()` | Whether there is a microphone to listen on **right now** — `null` when there is, and otherwise why not, including the one answer a listening loop cannot work out for itself: the microphone set is **not connected**. A quiet room and an unplugged microphone look identical to `automationAwaitHeard`, and they mean opposite things. |
 | `automationNarrate()` | Reads **the log's selection** aloud: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when nothing is selected, when no device is set, or when it isn't connected. **Takes no text** — see below. (Windows) |
 | `automationSelectInLog(String text)` | Selects the last place that text appears in the log — the model's answer where it stands, or a line `automationNote` has just put there. Refuses when it is not there (*Dialog only* hides gray lines). |
-| `automationClearSelection()` | Lets the selection go and follows the end of the conversation again — the log scrolls nowhere while a selection exists. |
+| `automationClearLogSelection()` | Lets the selection go and follows the end of the conversation again — the log scrolls nowhere while a selection exists. |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
-| `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
-| `automationMessageFile(String role, String stamp)` | The path of one `JRock/messages/` file, or `null` when it isn't there. |
-| `automationExportSelectionDocx(String file)` | **The log's own selection** as a DOCX — `Ctrl+Shift+D` through the API, and the third of the trio narration already uses: `automationSelectInLog`, this, `automationClearSelection`. The selection is **left as it was found**, an automation being the one that knows when it has finished with it. Refuses when nothing is selected. |
-| `automationExportDocx(String markdown, String file)` | **Any Markdown**, including text that is in no log at all — a file's own text that nobody sent, or a reply with its code fences stripped, neither of which there is a selection for. Writes `file` as A4 portrait with every `![...](<name>)` (or `![](<hash>)`) placed as the image that include names, and shows the text in the log where it can be found. |
-| `automationExportPromptDocx(String file)` | The same, for **what the prompt holds** - or its selection, when it has one. No model, no send, nothing cleared: the prompt is a sheet of paper here. It is what `Ctrl+Shift+D` does by hand when the selection is the prompt's, offered to an automation that has written something and wants it as a file. |
+| `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns a **`Sent`**: `ok()`, `failure()`, and the two moments it wrote as `LocalDateTime`s — which is what `automationMessageFile` takes, so nothing has to be parsed on the way. |
+| `automationMessageFile(String role, LocalDateTime stamp)` | The **absolute `Path`** of one `JRock/messages/` file, or `null` when there is none. `role` is `"operator"` or `"assistant"`; the stamp is one of the two `Sent` hands back, so there is no text to parse in either direction. |
+| `automationExportSelectionDocx(String file)` | **The log's own selection** as a DOCX — `Ctrl+Shift+D` through the API, and the third of the trio narration already uses: `automationSelectInLog`, this, `automationClearLogSelection`. The selection is **left as it was found**, an automation being the one that knows when it has finished with it. Refuses when nothing is selected. |
+| `automationExportPromptDocx(String file)` | **What the prompt holds** — or its selection, when it has one. Where an automation's own text goes: there is no call that takes Markdown as an argument, because an export is of something the window is **showing**, and a document nobody can see on screen is one nobody can check before it is written. No model, no send, nothing cleared: the prompt is a sheet of paper here. It is what `Ctrl+Shift+D` does by hand when the selection is the prompt's, offered to an automation that has written something and wants it as a file. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationMergeDuplex(front, back, out)` | **Merge two-sided scans**: the same interleave as the window menu — front 1, back N, front 2, back N−1 — with the two dialogs replaced by three arguments. Both passes must have the same page count, or one of them is not the file it was taken for; refused rather than guessed at, since the mistake it makes is every back page against the wrong front. No dialog either way: an automation that cannot press OK must not be shown one. The two scans are left exactly as they were. |
-| `automationNote(String agent, String line)` | One line in JRock's log, from a **named** agent: `Push-to-talk: something went wrong`. An agent is started by `javaw` and **has no standard output at all**, and its own window has one status line the next turn overwrites — so this is the only place a reason can still be read an hour later. Needs no `automationBegin`. **The name is not optional**: read a month later, a line with nobody's name on it is either JRock saying something about itself or an agent saying something about its own work, and those are not the same claim. For the sentences an agent says for itself — narration reads the log's selection, so a sentence of its own has to be written down before it can be spoken, and the model's answer never is, being there already. The agent then selects its own words alone, so the name is read by whoever reads the log rather than out loud. |
+| `automationNote(String line)` | One line in JRock's log, **named by `automationBegin`** — which already said what this automation is called, so the name is given once there rather than in every line: `Push-to-talk: something went wrong`. An agent is started by `javaw` and **has no standard output at all**, and its own window has one status line the next turn overwrites — so this is the only place a reason can still be read an hour later. Needs no `automationBegin` to work, but then the line carries no name. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
 
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the
@@ -4287,8 +4303,9 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockAutomationDocTest`** drives the two calls the doc inventory's first pass is made of,
   from a thread of its own as an automation would: `automationInclude(pdf, "pdfhtml")`, answering
   **Yes** to the create question and checking every page image arrived with its `![...](<path>)`
-  reference, and `automationExportDocx`, checking the DOCX carries the very PNG the reference
-  named. Nothing is sent.
+  reference, and `automationExportPromptDocx`, checking the DOCX carries the very PNG the
+  reference named — the text put in the prompt first, which is where an automation's own text
+  goes now that no call takes Markdown as an argument. Nothing is sent.
 - **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
   sheet* and compares both CSVs under `JRock/includes/` **whole**: shared, rich and inline
   strings, a comma and quotes quoted, a line break kept inside its field, dates in a built-in and

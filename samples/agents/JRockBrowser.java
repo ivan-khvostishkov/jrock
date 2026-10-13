@@ -134,9 +134,10 @@ public final class JRockBrowser {
     // The next port after the calendar's, on the loopback interface only.
     private static final int PORT = 47474;
 
-    // What this agent is called in JRock's log, in front of every line it writes
-    // there: a transcript is read long afterwards, and a line with no name on it
-    // reads as something JRock said about itself.
+    // What this agent is called in JRock's log. Given to automationBegin, which keeps it
+    // and writes it in front of every note this agent makes afterwards - so the name is
+    // here once rather than in every line, and a transcript read long afterwards says who
+    // spoke rather than leaving it to read as something JRock said about itself.
     private static final String AGENT = "Browser agent";
 
     // THE LIST. Hosts, and their subdomains, and nothing else ever.
@@ -394,7 +395,7 @@ public final class JRockBrowser {
         JRock.main(args);
         String notReady = JRock.automationAwaitReady(READY_TIMEOUT_MS);
         String problem = JRock.automationWindow() == null ? notReady
-                : JRock.automationBegin("browser agent");
+                : JRock.automationBegin(AGENT);
         if (problem == null) problem = notReady;
         if (problem != null) {
             String why = problem;
@@ -2017,7 +2018,7 @@ public final class JRockBrowser {
                     + "picture into Markdown.");
         }
         check(JRock.automationClearPrompt());
-        check(JRock.automationLoadPrompt(prompt.toString()));
+        check(JRock.automationLoadPrompt(prompt));
         String text = JRock.automationPromptText();
         if (text == null) throw new Stop("the prompt could not be read.");
         // The prompt ends with a bare @img line as a placeholder for a person reading it;
@@ -2031,17 +2032,17 @@ public final class JRockBrowser {
         // Every piece, in the order they come down the page: the prompt says they overlap
         // and that they are one page, so the answer is one page's worth of Markdown.
         for (Path piece : page.pieces) {
-            check(JRock.automationInclude(piece.toString(), "img"));
+            check(JRock.automationInclude(piece));
         }
-        String[] sent = JRock.automationSend(SEND_TIMEOUT_MS);
-        if (!"1".equals(sent[0])) {
-            throw new Stop("the page was not read: " + (sent[3] == null ? "no reason given"
-                    : sent[3]));
+        JRock.Sent sent = JRock.automationSend(SEND_TIMEOUT_MS);
+        if (!sent.ok()) {
+            throw new Stop("the page was not read: " + (sent.failure() == null ? "no reason given"
+                    : sent.failure()));
         }
-        String file = JRock.automationMessageFile("assistant", sent[2]);
+        java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
         if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
         try {
-            String markdown = new String(Files.readAllBytes(Paths.get(file)),
+            String markdown = new String(Files.readAllBytes(file),
                     StandardCharsets.UTF_8).trim();
             if (markdown.isEmpty()) throw new Stop("the reply was empty.");
             return markdown;
@@ -2480,7 +2481,7 @@ public final class JRockBrowser {
         if (wide > 0) status.setSize(wide, Short.MAX_VALUE);
         status.revalidate();
         System.out.println(text);
-        JRock.automationNote(AGENT, text);
+        JRock.automationNote(text);
     }
 
     // ---- Settings --------------------------------------------------------------

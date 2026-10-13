@@ -66,9 +66,16 @@ class JRockAutomationApiTest {
         // state the next test did not ask for.
         assertThat(api.automationWindow()).describedAs("the window, both ways round")
                 .isSameAs(JRock.automationWindow());
-        assertThat(api.automationMessageFile("assistant", "20260101-000000-000"))
+        // The stamp is made HERE, by this side's own parse of the format JRock names its
+        // message files with (see stampOf): the API takes a moment in time, so a path or
+        // a name with separators in it cannot be handed to it at all.
+        java.time.LocalDateTime stamp = stampOf("20260101-000000-000");
+        assertThat(stamp).describedAs("a stamp this side parsed").isNotNull();
+        assertThat(stampOf("../../etc/passwd"))
+                .describedAs("something that is not a stamp at all").isNull();
+        assertThat(api.automationMessageFile("assistant", stamp))
                 .describedAs("the path of a message file that does not exist, both ways round")
-                .isEqualTo(JRock.automationMessageFile("assistant", "20260101-000000-000"));
+                .isEqualTo(JRock.automationMessageFile("assistant", stamp));
     }
 
     /** Each method as "name(paramType, paramType): returnType", which is what has to match. */
@@ -83,4 +90,21 @@ class JRockAutomationApiTest {
         }
         return out;
     }
+
+    // The format JRock names its message files with - "yyyyMMdd-HHmmss-SSS", documented
+    // and stable - which is what automationSend's stamps are written in. Parsed HERE and
+    // not by JRock: a stamp is a moment in time, and turning the text of one into a
+    // moment is this side's own business. JRock takes the moment (see
+    // automationMessageFile), so what crosses the API cannot be a path, a name with
+    // separators in it, or anything else that is not a time.
+    private static java.time.LocalDateTime stampOf(String stamp) {
+        if (stamp == null) return null;
+        try {
+            return java.time.LocalDateTime.parse(stamp.trim(),
+                    java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"));
+        } catch (java.time.format.DateTimeParseException notAStamp) {
+            return null;
+        }
+    }
+
 }

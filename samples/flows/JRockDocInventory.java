@@ -113,7 +113,7 @@ public final class JRockDocInventory {
     // The flow is the same flow; what changes is that every question answers itself the
     // way the person at the keyboard almost always answers it - yes, rename them - and
     // that the result is PRINTED in a line a program can read instead of shown in a
-    // dialog a program cannot dismiss. It is how the papers agent files a scan the
+    // dialog a program cannot dismiss. It is how the paper docs agent files a scan the
     // moment it arrives, with the operator three rooms away.
     //
     // Two documents are allowed with it, and only with it: the two passes of a
@@ -205,11 +205,11 @@ public final class JRockDocInventory {
         // somebody closed it. Interactively that is exactly right - the window holds the
         // log and the conversation, and the operator closes it when they have read it.
         // Under --auto nobody is there to close anything, and whoever started this is
-        // waiting for the PROCESS to end and not merely for its answer: the papers agent
+        // waiting for the PROCESS to end and not merely for its answer: the paper docs agent
         // reads this output until the stream ends, which it only does when the process
         // does. So it read the result line, printed "Flow: Finished", and then waited for
         // ever on a process that was never going to exit - with every later request to
-        // that agent queued behind it, and push-to-talk reporting "the papers agent did
+        // that agent queued behind it, and push-to-talk reporting "the paper docs agent did
         // not answer" three minutes after the letter had in fact been filed.
         //
         // Read off the command line rather than off `asking`, so that an automation that
@@ -318,26 +318,45 @@ public final class JRockDocInventory {
         }
 
         // ---- Pass one: the document as Markdown, then as a DOCX -------------
-        // A PDF as HTML: its text as the pages' own, its pictures as the page images,
-        // each with the "![](<hash>)" the answer is to copy. JRock asks before creating
-        // the folder, and offers the one already there instead.
+        // INCLUDED AS THE FOLDER SAYS, AND THE PROMPT FITTED TO WHAT ARRIVED.
+        //
+        // This used to force a reading - a PDF as xpdf HTML, an image with its Markdown
+        // reference - which is the best input there is for this pass and is also this
+        // automation overruling the operator in their own folder. "Include a PDF as" and
+        // "Write a Markdown reference" are settings of the JRock that runs here, and a
+        // flow that ignores them is a flow whose output cannot be explained by what the
+        // dialog says.
+        //
+        // So the include is the plain one, and THE PROMPT COVERS WHAT MAY ARRIVE: page
+        // images laid out, extracted text, either of them with or without the references
+        // that let a picture be placed. It says what to do in each case - and, where no
+        // references are attached, to write none and invent nothing - so an instruction
+        // and an attachment cannot disagree whatever the dialog says. What did arrive is
+        // read off the prompt and printed (see sayWhatArrived), because that is the first
+        // thing to know when a document comes out with no pictures in it.
         Path wordFile = document;
         if (pass == PASS_MARKDOWN) {
             System.out.println("Pass 1: " + PROMPT_MARKDOWN);
-            check(JRock.automationLoadPrompt(markdownPrompt.toString()));
+            check(JRock.automationLoadPrompt(markdownPrompt));
             dropPlaceholders();
-            check(JRock.automationInclude(document.toString(),
-                    extension(document).equals(EXT_PDF) ? "pdfhtml" : "imgref"));
+            check(JRock.automationInclude(document));
+            sayWhatArrived();
             String markdown = unfenced(reply(JRock.automationSend(REPLY_TIMEOUT_MS)));
             wordFile = free(dir, stem(document), "." + EXT_DOCX);
-            check(JRock.automationExportDocx(markdown, wordFile.toString()));
+            // EXPORTED FROM THE LOG, where the answer already is. unfenced only takes a
+            // ``` line off each end, so what is left is a contiguous run of the answer as
+            // the log holds it - selectable, and the same document. Selected, written,
+            // and let go of: the log scrolls nowhere while a selection stands.
+            check(JRock.automationSelectInLog(markdown));
+            check(JRock.automationExportSelectionDocx(wordFile.toString()));
+            JRock.automationClearLogSelection();
             written.add(wordFile);
             System.out.println("Wrote " + wordFile);
         } else if (pass == PASS_NAME && alone(document)) {
             // A TXT THAT IS NOBODY'S PLAIN-TEXT COPY IS A DOCUMENT OF ITS OWN, and gets
             // the DOCX the others get. No send: the text is already the text, and the
             // exporter reads Markdown - so this works for a note and for an answer the
-            // papers agent was asked to keep, which arrives as markdown in a .txt.
+            // paper docs agent was asked to keep, which arrives as markdown in a .txt.
             //
             // Only when the TXT stands alone. A .txt BESIDE a document is that
             // document's plain text, written by pass two, and exporting a DOCX from it
@@ -349,7 +368,12 @@ public final class JRockDocInventory {
             }
             System.out.println("A text document on its own: writing its DOCX, no send.");
             wordFile = free(dir, stem(document), "." + EXT_DOCX);
-            check(JRock.automationExportDocx(markdown, wordFile.toString()));
+            // THROUGH THE PROMPT, because nothing was sent and so nothing of this is in
+            // the log. The prompt is this automation's workspace between steps - it is
+            // read-only to the operator while the window is held - so the text goes
+            // there, is exported from there, and pass three loads its own prompt over it.
+            check(JRock.automationSetPrompt(markdown));
+            check(JRock.automationExportPromptDocx(wordFile.toString()));
             written.add(wordFile);
             System.out.println("Wrote " + wordFile);
         }
@@ -360,9 +384,9 @@ public final class JRockDocInventory {
         Path textFile = document;
         if (pass <= PASS_TEXT) {
             System.out.println("Pass 2: " + PROMPT_ASCII);
-            check(JRock.automationLoadPrompt(ascii.toString()));
+            check(JRock.automationLoadPrompt(ascii));
             dropPlaceholders();
-            check(JRock.automationInclude(wordFile.toString(), extension(wordFile)));
+            check(JRock.automationInclude(wordFile));
             String text = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
             textFile = free(dir, stem(document), "." + EXT_TXT);
             Files.write(textFile, text.getBytes(StandardCharsets.UTF_8));
@@ -372,9 +396,9 @@ public final class JRockDocInventory {
 
         // ---- Pass three: a name for it --------------------------------------
         System.out.println("Pass 3: " + PROMPT_NAME);
-        check(JRock.automationLoadPrompt(inventory.toString()));
+        check(JRock.automationLoadPrompt(inventory));
         dropPlaceholders();
-        check(JRock.automationInclude(textFile.toString(), EXT_TXT));
+        check(JRock.automationInclude(textFile));
         String answer = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
         String base = baseName(answer);
         if (base.isEmpty()) {
@@ -520,7 +544,7 @@ public final class JRockDocInventory {
         String scansLine = scansNote.isEmpty() ? "" : "\n" + capitalised(scansNote) + ".";
 
         if (!asking) {
-            // The one line the papers agent reads out of all this output.
+            // The one line the paper docs agent reads out of all this output.
             System.out.println(autoResult(base, renamed.isEmpty() ? document
                     : renamed.get(0), renamed.size()));
         }
@@ -787,6 +811,33 @@ public final class JRockDocInventory {
     // they go - and what is left ends with one newline, as each include token goes on a
     // line of its own at the end of it. They are no tokens (a token carries a
     // 12-hex-digit hash), so one left in would go out as the word it is.
+    // WHAT THE INCLUDE ACTUALLY ATTACHED, read off the prompt it attached into - said,
+    // and nothing else done about it.
+    //
+    // Three readings reach this pass, all of them legitimate settings of the folder, and
+    // the PROMPT covers all three rather than this automation editing it: page images
+    // show the document laid out, extracted text shows the words alone, and a reference
+    // line above a picture is what lets the answer place that picture. Asked for pictures
+    // it has no references for, the prompt tells the model to write none and to invent
+    // nothing - so an instruction and an attachment cannot disagree, whatever the dialog
+    // is set to.
+    //
+    // Printed because it is the first thing to know when a DOCX comes out without the
+    // pictures in it, or with less structure than the page had: what arrived is what the
+    // folder's "Include a PDF as" and "Write a Markdown reference" said to attach.
+    private static void sayWhatArrived() {
+        String prompt = JRock.automationPromptText();
+        if (prompt == null) throw new Stop("the prompt could not be read.");
+        boolean pictures = prompt.contains("@img ");
+        boolean text = prompt.contains("@txt ");
+        System.out.println("Attached as this folder is configured: "
+                + (text && pictures ? "text and page images"
+                   : text ? "text only" : pictures ? "page images only" : "nothing")
+                + (prompt.contains("![") ? ", with Markdown references - the pictures can be "
+                        + "placed in the document"
+                   : ", with no references - the pictures are read, not placed"));
+    }
+
     private static void dropPlaceholders() {
         String prompt = JRock.automationPromptText();
         if (prompt == null) throw new Stop("the prompt could not be read.");
@@ -813,15 +864,15 @@ public final class JRockDocInventory {
         }
     }
 
-    private static String reply(String[] sent) {
-        if (!"1".equals(sent[0])) throw new Stop(sent[3]);
-        if (JRock.automationMessageFile("operator", sent[1]) == null) {
+    private static String reply(JRock.Sent sent) {
+        if (!sent.ok()) throw new Stop(sent.failure());
+        if (JRock.automationMessageFile("operator", sent.operator()) == null) {
             throw new Stop("the request was not written to JRock/messages/.");
         }
-        String file = JRock.automationMessageFile("assistant", sent[2]);
+        java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
         if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
         try {
-            return new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8);
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException ex) {
             throw new Stop("could not read the reply:\n\n    " + file
                     + "\n\n" + ex.getMessage());

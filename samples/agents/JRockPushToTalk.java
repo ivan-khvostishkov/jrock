@@ -216,9 +216,11 @@ public final class JRockPushToTalk {
     private static final String FAILED_ALOUD = "Something went wrong. Should I try again?";
 
     // What this agent is called in JRock's log, in front of every line it writes there -
-    // its own reports, and the sentences it says out loud (see sayOwnWords). One JRock
-    // window can be driven by one agent, but a transcript is read long afterwards, and a
-    // line with no name on it reads as something JRock said about itself.
+    // its own reports, and the sentences it says out loud (see sayOwnWords). Given to
+    // automationBegin, which keeps it and prefixes the notes with it: the name is said
+    // once, where the window is taken, rather than in every line. A transcript is read
+    // long afterwards, and a line with no name on it reads as something JRock said about
+    // itself.
     private static final String AGENT = "Push-to-talk";
 
     // How often hands-free looks for a microphone that is not there.
@@ -427,7 +429,7 @@ public final class JRockPushToTalk {
             // file JRock loads - harmless, since the prompt is cleared a line later.
             JRock.main(args);
             check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
-            check(JRock.automationBegin("push-to-talk agent"));
+            check(JRock.automationBegin(AGENT));
             check(JRock.automationClearPrompt());
         } catch (Stop stop) {
             JRock.automationEnd("stopped - " + stop.getMessage());
@@ -494,7 +496,7 @@ public final class JRockPushToTalk {
     private static String answer(boolean handsFreeTurn) {
         String prompt = JRock.automationPromptText();
         if (prompt == null) throw new Stop("the prompt could not be read.");
-        String after = read(appendix.toString());
+        String after = read(appendix);
         if (after == null) throw new Stop("there is no " + appendix + ".");
         after = after.replace(NOW_PLACEHOLDER, now()).replaceAll("\\s+$", "");
         check(JRock.automationSetPrompt(prompt.replaceAll("\\s+$", "") + "\n\n" + after + "\n"));
@@ -888,7 +890,7 @@ public final class JRockPushToTalk {
                       + "language. Name any date, amount or reference number that matters. "
                       + "Do not read out the file name.\n\n");
             if (problem != null) return problem;
-            return JRock.automationInclude(file.toString(), "txt");
+            return JRock.automationInclude(file);
         } catch (IOException ex) {
             return "it could not be written beside the transcript: " + ex.getMessage();
         }
@@ -914,7 +916,7 @@ public final class JRockPushToTalk {
         later(() -> setState(State.ANSWERING, "Finding the weather for " + at + "\u2026"));
         String[] url = askAgent(WEATHER_PORT, at, "weather", "JRockWeather.java");
         if (url[0] == null) return url;
-        String prompt = read(ownDirectory().resolve(WEATHER_PROMPT).toString());
+        String prompt = read(ownDirectory().resolve(WEATHER_PROMPT));
         if (prompt == null) return new String[] { null, "there is no " + WEATHER_PROMPT + "." };
         prompt = prompt.replace("#location", at);
         int cut = prompt.indexOf("#url");
@@ -940,9 +942,9 @@ public final class JRockPushToTalk {
             answerArea.setText("");
             setState(State.ANSWERING, waiting);
         });
-        String[] sent = JRock.automationSend(REPLY_TIMEOUT_MS);
-        if (!"1".equals(sent[0])) throw new Stop(sent[3]);
-        String answer = read(JRock.automationMessageFile("assistant", sent[2]));
+        JRock.Sent sent = JRock.automationSend(REPLY_TIMEOUT_MS);
+        if (!sent.ok()) throw new Stop(sent.failure());
+        String answer = read(JRock.automationMessageFile("assistant", sent.assistant()));
         if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
         return answer;
     }
@@ -997,7 +999,7 @@ public final class JRockPushToTalk {
     // name in front (automationNote with an agent), and only the words after the name are
     // narrated - "Push-to-talk:" is for whoever reads the transcript.
     private static String sayOwnWords(String words) {
-        String problem = JRock.automationNote(AGENT, words);
+        String problem = JRock.automationNote(words);
         if (problem != null) return problem;
         return narrateFromLog(words);
     }
@@ -1008,7 +1010,7 @@ public final class JRockPushToTalk {
         String problem = JRock.automationSelectInLog(words);
         if (problem != null) return problem;
         String silent = JRock.automationNarrate();
-        JRock.automationClearSelection();
+        JRock.automationClearLogSelection();
         return silent;
     }
 
@@ -1031,7 +1033,7 @@ public final class JRockPushToTalk {
     // so the reason is still there to read afterwards.
     private static void report(String line) {
         System.out.println(line);
-        JRock.automationNote(AGENT, line);
+        JRock.automationNote(line);
     }
 
     // The notes that are there, in one line; null when there are none.
@@ -1318,7 +1320,7 @@ public final class JRockPushToTalk {
                     String listening = note == null ? LISTENING_HANDS_FREE
                             : note + " " + LISTENING_HANDS_FREE;
                     later(() -> setState(State.RECORDING, listening));
-                    String[] heard;
+                    JRock.Heard heard;
                     do {
                         heard = JRock.automationAwaitHeard(LISTEN_POLL_MS);
                         // A microphone goes while nobody is speaking, which is exactly
@@ -1327,12 +1329,12 @@ public final class JRockPushToTalk {
                         // the two apart. Asked on every poll: automationMicReady reports
                         // what JRock's own watcher last saw and goes nowhere near the
                         // devices, so asking costs nothing.
-                    } while (handsFree && !"1".equals(heard[0]) && heard[1] == null
+                    } while (handsFree && heard.quiet()
                              && JRock.automationMicReady() == null);
                     // Muted while the answer is on its way, so the question is not asked twice.
                     JRock.automationListen(false);
                     if (!handsFree) break;   // ended: what was being said is not sent
-                    if ("1".equals(heard[0])) {
+                    if (heard.heard()) {
                         // What was said HAS reached the prompt, so it is sent - whether
                         // the microphone is still there or not. That is the usual way
                         // round, not the exception: say it, then unplug so the answer
@@ -1346,7 +1348,7 @@ public final class JRockPushToTalk {
                         // gesture, not a failure. The top of the loop does the waiting.
                         continue;
                     } else {
-                        throw new Stop(heard[1]);
+                        throw new Stop(heard.failure());
                     }
                 } catch (Stop failed) {
                     JRock.automationListen(false);
@@ -1826,10 +1828,10 @@ public final class JRockPushToTalk {
     }
 
     // A message file's text, or null when there is none to read.
-    private static String read(String file) {
+    private static String read(Path file) {
         if (file == null) return null;
         try {
-            return new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8);
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException ex) {
             throw new Stop("could not read " + file + ": " + ex.getMessage());
         }

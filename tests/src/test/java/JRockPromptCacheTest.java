@@ -39,9 +39,9 @@ class JRockPromptCacheTest extends JRockGuiFixture {
         assertThat(JRock.automationBegin("cache test")).isNull();
         try {
             assertThat(JRock.automationSetPrompt("What is 2+2?")).isNull();
-            String[] sent = JRock.automationSend(SEND_TIMEOUT_MS);
-            assertThat(sent[0]).describedAs("the send, answered: " + sent[3]).isEqualTo("1");
-            assertThat(read(JRock.automationMessageFile("assistant", sent[2]))).isEqualTo("4.");
+            JRock.Sent sent = JRock.automationSend(SEND_TIMEOUT_MS);
+            assertThat(sent.ok()).describedAs("the send, answered: " + sent.failure()).isTrue();
+            assertThat(read(JRock.automationMessageFile("assistant", sent.assistant()))).isEqualTo("4.");
             assertThat(logPane().text())
                     .contains("Local prompt cache: this prompt was answered before - reusing "
                             + "JRock/messages/20260101-100005-000-assistant.txt, with no call "
@@ -50,7 +50,7 @@ class JRockPromptCacheTest extends JRockGuiFixture {
 
             // The one that failed is not an answer to anything.
             assertThat(JRock.automationSetPrompt("Unanswered?")).isNull();
-            assertThat(JRock.automationSend(SEND_TIMEOUT_MS)[0]).isEqualTo("0");
+            assertThat(JRock.automationSend(SEND_TIMEOUT_MS).ok()).isFalse();
             assertThat(logPane().text()).contains("Calling ");
         } finally {
             JRock.automationEnd("done");
@@ -76,9 +76,9 @@ class JRockPromptCacheTest extends JRockGuiFixture {
         assertThat(JRock.automationBegin("cache test")).isNull();
         try {
             assertThat(JRock.automationSetPrompt("Capital of France?")).isNull();
-            String[] sent = JRock.automationSend(SEND_TIMEOUT_MS);
-            assertThat(sent[0]).describedAs("the send, answered: " + sent[3]).isEqualTo("1");
-            assertThat(read(JRock.automationMessageFile("assistant", sent[2]))).isEqualTo("Paris.");
+            JRock.Sent sent = JRock.automationSend(SEND_TIMEOUT_MS);
+            assertThat(sent.ok()).describedAs("the send, answered: " + sent.failure()).isTrue();
+            assertThat(read(JRock.automationMessageFile("assistant", sent.assistant()))).isEqualTo("Paris.");
         } finally {
             JRock.automationEnd("done");
         }
@@ -98,7 +98,7 @@ class JRockPromptCacheTest extends JRockGuiFixture {
         assertThat(JRock.automationBegin("cache test")).isNull();
         try {
             assertThat(JRock.automationSetPrompt("What is 2+2?")).isNull();
-            assertThat(JRock.automationSend(SEND_TIMEOUT_MS)[0]).isEqualTo("0");
+            assertThat(JRock.automationSend(SEND_TIMEOUT_MS).ok()).isFalse();
             assertThat(logPane().text()).contains("Calling ")
                     .doesNotContain("this prompt was answered before");
         } finally {
@@ -158,8 +158,11 @@ class JRockPromptCacheTest extends JRockGuiFixture {
         Files.write(file, text.getBytes(StandardCharsets.UTF_8));
     }
 
-    private static String read(String file) throws Exception {
+    private static String read(Path file) throws Exception {
+        // Absolute by the API's own contract, which is worth saying once here: what comes
+        // back is a path to read, not text to turn into one.
         assertThat(file).describedAs("the reply's message file").isNotNull();
-        return new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8);
+        assertThat(file.isAbsolute()).describedAs("and an absolute path: " + file).isTrue();
+        return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
     }
 }

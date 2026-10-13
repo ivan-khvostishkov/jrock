@@ -4096,83 +4096,89 @@ public class JRock {
      * already running.
      */
     public interface Automation {
+        // WHAT A STRING COMING BACK MEANS, once for all of them below: null is "it was
+        // done", and anything else is the SENTENCE SAYING WHY IT WAS NOT - in the
+        // language the log is written in, ready to put straight into a dialog or a status
+        // line. There are no error codes to look up and no exceptions to catch: a flow is
+        // a single .java file, and one thrown halfway through a document leaves the
+        // document half made.
+        //
+        // The three calls that answer a question rather than do a thing say so on their
+        // own line: automationPromptText and automationMessageFile hand back the thing
+        // asked for or null, and automationStopNarration a boolean. The two that come
+        // back with more than one fact have a type each (Sent, Heard).
+
         /** The window itself, so an automation's dialogs belong to it. Null until it exists. */
         JFrame automationWindow();
 
-        /** Takes the window: prompt read-only, Send held, Mic always on paused. */
+        /** Takes the window: prompt read-only, Send held, Mic always on paused. Null, or why not. */
         String automationBegin(String what);
 
-        /** Blocks until the session report has ended and the window can be used. */
+        /** Blocks until the session report has ended. Null when ready, or why it is not. */
         String automationAwaitReady(long timeoutMillis);
 
-        /** Loads a prompt file from the prompts directory into the prompt. */
-        String automationLoadPrompt(String file);
+        /** One prompt file into the prompt: absolute, or a bare name of this folder. Null, or why not. */
+        String automationLoadPrompt(Path file);
 
-        /** What the prompt holds, or null when it cannot be read. */
+        /** THE PROMPT'S TEXT as it stands, or null when there is no window to read it from. */
         String automationPromptText();
 
-        /** Replaces the prompt's text. */
+        /** Replaces the prompt's text. Null, or why not. */
         String automationSetPrompt(String text);
 
-        /** Includes a file as Ctrl+I would - its extension and this folder's settings decide. */
-        String automationInclude(String file);
+        /** Includes an absolute path as Ctrl+I would - extension and folder settings decide. Null, or why not. */
+        String automationInclude(Path file);
 
-        /** The same, forcing one reading: "auto", "txt", "img", "imgref", "pdfhtml"... */
-        String automationInclude(String file, String kind);
-
-        /** Fetches a URL into the prompt, saved under JRock/urls/. */
+        /** Fetches a URL into the prompt, saved under JRock/urls/. Null, or why not. */
         String automationFetchUrl(String url);
 
-        /** Ctrl+Enter, waited for: {ok, operator stamp, assistant stamp, why not}. */
-        String[] automationSend(long timeoutMillis);
+        /** Ctrl+Enter, and waits for the answer. WHAT IT CAME TO: see Sent. */
+        Sent automationSend(long timeoutMillis);
 
-        /** The path of one JRock/messages/ file, or null when it is not there. */
-        String automationMessageFile(String role, String stamp);
+        /** THE ABSOLUTE PATH of one JRock/messages/ file, or null when there is no such file. */
+        Path automationMessageFile(String role, LocalDateTime stamp);
 
-        /** The log's SELECTION as a DOCX, left selected - the pair of automationSelectInLog. */
+        /** The log's selection as a DOCX, left selected. Null, or why not. */
         String automationExportSelectionDocx(String file);
 
-        /** Any Markdown as a DOCX, for text that is in no log: a file's own, a reply unfenced. */
-        String automationExportDocx(String markdown, String file);
-
-        /** The same for what the prompt holds, or its selection when it has one. */
+        /** The same for what the prompt holds, or its selection. Null, or why not. */
         String automationExportPromptDocx(String file);
 
-        /** Empties the prompt. */
+        /** Empties the prompt. Null, or why not. */
         String automationClearPrompt();
 
-        /** Starts recording from the microphone in Configure. */
+        /** Starts recording from the microphone in Configure. Null, or why not. */
         String automationStartRecording();
 
-        /** Stops it and includes the recording as @audio. */
+        /** Stops it and includes the recording as @audio. Null, or why not. */
         String automationStopRecording(long timeoutMillis);
 
-        /** Reads the log's SELECTION aloud, on the speaker in Configure. */
+        /** Reads the log's selection aloud, on the speaker in Configure. Null, or why not. */
         String automationNarrate();
 
-        /** Selects the last place that text appears in the log - what narration reads. */
+        /** Selects the last place that text appears in the log. Null, or why it is not there. */
         String automationSelectInLog(String text);
 
-        /** Lets the selection go, so the log follows the conversation again. */
-        String automationClearSelection();
+        /** Lets the log's selection go, so it follows the conversation again. Null, or why not. */
+        String automationClearLogSelection();
 
-        /** Stops whatever narration is playing; whether one was. */
+        /** WHETHER A NARRATION WAS PLAYING, having stopped it if one was. */
         boolean automationStopNarration();
 
-        /** Mic always on, turned on or off for a hands-free turn. */
+        /** Mic always on, on or off for a hands-free turn. Null, or why not. */
         String automationListen(boolean on);
 
-        /** Whether there is a microphone to listen on right now, and why not. */
+        /** Null when there is a microphone to listen on RIGHT NOW, and otherwise why not. */
         String automationMicReady();
 
-        /** Waits for a recording Mic always on made: {file, why not}. */
-        String[] automationAwaitHeard(long timeoutMillis);
+        /** Waits for a recording Mic always on made. HEARD, QUIET OR WHY NOT: see Heard. */
+        Heard automationAwaitHeard(long timeoutMillis);
 
-        /** Merges two one-sided scans into one two-sided document. */
+        /** Merges two one-sided scans into one two-sided document. Null, or why not. */
         String automationMergeDuplex(String frontFile, String backFile, String outFile);
 
-        /** One line in JRock's log from a NAMED agent - the only place an agent can be read. */
-        String automationNote(String agent, String line);
+        /** One line in JRock's log, named by automationBegin. Null, or why not. */
+        String automationNote(String line);
 
         /** Gives the window back: prompt editable, Send released, a line saying so. */
         void automationEnd(String note);
@@ -4195,33 +4201,27 @@ public class JRock {
         @Override public String automationAwaitReady(long timeoutMillis) {
             return JRock.automationAwaitReady(timeoutMillis);
         }
-        @Override public String automationLoadPrompt(String file) {
+        @Override public String automationLoadPrompt(Path file) {
             return JRock.automationLoadPrompt(file);
         }
         @Override public String automationPromptText() { return JRock.automationPromptText(); }
         @Override public String automationSetPrompt(String text) {
             return JRock.automationSetPrompt(text);
         }
-        @Override public String automationInclude(String file) {
+        @Override public String automationInclude(Path file) {
             return JRock.automationInclude(file);
-        }
-        @Override public String automationInclude(String file, String kind) {
-            return JRock.automationInclude(file, kind);
         }
         @Override public String automationFetchUrl(String url) {
             return JRock.automationFetchUrl(url);
         }
-        @Override public String[] automationSend(long timeoutMillis) {
+        @Override public Sent automationSend(long timeoutMillis) {
             return JRock.automationSend(timeoutMillis);
         }
-        @Override public String automationMessageFile(String role, String stamp) {
+        @Override public Path automationMessageFile(String role, LocalDateTime stamp) {
             return JRock.automationMessageFile(role, stamp);
         }
         @Override public String automationExportSelectionDocx(String file) {
             return JRock.automationExportSelectionDocx(file);
-        }
-        @Override public String automationExportDocx(String markdown, String file) {
-            return JRock.automationExportDocx(markdown, file);
         }
         @Override public String automationExportPromptDocx(String file) {
             return JRock.automationExportPromptDocx(file);
@@ -4237,23 +4237,23 @@ public class JRock {
         @Override public String automationSelectInLog(String text) {
             return JRock.automationSelectInLog(text);
         }
-        @Override public String automationClearSelection() {
-            return JRock.automationClearSelection();
+        @Override public String automationClearLogSelection() {
+            return JRock.automationClearLogSelection();
         }
         @Override public boolean automationStopNarration() {
             return JRock.automationStopNarration();
         }
         @Override public String automationListen(boolean on) { return JRock.automationListen(on); }
         @Override public String automationMicReady() { return JRock.automationMicReady(); }
-        @Override public String[] automationAwaitHeard(long timeoutMillis) {
+        @Override public Heard automationAwaitHeard(long timeoutMillis) {
             return JRock.automationAwaitHeard(timeoutMillis);
         }
         @Override public String automationMergeDuplex(String frontFile, String backFile,
                                                       String outFile) {
             return JRock.automationMergeDuplex(frontFile, backFile, outFile);
         }
-        @Override public String automationNote(String agent, String line) {
-            return JRock.automationNote(agent, line);
+        @Override public String automationNote(String line) {
+            return JRock.automationNote(line);
         }
         @Override public void automationEnd(String note) { JRock.automationEnd(note); }
     };
@@ -4294,6 +4294,10 @@ public class JRock {
     // read-only prompt: the prompt is the automation's workspace between steps, and a
     // line typed into it would be sent as part of the next request.
     private static volatile boolean automating = false;
+
+    // And what that automation calls itself, as automationBegin was told: the name in
+    // front of every line it writes into the log. Empty when nothing is driving.
+    private static volatile String automationName = "";
 
     // One send, waited for. The latch is made by automationSend before it presses the
     // button and counted down by sendFinished wherever the send path stops; the failure
@@ -4700,6 +4704,10 @@ public class JRock {
         if (live == null) return "JRock has no window yet - call main() and wait for it.";
         if (automating) return "an automation is already running.";
         automating = true;
+        // WHAT THIS AUTOMATION IS CALLED, kept for the lines it writes afterwards: a note
+        // is prefixed with it, so an agent names itself once here rather than in every
+        // line (see automationNote).
+        automationName = what == null ? "" : what.trim();
         setMicMuted(true);
         onEdt(() -> {
             live.input.setEditable(false);
@@ -4746,11 +4754,44 @@ public class JRock {
     // Loads a prompt file into the prompt area, exactly as Ctrl+O does, and leaves the
     // caret at the end of it so whatever is included next is appended. Returns null,
     // or why that file is not a prompt.
-    public static String automationLoadPrompt(String file) {
+    /**
+     * ONE PROMPT FILE INTO THE PROMPT - from anywhere by an ABSOLUTE path, or from this
+     * folder by a BARE FILE NAME. Those are the only two shapes, and {@code Path} itself
+     * says which one it was handed: a bare name is the path that equals its own
+     * {@link Path#getFileName()}.
+     *
+     * <p>Anything else is refused rather than resolved - {@code prompts/one.txt},
+     * {@code ../one.txt}, a name with a separator anywhere in it. What a relative path
+     * would be resolved against is the process's working directory, which an agent
+     * started from a right-click entry did not choose and may have changed with the
+     * Configure dialog since; so a caller that knows where its file is says so in full,
+     * and one that means "the file beside me in this folder" says the name and nothing
+     * else.
+     *
+     * <p>THE NAME IS NEVER PARSED HERE. {@link Paths#get(String, String...)} is where a
+     * character no file name can hold fails, in the caller's own hands, before this is
+     * called at all - and {@code getFileName()} is a question about structure rather than
+     * about text. There is no stripping of {@code ..}, no guessing at separators, and
+     * nothing in the middle to get wrong.
+     *
+     * <p>Returns null when the prompt now holds that file, and otherwise the sentence
+     * saying why it does not: no such file, a file that does not look like text, a path
+     * that is neither of the two shapes.
+     */
+    public static String automationLoadPrompt(Path file) {
         String problem = requireAutomation();
         if (problem != null) return problem;
         Ui live = ui;
-        Path source = Paths.get(file).toAbsolutePath().normalize();
+        if (file == null) return "there is no prompt file to load.";
+        boolean justTheName = file.equals(file.getFileName());
+        if (!file.isAbsolute() && !justTheName) {
+            return file + " is neither an absolute path nor a file name of this folder. "
+                    + "Give one or the other: Paths.get(\"one.txt\") is read from the "
+                    + "folder this is running in, and an absolute path from anywhere.";
+        }
+        Path source = justTheName
+                ? Paths.get("").toAbsolutePath().resolve(file)
+                : file.toAbsolutePath().normalize();
         String loaded = readFileQuietly(source);
         if (loaded == null) return "could not read " + source;
         // The same guard Ctrl+O applies, and for the same reason: a prompt is text, and
@@ -4828,70 +4869,41 @@ public class JRock {
      * are settings of the folder, and an agent working in a folder should not have to
      * repeat them in its own source.
      *
-     * <p>The two-argument form is for the one case this cannot serve: a caller whose
-     * PROMPT depends on a particular reading. The doc inventory flow's first pass asks the
-     * model to copy {@code ![](<hash>)} references for the page images, so it includes a
-     * PDF as {@code "pdfhtml"} whatever the folder is set to - with the setting deciding,
-     * the attachment and the instructions beside it could disagree.
+     * <p>There is no second form taking a kind. There was - {@code automationInclude(file,
+     * "pdfhtml")} and the rest - and what it was for was a flow whose PROMPT depended on
+     * one reading: the doc inventory's first pass asked the model to copy the page
+     * images' references, so it forced a PDF to arrive as xpdf HTML. The prompt says what
+     * to do with whatever arrives now, references or no references, so there is nothing
+     * left to force - and an automation that overrules the dialog in the operator's own
+     * folder produces documents the dialog cannot explain.
      */
-    public static String automationInclude(String file) {
-        return automationInclude(file, "auto");
-    }
-
-    public static String automationInclude(String file, String kind) {
+    public static String automationInclude(Path file) {
         String problem = requireAutomation();
         if (problem != null) return problem;
         Ui live = ui;
-        Path path = Paths.get(file).toAbsolutePath().normalize();
+        if (file == null) return "there is no file to include.";
+        // ABSOLUTE, and nothing else. A prompt file has a second shape - the bare name of
+        // one in this folder, where the prompt library lives (see automationLoadPrompt) -
+        // and an include has no such folder: what is included comes from wherever the
+        // caller found it, a scan folder, a temp file it has just written, a message's
+        // attachment. A relative path would be resolved against the process's working
+        // directory, which an agent did not choose and the Configure dialog can change.
+        if (!file.isAbsolute()) {
+            return file + " is not an absolute path. What is included comes from "
+                    + "wherever it is, so say where that is in full.";
+        }
+        Path path = file.toAbsolutePath().normalize();
         if (!Files.isRegularFile(path)) return "not a file: " + path;
         int before = promptTokenCount(live);
-        boolean forced = kind.equals("imgref") || kind.equals("pdfhtml");
+        // The include dialog's own path, and nothing beside it: what a PDF, an RTF, a
+        // picture or a spreadsheet becomes is read off the extension and this folder's
+        // settings, and what cannot be done - a conversion with "Include from processed
+        // copies" off, say - is refused there with a line saying why. Which is why the
+        // one check here is whether anything arrived at all.
         IncludeAction act = new IncludeAction(live.frame, live.input, live.log, false,
-                forced, false);
-        boolean toJRock = kind.equals("pdf") || kind.equals("rtf") || kind.equals("docx")
-                || kind.equals("xlsx");
-        if (toJRock && !includeProcessedCopies) {
-            return "a \"" + kind + "\" include converts the file into JRock/includes/, and "
-                    + "\"Include from processed copies in JRock/includes/\" is off in Configure.";
-        }
+                false, false);
         try {
-            switch (kind) {
-                case "auto":
-                    includeFile(act, path);
-                    break;
-                case "pdf":
-                    includePdf(live.frame, live.input, live.log, false, path, act.namer());
-                    break;
-                case "pdfhtml":
-                case "pdftext":
-                    includePdfWithXpdf(live.frame, live.input, live.log, false, path,
-                            kind.equals("pdfhtml"), act.refs);
-                    break;
-                case "rtf":
-                    includeRtfAsMarkdown(live.input, live.log, false, path, act.namer());
-                    break;
-                case "docx":
-                    includeDocxAsMarkdown(live.input, live.log, false, path, act.namer());
-                    break;
-                case "xlsx":
-                    includeXlsxAsCsv(live.input, live.log, false, path, act.namer());
-                    break;
-                case "img":
-                case "imgref":
-                case "audio":
-                case "txt": {
-                    boolean image = kind.equals("img") || kind.equals("imgref");
-                    Path included = includeProcessedCopies
-                            ? includeCopyOf(path, live.log, image) : path;
-                    String target = act.target(path);
-                    onEdt(() -> includeOne(live.input, live.log, false, included,
-                            image ? "img" : kind.equals("audio") ? "audio" : "txt",
-                            image, null, target));
-                    break;
-                }
-                default:
-                    return "unknown include kind \"" + kind + "\".";
-            }
+            includeFile(act, path);
         } catch (RuntimeException ex) {
             return "including " + path + " failed: " + ex;
         }
@@ -4901,7 +4913,7 @@ public class JRock {
             return "nothing was included from " + path + " - the log says why.";
         }
         live.log.gray("Included " + (after - before) + " file(s) from " + path.getFileName()
-                + " as \"" + kind + "\".");
+                + ", as this folder is set to read them.");
         live.log.gray("");
         return null;
     }
@@ -4951,9 +4963,60 @@ public class JRock {
     //
     // A timeout leaves the request in flight - there is nothing here that could recall
     // it - so an automation that times out should stop rather than send again.
-    public static String[] automationSend(long timeoutMillis) {
+    /**
+     * WHAT ONE SEND CAME TO: the two moments it wrote, or the reason it wrote nothing.
+     *
+     * <p>A type rather than a {@code String[]}, which is what this was: four strings
+     * where {@code [0]} was {@code "1"} or {@code "0"}, {@code [3]} was the reason and
+     * the two in the middle were stamps, each of them a position a caller had to know by
+     * heart - and the stamps were text a caller then had to parse to use. Here they are
+     * {@link LocalDateTime}s, which is what a moment is, and
+     * {@link JRock#automationMessageFile(String, LocalDateTime)} takes one as it stands.
+     *
+     * <p>{@link #ok()} is the whole of the question "did it send"; {@link #failure()} is
+     * null exactly when it did. Both stamps are null when nothing was written - and the
+     * operator's alone can be there when the question went out and no answer came back.
+     */
+    public static final class Sent {
+        private final LocalDateTime operator;
+        private final LocalDateTime assistant;
+        private final String failure;
+
+        private Sent(LocalDateTime operator, LocalDateTime assistant, String failure) {
+            this.operator = operator;
+            this.assistant = assistant;
+            this.failure = failure;
+        }
+
+        /** Whether the reply arrived: the one question most callers have. */
+        public boolean ok() {
+            return failure == null;
+        }
+
+        /** Why it did not, in the language the log is written in - or null when it did. */
+        public String failure() {
+            return failure;
+        }
+
+        /** When the question was written, or null when it was not. */
+        public LocalDateTime operator() {
+            return operator;
+        }
+
+        /** When the answer was written, or null when none came. */
+        public LocalDateTime assistant() {
+            return assistant;
+        }
+
+        @Override public String toString() {
+            return ok() ? "sent at " + operator + ", answered at " + assistant
+                        : "not sent: " + failure;
+        }
+    }
+
+    public static Sent automationSend(long timeoutMillis) {
         String problem = requireAutomation();
-        if (problem != null) return new String[] { "0", null, null, problem };
+        if (problem != null) return new Sent(null, null, problem);
         Ui live = ui;
         String[] before = new String[2];
         onEdt(() -> {
@@ -5000,11 +5063,20 @@ public class JRock {
             after[0] = live.log.lastStamp(ROLE_HUMAN);
             after[1] = live.log.lastStamp(ROLE_ASSISTANT);
         });
-        return new String[] {
-                failure == null ? "1" : "0",
-                newStamp(after[0], before[0]),
-                newStamp(after[1], before[1]),
-                failure };
+        return new Sent(stampOf(newStamp(after[0], before[0])),
+                stampOf(newStamp(after[1], before[1])), failure);
+    }
+
+    // One of the log's own stamps as the moment it is. Private: the text form never
+    // leaves this class now - a send hands back moments, and the message-file lookup
+    // takes one (see Sent).
+    private static LocalDateTime stampOf(String stamp) {
+        if (stamp == null) return null;
+        try {
+            return LocalDateTime.parse(stamp.trim(), STAMP_FMT);
+        } catch (DateTimeParseException notAStamp) {
+            return null;
+        }
     }
 
     // The file one of a send's stamps names, under JRock/messages/, as an absolute path
@@ -5017,19 +5089,19 @@ public class JRock {
     // automation that only wants to check the request was logged need not. The stamp is
     // validated by parsing it and rebuilding the name from the parsed value, the same
     // guard resolveReference uses, so nothing derived from it can leave that directory.
-    public static String automationMessageFile(String role, String stamp) {
+    public static Path automationMessageFile(String role, LocalDateTime stamp) {
         if (stamp == null) return null;
         String want = "assistant".equals(role) ? ROLE_ASSISTANT
                 : "operator".equals(role) ? ROLE_HUMAN : null;
         if (want == null) return null;
-        try {
-            LocalDateTime dt = LocalDateTime.parse(stamp, STAMP_FMT);
-            Path file = messageFile(want, dt.format(STAMP_FMT));
-            return Files.isRegularFile(file) ? file.toAbsolutePath().toString() : null;
-        } catch (DateTimeParseException ex) {
-            return null;
-        }
+        Path file = messageFile(want, stamp.format(STAMP_FMT));
+        // A PATH, and an ABSOLUTE one: what comes back is read, and a caller holding text
+        // would have to turn it back into a path to read it - with the one question
+        // "which folder was that relative to?" in between. There is no such question
+        // here, and nothing for a caller to parse.
+        return Files.isRegularFile(file) ? file.toAbsolutePath().normalize() : null;
     }
+
 
     // Writes markdown - normally a reply the automation has just read back - to file as a
     // DOCX with its pictures, as "Export selected Markdown with images as DOCX..." does
@@ -5037,21 +5109,37 @@ public class JRock {
     // image that include's reference names. The text is selected in the log first, where it can be found,
     // so the window shows what was exported. Returns null, or why nothing was written.
     // file is written as given; the automation picks a name that is free.
+    // ---- Exporting a document: two ways in, and no third ------------------------
+    // There was a third until this comment replaced it: automationExportDocx(markdown,
+    // file), which took any text at all. It is gone, and nothing it did is lost.
+    //
+    // Both of its callers had their text somewhere JRock could already see. The doc
+    // inventory flow's first pass exports the model's answer with a code fence taken off
+    // it - and the inside of that fence is a CONTIGUOUS run of the answer in the log, so
+    // selecting it and exporting the selection is the same document. Its other caller
+    // exports the text of a .txt nobody ever sent, which has the prompt for a workspace:
+    // set it there and export the prompt.
+    //
+    // Which leaves the API with two exports that each name their source - the log's
+    // selection, or the prompt - and none that takes a string from anywhere at all. An
+    // export is of something the window is showing, and a document nobody can see on
+    // screen is a document nobody can check before it is written.
+
     /**
      * THE LOG'S OWN SELECTION as a DOCX: the third of the trio an automation already has
      * for narration - {@link #automationSelectInLog(String)}, this, and
-     * {@link #automationClearSelection()} - and the keyboard's <em>Ctrl+Shift+D</em>
+     * {@link #automationClearLogSelection()} - and the keyboard's <em>Ctrl+Shift+D</em>
      * through the API.
      *
      * <p>The selection is left exactly as it was found: an automation that selected
      * something is the one that knows when it has finished with it, and the log scrolls
-     * nowhere while a selection exists (see {@code automationClearSelection}). The same
+     * nowhere while a selection exists (see {@code automationClearLogSelection}). The same
      * rule narration follows.
      *
-     * <p>Use this when the text IS in the log - an answer that has just arrived, a passage
-     * out of one. Use {@link #automationExportDocx(String, String)} when it is not: a
-     * flow exporting the text of a file nobody sent, or a reply with its code fences
-     * stripped, has nothing in the transcript to select.
+     * <p>Use this when the text is in the log - an answer that has just arrived, a passage
+     * out of one, the inside of a code fence the model wrapped its answer in. Use
+     * {@link #automationExportPromptDocx(String)} when it is not: the prompt is the
+     * automation's own workspace, and text put there is text the window is showing.
      */
     public static String automationExportSelectionDocx(String file) {
         String problem = requireAutomation();
@@ -5069,21 +5157,6 @@ public class JRock {
         return failure == null ? null : "could not export " + target + ": " + failure;
     }
 
-    public static String automationExportDocx(String markdown, String file) {
-        String problem = requireAutomation();
-        if (problem != null) return problem;
-        if (markdown == null || markdown.isBlank()) return "there is no Markdown to export.";
-        Ui live = ui;
-        Path target = Paths.get(file).toAbsolutePath().normalize();
-        onEdt(() -> live.log.selectLast(markdown.trim()));
-        String failure = writeMarkdownExport(live.log, markdown, true, false,
-                "DOCX (A4 portrait)", target);
-        // The selection goes, whether that worked or not: it was this program's doing,
-        // not the operator's, and a selection left in the pane stops it following the
-        // conversation (see selectNothing).
-        onEdt(live.log::selectNothing);
-        return failure == null ? null : "could not export " + target + ": " + failure;
-    }
 
     // THE PROMPT as a DOCX: what it holds, or its selection when it has one, written to
     // file as "Export selected Markdown with images as DOCX..." writes it. Returns null,
@@ -5236,7 +5309,7 @@ public class JRock {
     // the one kind this machine must not produce. An agent says what it means to say the
     // way a person would: put it in the log (automationNote), select it
     // (automationSelectInLog), narrate, and let the selection go
-    // (automationClearSelection). The transcript then holds everything JRock has said out
+    // (automationClearLogSelection). The transcript then holds everything JRock has said out
     // loud, in order, with the rest of the conversation around it.
     //
     // Unlike the menu item, an unset device is a refusal and not the "set up the output
@@ -5279,7 +5352,7 @@ public class JRock {
     // "Dialog only" mode a gray line is not shown at all, and what is not shown cannot
     // be selected or narrated.
     //
-    // The pair of this and automationClearSelection exists so that narration has a
+    // The pair of this and automationClearLogSelection exists so that narration has a
     // SOURCE rather than an argument: the window shows what is being said while it is
     // being said, and the transcript keeps it afterwards.
     public static String automationSelectInLog(String text) {
@@ -5300,7 +5373,7 @@ public class JRock {
     // copying. A selection left behind by a program therefore stops the window following
     // the conversation - which the operator watching it reads as a window that has
     // stopped working.
-    public static String automationClearSelection() {
+    public static String automationClearLogSelection() {
         String problem = requireAutomation();
         if (problem != null) return problem;
         Ui live = ui;
@@ -5422,22 +5495,61 @@ public class JRock {
     // The timeout is for speech to START. A recording under way is waited for until the
     // quiet that ends it, and its transcription after that, so a short timeout polled in
     // a loop never cuts anyone off.
-    public static String[] automationAwaitHeard(long timeoutMillis) {
+    /**
+     * WHAT ONE SPELL OF LISTENING CAME TO, which is three things and not two: something
+     * was heard, nothing was heard yet, or it cannot listen at all.
+     *
+     * <p>That third state is why this is a type and not a boolean. A hands-free loop polls
+     * this: {@link #quiet()} means go round again - the room has been silent for one
+     * timeout, which is the ordinary case and no kind of error - while {@link #failure()}
+     * means stop and say so. As a {@code String[]} the difference was {@code [1] == null}
+     * against {@code [1] != null}, which is a thing to know by heart rather than to read.
+     */
+    public static final class Heard {
+        private final boolean heard;
+        private final String failure;
+
+        private Heard(boolean heard, String failure) {
+            this.heard = heard;
+            this.failure = failure;
+        }
+
+        /** Something was said, and it has reached the prompt. */
+        public boolean heard() {
+            return heard;
+        }
+
+        /** Nothing yet: the room was quiet for this timeout. Go round again. */
+        public boolean quiet() {
+            return !heard && failure == null;
+        }
+
+        /** Why it cannot listen, or null - and null with nothing heard is quiet. */
+        public String failure() {
+            return failure;
+        }
+
+        @Override public String toString() {
+            return heard ? "heard" : failure == null ? "quiet" : "not listening: " + failure;
+        }
+    }
+
+    public static Heard automationAwaitHeard(long timeoutMillis) {
         String problem = requireAutomation();
-        if (problem != null) return new String[] { "0", problem };
+        if (problem != null) return new Heard(false, problem);
         long deadline = System.currentTimeMillis() + Math.max(0, timeoutMillis);
         Recording r;
         while ((r = heardRecording) == null) {
             if (micMuted) {
-                return new String[] { "0", "Mic always on is muted - call "
-                        + "automationListen(true) first." };
+                return new Heard(false, "Mic always on is muted - call "
+                        + "automationListen(true) first.");
             }
-            if (System.currentTimeMillis() > deadline) return new String[] { "0", null };
+            if (System.currentTimeMillis() > deadline) return new Heard(false, null);
             try {
                 Thread.sleep(AUTOMATION_POLL_MS);
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
-                return new String[] { "0", "interrupted while listening." };
+                return new Heard(false, "interrupted while listening.");
             }
         }
         heardRecording = null;
@@ -5450,20 +5562,20 @@ public class JRock {
             r.thread.join(HEARD_SAVE_TIMEOUT_MS);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            return new String[] { "0", "interrupted while the recording was being saved." };
+            return new Heard(false, "interrupted while the recording was being saved.");
         }
         if (r.thread.isAlive()) {
-            return new String[] { "0", "the recording did not reach the prompt within "
-                    + HEARD_SAVE_TIMEOUT_MS + " ms." };
+            return new Heard(false, "the recording did not reach the prompt within "
+                    + HEARD_SAVE_TIMEOUT_MS + " ms.");
         }
         Ui live = ui;
         String[] now = { null };
         onEdt(() -> now[0] = live.input.getText());
         if (now[0].equals(heardPromptBefore)) {
-            return new String[] { "0", "nothing from the recording reached the prompt - "
-                    + "the log says why." };
+            return new Heard(false, "nothing from the recording reached the prompt - "
+                    + "the log says why.");
         }
-        return new String[] { "1", null };
+        return new Heard(true, null);
     }
 
     // Merge two-sided (duplex) scans, for an automation: the same interleave the window
@@ -5575,8 +5687,8 @@ public class JRock {
     // comma or colon, so that the window can wrap it (see addWrapPoints). A spoken
     // sentence has spaces in it and is unaffected; an agent that writes a path or an
     // address and then looks for it again should look for a part of it without such a run.
-    public static String automationNote(String agent, String line) {
-        String name = agent == null ? "" : agent.trim();
+    public static String automationNote(String line) {
+        String name = automationName;
         String said = line == null ? "" : line;
         return note(name.isEmpty() ? said : name + ": " + said);
     }
@@ -5596,6 +5708,7 @@ public class JRock {
             live.sendGate.accept(true);
         });
         automating = false;
+        automationName = "";
         setMicMuted(false);
         // Mic always on back as the operator left it, if an automation turned it on to
         // listen (see automationListen): what the tick in this folder says is theirs.

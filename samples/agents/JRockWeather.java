@@ -249,15 +249,15 @@ public final class JRockWeather {
     private static String ask(String prompt) {
         check(JRock.automationClearPrompt());
         check(JRock.automationSetPrompt(prompt));
-        String[] sent = JRock.automationSend(REPLY_TIMEOUT_MS);
-        if (!"1".equals(sent[0])) throw new Stop("the model did not answer: " + sent[3]);
-        String reply = read(JRock.automationMessageFile("assistant", sent[2]));
+        JRock.Sent sent = JRock.automationSend(REPLY_TIMEOUT_MS);
+        if (!sent.ok()) throw new Stop("the model did not answer: " + sent.failure());
+        String reply = read(JRock.automationMessageFile("assistant", sent.assistant()));
         if (reply == null) throw new Stop("the reply was not written to JRock/messages/.");
         return reply.trim();
     }
 
     private static String prompt(String name) {
-        String text = read(prompts.resolve(name).toString());
+        String text = read(prompts.resolve(name));
         if (text == null) throw new Stop("there is no " + prompts.resolve(name) + ".");
         return text;
     }
@@ -451,10 +451,10 @@ public final class JRockWeather {
     }
 
     // A file's text, or null when there is none to read.
-    private static String read(String file) {
+    private static String read(Path file) {
         if (file == null) return null;
         try {
-            return new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8);
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException ex) {
             throw new Stop("could not read " + file + ": " + ex.getMessage());
         }

@@ -188,9 +188,13 @@ public final class JRockTranslateToEnglish {
 
         // ---- The pass: the document in English ------------------------------
         System.out.println("Translating with " + PROMPT_TRANSLATE);
-        check(JRock.automationLoadPrompt(prompt.toString()));
+        check(JRock.automationLoadPrompt(prompt));
         dropPlaceholders();
-        check(JRock.automationInclude(document.toString(), kind));
+        // The kind is not passed on: what a PDF or an RTF becomes is this folder's
+        // own setting, as it is for a person pressing Ctrl+I. It was worked out
+        // above only to refuse a type this flow cannot translate at all, with a
+        // line naming the ones it can.
+        check(JRock.automationInclude(document));
         String translation = reply(JRock.automationSend(REPLY_TIMEOUT_MS));
         if (translation.isBlank()) throw new Stop("the reply was empty.");
 
@@ -444,15 +448,15 @@ public final class JRockTranslateToEnglish {
     // The request's file is checked and not read, which is the point of checking it: if
     // the message JRock says it sent is not on disk, the stamps do not mean what they
     // look like they mean and the reply under the other one is not to be trusted.
-    private static String reply(String[] sent) {
-        if (!"1".equals(sent[0])) throw new Stop(sent[3]);
-        if (JRock.automationMessageFile("operator", sent[1]) == null) {
+    private static String reply(JRock.Sent sent) {
+        if (!sent.ok()) throw new Stop(sent.failure());
+        if (JRock.automationMessageFile("operator", sent.operator()) == null) {
             throw new Stop("the request was not written to JRock/messages/.");
         }
-        String file = JRock.automationMessageFile("assistant", sent[2]);
+        java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
         if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
         try {
-            return new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8);
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException ex) {
             throw new Stop("could not read " + file + ": " + ex.getMessage());
         }

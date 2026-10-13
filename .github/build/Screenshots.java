@@ -106,7 +106,13 @@ public final class Screenshots {
         Files.write(jrockDir.resolve("jrock-config.txt"),
                 ("' Written by .github/build/Screenshots.java - a throwaway demo folder.\n\n"
                  + "endpoint$\n" + endpoint + "\n\n"
-                 + "model$\n" + MODEL + "\n\n").getBytes(StandardCharsets.UTF_8));
+                 + "model$\n" + MODEL + "\n\n"
+                 // The include scene is about the Markdown reference above a picture, so
+                 // this folder is set to write them - the setting a person would tick in
+                 // Configure. No automation can force one include to be read differently
+                 // from the rest any more, which is the point: the picture in the README
+                 // is of JRock as this folder is configured.
+                 + "include-markdown-references$\ntrue\n\n").getBytes(StandardCharsets.UTF_8));
         // A key has to be there for a send to be attempted at all. This one is a word:
         // the endpoint above takes whatever arrives without looking at it.
         Files.write(jrockDir.resolve("bedrock-key.txt"),
@@ -138,7 +144,7 @@ public final class Screenshots {
         // shipped, so the picture is of this build's own behaviour.
         Path png = work.resolve("a-page.png");
         ImageIO.write(invoicePage(), "png", png.toFile());
-        String included = JRock.automationInclude(png.toString(), "imgref");
+        String included = JRock.automationInclude(png);
         if (included != null) System.out.println("include: " + included);
         settle();
         shoot(window, "03-a-page-included-as-an-image");
@@ -168,9 +174,9 @@ public final class Screenshots {
 
     /** Presses Send, waits for the answer, and paints the window when asked to. */
     private static void send(String name, JFrame window) {
-        String[] result = JRock.automationSend(REPLY_TIMEOUT_MILLIS);
-        if (!"1".equals(result[0])) {
-            System.out.println("no reply: " + result[3]);
+        JRock.Sent sent = JRock.automationSend(REPLY_TIMEOUT_MILLIS);
+        if (!sent.ok()) {
+            System.out.println("no reply: " + sent.failure());
             System.exit(1);
         }
         settle();
