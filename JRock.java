@@ -3993,6 +3993,186 @@ public class JRock {
     // waits for Ghostscript, a send waits for Bedrock. On the EDT that is a frozen
     // window, and for a send it is a deadlock - the reply is delivered by the EDT.
 
+    /**
+     * THE WHOLE OF THE AUTOMATION API, IN ONE DECLARATION - every call an agent or a flow
+     * may make on JRock's window, with its arguments and what it gives back.
+     *
+     * <p>It exists to be READ. The calls themselves are static methods ({@code
+     * JRock.automationSetPrompt(...)}), because there is nothing to instantiate - one
+     * window, one log, one {@code JRock/} folder per process - and twenty-six static
+     * methods spread over a thousand lines of this file are a surface nobody can see the
+     * shape of. Here they are a list: what there is, in order of use, on one screen. The
+     * README's cheat sheet names this interface so that the list and the documentation
+     * cannot drift apart, and {@code JRockAutomationApiTest} holds them to each other -
+     * a method added to one and not the other fails the build.
+     *
+     * <p>THE NAMES ARE THE STATIC ONES, {@code automationBegin} and not {@code begin},
+     * which reads oddly on a variable of this type and is still right: there is one
+     * vocabulary for this API, the same word in an agent, in this interface, in the README
+     * and in the log. Two spellings of one call would be the drift this is meant to
+     * prevent.
+     *
+     * <p>{@link JRock#automation()} returns an implementation that forwards to those
+     * statics, for a caller that would rather hold the API than name it - a test with a
+     * stub of its own, or code that takes it as an argument. {@code JRock.main(String[])}
+     * is not here: starting the application is not an operation on a window that is
+     * already running.
+     */
+    public interface Automation {
+        /** The window itself, so an automation's dialogs belong to it. Null until it exists. */
+        JFrame automationWindow();
+
+        /** Takes the window: prompt read-only, Send held, Mic always on paused. */
+        String automationBegin(String what);
+
+        /** Blocks until the session report has ended and the window can be used. */
+        String automationAwaitReady(long timeoutMillis);
+
+        /** Loads a prompt file from the prompts directory into the prompt. */
+        String automationLoadPrompt(String file);
+
+        /** What the prompt holds, or null when it cannot be read. */
+        String automationPromptText();
+
+        /** Replaces the prompt's text. */
+        String automationSetPrompt(String text);
+
+        /** Includes a file as Ctrl+I would: "txt", "img", "imgref", "pdfhtml", "audio"... */
+        String automationInclude(String file, String kind);
+
+        /** Fetches a URL into the prompt, saved under JRock/urls/. */
+        String automationFetchUrl(String url);
+
+        /** Ctrl+Enter, waited for: {ok, operator stamp, assistant stamp, why not}. */
+        String[] automationSend(long timeoutMillis);
+
+        /** The path of one JRock/messages/ file, or null when it is not there. */
+        String automationMessageFile(String role, String stamp);
+
+        /** Writes Markdown as a DOCX, with every image it names placed in it. */
+        String automationExportDocx(String markdown, String file);
+
+        /** The same for what the prompt holds, or its selection when it has one. */
+        String automationExportPromptDocx(String file);
+
+        /** Empties the prompt. */
+        String automationClearPrompt();
+
+        /** Starts recording from the microphone in Configure. */
+        String automationStartRecording();
+
+        /** Stops it and includes the recording as @audio. */
+        String automationStopRecording(long timeoutMillis);
+
+        /** Reads the log's SELECTION aloud, on the speaker in Configure. */
+        String automationNarrate();
+
+        /** Selects the last place that text appears in the log - what narration reads. */
+        String automationSelectInLog(String text);
+
+        /** Lets the selection go, so the log follows the conversation again. */
+        String automationClearSelection();
+
+        /** Stops whatever narration is playing; whether one was. */
+        boolean automationStopNarration();
+
+        /** Mic always on, turned on or off for a hands-free turn. */
+        String automationListen(boolean on);
+
+        /** Whether there is a microphone to listen on right now, and why not. */
+        String automationMicReady();
+
+        /** Waits for a recording Mic always on made: {file, why not}. */
+        String[] automationAwaitHeard(long timeoutMillis);
+
+        /** Merges two one-sided scans into one two-sided document. */
+        String automationMergeDuplex(String frontFile, String backFile, String outFile);
+
+        /** One line in JRock's log, which is the only place an agent can be read. */
+        String automationNote(String line);
+
+        /** The same line from a NAMED agent, and the words an agent says for itself. */
+        String automationNote(String agent, String line);
+
+        /** Gives the window back: prompt editable, Send released, a line saying so. */
+        void automationEnd(String note);
+    }
+
+    /**
+     * The automation API as an object, forwarding to the static calls.
+     *
+     * <p>One instance, made once: it holds nothing, the state being the window's.
+     */
+    public static Automation automation() {
+        return AUTOMATION;
+    }
+
+    private static final Automation AUTOMATION = new Automation() {
+        @Override public JFrame automationWindow() { return JRock.automationWindow(); }
+        @Override public String automationBegin(String what) {
+            return JRock.automationBegin(what);
+        }
+        @Override public String automationAwaitReady(long timeoutMillis) {
+            return JRock.automationAwaitReady(timeoutMillis);
+        }
+        @Override public String automationLoadPrompt(String file) {
+            return JRock.automationLoadPrompt(file);
+        }
+        @Override public String automationPromptText() { return JRock.automationPromptText(); }
+        @Override public String automationSetPrompt(String text) {
+            return JRock.automationSetPrompt(text);
+        }
+        @Override public String automationInclude(String file, String kind) {
+            return JRock.automationInclude(file, kind);
+        }
+        @Override public String automationFetchUrl(String url) {
+            return JRock.automationFetchUrl(url);
+        }
+        @Override public String[] automationSend(long timeoutMillis) {
+            return JRock.automationSend(timeoutMillis);
+        }
+        @Override public String automationMessageFile(String role, String stamp) {
+            return JRock.automationMessageFile(role, stamp);
+        }
+        @Override public String automationExportDocx(String markdown, String file) {
+            return JRock.automationExportDocx(markdown, file);
+        }
+        @Override public String automationExportPromptDocx(String file) {
+            return JRock.automationExportPromptDocx(file);
+        }
+        @Override public String automationClearPrompt() { return JRock.automationClearPrompt(); }
+        @Override public String automationStartRecording() {
+            return JRock.automationStartRecording();
+        }
+        @Override public String automationStopRecording(long timeoutMillis) {
+            return JRock.automationStopRecording(timeoutMillis);
+        }
+        @Override public String automationNarrate() { return JRock.automationNarrate(); }
+        @Override public String automationSelectInLog(String text) {
+            return JRock.automationSelectInLog(text);
+        }
+        @Override public String automationClearSelection() {
+            return JRock.automationClearSelection();
+        }
+        @Override public boolean automationStopNarration() {
+            return JRock.automationStopNarration();
+        }
+        @Override public String automationListen(boolean on) { return JRock.automationListen(on); }
+        @Override public String automationMicReady() { return JRock.automationMicReady(); }
+        @Override public String[] automationAwaitHeard(long timeoutMillis) {
+            return JRock.automationAwaitHeard(timeoutMillis);
+        }
+        @Override public String automationMergeDuplex(String frontFile, String backFile,
+                                                      String outFile) {
+            return JRock.automationMergeDuplex(frontFile, backFile, outFile);
+        }
+        @Override public String automationNote(String line) { return JRock.automationNote(line); }
+        @Override public String automationNote(String agent, String line) {
+            return JRock.automationNote(agent, line);
+        }
+        @Override public void automationEnd(String note) { JRock.automationEnd(note); }
+    };
+
     // The window's own parts, published by createAndShowGui once all of them exist.
     // One object rather than six fields so there is no moment at which half a window
     // is visible to a caller; volatile because it is written on the EDT and read from

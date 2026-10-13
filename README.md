@@ -3140,7 +3140,63 @@ Static because there is nothing to instantiate: the window, the log, the `JRock/
 the Bedrock session are one per process, so there is no object that could hold a second set of
 them. `JRock.main(new String[0])` shows the window and returns; the methods below drive the one
 that is there, and every one of them **blocks and must not be called on the event dispatch
-thread** — they say so rather than deadlocking if you do.
+thread** — they say so rather than deadlocking if you do. They are also listed, all of them
+together, as [`JRock.Automation`](#the-cheat-sheet-jrockautomation).
+
+#### The cheat sheet: `JRock.Automation`
+
+**The whole surface in one declaration**, for reading rather than for calling: `public interface
+Automation` in `JRock.java` lists every call with its arguments and what it gives back. Grep for
+`interface Automation` and the API is on one screen; `JRock.automation()` returns an
+implementation that forwards to the statics, for a caller that would rather hold the API than
+name it (a test with a stub of its own, say). The method names in the interface are the static
+ones — `automationBegin`, not `begin` — because one vocabulary across an agent, this table, the
+interface and the log is the point of having it, and `JRockAutomationApiTest` fails the build if
+a call is added to one and not the other.
+
+```java
+// Starting and finishing
+void     main(String[] args)                                 // not in the interface: starts JRock
+JFrame   automationWindow()
+String   automationBegin(String what)
+String   automationAwaitReady(long timeoutMillis)
+void     automationEnd(String note)
+
+// The prompt
+String   automationLoadPrompt(String file)
+String   automationPromptText()
+String   automationSetPrompt(String text)
+String   automationClearPrompt()
+String   automationInclude(String file, String kind)         // txt, img, imgref, pdfhtml, audio...
+String   automationFetchUrl(String url)
+
+// Sending, and what came back
+String[] automationSend(long timeoutMillis)                  // {ok, operator stamp, assistant stamp, why not}
+String   automationMessageFile(String role, String stamp)
+
+// Documents
+String   automationExportDocx(String markdown, String file)
+String   automationExportPromptDocx(String file)
+String   automationMergeDuplex(String front, String back, String out)
+
+// Saying things, and being read afterwards
+String   automationNote(String line)
+String   automationNote(String agent, String line)
+String   automationSelectInLog(String text)
+String   automationClearSelection()
+String   automationNarrate()
+boolean  automationStopNarration()
+
+// Listening
+String   automationStartRecording()
+String   automationStopRecording(long timeoutMillis)
+String   automationListen(boolean on)
+String   automationMicReady()
+String[] automationAwaitHeard(long timeoutMillis)            // {file, why not}
+```
+
+Every one of them returns `null` for *fine*; anything else is the sentence saying what went
+wrong. What each one does, in full:
 
 | Method | What it does |
 |---|---|
