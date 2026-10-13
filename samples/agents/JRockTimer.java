@@ -153,6 +153,11 @@ public final class JRockTimer {
         for (String arg : args) System.out.println("Ignoring JRock's flag: " + arg);
         readSettings();
         onEdt(JRockTimer::showWindow);
+        // The alarms that were still waiting when this agent last stopped, back in the
+        // list and counting down again (see restoreAlarms). After the window, because
+        // that is what they go into; before the server, so an agent asking for the list
+        // the moment this starts gets all of it.
+        onEdt(JRockTimer::restoreAlarms);
         String listening = listen();
         later(() -> say(listening));
         System.out.println("Timer is ready. " + listening);
@@ -208,6 +213,11 @@ public final class JRockTimer {
             alarms.add(i, alarm);
             say("Alarm set for " + ringsAt(alarm) + ", " + sounds(alarm)
                     + (from == null ? "." : ", by " + from + "."));
+            // WRITTEN DOWN AS IT IS SET, and not only when the window closes: a machine
+            // that is restarted for an update, or an agent that is killed rather than
+            // closed, never reaches the closing handler - and an alarm is exactly the
+            // thing that has to survive both.
+            writeSettings();
         });
         SOUND.submit(() -> play(confirmation(alarm), () -> false));
         Thread wait = new Thread(() -> await(alarm), "jrock-timer-" + label);
@@ -240,7 +250,10 @@ public final class JRockTimer {
                 play(ring(alarm), () -> alarm.phase != Phase.RINGING);
             }
             if (alarm.phase == Phase.RINGING) alarm.phase = Phase.RANG;
-            later(list::repaint);
+            later(() -> {
+                list.repaint();
+                writeSettings();    // it has rung: there is nothing left to pick up
+            });
         });
     }
 
@@ -399,6 +412,26 @@ public final class JRockTimer {
         return new byte[(int) (RATE * ms / 1000) * 2];
     }
 
+    // THE WAY OUT, SAID OUT LOUD: two notes falling, where starting up is a chord rising.
+    //
+    // Closing this window ends the agent, and with it every alarm that was waiting - and
+    // this window has one button, a list and a close box, which is not many ways to click
+    // the wrong thing. The sound is for the time it is the wrong thing: a falling pair is
+    // the one noise nobody has to be taught, and hearing it means the alarms have gone.
+    //
+    // Low and quiet: the agent has no more business making noise than that, and the ring
+    // it must never be mistaken for is high, bright and three times over.
+    private static byte[] closing() {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        write(out, chord(new double[] { 261.63, 329.63 }, 130, 0.45));   // C4 + E4
+        write(out, chord(new double[] { 174.61, 220.00 }, 260, 0.45));   // F3 + A3
+        return out.toByteArray();
+    }
+
+    private static void write(java.io.ByteArrayOutputStream out, byte[] pcm) {
+        out.write(pcm, 0, pcm.length);
+    }
+
     // Plays pcm on the speaker chosen in this window, a slice at a time so stop() is
     // looked at every 50 ms. On the SOUND thread. Returns whether it could play - a device
     // not set, or not there, is said on the status line and is false.
@@ -463,11 +496,22 @@ public final class JRockTimer {
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
+                // The alarms that are still waiting are written down BEFORE they are
+                // called off, so a restart picks them up where this left them (see
+                // readSettings): closing the window is not the same as cancelling an
+                // alarm, and an alarm set for eight tomorrow morning should not be undone
+                // by tidying the desktop tonight.
+                writeSettings();
                 for (int i = 0; i < alarms.size(); i++) alarms.get(i).phase = Phase.REMOVED;
                 ServerSocket s = server;
                 if (s != null) {
                     try { s.close(); } catch (IOException ignored) { }
                 }
+                // PLAYED HERE AND NOT HANDED TO THE SOUND THREAD. That thread is a daemon,
+                // and this is the last thing this JVM does: a sound submitted now would be
+                // dropped when the window's dispose lets the process end. Half a second on
+                // the event thread, at the one moment there is nothing left for it to do.
+                play(closing(), () -> false);
             }
         });
 
@@ -647,6 +691,7 @@ public final class JRockTimer {
         a.phase = Phase.REMOVED;
         say((wasRinging ? "Stopped and removed: " : "Removed: ") + ringsAt(a) + ".");
         if (!alarms.isEmpty()) list.setSelectedIndex(Math.min(i, alarms.size() - 1));
+        writeSettings();        // one fewer to pick up next time
     }
 
     // When an alarm rings, as a time of day - with the date too, when that is not today.
@@ -748,6 +793,33 @@ public final class JRockTimer {
     // ---- Settings ---------------------------------------------------------------
     // One line beside this agent's own file, so the speaker chosen once is the speaker
     // tomorrow. Nothing of JRock's is read or written: this is this agent's setting.
+    // ---- What survives a restart -------------------------------------------------
+    // THE ALARMS THAT ARE STILL WAITING, beside the speaker in this agent's own settings
+    // file: "alarm=<label>|<when, in epoch milliseconds>|<its number>".
+    //
+    // Why they are kept at all: an alarm is for a moment in the future, and the machine
+    // between now and then is promised to nobody - Windows restarts for an update, the
+    // laptop is shut, the window is closed by mistake. An alarm set for eight tomorrow
+    // morning that a reboot at midnight quietly cancels is worse than no alarm at all,
+    // because it was relied on.
+    //
+    // AN ALARM THAT CAME DUE WHILE NOTHING WAS RUNNING IS DROPPED WITHOUT A WORD. Ringing
+    // it late is the one thing it must not do - "it is 07:30" at nine in the morning is
+    // not information, it is a machine talking about yesterday - and there is nothing to
+    // be done about a moment that has passed, so nothing is said about it either. A window
+    // that opens complaining about three of them is a window that teaches somebody to
+    // close it.
+    //
+    // THE ABSOLUTE MOMENT IS WHAT IS WRITTEN, not the time of day: "+00:05:00" set at
+    // 23:58 is due at 00:03, and a timer read back as five minutes from whenever the agent
+    // next starts would be an alarm for a different moment. The label is written too, so
+    // the list still says what was asked for.
+    private static final String ALARM_PREFIX = "alarm=";
+
+    // Read here, put in the list from the window: the list and the sounds belong to the
+    // event thread.
+    private static final java.util.List<Alarm> restored = new java.util.ArrayList<>();
+
     private static void readSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
         if (!Files.isRegularFile(file)) return;
@@ -756,6 +828,9 @@ public final class JRockTimer {
                 String text = line.trim();
                 if (text.startsWith("speaker=")) {
                     speaker = text.substring("speaker=".length()).trim();
+                } else if (text.startsWith(ALARM_PREFIX)) {
+                    Alarm alarm = alarmOf(text.substring(ALARM_PREFIX.length()).trim());
+                    if (alarm != null) restored.add(alarm);
                 }
             }
         } catch (IOException ex) {
@@ -763,13 +838,73 @@ public final class JRockTimer {
         }
     }
 
+    // One written line back into an alarm, or null - and a line this cannot read and one
+    // whose moment has gone are the same thing here: nothing to ring.
+    private static Alarm alarmOf(String written) {
+        String[] parts = written.split(Pattern.quote("|"));
+        if (parts.length < 3) return null;
+        try {
+            Instant due = Instant.ofEpochMilli(Long.parseLong(parts[1].trim()));
+            if (!due.isAfter(Instant.now())) return null;    // came due while we were off
+            return new Alarm(parts[0].trim(), due, Integer.parseInt(parts[2].trim()));
+        } catch (NumberFormatException notANumber) {
+            return null;
+        }
+    }
+
+    // Every alarm that has not rung yet, as the lines readSettings reads back. Called on
+    // the event thread, which is where the list lives.
+    private static String alarmLines() {
+        StringBuilder out = new StringBuilder();
+        if (alarms == null) return "";
+        for (int i = 0; i < alarms.size(); i++) {
+            Alarm alarm = alarms.get(i);
+            if (alarm.phase != Phase.WAITING) continue;
+            out.append(ALARM_PREFIX).append(alarm.label).append('|')
+               .append(alarm.due.toEpochMilli()).append('|').append(alarm.number)
+               .append(System.lineSeparator());
+        }
+        return out.toString();
+    }
+
+    // The alarms read back at startup, put in the list and given their waiting threads.
+    // On the event thread, once the window exists. Said once, because an alarm somebody
+    // set yesterday being still set is worth knowing - and nothing at all when there were
+    // none, which is the ordinary case.
+    private static void restoreAlarms() {
+        if (restored.isEmpty()) return;
+        int highest = 0;
+        for (Alarm alarm : restored) {
+            int i = 0;
+            while (i < alarms.size() && !alarms.get(i).due.isAfter(alarm.due)) i++;
+            alarms.add(i, alarm);
+            highest = Math.max(highest, alarm.number);
+            Thread wait = new Thread(() -> await(alarm), "jrock-timer-" + alarm.label);
+            wait.setDaemon(true);
+            wait.start();
+        }
+        // The next alarm set carries the numbering on, so its chord and its count are not
+        // ones an alarm already waiting has (see CHORDS).
+        SET_COUNT.set(Math.max(SET_COUNT.get(), highest));
+        say(restored.size() == 1
+                ? "One alarm was still set: " + ringsAt(restored.get(0)) + ", "
+                  + sounds(restored.get(0)) + "."
+                : restored.size() + " alarms were still set, the first at "
+                  + ringsAt(restored.get(0)) + ".");
+        restored.clear();
+        // The file again, now that the ones whose moment had passed have been dropped:
+        // what is written is what is waiting, from the first moment of the run.
+        writeSettings();
+    }
+
     private static void writeSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
         String text = "' JRock timer agent\nspeaker=" + speaker + "\n";
         try {
-            Files.write(file, text.getBytes(StandardCharsets.UTF_8));
+            // The speaker, and every alarm still waiting (see alarmLines).
+            Files.write(file, (text + alarmLines()).getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
-            later(() -> say("Could not remember the speaker in " + file + ": "
+            later(() -> say("Could not remember the alarms in " + file + ": "
                     + ex.getMessage()));
         }
     }
