@@ -3946,13 +3946,15 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
   greyed out without one (see [**Markdown export**](#markdown-export-rtf-and-docx)). On
   **Windows**, *Narrate selected text* reads the selection aloud, and is *Stop narrating* while
-  it does (see [**Narrate**](#narrate-windows-and-the-browser)). *Open URL in new tab* opens the address the
+  it does (see [**Narrate**](#narrate-windows-and-the-browser)). *Open URL in new tab* (**Ctrl+Shift+U**)
+  opens the address the
   selection holds or sits inside, so selecting ` - https://example.com/ ;` or just `xample.co`
   out of it opens `https://example.com/` — in the default browser on the desktop, in a new tab of
   the page in the browser. It is greyed out when the selection points at no address, and the log
   says what was opened, or why it could not be.
 
-  *Open local file* is the same idea for the other kind of address in a log: **select a path and
+  *Open local file* (**Ctrl+Shift+L**) is the same idea for the other kind of address in a log:
+  **select a path and
   it opens with whatever this desktop opens it with** — a `.docx` in the word processor, a `.wav`
   in the player, a **folder** in the file manager. The log is full of paths JRock wrote itself
   (every include, every conversion, every recording, every export), and this is how you open one
@@ -4159,6 +4161,8 @@ second variant** of its plain twin. The same list is in the window itself, behin
 | Ctrl+I | Include text/image/audio files, a PDF, an RTF, a DOCX or an XLSX (multi-select) |
 | Ctrl+Shift+I | Include a whole **folder** |
 | Ctrl+U | Fetch a URL and include what it answers with |
+| Ctrl+Shift+U | **Open** the address the log's selection points at — any part of one will do — in the default browser, or a new tab in JRock Web |
+| Ctrl+Shift+L | **Open** the file or folder the log's selection names, with whatever this desktop opens it with (desktop only; *L* for local) |
 | Ctrl+Space | Start recording from the microphone; again to stop and include it as `@audio` (or type it into the prompt, with Transcribe on) |
 | Ctrl+N | Narrate the selected text, or stop what is playing |
 | Ctrl+S | Save prompt as (a copy) |

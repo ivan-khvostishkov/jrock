@@ -3372,6 +3372,56 @@ public class JRock {
             }
         });
 
+        // Ctrl+Shift+U and Ctrl+Shift+L: OPEN WHAT THE LOG'S SELECTION POINTS AT - an
+        // address in a browser, a path with whatever this desktop opens it with. Both were
+        // right-click items and nothing else, which is a mouse for something the keyboard
+        // is already in the middle of: the log is full of paths JRock wrote itself - every
+        // include, every conversion, every recording, every export - and opening one
+        // should not mean reaching for the pointer.
+        //
+        // U FOR THE ADDRESS, under Ctrl+U, which fetches one INTO the prompt; this opens
+        // it outside JRock. L FOR LOCAL, which has no plain twin to sit under - a path is
+        // not something this window can fetch, and Ctrl+Shift+O would read as the second
+        // half of Load prompt, which it is not.
+        //
+        // A SELECTION THAT POINTS AT NOTHING SAYS SO. The menu items can be greyed out;
+        // a key cannot, and a key that does nothing at all is one somebody presses twice
+        // and then stops trusting.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_U,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                "jrock-open-url");
+        frame.getRootPane().getActionMap().put("jrock-open-url", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                String url = log.selectedUrl();
+                if (url != null) {
+                    openUrlInNewTab(url, log);
+                } else {
+                    log.gray("Nothing to open: select an address in the log first - any "
+                            + "part of one will do.");
+                }
+            }
+        });
+        // Not in the browser, which has no disk of the user's to open anything on and no
+        // shell to hand a name to - the same reason its menu has no such item.
+        if (!isCheerpJ()) {
+            frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW)
+                    .put(KeyStroke.getKeyStroke(KeyEvent.VK_L,
+                            InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                            "jrock-open-file");
+            frame.getRootPane().getActionMap().put("jrock-open-file", new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent e) {
+                    String path = localPathIn(log.selectedText());
+                    if (path != null) {
+                        openLocalFile(path, log);
+                    } else {
+                        log.gray("Nothing to open: select a whole path in the log first - "
+                                + "a file or a folder, and the selection is the name.");
+                    }
+                }
+            });
+        }
+
         // Ctrl+, opens Configure, and F1 opens Help: the two keys every desktop program
         // has for its settings and its manual, and the two things in this window that
         // could only be reached by aiming at a button. Ctrl+, is the settings key on
@@ -7045,6 +7095,12 @@ public class JRock {
                 "Include a text, image, audio, PDF, RTF, DOCX or XLSX file"});
         keys.add(new String[] {"Ctrl+Shift+I", "Include a whole folder"});
         keys.add(new String[] {"Ctrl+U", "Fetch a URL and include what it answers with"});
+        keys.add(new String[] {"Ctrl+Shift+U",
+                "Open the address the log's selection points at (any part of one will do)"});
+        if (!isCheerpJ()) {
+            keys.add(new String[] {"Ctrl+Shift+L", "Open the file or folder the log's "
+                    + "selection names, with whatever this desktop opens it with"});
+        }
         if (recordAvailable()) {
             keys.add(new String[] {"Ctrl+Space", "Start recording from the microphone; "
                     + "again to stop and include it (or type it, with Transcribe on)"});
