@@ -395,6 +395,21 @@ public final class JRockPushToTalk {
     private static boolean ctrlHeld;
     private static boolean shiftHeld;
 
+    // THE SMALLEST THIS WINDOW CAN BE, as a whole number of cells on JRock's 32x27
+    // grid (JRock.CELL_W, JRock.CELL_H - one grid for every window in this project):
+    // 14 x 23 cells = 448 x 621, room for the button, the lever and a spoken answer.
+    //
+    // A NUMBER IN THIS FILE, and not whatever the layout worked out. This used to be
+    // "pack(); setMinimumSize(getSize())", which makes the floor a figure nobody wrote
+    // and nobody can read off the source - one that moves with the platform's fonts, the
+    // display scaling, and even the text that happened to be in a label while the window
+    // was being built. pack() still asks for the size of what is in this window, and it
+    // opens at whichever of the two is larger.
+    private static final int WINDOW_MIN_CELLS_W = 14;
+    private static final int WINDOW_MIN_CELLS_H = 23;
+    private static final int WINDOW_MIN_W = WINDOW_MIN_CELLS_W * JRock.CELL_W;
+    private static final int WINDOW_MIN_H = WINDOW_MIN_CELLS_H * JRock.CELL_H;
+
     private static javax.swing.JFrame window;
     private static TalkButton button;
     private static HandsFreeLever lever;
@@ -1520,7 +1535,7 @@ public final class JRockPushToTalk {
                 });
 
         window.pack();
-        window.setMinimumSize(window.getSize());
+        window.setMinimumSize(new java.awt.Dimension(WINDOW_MIN_W, WINDOW_MIN_H));
         // Beside JRock's window rather than on top of it, so both can be watched.
         java.awt.Window jrock = JRock.automationWindow();
         if (jrock != null) {

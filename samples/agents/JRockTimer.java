@@ -123,6 +123,21 @@ public final class JRockTimer {
     private static final String SETTINGS = "jrock-timer.txt";
     private static volatile String speaker = "";
 
+    // THE SMALLEST THIS WINDOW CAN BE, as a whole number of cells on JRock's 32x27
+    // grid (JRock.CELL_W, JRock.CELL_H - one grid for every window in this project):
+    // 12 x 16 cells = 384 x 432, room for the clock, the two fields and the list.
+    //
+    // A NUMBER IN THIS FILE, and not whatever the layout worked out. This used to be
+    // "pack(); setMinimumSize(getSize())", which makes the floor a figure nobody wrote
+    // and nobody can read off the source - one that moves with the platform's fonts, the
+    // display scaling, and even the text that happened to be in a label while the window
+    // was being built. pack() still asks for the size of what is in this window, and it
+    // opens at whichever of the two is larger.
+    private static final int WINDOW_MIN_CELLS_W = 12;
+    private static final int WINDOW_MIN_CELLS_H = 16;
+    private static final int WINDOW_MIN_W = WINDOW_MIN_CELLS_W * JRock.CELL_W;
+    private static final int WINDOW_MIN_H = WINDOW_MIN_CELLS_H * JRock.CELL_H;
+
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField timeField;
     private static javax.swing.JComboBox<String> speakerBox;
@@ -607,7 +622,7 @@ public final class JRockTimer {
         new javax.swing.Timer(250, e -> list.repaint()).start();
 
         window.pack();
-        window.setMinimumSize(window.getSize());
+        window.setMinimumSize(new java.awt.Dimension(WINDOW_MIN_W, WINDOW_MIN_H));
         window.setLocationRelativeTo(null);
         window.setVisible(true);
         // NOTHING THAT CAN BE CHANGED HAS THE FOCUS WHEN THIS OPENS. Swing gives it to

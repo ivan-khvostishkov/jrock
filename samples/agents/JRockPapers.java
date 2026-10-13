@@ -185,6 +185,21 @@ public final class JRockPapers {
     private static volatile Path incoming;
     private static volatile Process flowRunning;
 
+    // THE SMALLEST THIS WINDOW CAN BE, as a whole number of cells on JRock's 32x27
+    // grid (JRock.CELL_W, JRock.CELL_H - one grid for every window in this project):
+    // 20 x 18 cells = 640 x 486, room for the four rows of controls, and a few file names under them.
+    //
+    // A NUMBER IN THIS FILE, and not whatever the layout worked out. This used to be
+    // "pack(); setMinimumSize(getSize())", which makes the floor a figure nobody wrote
+    // and nobody can read off the source - one that moves with the platform's fonts, the
+    // display scaling, and even the text that happened to be in a label while the window
+    // was being built. pack() still asks for the size of what is in this window, and it
+    // opens at whichever of the two is larger.
+    private static final int WINDOW_MIN_CELLS_W = 20;
+    private static final int WINDOW_MIN_CELLS_H = 18;
+    private static final int WINDOW_MIN_W = WINDOW_MIN_CELLS_W * JRock.CELL_W;
+    private static final int WINDOW_MIN_H = WINDOW_MIN_CELLS_H * JRock.CELL_H;
+
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField folderField;
     private static javax.swing.JTextField incomingField;
@@ -1110,7 +1125,7 @@ public final class JRockPapers {
         window.setContentPane(content);
 
         window.pack();
-        window.setMinimumSize(window.getSize());
+        window.setMinimumSize(new java.awt.Dimension(WINDOW_MIN_W, WINDOW_MIN_H));
         window.setLocationRelativeTo(null);
         window.setVisible(true);
         // NOTHING THAT CAN BE CHANGED HAS THE FOCUS WHEN THIS OPENS. Swing gives it to

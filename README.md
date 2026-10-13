@@ -3431,6 +3431,42 @@ belongs. A remembered place that is on **no screen any more** — a laptop that 
 was pressed — is ignored, with a line in the log saying so, rather than opening the window where
 nobody can reach it. **Cancel** is still the way out that leaves the rest of the dialog alone.
 
+### Every window's smallest size, on a 32×27 grid
+
+**The smallest size of every window here is a whole number of cells**, 32 wide by 27 high, and
+each window says its own count in constants at the top of its own file — `WINDOW_MIN_CELLS_W`
+and `WINDOW_MIN_CELLS_H`, times `JRock.CELL_W` and `JRock.CELL_H`, which are the one definition
+of the grid.
+
+**Why a number in the source and not the layout's own.** Every agent used to end its window with
+`pack(); setMinimumSize(getSize())`, which makes the floor a figure nobody wrote: it is whatever
+the layout worked out at that moment, and it moves with the platform's fonts, the display
+scaling, and even the text that happened to be in a label while the window was being built. The
+Location agent was packed while its status line held a single space, so its minimum had room for
+one line of it — the first real sentence wrapped to two and pushed the last row of the form off
+the bottom. A grid cannot do that: it is the same number on every machine, and you can read it.
+
+`pack()` still asks for the size of what is in a window, and the window opens at whichever is
+larger — so a floor a cell or two above what the layout needs is simply the size that window
+opens at.
+
+| Window | Cells | Smallest size |
+|---|---|---|
+| JRock | 12 × 11 | **384 × 297** (it opens at 33 × 30 = 1056 × 810) |
+| Push-to-talk | 14 × 23 | 448 × 621 |
+| Timer | 12 × 16 | 384 × 432 |
+| Weather | 16 × 13 | 512 × 351 |
+| Location | 16 × 16 | 512 × 432 |
+| Browser | 20 × 16 | 640 × 432 |
+| Papers | 20 × 18 | 640 × 486 |
+| Thunderbird | 24 × 20 | 768 × 540 |
+
+JRock's own window had **no minimum at all** before this and could be dragged to nothing; at
+384 × 297 it still holds Configure, the folder menu, *Dialog only*, *Clear log*, the log, the
+prompt and Send with its three checkboxes. The **Window** tab's Set button clamps a typed width
+or height to those same two numbers, so what Set accepts and what the window can be dragged to
+are one pair of numbers rather than two opinions.
+
 ## Printing / PDF (Ctrl+P)
 
 Opens the native print dialog for the log. On Windows you can pick "Microsoft Print to PDF"

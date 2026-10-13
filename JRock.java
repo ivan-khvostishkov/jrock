@@ -176,6 +176,45 @@ public class JRock {
           + "page must pass natives: { Java_JRock_browserHttpInfo, "
           + "Java_JRock_browserHttpSend } to cheerpjInit(); see jrock-web/index.html.";
 
+    // ---- How big a window may be, on a 32x27 grid -------------------------------
+    // THE SMALLEST SIZE OF EVERY WINDOW IN THIS PROJECT IS A WHOLE NUMBER OF CELLS, and
+    // every window - this one and each agent's - says its own count in constants like
+    // these at the top of its own file. One grid, eight windows, no pixel arithmetic in
+    // the middle of a layout.
+    //
+    // WHY A NUMBER HERE RATHER THAN THE LAYOUT'S OWN. The agents used to end with
+    // "pack(); setMinimumSize(getSize())", which makes the smallest size whatever the
+    // layout worked out at that moment - a figure nobody wrote, nobody could read off the
+    // source, and which moved with the platform's fonts, the display scaling and even the
+    // text that happened to be in a label while the window was being built. One agent's
+    // form was packed while its status line held a single space, so the window's minimum
+    // had room for one line of it; the first real sentence wrapped to two and pushed the
+    // last row of the form off the bottom. A grid cannot do that: it is the same number on
+    // every machine, and it is in the file.
+    //
+    // The cell is 32 wide and 27 high - a little wider than tall, like the windows and
+    // the screens they sit on. An agent's window still packs itself around what is in it
+    // and opens at whichever is larger, so a floor set a cell or two above what a layout
+    // needs is simply the size that window opens at.
+    static final int CELL_W = 32;
+    static final int CELL_H = 27;
+
+    // This window: 12 x 11 cells = 384 x 297. Small enough to tuck into a corner and
+    // still show a prompt, a Send and a few lines of answer - everything else in it
+    // scrolls, which is what makes a window this size usable at all.
+    private static final int WINDOW_MIN_CELLS_W = 12;
+    private static final int WINDOW_MIN_CELLS_H = 11;
+    private static final int WINDOW_MIN_W = WINDOW_MIN_CELLS_W * CELL_W;
+    private static final int WINDOW_MIN_H = WINDOW_MIN_CELLS_H * CELL_H;
+
+    // The size it OPENS at, which is not the same question: room for a conversation.
+    // On the same grid - 33 x 30 cells = 1056 x 810, which is where 1050 x 800 lands when
+    // it is put on it.
+    private static final int WINDOW_CELLS_W = 33;
+    private static final int WINDOW_CELLS_H = 30;
+    private static final int WINDOW_W = WINDOW_CELLS_W * CELL_W;
+    private static final int WINDOW_H = WINDOW_CELLS_H * CELL_H;
+
     // Most recently fetched list of available model ids (from the /v1/models call).
     // Empty until the first successful fetch; used to populate the Configure dropdown.
     private static java.util.List<String> availableModels = new ArrayList<>();
@@ -2654,14 +2693,16 @@ public class JRock {
 
         // Preferred window size; if the screen can't fit it in either dimension,
         // start maximized, otherwise center it on screen.
-        final int WIN_W = 1050, WIN_H = 800;
-        frame.setSize(WIN_W, WIN_H);
+        frame.setSize(WINDOW_W, WINDOW_H);
         java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
-        if (screen.width < WIN_W || screen.height < WIN_H) {
+        if (screen.width < WINDOW_W || screen.height < WINDOW_H) {
             frame.setExtendedState(frame.getExtendedState() | JFrame.MAXIMIZED_BOTH);
         } else {
             frame.setLocationRelativeTo(null);   // center on screen
         }
+        // And the smallest it can be dragged to, which is a number in this file and not
+        // whatever the layout happened to work out (see WINDOW_MIN_CELLS_W).
+        frame.setMinimumSize(new java.awt.Dimension(WINDOW_MIN_W, WINDOW_MIN_H));
 
         JTextPane output = new JTextPane();
         output.setEditable(false);
@@ -15356,8 +15397,10 @@ public class JRock {
     // that OK saves, so Enter closing the dialog is right there; here the button that does
     // the work is Set, and Enter reaching OK instead shut the dialog without moving the
     // window - the one thing somebody typing a width into this tab cannot have meant.
-    private static final int WINDOW_MIN_W = 200;
-    private static final int WINDOW_MIN_H = 150;
+    // A width or a height below the window's own smallest size is raised to it rather
+    // than refused: WINDOW_MIN_W and WINDOW_MIN_H are that size, so what Set accepts and
+    // what the window can be dragged to are the same two numbers and not two opinions.
+    //
     // How much of a remembered window's top edge has to be on a screen for the place to
     // be used: a title bar's worth, so it can be dragged.
     private static final int WINDOW_GRAB_H = 40;

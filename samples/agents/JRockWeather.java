@@ -108,6 +108,21 @@ public final class JRockWeather {
     private static final java.util.Map<String, String> cache =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    // THE SMALLEST THIS WINDOW CAN BE, as a whole number of cells on JRock's 32x27
+    // grid (JRock.CELL_W, JRock.CELL_H - one grid for every window in this project):
+    // 16 x 13 cells = 512 x 351, room for the place, the buttons and a line of weather.
+    //
+    // A NUMBER IN THIS FILE, and not whatever the layout worked out. This used to be
+    // "pack(); setMinimumSize(getSize())", which makes the floor a figure nobody wrote
+    // and nobody can read off the source - one that moves with the platform's fonts, the
+    // display scaling, and even the text that happened to be in a label while the window
+    // was being built. pack() still asks for the size of what is in this window, and it
+    // opens at whichever of the two is larger.
+    private static final int WINDOW_MIN_CELLS_W = 16;
+    private static final int WINDOW_MIN_CELLS_H = 13;
+    private static final int WINDOW_MIN_W = WINDOW_MIN_CELLS_W * JRock.CELL_W;
+    private static final int WINDOW_MIN_H = WINDOW_MIN_CELLS_H * JRock.CELL_H;
+
     private static javax.swing.JFrame window;
     private static javax.swing.JTextField locationField;
     private static javax.swing.JButton askButton;
@@ -397,7 +412,7 @@ public final class JRockWeather {
         window.setContentPane(content);
 
         window.pack();
-        window.setMinimumSize(window.getSize());
+        window.setMinimumSize(new java.awt.Dimension(WINDOW_MIN_W, WINDOW_MIN_H));
         // Beside JRock's window rather than on top of it, so both can be watched.
         java.awt.Window jrock = JRock.automationWindow();
         if (jrock != null) {
