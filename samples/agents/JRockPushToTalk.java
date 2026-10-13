@@ -75,8 +75,8 @@
 // says what became of it.
 //
 // Location: an answer that is only "I need to know your location" - which the appendix
-// asks the model for, in English - is neither shown nor read aloud. The location agent
-// (JRockLocation.java) on 127.0.0.1:LOCATION_PORT is sent "#here", and the line it sends
+// asks the model for, in English - is neither shown nor read aloud. The geo location agent
+// (JRockGeoLocation.java) on 127.0.0.1:LOCATION_PORT is sent "#here", and the line it sends
 // back - "Munich, Bavaria, Lat: 48.13, Lon: 11.59" - goes to the model as it is, as the
 // next prompt; its reply is the turn's answer. Once a turn. The model knows which
 // question that answers only with History on. Without the agent, or when it does not
@@ -84,7 +84,7 @@
 //
 // Weather: an answer that is only "I need weather for this location: ..." is not shown or
 // read aloud either. A location with no coordinates in it - "Munich" - goes to the
-// location agent first, for them; one the model already has from "#here" is used as it
+// geo location agent first, for them; one the model already has from "#here" is used as it
 // is. The location goes to the weather agent (JRockWeather.java) on
 // 127.0.0.1:WEATHER_PORT, which answers with a checked address on open-meteo.com; that
 // is fetched, as Fetch URL does, into jrock-prompt-ptt-weather.txt beside this file, and
@@ -144,13 +144,16 @@ public final class JRockPushToTalk {
     // in the prompt, so that the transcript holds a token and a file rather than ten
     // thousand characters of letter.
     //
-    // NOT the saved answers any more: those belong to the papers agent, which has the
+    // NOT the saved answers any more: those belong to the paper docs agent, which has the
     // folder for documents and the flow that names them (see savedIn). What is left here
     // is working material - the thing a question was asked ABOUT - and it is still worth
     // keeping out of the working folder and out of JRock's own, which hold the API key,
     // the conversation and the log.
     private static final String FILES_DIR = "PTTFiles";
     private static final String MAIL_SUB = "mail";
+    // The folder name is the old one on purpose, as the agent's settings file is:
+    // a transcript written last week names files in PTTFiles/papers/, and a
+    // rename would leave every one of those tokens pointing at nothing.
     private static final String PAPERS_SUB = "papers";
 
     // What goes after every recording, expected beside this file; and the placeholder in
@@ -352,7 +355,7 @@ public final class JRockPushToTalk {
     // The answer before this one, which is what the save sentence saves.
     private static volatile String lastAnswer;
 
-    // Coordinates in a location line, as the location agent writes them - which the model
+    // Coordinates in a location line, as the geo location agent writes them - which the model
     // may already have from it, and then they are used as they are.
     private static final java.util.regex.Pattern COORDINATES = java.util.regex.Pattern.compile(
             "Lat(?:itude)?\\s*:\\s*[-+]?\\d", java.util.regex.Pattern.CASE_INSENSITIVE);
@@ -361,7 +364,7 @@ public final class JRockPushToTalk {
     // for, #url where the page goes.
     private static final String WEATHER_PROMPT = "jrock-prompt-ptt-weather.txt";
 
-    // The location and weather agents' ports - JRockLocation.PORT and JRockWeather.PORT,
+    // The location and weather agents' ports - JRockGeoLocation.PORT and JRockWeather.PORT,
     // the second and third of JRock's agents' ports - and how long an agent has: at once
     // to take the connection, and for the answer as long as two questions to its own
     // model and a page fetched take.
@@ -373,14 +376,14 @@ public final class JRockPushToTalk {
     private static final int AGENT_CONNECT_MS = 3000;
     private static final int AGENT_TIMEOUT_MS = 180_000;
 
-    // Filing a letter is not a lookup: the papers agent drives the doc inventory flow,
+    // Filing a letter is not a lookup: the paper docs agent drives the doc inventory flow,
     // and a scanned letter through Ghostscript, xpdf and three model passes takes
     // minutes. Only the request that files one waits this long - everything else the
-    // papers agent answers, it answers at once.
+    // paper docs agent answers, it answers at once.
     private static final int FILING_TIMEOUT_MS = 12 * 60_000;
     private static final String FILING_REQUEST = "#inventory";
 
-    // Printing is a handover rather than a lookup too, but a quick one: the papers agent
+    // Printing is a handover rather than a lookup too, but a quick one: the paper docs agent
     // hands the document to the program that owns it and the paper comes out afterwards.
     // It gets the ordinary limit, and a status line of its own because something is about
     // to happen in another room.
@@ -522,7 +525,7 @@ public final class JRockPushToTalk {
             if (!askedLocation && LOCATION_REQUEST.matcher(answer.trim()).matches()) {
                 askedLocation = true;
                 later(() -> setState(State.ANSWERING, "Looking up the location\u2026"));
-                String[] here = askAgent(LOCATION_PORT, "#here", "location", "JRockLocation.java");
+                String[] here = askAgent(LOCATION_PORT, "#here", "geo location", "JRockGeoLocation.java");
                 if (here[0] == null) {
                     note = "Location not sent: " + here[1];
                     break;
@@ -579,7 +582,7 @@ public final class JRockPushToTalk {
                 }
                 answer = sendAndRead("Sent the mail, waiting for the reply\u2026");
             } else if (post.matches()) {
-                // The paper post, off the papers agent - which has no model of its own:
+                // The paper post, off the paper docs agent - which has no model of its own:
                 // it looks in the scanner's folder, and drives the doc inventory flow
                 // when a letter has to be filed.
                 String about = post.group(1).trim();
@@ -593,8 +596,8 @@ public final class JRockPushToTalk {
                 } else if (postAsked.startsWith(PRINT_REQUEST)) {
                     later(() -> setState(State.ANSWERING, "Printing it…"));
                 }
-                String[] letters = askAgent(PAPERS_PORT, postAsked, "papers",
-                        "JRockPapers.java",
+                String[] letters = askAgent(PAPERS_PORT, postAsked, "paper docs",
+                        "JRockPaperDocs.java",
                         postAsked.startsWith(FILING_REQUEST) ? FILING_TIMEOUT_MS
                                                              : AGENT_TIMEOUT_MS);
                 if (letters[0] == null) {
@@ -814,9 +817,9 @@ public final class JRockPushToTalk {
         return "#page " + asked;
     }
 
-    // What the model asked of the post, as the papers agent's own request. The leading
+    // What the model asked of the post, as the paper docs agent's own request. The leading
     // word decides and the rest is passed through as written - a letter's name as the
-    // operator said it, which the papers agent matches against the file names itself.
+    // operator said it, which the paper docs agent matches against the file names itself.
     private static String postRequest(String about) {
         String asked = about.trim();
         String lower = asked.toLowerCase(java.util.Locale.ROOT);
@@ -829,7 +832,7 @@ public final class JRockPushToTalk {
                 { "incoming", "#incoming" }, { "documents", "#incoming" },
                 { "file it", "#inventory" }, { "inventory", "#inventory" },
                 // ON PAPER. "print it" is the newest scan, the way "file it" is, and
-                // anything after "print" is the document's name - which the papers agent
+                // anything after "print" is the document's name - which the paper docs agent
                 // matches, and whose best printable kind it picks.
                 { "print it", "#print" }, { "print", "#print" },
                 { "file", "#file" }, { "read", "#file" }, { "what", "#file" },
@@ -900,10 +903,10 @@ public final class JRockPushToTalk {
         if (!COORDINATES.matcher(where).find()) {
             String named = where;
             later(() -> setState(State.ANSWERING, "Looking up where " + named + " is\u2026"));
-            String[] found = askAgent(LOCATION_PORT, named, "location", "JRockLocation.java");
+            String[] found = askAgent(LOCATION_PORT, named, "geo location", "JRockGeoLocation.java");
             if (found[0] == null) return found;
             if (!COORDINATES.matcher(found[0]).find()) {
-                return new String[] { null, "the location agent found no coordinates for " + named + "." };
+                return new String[] { null, "the geo location agent found no coordinates for " + named + "." };
             }
             where = found[0];
         }
@@ -1042,7 +1045,7 @@ public final class JRockPushToTalk {
         return out.length() == 0 ? null : out.toString();
     }
 
-    // Asks another agent - the location agent, the weather agent - on its port: the line
+    // Asks another agent - the geo location agent, the weather agent - on its port: the line
     // sent, and the line that comes back, read until the agent closes the connection.
     // Returns { line, null }, or { null, why not }; an empty line is the agent's "don't
     // know". what and file name the agent in that.
@@ -1199,10 +1202,10 @@ public final class JRockPushToTalk {
         // flow that names things, and it already reads everything in there back out. This
         // one has a microphone and a model, which is a different job - and the markdown
         // travels between them as every other document here already does.
-        String[] saved = askAgent(PAPERS_PORT, "#save " + keep, "papers",
-                "JRockPapers.java");
+        String[] saved = askAgent(PAPERS_PORT, "#save " + keep, "paper docs",
+                "JRockPaperDocs.java");
         if (saved[0] == null) return "Not saved: " + saved[1];
-        report("papers: " + saved[0].replace("\n", " "));
+        report("paper docs: " + saved[0].replace("\n", " "));
         return saved[0].split("\n", 2)[0].trim();
     }
 

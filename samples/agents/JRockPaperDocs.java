@@ -8,8 +8,8 @@
 //
 // Run it the way JRock itself runs - no build step, no Maven, one file:
 //
-//     java -cp jrock.jar JRockPapers.java [--folder <where the scanner writes>]
-//     java -cp jrock.jar JRockPapers.java --print recent
+//     java -cp jrock.jar JRockPaperDocs.java [--folder <where the scanner writes>]
+//     java -cp jrock.jar JRockPaperDocs.java --print recent
 //
 // NO JROCK OF ITS OWN: AN AGENT THAT DRIVES A FLOW.
 //
@@ -95,12 +95,16 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-public final class JRockPapers {
+public final class JRockPaperDocs {
 
     // The next port after the browser's.
     private static final int PORT = 47475;
 
     // Where this agent keeps the one thing it is told: the folder the scanner writes to.
+    // The file name is the old one on purpose: this agent was called
+    // JRockPapers, and a folder whose scanner and incoming folders are already
+    // set should not lose them to a rename. What it is called and what it keeps
+    // its settings in are two different questions.
     private static final String SETTINGS = "jrock-papers.txt";
 
     // The flow it drives, and the flag that stops it asking.
@@ -233,10 +237,10 @@ public final class JRockPapers {
             return;
         }
 
-        onEdt(JRockPapers::showWindow);
+        onEdt(JRockPaperDocs::showWindow);
         String said = listen();
         later(() -> listening.setText(said));
-        System.out.println("Papers agent is ready. " + said);
+        System.out.println("Paper docs agent is ready. " + said);
     }
 
     // ---- Answering -------------------------------------------------------------
@@ -858,7 +862,7 @@ public final class JRockPapers {
                     if (server == null || server.isClosed()) return;
                 }
             }
-        }, "jrock-papers-listener");
+        }, "jrock-paperdocs-listener");
         t.start();
         return "Listening on 127.0.0.1:" + PORT + " for #recent, #scans, #file, "
                 + "#inventory and #print.";
@@ -925,7 +929,7 @@ public final class JRockPapers {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        window = new javax.swing.JFrame("JRock - Papers");
+        window = new javax.swing.JFrame("JRock - Paper docs");
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
@@ -1189,7 +1193,7 @@ public final class JRockPapers {
             }
             String shown = out;
             later(() -> show(shown));
-        }, "jrock-papers-ask").start();
+        }, "jrock-paperdocs-ask").start();
     }
 
     private static void show(String text) {
@@ -1585,7 +1589,7 @@ public final class JRockPapers {
     // Documents\Incoming.
     private static void writeSettings() {
         Path file = ownDirectory().resolve(SETTINGS);
-        String out = "' JRock papers agent\n"
+        String out = "' JRock paper docs agent\n"
                 + (folder == null ? "" : "folder=" + folder + "\n")
                 + (incoming == null ? "" : "incoming=" + incoming + "\n");
         try {
@@ -1604,7 +1608,7 @@ public final class JRockPapers {
         }
         try {
             java.security.CodeSource code =
-                    JRockPapers.class.getProtectionDomain().getCodeSource();
+                    JRockPaperDocs.class.getProtectionDomain().getCodeSource();
             if (code != null && code.getLocation() != null) {
                 Path at = Paths.get(code.getLocation().toURI()).toAbsolutePath().normalize();
                 Path parent = Files.isDirectory(at) ? at : at.getParent();
@@ -1652,6 +1656,6 @@ public final class JRockPapers {
         }
     }
 
-    private JRockPapers() {
+    private JRockPaperDocs() {
     }
 }

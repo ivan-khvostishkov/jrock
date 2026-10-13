@@ -157,9 +157,9 @@ public final class Screenshots {
         shoot(window, "05-two-turns-with-history-and-dialog-only");
 
         // The agents, each in its own window. The timer needs no JRock and no key at all;
-        // the papers agent shows the two folders it reads.
+        // the paper docs agent shows the two folders it reads.
         shootAgent("JRockTimer", new String[0], "06-the-timer-agent");
-        shootAgent("JRockPapers", new String[] { "--folder", work.toString(),
+        shootAgent("JRockPaperDocs", new String[] { "--folder", work.toString(),
                 "--incoming", work.toString() }, "07-the-papers-agent");
 
         System.out.println("wrote " + taken + " screenshot(s) to " + out);

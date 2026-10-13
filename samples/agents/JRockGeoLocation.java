@@ -4,7 +4,7 @@
 // Run it the way JRock itself runs - no build step, no Maven, one file - with the jar on
 // the class path:
 //
-//     java -cp jrock.jar JRockLocation.java [--working-dir <dir>]
+//     java -cp jrock.jar JRockGeoLocation.java [--working-dir <dir>]
 //
 // The jar is wherever the installer put it - one folder up from samples/flows/,
 // two up from an agent's own folder - and -cp names it. Take the flags as
@@ -79,9 +79,9 @@ import java.nio.file.Paths;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public final class JRockLocation {
+public final class JRockGeoLocation {
 
-    // JRock's agents' ports (see JRockTimer.java), and the location agent's, the second
+    // JRock's agents' ports (see JRockTimer.java), and the geo location agent's, the second
     // of them. Other agents connect to PORT.
     public static final int AGENT_PORTS_FIRST = 47470;
     public static final int PORT = AGENT_PORTS_FIRST + 1;
@@ -150,6 +150,9 @@ public final class JRockLocation {
     // how to work rather than facts about the world - whether to look the place up, and
     // how many digits anybody else gets - and typing them in again every morning is the
     // kind of small insult software should not offer.
+    // The file name is the old one on purpose: this agent was called
+    // JRockLocation, and a folder that has its place, its rounding and its
+    // refresh set should not lose them to a rename.
     private static final String SETTINGS = "jrock-location.txt";
 
     private static final String[] ROUNDINGS = {
@@ -227,7 +230,7 @@ public final class JRockLocation {
     // calls must not overlap, and two clients asking at once are answered one after the
     // other. A daemon, so closing JRock's window ends the process as it always does.
     private static final java.util.concurrent.ExecutorService RESOLVER =
-            java.util.concurrent.Executors.newSingleThreadExecutor(r -> daemon(r, "jrock-location-resolver"));
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> daemon(r, "jrock-geolocation-resolver"));
 
     // Answers found for lines that were sent, for the run; and "#here", while Refresh GPS
     // is on. The key is the line as sent, with every digit.
@@ -291,7 +294,7 @@ public final class JRockLocation {
             // Only no window at all is a reason not to start.
             noModel = JRock.automationAwaitReady(READY_TIMEOUT_MS);
             problem = JRock.automationWindow() == null ? noModel
-                    : JRock.automationBegin("location agent");
+                    : JRock.automationBegin("geo location agent");
         } catch (Stop stop) {
             problem = stop.getMessage();
         }
@@ -299,15 +302,15 @@ public final class JRockLocation {
             String why = problem;
             System.out.println("Stopped: " + why);
             onEdt(() -> javax.swing.JOptionPane.showMessageDialog(JRock.automationWindow(),
-                    "The location agent could not start:\n\n" + why,
+                    "The geo location agent could not start:\n\n" + why,
                     "Location", javax.swing.JOptionPane.ERROR_MESSAGE));
             return;
         }
-        onEdt(JRockLocation::showWindow);
+        onEdt(JRockGeoLocation::showWindow);
         String said = listen();
         later(() -> listening.setText(said));
         System.out.println("Location is ready. " + said);
-        later(JRockLocation::locateNow);
+        later(JRockGeoLocation::locateNow);
     }
 
     // ---- The line --------------------------------------------------------------
@@ -599,17 +602,17 @@ public final class JRockLocation {
                 while (!socket.isClosed()) {
                     try {
                         Socket client = socket.accept();
-                        daemon(() -> serve(client), "jrock-location-client").start();
+                        daemon(() -> serve(client), "jrock-geolocation-client").start();
                     } catch (IOException closed) {
                         // Closed with the window, or failed: either way, no more clients.
                         return;
                     }
                 }
-            }, "jrock-location-server").start();
+            }, "jrock-geolocation-server").start();
             return "Other agents ask on 127.0.0.1:" + PORT + ".";
         } catch (IOException ex) {
             return "Not listening on port " + PORT + " (" + ex.getMessage() + ") - is "
-                    + "another location agent running?";
+                    + "another geo location agent running?";
         }
     }
 
@@ -658,7 +661,7 @@ public final class JRockLocation {
     private static final java.awt.Color MUTED = new java.awt.Color(0x6B7280);
 
     private static void showWindow() {
-        window = new javax.swing.JFrame("JRock - Location");
+        window = new javax.swing.JFrame("JRock - Geo location");
         // Closing this window ends the agent, not JRock: no more clients.
         window.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         window.addWindowListener(new java.awt.event.WindowAdapter() {
@@ -668,7 +671,7 @@ public final class JRockLocation {
                 if (s != null) {
                     try { s.close(); } catch (IOException ignored) { }
                 }
-                RESOLVER.submit(() -> JRock.automationEnd("location agent closed"));
+                RESOLVER.submit(() -> JRock.automationEnd("geo location agent closed"));
             }
         });
 
@@ -1011,7 +1014,7 @@ public final class JRockLocation {
     private static void writeSettings() {
         if (placeAuto == null || roundTo == null) return;
         Path file = ownDirectory().resolve(SETTINGS);
-        String out = "' JRock location agent\n"
+        String out = "' JRock geo location agent\n"
                 + "place-auto=" + placeAuto.isSelected() + "\n"
                 + "round-to=" + ROUNDINGS[Math.max(0, roundTo.getSelectedIndex())] + "\n";
         try {
@@ -1030,7 +1033,7 @@ public final class JRockLocation {
         }
         try {
             java.security.CodeSource code =
-                    JRockLocation.class.getProtectionDomain().getCodeSource();
+                    JRockGeoLocation.class.getProtectionDomain().getCodeSource();
             if (code != null && code.getLocation() != null) {
                 Path at = Paths.get(code.getLocation().toURI()).toAbsolutePath().normalize();
                 Path parent = Files.isDirectory(at) ? at : at.getParent();

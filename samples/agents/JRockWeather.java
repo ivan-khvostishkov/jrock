@@ -23,7 +23,7 @@
 //      closes. What comes back is one line: the address, or an empty line when there is
 //      none - and this window's status line says why.
 //
-// The location is a line as the location agent (JRockLocation.java) sends it, and it has
+// The location is a line as the geo location agent (JRockGeoLocation.java) sends it, and it has
 // to have coordinates in it - the weather is for a point, not a name:
 //
 //     Munich, Bavaria, Lat: 48.13, Lon: 11.59
@@ -81,7 +81,7 @@ public final class JRockWeather {
     // The one site addresses are answered from.
     private static final String SITE = "open-meteo.com";
 
-    // A location line as JRockLocation.java has it: the place, then the coordinates,
+    // A location line as JRockGeoLocation.java has it: the place, then the coordinates,
     // either way round, the labels short or long.
     private static final String NUMBER = "[-+]?\\d+(?:[.,]\\d+)?";
     private static final String LABEL = "(Lat(?:itude)?|Lon(?:gitude)?|Lng)";
@@ -350,7 +350,7 @@ public final class JRockWeather {
 
         locationField = new javax.swing.JTextField("Munich, Bavaria, Lat: 48.13, Lon: 11.59", 28);
         locationField.setFont(base.deriveFont(java.awt.Font.PLAIN, 14f));
-        locationField.setToolTipText("A location as the location agent gives it, with its coordinates");
+        locationField.setToolTipText("A location as the geo location agent gives it, with its coordinates");
         askButton = new javax.swing.JButton("Get address");
         Runnable askIt = () -> {
             String line = locationField.getText();

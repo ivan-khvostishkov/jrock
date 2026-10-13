@@ -1697,7 +1697,7 @@ two-sided batch, which are merged into one document first through JRock's own du
 of it twice. Every question answers itself the way the person at the keyboard almost always
 answers it — yes, rename them — and the result is **printed in a line a program can read**
 (`AUTO-RESULT name=… scanned=… files=…`) instead of shown in a dialog a program cannot dismiss.
-It is how the [papers agent](#a-seventh-agent-the-paper-post-jrockpapersjava) files a scan the
+It is how the [paper docs agent](#a-seventh-agent-paper-docs-in-and-out-jrockpaperdocsjava) files a scan the
 moment it arrives, with the operator three rooms away.
 
 **And `--auto` ends the process when it is done**, window and all. That is not tidiness: a JVM
@@ -1707,7 +1707,7 @@ it, which is right. With nobody there to close it, the agent that started the fl
 **process** and not merely for its answer: it reads the flow's output until the stream ends, and
 a stream ends when the process does. A flow that files a letter and then sits there is therefore
 indistinguishable from one still working, which is exactly how a filed letter once came back to
-the operator as *"the papers agent did not answer"*.
+the operator as *"the paper docs agent did not answer"*.
 
 **`-cp jrock.jar` has to name a jar that is there.** Nothing downloads it: the
 [installer](#the-installer-installerinstalljrockjava) puts one in the folder it installs into
@@ -1972,7 +1972,7 @@ the voice, so the microphone doesn't record the last answer as the next question
   the browser's own window is open on it.
 - **Location.** When the whole answer is *"I need to know your location"*, the agent does not
   show it or read it aloud. It sends `#here` to the
-  [location agent](#a-third-agent-location-jrocklocationjava) and gives the model the line that
+  [geo location agent](#a-third-agent-geo-location-jrockgeolocationjava) and gives the model the line that
   comes back, unchanged, as the next prompt, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`.
   The reply to that is the turn's answer. Once a turn: a place does not change between two
   sends, so a model that asks twice has its turn ended rather than answered. The model knows
@@ -2108,7 +2108,7 @@ sequenceDiagram
   above and a newline, and read one line back: `1` means the alarm is set, `0` means it isn't.
   Then close the connection. [Push-to-talk](#the-first-agent-push-to-talk-jrockpushtotalkjava)
   does this.
-- **JRock's agents' ports** are **47470–47479**. The timer has the first, the location agent
+- **JRock's agents' ports** are **47470–47479**. The timer has the first, the geo location agent
   47471, the weather agent 47472, and the Thunderbird agent 47473. The range is
   below Windows' dynamic range (49152 and up, where the system hands out ports and Hyper-V
   reserves blocks of them), and no well-known service uses it. Another timer already running
@@ -2118,12 +2118,12 @@ sequenceDiagram
   folder with no key is fine. Set its **Narrate on** once, in its own JRock's Configure: the
   dropdown lists the speakers when you open it.
 
-### A third agent: location (`JRockLocation.java`)
+### A third agent: geo location (`JRockGeoLocation.java`)
 
 It knows where the operator is and tells other agents.
 
 ```
-java -cp jrock.jar JRockLocation.java --working-dir D:\Location
+java -cp jrock.jar JRockGeoLocation.java --working-dir D:\Location
 ```
 
 It starts JRock and takes it as an automation, like the timer, and opens a small window.
@@ -2185,12 +2185,12 @@ the weather itself: the agent that asked does that.
 java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
 ```
 
-- **Other agents ask** on `127.0.0.1:47472`. They send a location in the location agent's line
+- **Other agents ask** on `127.0.0.1:47472`. They send a location in the geo location agent's line
   format, **with coordinates**, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`. They get back
   one line: the address, or an empty line and the reason in the window.
 - `jrock-prompt-weather-url.txt` asks the model for the open-meteo.com address with the current
   weather and the forecast, in Celsius and in the local time zone — **no URL template in the
-  source**, for the reason the [location agent](#a-third-agent-location-jrocklocationjava)
+  source**, for the reason the [geo location agent](#a-third-agent-geo-location-jrockgeolocationjava)
   gives: an API's query string is not ours to keep up to date, and a model that has read the
   site can write one from the coordinates. The address is then checked the same way, against
   `open-meteo.com` and its subdomains, and kept for the run by coordinates.
@@ -2584,7 +2584,7 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   wrapping text area rather than an HTML label, because a label wraps only where its HTML names
   a width in **CSS** pixels — which Swing scales by the display, so `width:680px` asks for 886
   device pixels and a narrower window simply cuts the line off. Measured on a 130% screen: the
-  papers agent wanted 939 px in a window with 818, and showed two lines of three. A text area
+  paper docs agent wanted 939 px in a window with 818, and showed two lines of three. A text area
   wraps to the width it actually has, and breaks **inside** a word when the word is wider than
   that — which a file name or an address, being one long token with no space in it, always is.
 - **One tab per site**, kept. A second page on a site reuses its tab, and since the only sites
@@ -2722,20 +2722,20 @@ and its own JRock log.
 Protocol is JSON over a WebSocket, and a WebSocket client has been in the JDK since 11
 (`java.net.http.WebSocket`), so this is one file with no dependencies like everything else here.
 
-### A seventh agent: papers, in and out (`JRockPapers.java`)
+### A seventh agent: paper docs, in and out (`JRockPaperDocs.java`)
 
 The post that comes through the door, and the documents that arrive by every other route — what
 the scanner has put in its folder, what arrived when, what a filed letter says, and what was
 kept as a document of its own.
 
-**Papers, not mail.** The [Thunderbird
+**Paper docs, not mail.** The [Thunderbird
 agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) reads
 e-mail; this one reads what is on paper. A scan is a **letter**, a file in the incoming folder
 is a **document**, and the answer says which it is, by the folder it came from.
 
 ```sh
-java -cp jrock.jar JRockPapers.java --folder D:\HPNetworkScan
-java -cp jrock.jar JRockPapers.java --folder D:\HPNetworkScan --print recent
+java -cp jrock.jar JRockPaperDocs.java --folder D:\HPNetworkScan
+java -cp jrock.jar JRockPaperDocs.java --folder D:\HPNetworkScan --print recent
 ```
 
 **No JRock of its own.** It lists folders and reads text files, which needs no model and no
@@ -2752,7 +2752,7 @@ sequenceDiagram
         participant PTT as JRockPushToTalk
         participant PM as its JRock (model)
     end
-    participant Pap as JRockPapers, 127.0.0.1:47475
+    participant Pap as JRockPaperDocs, 127.0.0.1:47475
     box One letter, one lifetime
         participant Flow as JRockDocInventory #45;#45;auto
         participant FM as its own JRock (model)
@@ -2908,7 +2908,7 @@ sequenceDiagram
 - **Filing takes minutes, and nothing waits for ever.** The flow behind it is Ghostscript,
   xpdf and three model passes over a scanned page, so a minute or two is an ordinary letter.
   Push-to-talk waits **twelve minutes** for this one request, telling the operator what is
-  happening; every other question the papers agent answers at once. The flow gets **twenty
+  happening; every other question the paper docs agent answers at once. The flow gets **twenty
   minutes**, kept by a thread of its own that ends the process — the agent reads the flow's
   output until the stream ends, and a stream ends when the process does, so a limit checked
   after the reading could never be reached. A flow that will not exit is killed, the agent
@@ -2958,11 +2958,11 @@ flowchart LR
     subgraph agents ["Agents - they loop, and only listen"]
         direction TB
         TIM["Timer<br/>:47470<br/>no JRock"]
-        LOC["Location<br/>:47471<br/>its own JRock"]
+        LOC["Geo location<br/>:47471<br/>its own JRock"]
         WX["Weather<br/>:47472<br/>its own JRock"]
         TB["Thunderbird<br/>:47473<br/>its own JRock"]
         BR["Browser<br/>:47474<br/>its own JRock"]
-        PAP["Papers<br/>:47475<br/>no JRock"]
+        PAP["Paper docs<br/>:47475<br/>no JRock"]
     end
 
     subgraph flows ["Flows - one run each, from a right-click"]
@@ -3018,7 +3018,7 @@ flowchart LR
 Three things that diagram is for. **Only push-to-talk connects to anything** — every other agent
 opens a socket on the loopback interface and waits, so the question "which agent could have
 started this?" has one answer. **Two agents have no JRock at all**: the timer, which makes its
-own sounds, and the papers agent, which drives a flow and otherwise reads a folder. And **every
+own sounds, and the paper docs agent, which drives a flow and otherwise reads a folder. And **every
 agent that needs a model has its own** — one JRock per program, one folder per JRock, so two of
 them never write the same log or the same prompt file.
 
@@ -3046,7 +3046,7 @@ sequenceDiagram
         participant PM as its JRock (model)
     end
     box Location, 127.0.0.1:47471
-        participant Loc as JRockLocation
+        participant Loc as JRockGeoLocation
         participant LM as its JRock (model)
     end
     box Weather, 127.0.0.1:47472
@@ -3097,7 +3097,7 @@ sequenceDiagram
 
 If the operator names a place instead, as in "What's the weather in Berlin?", the model asks
 straight away: *"I need weather for this location: Berlin"*. That line has no coordinates, so
-push-to-talk first sends `Berlin` to the location agent. That agent looks the coordinates up
+push-to-talk first sends `Berlin` to the geo location agent. That agent looks the coordinates up
 through openstreetmap.org, the same way it looks up a place above. The rest is the same.
 
 **Setting an alarm.** Here the sentence the program recognises is also what the operator
@@ -3551,7 +3551,7 @@ of the grid.
 `pack(); setMinimumSize(getSize())`, which makes the floor a figure nobody wrote: it is whatever
 the layout worked out at that moment, and it moves with the platform's fonts, the display
 scaling, and even the text that happened to be in a label while the window was being built. The
-Location agent was packed while its status line held a single space, so its minimum had room for
+Geo location agent was packed while its status line held a single space, so its minimum had room for
 one line of it — the first real sentence wrapped to two and pushed the last row of the form off
 the bottom. A grid cannot do that: it is the same number on every machine, and you can read it.
 
@@ -3565,9 +3565,9 @@ opens at.
 | Push-to-talk | 14 × 23 | 448 × 621 |
 | Timer | 12 × 16 | 384 × 432 |
 | Weather | 16 × 13 | 512 × 351 |
-| Location | 18 × 16 | 576 × 432 |
+| Geo location | 18 × 16 | 576 × 432 |
 | Browser | 20 × 16 | 640 × 432 |
-| Papers | 20 × 18 | 640 × 486 |
+| Paper docs | 20 × 18 | 640 × 486 |
 | Thunderbird | 24 × 20 | 768 × 540 |
 | The installer | 25 × 24 | 800 × 648 (it opens at 28 × 30 = 896 × 810) |
 
@@ -4481,7 +4481,7 @@ Nine pages, in this order:
 
 1. **What was unpacked** — `jrock.jar` and `samples/` have to be in the folder it was started
    from, which is where a release unpacks to. Missing, it says so and waits for Retry. It also
-   names **what is running right now** — *JRock (javaw.exe 17880), Browser, Papers, Timer…* —
+   names **what is running right now** — *JRock (javaw.exe 17880), Browser, PaperDocs, Timer…* —
    with a **Stop them all now** button: Windows will not replace a file a process has open, and
    `jrock.jar` is open in every one of them. Stopping them loses nothing (the log is written as
    it goes and the prompt is autosaved) and the last page starts them again.
@@ -4624,7 +4624,7 @@ asked to paint itself:
 | `04-a-question-and-its-answer` | `automationSend`: the turn, the raw request and response, the stats |
 | `05-two-turns-with-history-and-dialog-only` | The conversation without the machinery around it |
 | `06-the-timer-agent` | `JRockTimer` |
-| `07-the-papers-agent` | `JRockPapers`, with its two folders |
+| `07-the-papers-agent` | `JRockPaperDocs`, with its two folders |
 
 Run it locally the way CI does (the jar first, because the agents compile against it):
 
