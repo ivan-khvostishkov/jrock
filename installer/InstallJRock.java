@@ -108,6 +108,10 @@ public final class InstallJRock {
     // because asking Windows what is running is a WMI query and that is PowerShell's job,
     // and the .cmd is the thing a person can double-click in Explorer.
     private static final String START_PS1 = "JRockStart.ps1";
+
+    // JRock's own flag for "no window: ask at a prompt and print the answer", which the
+    // CLI shortcut is a shortcut TO (see Place.CLI).
+    private static final String CLI_FLAG = "--cli";
     private static final String START_CMD = "JRockStart.cmd";
     private static final String START_SH = "jrock-start.sh";
 
@@ -232,6 +236,15 @@ public final class InstallJRock {
     private static Path home;            // the one folder the installation lives in
     private static boolean startMenu = true;
     private static boolean desktop = true;
+    // The CLI entry is OFF unless it is already there: a console prompt is a thing
+    // somebody asks for, and an installer that adds menu entries nobody wanted is an
+    // installer people uninstall. Read rather than assumed, like the login entry.
+    private static boolean cliMenu;
+    // Whether page 6 stops to OPEN the two files it writes. Both on, because a first
+    // install has to paste a key in somewhere; unticked they are still written, and
+    // Next simply goes on - which is what an update wants (see the page).
+    private static boolean reviewConfig = true;
+    private static boolean reviewKey = true;
     // Run everything at login. Unlike the other two this does NOT default to yes: adding
     // an autostart entry is a decision about somebody's machine, and the honest default
     // is whatever they chose last time (see main, where it is read off the disk).
@@ -260,6 +273,21 @@ public final class InstallJRock {
     // the same line down the right - which is most of what makes a page look made rather
     // than assembled.
     private static final int TEXT_WIDTH = 700;
+
+    // THE SAME 32x27 GRID EVERY WINDOW IN THIS PROJECT IS SIZED ON (JRock.CELL_W and
+    // JRock.CELL_H hold it there; this installer carries nothing but the JDK on its class
+    // path - it is what puts jrock.jar where it belongs - so the two numbers are repeated
+    // here rather than read from it).
+    //
+    // 28 x 30 cells to open at, 25 x 24 as the floor: a page of this wizard is a column
+    // of text, a table of agents and a log, and below about eight hundred by six hundred
+    // the table starts scrolling inside a page that is already scrolling.
+    private static final int CELL_W = 32;
+    private static final int CELL_H = 27;
+    private static final int WINDOW_CELLS_W = 28;
+    private static final int WINDOW_CELLS_H = 30;
+    private static final int WINDOW_MIN_CELLS_W = 25;
+    private static final int WINDOW_MIN_CELLS_H = 24;
 
     private static javax.swing.JFrame window;
     private static Page content;
@@ -406,6 +434,9 @@ public final class InstallJRock {
         Path login = shortcutFile(Place.STARTUP);
         System.out.println("At login:            " + (login == null ? "not offered here"
                 : Files.exists(login) ? login : "no (" + login.getParent() + " has none)"));
+        Path console = shortcutFile(Place.CLI);
+        System.out.println("CLI entry:           " + (console == null ? "not offered here"
+                : Files.exists(console) ? console : "no (page 3 offers it)"));
     }
 
     private static String or(Object value, String otherwise) {
@@ -430,10 +461,45 @@ public final class InstallJRock {
     // source rather than from the folder listing: a prompt can be read by two samples
     // (the push-to-talk and the weather agent share one), the flows all sit together, and
     // only the source says which of the files beside it are actually its own.
+    // The catalogue in the artifact, read again whenever page 1 is left - which is why
+    // WHAT WAS ALREADY DECIDED IS CARRIED OVER. Rebuilding the list makes new Sample
+    // objects, and a new Sample is ticked and has no folder of its own; so a re-read used
+    // to throw away both the ticks that say "these are the ones you have" and any folder
+    // typed on page 4. The page then still said "Update these 10" while all fourteen were
+    // ticked underneath, and the copy installed fourteen - which is the one thing an
+    // update must not do.
+    //
+    // A sample that was not in the list before is new to this run, and starts where
+    // preselect puts it.
     private static void findSamples() {
+        Map<String, Sample> before = new LinkedHashMap<>();
+        for (Sample s : found) before.put(s.stem, s);
         found.clear();
         collect(source.resolve(SAMPLES).resolve(AGENTS_SUB), Kind.AGENT);
         collect(source.resolve(SAMPLES).resolve(FLOWS_SUB), Kind.FLOW);
+        for (Sample s : found) {
+            Sample had = before.get(s.stem);
+            if (had == null) {
+                preselect(s);
+            } else {
+                s.selected = had.selected;
+                s.own = had.own;
+            }
+        }
+    }
+
+    // WHERE A TICK STARTS: on what is installed already, and on everything when nothing
+    // is. Somebody who has chosen their agents once has chosen, and a first install wants
+    // the lot - so the box that is ticked when page 4 is first seen, and when the full
+    // catalogue is opened from it, is the answer they most likely want to keep.
+    private static void preselect(Sample sample) {
+        if (previouslyInstalled.isEmpty()) {
+            sample.selected = true;
+            return;
+        }
+        sample.selected = previouslyInstalled.containsKey(sample.stem);
+        Path was = previouslyInstalled.get(sample.stem);
+        if (sample.loops() && was != null) sample.own = was;
     }
 
     private static void collect(Path dir, Kind kind) {
@@ -643,6 +709,8 @@ public final class InstallJRock {
         // than assumed.
         Path login = shortcutFile(Place.STARTUP);
         startup = login != null && Files.exists(login);
+        Path console = shortcutFile(Place.CLI);
+        cliMenu = console != null && Files.exists(console);
         Path userHome = Paths.get(System.getProperty("user.home", "."));
         Path documents = Files.isDirectory(userHome.resolve("Documents"))
                 ? userHome.resolve("Documents") : userHome;
@@ -653,11 +721,7 @@ public final class InstallJRock {
             // offered at all. Somebody who has chosen their agents once has chosen; the
             // second run is for the new jar, not for a fresh argument about which
             // agents. The full list is one radio button away when it is wanted.
-            for (Sample s : found) {
-                s.selected = previouslyInstalled.containsKey(s.stem);
-                Path was = previouslyInstalled.get(s.stem);
-                if (s.loops() && was != null) s.own = was;
-            }
+            for (Sample s : found) preselect(s);
             updating = true;
             customise = true;
         }
@@ -764,9 +828,18 @@ public final class InstallJRock {
                 desktop = v;
                 redraw();
             }));
+            // And one that opens a console instead of a window: same folder, same key,
+            // same log, questions typed at a prompt (JRock's own --cli).
+            panel.add(check("Start menu shortcut \"" + SHORTCUT + " CLI\" - JRock at a "
+                    + "prompt, in a console, with no window", cliMenu, v -> {
+                        cliMenu = v;
+                        redraw();
+                    }));
+            Path cliAt = shortcutFile(Place.CLI);
             List<Path> going = new ArrayList<>();
             if (!startMenu && menuAt != null && Files.exists(menuAt)) going.add(menuAt);
             if (!desktop && deskAt != null && Files.exists(deskAt)) going.add(deskAt);
+            if (!cliMenu && cliAt != null && Files.exists(cliAt)) going.add(cliAt);
             for (Path p : going) panel.add(alarm("Will be removed: " + p));
             panel.add(note(going.isEmpty()
                     ? "Unticking one that is already there removes it - this is where a "
@@ -785,6 +858,8 @@ public final class InstallJRock {
             else removeShortcut(Place.MENU);
             if (desktop) shortcut(Place.DESKTOP);
             else removeShortcut(Place.DESKTOP);
+            if (cliMenu) shortcut(Place.CLI);
+            else removeShortcut(Place.CLI);
             return null;
         }));
 
@@ -922,8 +997,28 @@ public final class InstallJRock {
             panel.add(value("jrock-config.txt - the endpoint, the model, the DPI, the "
                     + "checkboxes"));
             panel.add(value("bedrock-key.txt - the Bedrock API key, and nothing else"));
-            panel.add(note("Next opens the config in whatever opens a .txt here. Save and "
-                    + "close it, then the key file opens the same way."));
+            // BOTH ARE A TICK, AND BOTH START TICKED. The files are created either way -
+            // that is this page's actual work - and what the ticks decide is whether Next
+            // stops to OPEN them. A first install wants both: the key has to be pasted
+            // somewhere. An update is the same jar into the same folder, where the config
+            // is already right and the key is already in place, and being walked through
+            // two editors and two dialogs on every run is what teaches people to press
+            // Next without reading it.
+            panel.add(check("Open jrock-config.txt to review it", reviewConfig, v -> {
+                reviewConfig = v;
+                redraw();
+            }));
+            panel.add(check("Open bedrock-key.txt to paste the key into", reviewKey, v -> {
+                reviewKey = v;
+                redraw();
+            }));
+            panel.add(note(reviewConfig || reviewKey
+                    ? "Next opens " + (reviewConfig && reviewKey
+                        ? "the config, and then the key file, each"
+                        : "it") + " in whatever opens a .txt here; save and close it, then "
+                      + "press OK."
+                    : "Next writes either file if it is missing and goes straight on - "
+                      + "nothing opens, and nothing of yours is touched."));
             panel.add(strong("An existing file of either kind is kept as it is - this "
                     + "installer never overwrites your settings."));
         }, () -> {
@@ -932,19 +1027,32 @@ public final class InstallJRock {
                 Files.createDirectories(jrock);
                 Path config = starterConfig(jrock);
                 Path key = starterKey(jrock);
-                open(config);
-                int done = javax.swing.JOptionPane.showConfirmDialog(window,
-                        "Reviewing " + config + "\n\nSave and close it, then press OK to "
-                        + "open the key file.", "JRock settings",
-                        javax.swing.JOptionPane.OK_CANCEL_OPTION,
-                        javax.swing.JOptionPane.INFORMATION_MESSAGE);
-                if (done != javax.swing.JOptionPane.OK_OPTION) return "Waiting for the config.";
-                open(key);
-                javax.swing.JOptionPane.showMessageDialog(window,
-                        "Paste your Bedrock API key into\n" + key + "\n\nOne line, nothing "
-                        + "else. Save and close it, then press OK.", "Bedrock API key",
-                        javax.swing.JOptionPane.INFORMATION_MESSAGE);
-                if (isBlank(key, true)) {
+                if (reviewConfig) {
+                    open(config);
+                    int done = javax.swing.JOptionPane.showConfirmDialog(window,
+                            "Reviewing " + config + "\n\nSave and close it, then press OK"
+                            + (reviewKey ? " to open the key file." : "."),
+                            "JRock settings",
+                            javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                            javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                    if (done != javax.swing.JOptionPane.OK_OPTION) {
+                        return "Waiting for the config.";
+                    }
+                } else {
+                    say("Settings: " + config + " is in place; not opened.");
+                }
+                if (reviewKey) {
+                    open(key);
+                    javax.swing.JOptionPane.showMessageDialog(window,
+                            "Paste your Bedrock API key into\n" + key + "\n\nOne line, "
+                            + "nothing else. Save and close it, then press OK.",
+                            "Bedrock API key",
+                            javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                }
+                if (!reviewKey) {
+                    say("Key: " + key + (isBlank(key, true)
+                            ? " is still empty." : " has one in it; not opened."));
+                } else if (isBlank(key, true)) {
                     say("No key in " + key + " yet.");
                     javax.swing.JOptionPane.showMessageDialog(window,
                             "The key file is still empty.\n\nPut the key in there whenever "
@@ -1442,12 +1550,17 @@ public final class InstallJRock {
     // PowerShell makes it - the one way to write a real shortcut without a native
     // library. Elsewhere it is a .desktop file or a small .command script, which is what
     // those desktops use.
-    // Three places one can go, and the third points somewhere else: the Start menu and
-    // the Desktop start JRock, while the startup entry runs the start SCRIPT - the whole
-    // installation, agents included, because "run it at login" means all of it or there
-    // is no point to it.
+    // Four places one can go, and the last two point somewhere else than the window.
+    //
+    // The Start menu and the Desktop start JRock. The startup entry runs the start SCRIPT
+    // - the whole installation, agents included, because "run it at login" means all of
+    // it or there is no point to it. And the CLI entry starts JRock IN A CONSOLE, with
+    // --cli: the same folder, the same key, the same log and the same prompt library, with
+    // the questions typed at a prompt and the answers printed - for somebody who wants to
+    // ask JRock something without a window, and for anybody who would rather pipe it.
     private enum Place {
-        MENU("Start menu"), DESKTOP("Desktop"), STARTUP("startup at login");
+        MENU("Start menu"), DESKTOP("Desktop"), STARTUP("startup at login"),
+        CLI("Start menu (CLI)");
 
         final String words;
 
@@ -1457,18 +1570,24 @@ public final class InstallJRock {
 
         /** The folder, or null where this desktop has nowhere to put one. */
         Path dir() {
-            if (this == MENU) return startMenuDir();
+            if (this == MENU || this == CLI) return startMenuDir();
             if (this == DESKTOP) return desktopDir();
             return startupDir();
+        }
+
+        /** What the file is called: the CLI entry sits beside the other one, named. */
+        String named() {
+            return this == CLI ? SHORTCUT + " CLI" : SHORTCUT;
         }
     }
 
     private static Path shortcutFile(Place place) {
         Path dir = place.dir();
         if (dir == null) return null;
-        if (isWindows()) return dir.resolve(SHORTCUT + ".lnk");
-        if (isMac()) return dir.resolve(SHORTCUT + ".command");
-        return dir.resolve("jrock-assistant.desktop");
+        if (isWindows()) return dir.resolve(place.named() + ".lnk");
+        if (isMac()) return dir.resolve(place.named() + ".command");
+        return dir.resolve(place == Place.CLI ? "jrock-assistant-cli.desktop"
+                                             : "jrock-assistant.desktop");
     }
 
     private static void shortcut(Place place) {
@@ -1478,23 +1597,31 @@ public final class InstallJRock {
             return;
         }
         boolean all = place == Place.STARTUP;
+        boolean console = place == Place.CLI;
         try {
             Files.createDirectories(dir);
             Path jar = home.resolve(JAR);
             Path file = shortcutFile(place);
-            String about = (all ? "JRock and its agents in " : "JRock in ")
-                    + home.getFileName();
+            String about = all ? "JRock and its agents in " + home.getFileName()
+                    : console ? "JRock at a prompt, in " + home.getFileName()
+                              : "JRock in " + home.getFileName();
             if (isWindows()) {
                 // WindowStyle 7 is minimised, which together with PowerShell's own
                 // -WindowStyle Hidden is the difference between a console window
                 // appearing at every login and not.
+                //
+                // The CLI entry is the opposite case and uses java.exe rather than
+                // javaw.exe for exactly that reason: a shortcut to java.exe is given a
+                // console window of its own, and a prompt nobody can see is not a prompt.
+                String target = all ? powershellExe()
+                        : console ? consoleLauncher() : launcher();
                 String ps = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('"
                         + file + "'); "
-                        + "$s.TargetPath = '" + (all ? powershellExe() : launcher()) + "'; "
+                        + "$s.TargetPath = '" + target + "'; "
                         + "$s.Arguments = '" + (all
                             ? "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "
                               + "\"" + home.resolve(START_PS1) + "\""
-                            : "-jar \"" + jar + "\"") + "'; "
+                            : "-jar \"" + jar + "\"" + (console ? " " + CLI_FLAG : "")) + "'; "
                         + "$s.WorkingDirectory = '" + home + "'; "
                         + (all ? "$s.WindowStyle = 7; " : "")
                         + "$s.Description = '" + about + "'; "
@@ -1506,7 +1633,8 @@ public final class InstallJRock {
                 return;
             }
             String command = all ? "\"" + home.resolve(START_SH) + "\""
-                                 : "\"" + launcher() + "\" -jar \"" + jar + "\"";
+                                 : "\"" + launcher() + "\" -jar \"" + jar + "\""
+                                   + (console ? " " + CLI_FLAG : "");
             if (isMac()) {
                 Files.write(file, ("#!/bin/sh\ncd \"" + home + "\"\nexec " + command + "\n")
                         .getBytes(StandardCharsets.UTF_8));
@@ -1514,9 +1642,10 @@ public final class InstallJRock {
                 say(place.words + ": " + file);
                 return;
             }
-            Files.write(file, ("[Desktop Entry]\nType=Application\nName=" + SHORTCUT
+            Files.write(file, ("[Desktop Entry]\nType=Application\nName=" + place.named()
                     + "\nComment=" + about + "\nExec=" + command + "\nPath=" + home
-                    + "\nTerminal=false\nCategories=Development;Utility;\n")
+                    + "\nTerminal=" + console
+                    + "\nCategories=Development;Utility;\n")
                     .getBytes(StandardCharsets.UTF_8));
             file.toFile().setExecutable(true);
             say(place.words + ": " + file);
@@ -1989,6 +2118,16 @@ public final class InstallJRock {
         return null;
     }
 
+    // The same JVM, by the launcher that KEEPS A CONSOLE. javaw.exe has none at all -
+    // which is what the window shortcuts want and the exact opposite of what the CLI
+    // entry wants, where the console is the program's whole user interface.
+    private static String consoleLauncher() {
+        String javaHome = System.getProperty("java.home");
+        if (javaHome == null) return null;
+        Path at = Paths.get(javaHome, "bin", isWindows() ? "java.exe" : "java");
+        return Files.isRegularFile(at) ? at.toAbsolutePath().toString() : launcher();
+    }
+
     // Ghostscript goes by three names, depending on the platform and the build.
     private static Path ghostscript() {
         for (String name : new String[] { "gs", "gswin64c", "gswin64", "gswin32c" }) {
@@ -2172,7 +2311,13 @@ public final class InstallJRock {
 
         window.setContentPane(all);
         window.pack();
-        window.setMinimumSize(window.getSize());
+        // ON THE GRID, both of them, and both in this file: the size it opens at and the
+        // floor it cannot be dragged below. pack() is still what works out whether the
+        // pages fit at all - a layout that wants more than the grid size gets it.
+        window.setSize(Math.max(window.getWidth(), WINDOW_CELLS_W * CELL_W),
+                Math.max(window.getHeight(), WINDOW_CELLS_H * CELL_H));
+        window.setMinimumSize(new java.awt.Dimension(
+                WINDOW_MIN_CELLS_W * CELL_W, WINDOW_MIN_CELLS_H * CELL_H));
         window.setLocationRelativeTo(null);
         redraw();
         window.setVisible(true);
@@ -2477,16 +2622,13 @@ public final class InstallJRock {
             table.add(s.loops() ? ownFolderCell(s) : sharedFolderCell(), at);
             row++;
         }
-        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(table,
-                javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.setBorder(javax.swing.BorderFactory.createTitledBorder("Agents and flows"));
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
-        // As tall as it needs, up to nine rows, and never taller: a fixed height that
-        // showed four and a half rows was most of what made this page a maze.
-        int height = Math.min(Math.max(shown.size(), 1), 9) * 30 + 18;
-        scroll.setPreferredSize(new java.awt.Dimension(TEXT_WIDTH, height));
-        return row(scroll);
+        // NO SCROLLBAR OF ITS OWN. The page it goes on already scrolls, and a scrolling
+        // box inside a scrolling page is two scrollbars side by side, each of which moves
+        // a different thing: fourteen rows in a box nine rows tall, in a page that also
+        // has to be scrolled to see the box. The table is simply as tall as it is, and the
+        // page is what gets dragged - one scrollbar, one direction, everything in order.
+        table.setBorder(javax.swing.BorderFactory.createTitledBorder("Agents and flows"));
+        return row(table);
     }
 
     // An agent's own folder: editable, defaulted, and browsable.
