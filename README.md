@@ -4806,7 +4806,7 @@ md5sum jrock.jar
 java -jar jrock.jar
 ```
 
-Current build hashes (3.9.0's - 4.1.0's go here once CI has built it):
+Current build hashes (3.9.0's - 5.0.0's go here once CI has built it):
 
 ```
 9c7cfc9009f8326039030b391d6e2dc9a0ce052c8f8b081b724bd760093fa03c  jrock.jar
