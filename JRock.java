@@ -4262,16 +4262,45 @@ public class JRock {
     // opens and not one refusal: Java Sound asks for shared streams, so Windows mixes
     // them.
     //
-    // A crackle is filtered noise, so "pitch" is the filter's corner: the number below is
-    // how far towards the input each sample moves, which is a dull thud at 0.10 and a
-    // sharp tick at 0.80.
+    // THE TONES ARE NOTES, and that is what makes them tellable apart. They were five
+    // filter settings - "deep", "low", "middle", "high", "sharp" - which is five shades
+    // of one click: a difference you can hear with both of them in the same second, and
+    // never otherwise. And never otherwise is how they are heard: one machine, one agent
+    // working, one crackle, and the question is "which of them is that?" A PITCH answers
+    // it on its own. C is C with nothing to compare it against.
+    //
+    // So each burst of noise is rung through a RESONATOR at the note's frequency, which
+    // is what a crackle on a string would be: it still sounds like a crackle, and it now
+    // has a note in it. The filter's corner rides along with the pitch, so the low notes
+    // stay duller and the high ones sharper - the character each tone always had - and
+    // the pattern of bursts and gaps is untouched.
+    //
+    // Seven notes of one octave from middle C: low enough not to be shrill on a laptop
+    // speaker, high enough to carry across a room.
+    //
+    //   name, frequency in Hz, how far towards the noise each sample moves
     private static final String[][] CRACKLE_TONES = {
-        { "deep",   "0.10" },
-        { "low",    "0.20" },
-        { "middle", "0.35" },
-        { "high",   "0.55" },
-        { "sharp",  "0.80" },
+        { "C",  "261.63", "0.20" },
+        { "D",  "293.66", "0.25" },
+        { "E",  "329.63", "0.30" },
+        { "F",  "349.23", "0.35" },
+        { "G",  "392.00", "0.45" },
+        { "A",  "440.00", "0.55" },
+        { "Bb", "466.16", "0.65" },
     };
+
+    // What the five old names meant, each on the note nearest the sound it made: a folder
+    // configured before this change goes on crackling, in a tone of the same character,
+    // rather than falling silent because its setting is a word this no longer knows.
+    private static final String[][] CRACKLE_WAS = {
+        { "deep", "C" }, { "low", "D" }, { "middle", "E" }, { "high", "G" },
+        { "sharp", "A" },
+    };
+
+    // How long a note rings: the pole radius of the resonator. 0.995 at 22050 Hz is a ring
+    // of about nine milliseconds - long enough to hear a pitch in, short enough to still
+    // be a crackle rather than a beep.
+    private static final double CRACKLE_RING = 0.995;
 
     // The loudest a crackle gets, as a fraction of the scale. Each one is milliseconds
     // long, so what is heard is far quieter than the figure looks.
@@ -4286,6 +4315,10 @@ public class JRock {
     private static final long CRACKLE_GAP_MAX_MS = 5_000;
     private static final long CRACKLE_WAKE_MS = 25;
     private static final double CRACKLE_TAIL_MS = 5;
+    // How long the resonator is left to fade after the noise stops: at 0.995 the
+    // ring is down to nothing within about thirty milliseconds, and cutting it off
+    // earlier would be a click where the note should have ended.
+    private static final double CRACKLE_RING_TAIL_MS = 40;
     private static final float CRACKLE_RATE = 22050f;
     private static final javax.sound.sampled.AudioFormat CRACKLE_FORMAT =
             new javax.sound.sampled.AudioFormat(CRACKLE_RATE, 16, 1, true, false);
@@ -4302,18 +4335,29 @@ public class JRock {
     /** The tone named, or "" for none: anything unknown reads as none. */
     private static String crackleToneOf(String name) {
         if (name == null) return "";
-        String want = name.trim().toLowerCase(java.util.Locale.ROOT);
+        String want = name.trim();
         for (String[] tone : CRACKLE_TONES) {
-            if (tone[0].equals(want)) return tone[0];
+            if (tone[0].equalsIgnoreCase(want)) return tone[0];
+        }
+        for (String[] was : CRACKLE_WAS) {
+            if (was[0].equalsIgnoreCase(want)) return was[1];
         }
         return "";
     }
 
     private static double crackleCutoff(String tone) {
         for (String[] one : CRACKLE_TONES) {
-            if (one[0].equals(tone)) return Double.parseDouble(one[1]);
+            if (one[0].equals(tone)) return Double.parseDouble(one[2]);
         }
         return 0.35;
+    }
+
+    /** The note's own frequency, or middle C for a tone this does not know. */
+    private static double crackleHertz(String tone) {
+        for (String[] one : CRACKLE_TONES) {
+            if (one[0].equals(tone)) return Double.parseDouble(one[1]);
+        }
+        return 261.63;
     }
 
     // Starts the crackle, if a tone is set and one is not going already. Returns at once.
@@ -4345,7 +4389,7 @@ public class JRock {
     // invisible inside a gap that is random to begin with.
     private static void cracklePlay() {
         String device = narrateDevice;
-        double cutoff = crackleCutoff(crackleTone);
+        String tone = crackleTone;
         javax.sound.sampled.Mixer mixer = outputMixer(device);
         if (mixer == null) {
             crackleQuiet("the speaker \"" + device + "\" is not connected");
@@ -4366,7 +4410,7 @@ public class JRock {
             if (crackleStop) return;
             javax.sound.sampled.SourceDataLine line = null;
             try {
-                byte[] pcm = crackleBurst(rnd, cutoff);
+                byte[] pcm = crackleBurst(rnd, tone);
                 line = (javax.sound.sampled.SourceDataLine) mixer.getLine(
                         new javax.sound.sampled.DataLine.Info(
                                 javax.sound.sampled.SourceDataLine.class, CRACKLE_FORMAT));
@@ -4392,24 +4436,77 @@ public class JRock {
     // One burst: a crackle, or now and then a run of two to four of them tens of
     // milliseconds apart, which is what a scratch on a line sounds like rather than one
     // tidy click - and a few milliseconds of silence to close the device on.
-    private static byte[] crackleBurst(java.util.Random rnd, double cutoff) {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+    private static byte[] crackleBurst(java.util.Random rnd, String tone) {
+        double cutoff = crackleCutoff(tone);
+        // The resonator: two poles at the note's frequency, which turn a scratch of noise
+        // into a scratch WITH A NOTE IN IT. Its gain at resonance is enormous, so the
+        // input is scaled by (1 - r) to bring the peak back to about the amplitude the
+        // noise had - the loudness of a crackle is set in one place, further down.
+        double w = 2 * Math.PI * crackleHertz(tone) / CRACKLE_RATE;
+        double feedback = 2 * CRACKLE_RING * Math.cos(w);
+        double decay = CRACKLE_RING * CRACKLE_RING;
+        double drive = 1 - CRACKLE_RING;
+        double rang = 0;
+        double rangBefore = 0;
+
+        // Written into a buffer rather than straight out, because the LOUDNESS IS SET
+        // AFTERWARDS. A resonator's gain depends on its frequency - C came out twice as
+        // loud as B flat, and both of them a third of the plain crackle - so what goes out
+        // is scaled to the peak the noise ITSELF reached before it was rung. Every tone is
+        // then as loud as every other, and as loud as a crackle with no note in it, while
+        // the softer and louder bursts stay softer and louder (see loud, below).
+        //
+        // The buffer is bounded by the pattern: four crackles of 25 ms at the most, three
+        // gaps of 70, and the tail. 16k samples is twice that.
+        double[] buf = new double[16384];
+        int wrote = 0;
+        double loudestHit = 0;
+        double loudestRang = 0;
+
         int crackles = rnd.nextDouble() < CRACKLE_RUN_CHANCE ? 2 + rnd.nextInt(3) : 1;
         double low = 0;
         for (int c = 0; c < crackles; c++) {
             int lasts = (int) crackleFrames(rnd, CRACKLE_MIN_MS, CRACKLE_MAX_MS);
             double loud = CRACKLE_SOFTEST + rnd.nextDouble() * (1 - CRACKLE_SOFTEST);
-            for (int i = 0; i < lasts; i++) {
+            for (int i = 0; i < lasts && wrote < buf.length; i++) {
                 double leftOf = 1 - i / (double) lasts;
                 low += (rnd.nextDouble() * 2 - 1 - low) * cutoff;
-                crackleSample(out, low * leftOf * leftOf * loud);
+                double hit = low * leftOf * leftOf * loud;
+                double now = drive * hit + feedback * rang - decay * rangBefore;
+                rangBefore = rang;
+                rang = now;
+                loudestHit = Math.max(loudestHit, Math.abs(hit));
+                loudestRang = Math.max(loudestRang, Math.abs(now));
+                buf[wrote++] = now;
             }
+            // THE RING GOES ON THROUGH THE GAP, which is what makes it a note rather than
+            // a click: the noise stops, the resonator carries on from where it was and
+            // fades out by itself.
             if (c < crackles - 1) {
                 long quiet = crackleFrames(rnd, CRACKLE_RUN_GAP_MIN_MS, CRACKLE_RUN_GAP_MAX_MS);
-                for (long i = 0; i < quiet; i++) crackleSample(out, 0);
+                for (long i = 0; i < quiet && wrote < buf.length; i++) {
+                    double now = feedback * rang - decay * rangBefore;
+                    rangBefore = rang;
+                    rang = now;
+                    loudestRang = Math.max(loudestRang, Math.abs(now));
+                    buf[wrote++] = now;
+                }
             }
         }
-        for (int i = 0; i < CRACKLE_RATE * CRACKLE_TAIL_MS / 1000; i++) crackleSample(out, 0);
+        // And the tail, long enough for the last note to die away rather than be cut off -
+        // a resonator stopped mid-ring is a click of its own.
+        int tail = (int) (CRACKLE_RATE * CRACKLE_RING_TAIL_MS / 1000);
+        for (int i = 0; i < tail && wrote < buf.length; i++) {
+            double now = feedback * rang - decay * rangBefore;
+            rangBefore = rang;
+            rang = now;
+            loudestRang = Math.max(loudestRang, Math.abs(now));
+            buf[wrote++] = now;
+        }
+
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(wrote * 2);
+        double scale = loudestRang > 0 ? loudestHit / loudestRang : 0;
+        for (int i = 0; i < wrote; i++) crackleSample(out, buf[i] * scale);
         return out.toByteArray();
     }
 
@@ -4434,10 +4531,10 @@ public class JRock {
     private static final long CRACKLE_PREVIEW_GAP_MIN_MS = 120;
     private static final long CRACKLE_PREVIEW_GAP_MAX_MS = 380;
 
-    private static void cracklePreview(String device, double cutoff) {
+    private static void cracklePreview(String device, String tone) {
         java.util.Random rnd = new java.util.Random();
         for (int i = 0; i < CRACKLE_PREVIEW_BURSTS; i++) {
-            crackleOnce(device, cutoff);
+            crackleOnce(device, tone);
             try {
                 Thread.sleep(CRACKLE_PREVIEW_GAP_MIN_MS + (long) (rnd.nextDouble()
                         * (CRACKLE_PREVIEW_GAP_MAX_MS - CRACKLE_PREVIEW_GAP_MIN_MS)));
@@ -4472,12 +4569,12 @@ public class JRock {
                 "Preview", javax.swing.JOptionPane.INFORMATION_MESSAGE);
     }
 
-    private static void crackleOnce(String device, double cutoff) {
+    private static void crackleOnce(String device, String tone) {
         javax.sound.sampled.Mixer mixer = outputMixer(device);
         if (mixer == null) return;
         javax.sound.sampled.SourceDataLine line = null;
         try {
-            byte[] pcm = crackleBurst(new java.util.Random(), cutoff);
+            byte[] pcm = crackleBurst(new java.util.Random(), tone);
             line = (javax.sound.sampled.SourceDataLine) mixer.getLine(
                     new javax.sound.sampled.DataLine.Info(
                             javax.sound.sampled.SourceDataLine.class, CRACKLE_FORMAT));
@@ -5786,8 +5883,7 @@ public class JRock {
                 if (tone.isEmpty() || device.isEmpty()) return;
                 // One burst, now, on the device as this dialog has it: hearing it is the
                 // whole reason for choosing by name.
-                double cutoff = crackleCutoff(tone);
-                new Thread(() -> crackleOnce(device, cutoff), "jrock-crackle-sample").start();
+                new Thread(() -> crackleOnce(device, tone), "jrock-crackle-sample").start();
             });
 
             // PREVIEW, which is the button somebody wanting to hear it actually looks for.
@@ -5827,8 +5923,7 @@ public class JRock {
                     tell(previewButton, "The speaker \"" + device + "\" is not connected.");
                     return;
                 }
-                double cutoff = crackleCutoff(tone);
-                new Thread(() -> cracklePreview(device, cutoff),
+                new Thread(() -> cracklePreview(device, tone),
                         "jrock-crackle-preview").start();
             });
         }
