@@ -3210,6 +3210,14 @@ the one they are looking for.
   `JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
   folder's [agent](#windows-agents-and-flows-one-entry-each) a different agent from the same
   automation installed into another folder.
+
+  **That list is fetched at startup, and afterwards only when there is something new to ask.**
+  It depends on exactly two things — the endpoint and the key — and applying this dialog re-runs
+  the session report, so changing the narration voice used to cost an HTTP round trip to a models
+  endpoint that was going to answer the same thing. Now OK fetches again only when it changed the
+  **endpoint**, the **key**, or the **working folder** (which has a key and an endpoint of its
+  own); otherwise the report names the list it already has and says it is unchanged. A restart
+  always asks.
 - **Autobackup log** — on a line of its own, right under the Model, and **on by default**: after five
   minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
@@ -3285,9 +3293,16 @@ rather than repeated on every row.
   choice is there for a reason worth stating: one machine runs several JRocks, one per agent,
   **sharing a speaker**, so a tone each turns *"something is thinking"* into *"the browser is
   thinking"*. Tested before it was built: three processes, three tones, one device, 28 opens and
-  not one refusal — Java Sound asks for shared streams, so Windows mixes them. Picking a tone
-  plays it, because the only way to choose between five sounds is to hear them. The line is
+  not one refusal — Java Sound asks for shared streams, so Windows mixes them. The line is
   **closed between crackles**, since a speaker hisses whenever its output stream is active.
+
+  **Preview**, beside it, plays a few seconds of the tone chosen on the speaker chosen — the
+  same bursts a wait makes, with the long silences between them taken out, since a faithful
+  preview of gaps up to five seconds is a button that appears to do nothing. Picking a tone in
+  the dropdown plays one burst too, but one burst is a tick: what has to be judged is the run of
+  them, and the only other way to hear that was to send a real request and wait for the answer.
+  Both use **what the dialog shows rather than what is saved**, so a tone and a speaker can be
+  tried together before OK.
 - **Narrate on** and **Record from** (Windows / desktop) — the one speaker
   [Narrate](#narrate-windows-and-the-browser) plays on and the one microphone
   [Ctrl+Space](#recording-from-the-microphone-ctrlspace) records from. Both are free text over a
@@ -3299,20 +3314,27 @@ rather than repeated on every row.
   picked up by closing it and opening it again. Whatever is typed in the field survives the
   list being made.
 - **Narrate with** (Windows, and the browser) — **the voices** Narrate may read in, by their
-  names, on a plain line with an **Add** dropdown beside it. **As many as you like, separated by
+  names, on a plain line with an **Add voice** button beside it. **As many as you like, separated by
   commas: the language of the text picks between them.** `Microsoft David Desktop, Microsoft
   Irina Desktop` reads an English answer in David and a Russian one in Irina, which is the point
   of the setting — no one voice reads every language. Empty — the default — means *whichever
   voice here speaks the language*, which is what JRock does when it has not been told
   otherwise. Kept per folder as `narrate-voice$`.
 
-  **Add** puts the voice you pick on the end of the line and goes back to blank, so the
-  dropdown is never mistaken for the value and the line — which is the value — stays text you
+  **Add voice** lists the voices there are and puts the one you pick on the end of the line, so
+  the control is never mistaken for the value and the line — which is the value — stays text you
   can type in, reorder or clear. A voice already named is not added twice, and each name appears
-  in the list once however many voices report it. On the desktop that list fills itself the first
-  time you narrate, like the device lists, since enumerating the voices means starting
-  PowerShell and a dialog opened to change the model should not pay for that; in the browser it
-  is filled as the dialog opens, the page keeping its voices in memory.
+  in the list once however many voices report it.
+
+  **The voices are read the first time that button is pressed**, the way the device dropdowns
+  fill themselves when they are first opened — about a second of PowerShell, with a wait cursor,
+  and only when somebody has asked. Before this they were learned only by *narrating* once, as a
+  side effect of the narration script reporting them on its way past, so a dialog opened before
+  the first narration offered an empty dropdown: a control that looks broken. A button and a menu
+  rather than a dropdown for the same reason — a dropdown is as wide as its widest item, so an
+  empty one is a stub the width of its arrow sitting beside a field four times its size, and a
+  menu is as wide as the voice names in it. In the browser the page keeps its own voices in
+  memory and the list costs nothing.
 - **Transcribe recordings into the prompt** (Windows) — under Record from: a recording is typed
   into the prompt by Windows speech recognition instead of being included as `@audio`.
 - **Mic always on: record when speech is heard** — under both (see
@@ -3375,15 +3397,25 @@ off the bottom.
 ## Window size and position (Configure → Window, Ctrl+M)
 
 The **Window** tab of the Configure dialog sets the window's **width/height** and **on-screen
-X/Y** numerically, and describes the screens below them: which monitor holds the window, and each
-screen's bounds. Handy for precise placement, or for moving across monitors without the mouse.
-**Ctrl+M** opens Configure straight onto it.
+X/Y** numerically, with the screens in a **table** below them — one row each, their sizes and
+top-left corners under each other, the window's own screen in bold — and a line saying where on
+that screen the window is. Handy for precise placement, or for moving across monitors without the
+mouse. **Ctrl+M** opens Configure straight onto it.
 
 It has a **Set** button of its own, and that is the point of it being a tab: Set applies the four
 numbers to the window at once, so the result is there to be looked at — and nudged again, and
-again — with the dialog still open. The window's size and place are not settings JRock keeps in
-a file, so there is nothing here for OK to save: **Cancel** is the way out, and it leaves the
-window where Set put it without re-reading the session the way OK does.
+again — with the dialog still open. **Enter** in this tab is Set, not OK: every other tab holds
+settings OK saves, but here the button that does the work is Set, and Enter reaching OK would
+close the dialog without moving anything.
+
+**Set also remembers.** The four numbers go into this folder's `JRock/jrock-config.txt`
+(`window=x,y,width,height`), and the next start opens the window there instead of centred — a
+window put on the second monitor for a reason belongs there tomorrow too, and each folder's JRock
+can have its own corner of the screen. Only that button writes it: a window dragged about by its
+title bar changes nothing, since a drag is not a decision about where this folder's window
+belongs. A remembered place that is on **no screen any more** — a laptop that was docked when Set
+was pressed — is ignored, with a line in the log saying so, rather than opening the window where
+nobody can reach it. **Cancel** is still the way out that leaves the rest of the dialog alone.
 
 ## Printing / PDF (Ctrl+P)
 

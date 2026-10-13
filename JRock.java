@@ -179,6 +179,11 @@ public class JRock {
     // Most recently fetched list of available model ids (from the /v1/models call).
     // Empty until the first successful fetch; used to populate the Configure dropdown.
     private static java.util.List<String> availableModels = new ArrayList<>();
+    // Whether that list is worth fetching again: true at startup, and afterwards only
+    // when the Configure dialog changed the endpoint, the key or the working folder -
+    // the three things the answer depends on. Everything else in that dialog can be
+    // applied without a request to the network (see initSession).
+    private static volatile boolean modelsStale = true;
 
     // The Bedrock API key in effect: read from JRock/bedrock-key.txt at startup and
     // whenever the working folder changes, or set by the Configure dialog - which
@@ -1023,6 +1028,17 @@ public class JRock {
     // Whether a recording is transcribed into the prompt rather than included: true or
     // false, and absent is false.
     private static final String CONFIG_RECORD_TRANSCRIBE = "record-transcribe";
+    // Where the window opens and how big it is: "x,y,width,height" in the virtual desktop
+    // space, as the Window tab's Set button last applied them - or absent, which is
+    // JRock's own size, centred.
+    //
+    // Written by Set and by nothing else: a window dragged about or resized by its corner
+    // is not a decision somebody made about where this folder's window belongs, and a
+    // setting that followed every drag would be impossible to leave alone. Per folder like
+    // every other setting here, which is what makes it useful - an agent's JRock and the
+    // one somebody types in can each have their own corner of the screen.
+    private static final String CONFIG_WINDOW = "window";
+    private static volatile String windowBounds = "";
     // Whether the Clock checkbox is ticked: true or false, and absent is true - the
     // checkbox's default.
     private static final String CONFIG_CLOCK = "clock";
@@ -1122,6 +1138,7 @@ public class JRock {
             recordDevice = (mic == null) ? "" : mic.trim();
             recordTranscribe = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_TRANSCRIBE));
             micAlwaysOn = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_ALWAYS_ON));
+            windowBounds = trimmed(settings.get(CONFIG_WINDOW));
             clockOn = !"false".equalsIgnoreCase(settings.get(CONFIG_CLOCK));
             historyLimit = parseHistoryLimit(settings.get(CONFIG_HISTORY_LIMIT), 0);
             historyOn = "true".equalsIgnoreCase(settings.get(CONFIG_HISTORY));
@@ -1187,6 +1204,7 @@ public class JRock {
         if (micAlwaysOnAvailable()) {
             appendSetting(text, CONFIG_RECORD_ALWAYS_ON, String.valueOf(micAlwaysOn));
         }
+        appendSetting(text, CONFIG_WINDOW, windowBounds);             // blank: left out
         appendSetting(text, CONFIG_CLOCK, String.valueOf(clockOn));
         appendSetting(text, CONFIG_HISTORY, String.valueOf(historyOn));
         if (historyLimit > 0) {   // unlimited: left out, which reads back as unlimited
@@ -2525,6 +2543,25 @@ public class JRock {
             log.gray("");
             return;
         }
+        // ONLY WHEN THERE IS SOMETHING NEW TO ASK. The list depends on exactly two things
+        // - the endpoint and the key - and the session report runs again every time the
+        // Configure dialog is applied, so changing the narration voice used to cost an
+        // HTTP round trip to a models endpoint that was going to answer the same thing.
+        // Now the dialog says whether either of those changed (see modelsStale), and this
+        // is a fetch at startup, after a change to the endpoint or the key, and after a
+        // move to another folder - which has a key and an endpoint of its own.
+        if (!modelsStale) {
+            log.gray("Available models (mantle): "
+                    + (availableModels.isEmpty()
+                       ? "(not fetched - unchanged endpoint and key)"
+                       : String.join(", ", availableModels)
+                         + "  (as last fetched; unchanged endpoint and key)"));
+            log.gray("");
+            log.gray("Ready.");
+            log.gray("");
+            sessionReady = true;
+            return;
+        }
         log.gray("Available models (mantle): loading...");
 
         // Fetch the model list off the EDT so the window stays responsive.
@@ -2543,6 +2580,10 @@ public class JRock {
                     models = "(error: " + ex.getMessage() + ")";
                 }
                 log.gray("Available models (mantle): " + models);
+                // Asked, and answered or not: either way there is nothing new to ask
+                // until the endpoint or the key changes. A failure is not retried on
+                // the next OK, because the next OK is not a new reason to try.
+                modelsStale = false;
                 // The one blank line that precedes its text, so "Ready." stands out
                 // at the end of the session report rather than trailing the last line.
                 log.gray("");
@@ -3609,7 +3650,64 @@ public class JRock {
         // exists (see the Automation API section).
         ui = new Ui(frame, input, log, send, extendMode, clockMode, sendGate);
 
+        // WHERE SET PUT IT LAST TIME, before it is shown rather than after: the settings
+        // of this folder have been read by now (initSession, above), and a window that
+        // appears in the middle of the screen and then jumps is a window that looks like
+        // it is still deciding.
+        applyRememberedBounds(frame, log);
         frame.setVisible(true);
+    }
+
+    // The window at the size and place the Window tab's Set button last applied in this
+    // folder, if it applied any. Nothing happens when there is no such setting, which is
+    // the ordinary case: JRock's own size, centred, as it always was.
+    //
+    // A SAVED PLACE IS CHECKED AGAINST THE SCREENS THERE ARE NOW. A laptop that was
+    // docked when Set was pressed has one screen today instead of three, and the place
+    // the window belonged on is somewhere nobody can see - so the saved bounds have to
+    // overlap a screen that exists, by enough of the window's top edge to be grabbed
+    // with a mouse, or they are ignored and said to have been.
+    private static void applyRememberedBounds(JFrame frame, LogView log) {
+        java.awt.Rectangle saved = parseBounds(windowBounds);
+        if (saved == null) return;
+        if (!onSomeScreen(saved)) {
+            log.gray("The remembered window place (" + windowBounds + ") is not on any "
+                    + "screen this machine has now, so it was not used. Configure > Window "
+                    + "> Set remembers a new one.");
+            windowBounds = "";
+            return;
+        }
+        frame.setBounds(saved);
+    }
+
+    /** "x,y,width,height" as a rectangle, or null when it is absent or not that. */
+    private static java.awt.Rectangle parseBounds(String stored) {
+        String[] parts = trimmed(stored).split(",");
+        if (parts.length != 4) return null;
+        try {
+            int x = Integer.parseInt(parts[0].trim());
+            int y = Integer.parseInt(parts[1].trim());
+            int w = Integer.parseInt(parts[2].trim());
+            int h = Integer.parseInt(parts[3].trim());
+            if (w < WINDOW_MIN_W || h < WINDOW_MIN_H) return null;
+            return new java.awt.Rectangle(x, y, w, h);
+        } catch (NumberFormatException notNumbers) {
+            return null;
+        }
+    }
+
+    // Whether enough of that rectangle is on a screen to be used and moved: its title bar
+    // has to be reachable, so the test is a strip along its top edge rather than the whole
+    // of it - a window whose bottom half hangs off the screen is ordinary, and one whose
+    // top is off it cannot be dragged back.
+    private static boolean onSomeScreen(java.awt.Rectangle bounds) {
+        java.awt.Rectangle top = new java.awt.Rectangle(bounds.x, bounds.y,
+                bounds.width, Math.min(bounds.height, WINDOW_GRAB_H));
+        for (java.awt.GraphicsDevice device : java.awt.GraphicsEnvironment
+                .getLocalGraphicsEnvironment().getScreenDevices()) {
+            if (device.getDefaultConfiguration().getBounds().intersects(top)) return true;
+        }
+        return false;
     }
 
     // A random 10-digit number that never starts with 0, so it keeps all ten digits
@@ -4107,6 +4205,52 @@ public class JRock {
     // One burst on a named device, for the Configure dialog to play while somebody is
     // choosing a tone. Silent about failures: the dialog is not the place to be told that
     // a speaker is unplugged, and the log says so the first time a request waits.
+    // A few seconds of it, for the Preview button: the same bursts a wait makes, with the
+    // long silences between them taken out. The real gaps are up to five seconds, which is
+    // what makes the crackle a background noise rather than a beep - and what would make a
+    // faithful preview a dialog that appears to do nothing.
+    private static final int CRACKLE_PREVIEW_BURSTS = 8;
+    private static final long CRACKLE_PREVIEW_GAP_MIN_MS = 120;
+    private static final long CRACKLE_PREVIEW_GAP_MAX_MS = 380;
+
+    private static void cracklePreview(String device, double cutoff) {
+        java.util.Random rnd = new java.util.Random();
+        for (int i = 0; i < CRACKLE_PREVIEW_BURSTS; i++) {
+            crackleOnce(device, cutoff);
+            try {
+                Thread.sleep(CRACKLE_PREVIEW_GAP_MIN_MS + (long) (rnd.nextDouble()
+                        * (CRACKLE_PREVIEW_GAP_MAX_MS - CRACKLE_PREVIEW_GAP_MIN_MS)));
+            } catch (InterruptedException stopped) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    // The tone and the speaker AS THE DIALOG HAS THEM, which is not the same as what is
+    // saved: both are being chosen, and what the preview plays has to be what is on the
+    // screen. The speaker row is absent in the browser, where there is no choice of
+    // device, and then the saved one is all there is.
+    private static String crackleToneIn(javax.swing.JComboBox<String> box) {
+        Object picked = box == null ? null : box.getSelectedItem();
+        return picked == null || CRACKLE_NONE.equals(picked) ? "" : picked.toString();
+    }
+
+    private static String deviceIn(javax.swing.JComboBox<String> box) {
+        if (box == null) return narrateDevice;
+        Object typed = box.isEditable() ? box.getEditor().getItem() : box.getSelectedItem();
+        return typed == null ? "" : typed.toString().trim();
+    }
+
+    // One sentence in a box, over whatever dialog the control is in: a modal dialog has no
+    // log to write to, and a button that plays a sound has to be able to say why it did
+    // not.
+    private static void tell(java.awt.Component near, String message) {
+        javax.swing.JOptionPane.showMessageDialog(
+                javax.swing.SwingUtilities.getWindowAncestor(near), message,
+                "Preview", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+    }
+
     private static void crackleOnce(String device, double cutoff) {
         javax.sound.sampled.Mixer mixer = outputMixer(device);
         if (mixer == null) return;
@@ -5402,6 +5546,7 @@ public class JRock {
         // share a speaker. A tone each turns "something is thinking" into "the browser is
         // thinking", which is worth five lines of table.
         javax.swing.JComboBox<String> crackleF = null;
+        javax.swing.JButton cracklePreviewF = null;
         if (narrateDeviceChoosable()) {
             crackleF = new javax.swing.JComboBox<>();
             crackleF.setName("crackle");
@@ -5413,16 +5558,57 @@ public class JRock {
                     + "thinking, so a wait is audible across a room. Pick a different tone "
                     + "in each agent's folder and the sound says which one is working.");
             javax.swing.JComboBox<String> listen = crackleF;
+            final javax.swing.JComboBox<String> speaker = deviceF;
             crackleF.addActionListener(e -> {
-                Object picked = listen.getSelectedItem();
-                String tone = picked == null || CRACKLE_NONE.equals(picked) ? ""
-                        : picked.toString();
-                if (tone.isEmpty() || narrateDevice.isEmpty()) return;
-                // One burst, now, on the device as it is set in this dialog: hearing it
-                // is the whole reason for choosing by name.
-                String device = narrateDevice;
+                String tone = crackleToneIn(listen);
+                String device = deviceIn(speaker);
+                if (tone.isEmpty() || device.isEmpty()) return;
+                // One burst, now, on the device as this dialog has it: hearing it is the
+                // whole reason for choosing by name.
                 double cutoff = crackleCutoff(tone);
                 new Thread(() -> crackleOnce(device, cutoff), "jrock-crackle-sample").start();
+            });
+
+            // PREVIEW, which is the button somebody wanting to hear it actually looks for.
+            // Picking a tone plays one burst already, but one burst is a tick: the crackle
+            // is a RUN of them with gaps, and that is what has to be judged - and judged
+            // without sending a request to a model to make it happen, which is the only
+            // other way to hear it.
+            //
+            // On the device and tone AS THIS DIALOG HAS THEM, not as they are saved: the
+            // whole point is to try them before OK, including a speaker just picked on the
+            // row above.
+            cracklePreviewF = new JButton("Preview");
+            cracklePreviewF.setName("cracklePreview");
+            cracklePreviewF.setToolTipText("Play a few seconds of this crackle on the "
+                    + "speaker above, without sending anything");
+            explains(cracklePreviewF, "Preview", "Plays a few seconds of the crackle above "
+                    + "on the speaker above, right now - the same bursts a wait makes, with "
+                    + "the long silences between them taken out.\n\n"
+                    + "It uses what this dialog shows rather than what is saved, so a tone "
+                    + "and a speaker can both be tried before OK. Without it the only way "
+                    + "to hear the sound is to send a real request and wait for it.");
+            final javax.swing.JButton previewButton = cracklePreviewF;
+            cracklePreviewF.addActionListener(e -> {
+                String tone = crackleToneIn(listen);
+                if (tone.isEmpty()) {
+                    tell(previewButton, "Pick a tone above first - \"" + CRACKLE_NONE
+                            + "\" is no sound at all.");
+                    return;
+                }
+                String device = deviceIn(speaker);
+                if (device.isEmpty()) {
+                    tell(previewButton, "Pick a speaker in \"Narrate on\" first: the crackle "
+                            + "plays on that one, and on no other.");
+                    return;
+                }
+                if (outputMixer(device) == null) {
+                    tell(previewButton, "The speaker \"" + device + "\" is not connected.");
+                    return;
+                }
+                double cutoff = crackleCutoff(tone);
+                new Thread(() -> cracklePreview(device, cutoff),
+                        "jrock-crackle-preview").start();
             });
         }
 
@@ -5437,15 +5623,17 @@ public class JRock {
         // TWO CONTROLS, because the value is a LIST and a dropdown is a single choice:
         // a dropdown holding one voice says that voice is the answer, while this setting
         // is "these voices, in this order". So the value is a text field that behaves like
-        // one - type in it, clear it, Tab away from it - and the dropdown beside it is
-        // labelled Add, adds one name to the field, and goes straight back to blank.
+        // one - type in it, clear it, Tab away from it - and beside it is a BUTTON that
+        // lists the voices and puts the one that is picked on the line.
+        //
+        // A button and a menu rather than a dropdown, and the reason is what it looks
+        // like. A dropdown's own width is its widest item, so one holding nothing - which
+        // is what it held until a narration had run once - is an empty stub the width of
+        // its arrow, sitting beside a field four times its size. A button says what it
+        // does, is the size of a button, and its menu is as wide as the voice names in it.
         javax.swing.JTextField voiceF = null;
-        javax.swing.JComboBox<String> addVoiceF = null;
+        javax.swing.JButton addVoiceF = null;
         if (narrateAvailable()) {
-            // In the browser the voices are there for the asking, so the list is filled
-            // now rather than by narrating once (see browserNarrateVoiceNames).
-            if (isCheerpJ()) narrateVoices = browserNarrateVoiceNames();
-
             voiceF = new javax.swing.JTextField(narrateVoiceName(narrateVoice), 24);
             voiceF.setName("narrateVoice");
             voiceF.setFont(voiceF.getFont().deriveFont(java.awt.Font.PLAIN));
@@ -5467,42 +5655,32 @@ public class JRock {
                     + "a name on it without typing one.");
             addCopyPasteMenu(voiceF, null);
 
-            // Each voice once: a machine can report several under one name, and a list
-            // offering "Bdl" five times offers five ways to say the same thing - the name
-            // is all that is sent on. First of each wins.
-            addVoiceF = new javax.swing.JComboBox<>(voiceChoices(narrateVoices));
+            addVoiceF = new JButton("Add voice...");
             addVoiceF.setName("addNarrateVoice");
-            addVoiceF.setFont(addVoiceF.getFont().deriveFont(java.awt.Font.PLAIN));
-            addVoiceF.setToolTipText("Puts a voice on the line to the left, keeping what "
-                    + "is already there. Pick another to add that too.");
-            explains(addVoiceF, "Add a voice", "Puts the voice you pick on the \"Narrate "
-                    + "with\" line, after whatever is already on it - so picking an "
-                    + "English voice and then a Russian one leaves both there, separated "
-                    + "by a comma, and the language of the text decides which reads it.\n\n"
-                    + "It goes back to blank after each pick, because it is not the "
-                    + "setting: the line is. A voice already on the line is not added "
-                    + "twice, and one picked by mistake is deleted from the line like any "
-                    + "other text.\n\n"
+            addVoiceF.setToolTipText("List the voices this "
+                    + (isCheerpJ() ? "browser" : "machine")
+                    + " has, and put the one you pick on the line to the left");
+            explains(addVoiceF, "Add a voice", "Lists the voices there are and puts the one "
+                    + "you pick on the \"Narrate with\" line, after whatever is already on "
+                    + "it - so picking an English voice and then a Russian one leaves both "
+                    + "there, separated by a comma, and the language of the text decides "
+                    + "which reads it.\n\n"
+                    + "It is not the setting: the line is. A voice already on the line is "
+                    + "not added twice, and one picked by mistake is deleted from the line "
+                    + "like any other text.\n\n"
                     + (isCheerpJ()
-                       ? "These are the browser's own voices, read from the page when this "
-                         + "dialog opened. Which of them there are is the browser's and "
-                         + "the system's business; a phone usually has more than a desktop "
-                         + "browser does."
-                       : "The list is filled by narrating once - enumerating the voices "
-                         + "means starting PowerShell, which this dialog should not wait "
-                         + "for. More voices come from Settings > Time & language > "
+                       ? "These are the browser's own voices, read from the page. Which of "
+                         + "them there are is the browser's and the system's business; a "
+                         + "phone usually has more than a desktop browser does."
+                       : "The voices are read from Windows the first time this button is "
+                         + "pressed - a second of PowerShell, which is why it waits until "
+                         + "somebody asks rather than doing it every time this dialog "
+                         + "opens. More voices come from Settings > Time & language > "
                          + "Speech."));
 
             final javax.swing.JTextField line = voiceF;
-            final javax.swing.JComboBox<String> picker = addVoiceF;
-            picker.addActionListener(e -> {
-                Object picked = picker.getSelectedItem();
-                if (picked == null) return;
-                String added = narrateVoiceName(picked.toString());
-                if (added.isEmpty()) return;          // the blank item it rests on
-                line.setText(withVoice(line.getText(), added));
-                picker.setSelectedIndex(0);           // blank again, ready for the next
-            });
+            final javax.swing.JButton picker = addVoiceF;
+            picker.addActionListener(e -> showVoiceMenu(picker, line));
         }
 
         // The microphone Ctrl+Space records from, the same way: listed when the list is
@@ -5737,23 +5915,25 @@ public class JRock {
         javax.swing.JPanel audio = new javax.swing.JPanel(new java.awt.GridBagLayout());
         row = 0;
         if (deviceF != null) addRow(audio, c, row++, "Narrate on:", deviceF);
-        if (crackleF != null) addRow(audio, c, row++, "Crackle while waiting:", crackleF);
+        if (crackleF != null) {
+            // The tone and the button that plays it, on one row: a sound setting whose
+            // only honest documentation is the sound.
+            javax.swing.JPanel crackleRow = new javax.swing.JPanel(new BorderLayout(12, 0));
+            crackleRow.add(crackleF, BorderLayout.CENTER);
+            if (cracklePreviewF != null) crackleRow.add(cracklePreviewF, BorderLayout.EAST);
+            addRow(audio, c, row++, "Crackle while waiting:", crackleRow);
+        }
         if (voiceF != null) {
-            // The dropdown to the right of the line it writes into, and labelled: a
-            // control that changes another one has to say which way round that works.
-            javax.swing.JPanel addVoice = new javax.swing.JPanel(new BorderLayout(6, 0));
-            javax.swing.JLabel addLabel = new javax.swing.JLabel("Add:");
-            addLabel.setFont(plainLabelFont());
-            addLabel.setToolTipText(addVoiceF.getToolTipText());
-            addVoice.add(addLabel, BorderLayout.WEST);
-            addVoice.add(addVoiceF, BorderLayout.CENTER);
+            // The button to the right of the line it writes into.
             javax.swing.JPanel voiceRow = new javax.swing.JPanel(new BorderLayout(12, 0));
             voiceRow.add(voiceF, BorderLayout.CENTER);
-            voiceRow.add(addVoice, BorderLayout.EAST);
+            voiceRow.add(addVoiceF, BorderLayout.EAST);
             addRow(audio, c, row++, "Narrate with:", voiceRow);
-            addRow(audio, c, row++, "", hint("Several, comma-separated - the text's "
-                    + "language picks between them. Add puts one on the line; the line "
-                    + "itself is plain text, to edit or clear."));
+            // One line, and short: the rest of it is on the button and in what the two
+            // controls say about themselves on a right-click. A hint as wide as the dialog
+            // reads as a paragraph nobody asked for.
+            addRow(audio, c, row++, "", hint("Several, comma-separated - the language of "
+                    + "the text picks between them."));
             // Only the desktop path has the audio to save: in the browser the voice is
             // the page's own and nothing of it comes back to be written down.
             if (!isCheerpJ()) {
@@ -5890,13 +6070,21 @@ public class JRock {
         String key = new String(typed).trim();
         java.util.Arrays.fill(typed, '\0');   // wipe the transient char[]
         if (!key.isEmpty()) {
+            // A DIFFERENT key is a different list of models; the same one typed again is
+            // not. The comparison is what stops the list being fetched for nothing.
+            if (!key.equals(apiKey)) modelsStale = true;
             apiKey = key;
             saveKeyQuietly(apiKey);
         }
 
         // Endpoint + model (free text).
         String r = endpointF.getText().trim();
-        if (!r.isEmpty()) { ENDPOINT = r; endpointSource = null; applyRegionOfEndpoint(); }
+        if (!r.isEmpty()) {
+            if (!r.equals(ENDPOINT)) modelsStale = true;
+            ENDPOINT = r;
+            endpointSource = null;
+            applyRegionOfEndpoint();
+        }
         Object selected = modelF.getEditor().getItem();  // typed or picked value
         String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
@@ -5956,6 +6144,11 @@ public class JRock {
         // adoptSettingsOfWorkingDir), and writing first would overwrite them with the
         // values this dialog was showing for the folder being left.
         if (workingDir.equals(dirAtOpen)) saveConfigQuietly();
+
+        // ANOTHER FOLDER IS ANOTHER KEY AND ANOTHER ENDPOINT - both are per folder, and
+        // the one being moved to has its own (see adoptSettingsOfWorkingDir). So the list
+        // is fetched again for the folder, whatever this dialog did or did not touch.
+        if (!workingDir.equals(dirAtOpen)) modelsStale = true;
 
         return true;
     }
@@ -6439,8 +6632,17 @@ public class JRock {
                + "comma-separated, with the language of the text picking between them, so "
                + "one English voice and one Russian one read each in its own. Empty, the "
                + "language picks from every voice there is. The line is plain text, to "
-               + "type in or clear; Add, beside it, puts a voice on the end of it and goes "
-               + "back to blank, so what it shows is never mistaken for the setting.\n\n"
+               + "type in or clear; Add voice, beside it, lists the voices this machine "
+               + "has - read the first time it is pressed - and puts the one you pick on "
+               + "the end of the line.\n\n"
+               : "")
+            + (narrateDeviceChoosable()
+               ? "Crackle while waiting is a sound on that same speaker while a model is "
+               + "thinking, so a wait is audible across a room: off, or one of five tones. "
+               + "Preview plays a few seconds of the one chosen, on the speaker chosen, "
+               + "without sending anything. Several JRocks on one machine share a speaker, "
+               + "so a tone each turns \"something is thinking\" into \"the browser agent "
+               + "is thinking\".\n\n"
                : "")
             + (isCheerpJ()
                ? "Ctrl+Space records from the browser's own microphone: press it to start "
@@ -7541,6 +7743,122 @@ public class JRock {
             items.add(voice);
         }
         return items.toArray(new String[0]);
+    }
+
+    // The voices, under the Add voice button, and PUT TOGETHER WHEN IT IS PRESSED.
+    //
+    // ENUMERATED ON THE FIRST PRESS, the way the speaker and microphone lists are filled
+    // when their dropdown is opened (see listOnOpen). Before this they were only ever
+    // learned by narrating once - the narration script reports them on its way past (see
+    // narratorMessages) - so a dialog opened before the first narration offered a list
+    // with nothing in it, which reads as a control that does not work. Asking Windows
+    // costs about a second of PowerShell, which is why it waits to be asked, and why the
+    // dialog shows a wait cursor while it happens.
+    //
+    // Each voice once: a machine can report several under one name, and a menu offering
+    // "Bdl" five times offers five ways to say the same thing - the name is all that is
+    // sent on (see voiceChoices).
+    private static void showVoiceMenu(javax.swing.JButton button,
+                                      javax.swing.JTextField line) {
+        java.awt.Window dialog = javax.swing.SwingUtilities.getWindowAncestor(button);
+        java.awt.Cursor was = dialog == null ? null : dialog.getCursor();
+        if (dialog != null) {
+            dialog.setCursor(java.awt.Cursor.getPredefinedCursor(
+                    java.awt.Cursor.WAIT_CURSOR));
+        }
+        try {
+            narrateVoices = isCheerpJ() ? browserNarrateVoiceNames() : installedVoiceNames();
+        } finally {
+            if (dialog != null) dialog.setCursor(was);
+        }
+        javax.swing.JPopupMenu menu = new FittedPopupMenu();
+        int offered = 0;
+        for (String voice : voiceChoices(narrateVoices)) {
+            String name = narrateVoiceName(voice);
+            if (name.isEmpty()) continue;        // the blank voiceChoices leads with
+            javax.swing.JMenuItem item = new javax.swing.JMenuItem(voice);
+            item.addActionListener(e -> line.setText(withVoice(line.getText(), name)));
+            menu.add(item);
+            offered++;
+        }
+        if (offered == 0) {
+            // Said in the menu rather than in a dialog of its own: the answer to "which
+            // voices are there" is "none this can see", and it belongs where the list
+            // would have been.
+            javax.swing.JMenuItem none = new javax.swing.JMenuItem(isCheerpJ()
+                    ? "This browser reports no voices"
+                    : "No voices found - add them in Settings > Time & language > Speech");
+            none.setEnabled(false);
+            menu.add(none);
+        }
+        menu.show(button, 0, button.getHeight());
+    }
+
+    // Every voice Windows has, as "<name>  (<culture>)" - the same shape the narration
+    // script reports, so a name picked here reads back exactly like one picked after a
+    // narration (see narrateVoiceName).
+    //
+    // Its own PowerShell, deliberately small: the narration script enumerates voices as a
+    // side effect of speaking, and asking it to speak in order to find out what it could
+    // speak with would be a sound nobody asked for. Everything goes to stdout, one line
+    // each, inside "$null = & { }" so no stray pipeline output lands among them.
+    private static final String VOICES_SCRIPT = String.join("\n",
+            "$ErrorActionPreference = 'Stop'",
+            "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+            "$null = & {",
+            "  Add-Type -AssemblyName System.Speech",
+            "  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
+            "  foreach ($iv in @($s.GetInstalledVoices() | Where-Object { $_.Enabled })) {",
+            "    [Console]::Out.WriteLine($iv.VoiceInfo.Name + '|'"
+                    + " + $iv.VoiceInfo.Culture.Name)",
+            "  }",
+            "}");
+
+    // How long that is given. A second is normal; this is the point at which the dialog
+    // stops waiting and offers what it already knew, which is better than a window that
+    // appears to have hung.
+    private static final long VOICES_TIMEOUT_MS = 6_000;
+
+    static java.util.List<String> installedVoiceNames() {
+        if (!narrateAvailable()) return narrateVoices;
+        java.util.concurrent.atomic.AtomicReference<java.util.List<String>> read =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        // Read on a thread of its own, so the wait has an end: this is called from the
+        // event thread, and a PowerShell that never answers would otherwise be a window
+        // that never paints again.
+        Thread asking = new Thread(() -> {
+            Process p = null;
+            try {
+                p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                        "-Command", VOICES_SCRIPT).start();
+                p.getOutputStream().close();
+                java.util.List<String> found = new ArrayList<>();
+                try (java.io.BufferedReader r = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(p.getInputStream(),
+                                StandardCharsets.UTF_8))) {
+                    for (String line; (line = r.readLine()) != null; ) {
+                        String[] v = line.trim().split("\\|", 2);
+                        if (v[0].isEmpty()) continue;
+                        found.add(v.length > 1 && !v[1].isEmpty()
+                                ? v[0] + "  (" + v[1] + ")" : v[0]);
+                    }
+                }
+                read.set(found);
+            } catch (IOException noPowerShell) {
+                // Then the list stays as whatever narrating has already reported.
+            } finally {
+                if (p != null) p.destroy();
+            }
+        }, "jrock-voices");
+        asking.setDaemon(true);
+        asking.start();
+        try {
+            asking.join(VOICES_TIMEOUT_MS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+        java.util.List<String> found = asking.isAlive() ? null : read.get();
+        return found == null || found.isEmpty() ? narrateVoices : found;
     }
 
     // The "Narrate with" line with one more voice on the end of it, or as it stands when
@@ -15025,9 +15343,25 @@ public class JRock {
     //
     // It has a Set button of its own, and that is the point of the tab: Set applies the
     // four numbers to the window at once, so the result is there to be looked at - and
-    // nudged again, and again - with the dialog still open. Nothing here is a setting
-    // this dialog writes, so Cancel is then the right way out: the window stays where Set
-    // put it, and the session is not re-read the way OK makes it.
+    // nudged again, and again - with the dialog still open. Cancel is then the right way
+    // out: the window stays where Set put it, and the session is not re-read the way OK
+    // makes it.
+    //
+    // SET ALSO REMEMBERS, which is why Cancel is enough. The four numbers are written to
+    // this folder's configuration (see CONFIG_WINDOW), so the next start opens the window
+    // where it was put rather than in the middle of the screen - a window placed on the
+    // second monitor for a reason belongs there tomorrow too.
+    //
+    // ENTER IN THIS TAB IS SET, and not the dialog's OK. Every other tab holds settings
+    // that OK saves, so Enter closing the dialog is right there; here the button that does
+    // the work is Set, and Enter reaching OK instead shut the dialog without moving the
+    // window - the one thing somebody typing a width into this tab cannot have meant.
+    private static final int WINDOW_MIN_W = 200;
+    private static final int WINDOW_MIN_H = 150;
+    // How much of a remembered window's top edge has to be on a screen for the place to
+    // be used: a title bar's worth, so it can be dragged.
+    private static final int WINDOW_GRAB_H = 40;
+
     private static javax.swing.JPanel windowTab(JFrame frame) {
         java.awt.Rectangle win = frame.getBounds();
 
@@ -15052,27 +15386,62 @@ public class JRock {
         javax.swing.JTextField yF      = new javax.swing.JTextField(String.valueOf(prefill.y), 6);
         yF.setName("windowY");
 
-        javax.swing.JTextArea info = new javax.swing.JTextArea(screenReport(frame));
-        info.setEditable(false);
-        info.setOpaque(false);
-        info.setLineWrap(true);
-        info.setWrapStyleWord(true);
-        info.setFont(javax.swing.UIManager.getFont("Label.font"));
+        // The screens as a TABLE, and the window's own line under it. It was a block of
+        // text with "> " in front of one line and four spaces in front of another, which
+        // is how a terminal says "this one" and is not how a window does: a table has a
+        // column per thing being compared, right-aligned numbers that line up without
+        // being padded, and a selected row for "the window is on this one".
+        javax.swing.JTable screens = screenTable();
+        refreshScreenTable(screens, frame);
+        // Both lines under the table WRAP, which a label cannot: this tab is as wide as
+        // the dialog's widest row and no wider, and a sentence that does not fit is simply
+        // cut off at the edge - "the window is on Screen 2, at (243, 32) on that scree".
+        javax.swing.JTextArea where = new javax.swing.JTextArea(windowPlace(frame));
+        where.setEditable(false);
+        where.setOpaque(false);
+        where.setLineWrap(true);
+        where.setWrapStyleWord(true);
+        where.setFocusable(false);
+        where.setFont(plainLabelFont());
+        javax.swing.JTextArea space = new javax.swing.JTextArea(SCREEN_SPACE_NOTE);
+        space.setEditable(false);
+        space.setOpaque(false);
+        space.setLineWrap(true);
+        space.setWrapStyleWord(true);
+        space.setFocusable(false);
+        space.setFont(plainLabelFont());
 
         JButton set = new JButton("Set");
         set.setName("windowSet");
-        set.setToolTipText("Move and resize the window now, with this dialog left open");
+        set.setToolTipText("Move and resize the window now, and remember this place for "
+                + "the next start (Enter does this too)");
         explains(set, "Set", "Moves and resizes the window to these four numbers straight "
                 + "away, with this dialog still open - so the result can be looked at and "
                 + "the numbers tried again. A maximized window is restored to normal "
-                + "first, since a maximized one cannot be placed.\n\n"
-                + "The window's size and place are not settings JRock keeps, so there is "
-                + "nothing here for OK to save: Set has already done it, and Cancel is the "
-                + "way out that leaves the rest of this dialog alone.");
+                + "first, since a maximized one cannot be placed. Enter, anywhere in this "
+                + "tab, is this button: the dialog's OK would close it without moving "
+                + "anything.\n\n"
+                + "It also REMEMBERS: the four numbers go into this folder's "
+                + "JRock/jrock-config.txt, and the next start opens the window there "
+                + "instead of in the middle of the screen. Only this button writes them - "
+                + "a window dragged about by its title bar changes nothing - and a "
+                + "remembered place that is on no screen any more (a laptop that was "
+                + "docked) is ignored, with a line in the log saying so.\n\n"
+                + "Cancel is the way out that leaves the rest of this dialog alone; Set "
+                + "has already done its work.");
         set.addActionListener(e -> {
-            applyWindowBounds(set, frame, widthF, heightF, xF, yF);
-            info.setText(screenReport(frame));
-            info.setCaretPosition(0);
+            if (!applyWindowBounds(set, frame, widthF, heightF, xF, yF)) return;
+            // Remembered as applied, and written where the next start reads it.
+            java.awt.Rectangle now = frame.getBounds();
+            windowBounds = now.x + "," + now.y + "," + now.width + "," + now.height;
+            saveConfigQuietly();
+            Ui live = ui;
+            if (live != null) {
+                live.log.gray("Window set to " + now.width + "x" + now.height + " at ("
+                        + now.x + ", " + now.y + "), and remembered for the next start.");
+            }
+            refreshScreenTable(screens, frame);
+            where.setText(windowPlace(frame));
         });
 
         java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
@@ -15087,18 +15456,163 @@ public class JRock {
         addRow(rows, c, row++, "Position Y:", narrow(yF));
         addRow(rows, c, row++, "",            narrow(set));
 
-        javax.swing.JScrollPane infoScroll = new javax.swing.JScrollPane(info);
-        infoScroll.setBorder(javax.swing.BorderFactory.createTitledBorder("Screens"));
-        infoScroll.setPreferredSize(new java.awt.Dimension(400, 180));
-        // Wrapping handles width, so no horizontal scrollbar is ever needed.
-        infoScroll.setHorizontalScrollBarPolicy(
-                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        // As tall as the screens there are, within reason: a box with room for four rows
+        // above a machine with two is empty space pretending something is missing.
+        int shown = Math.max(2, Math.min(6, screens.getRowCount()));
+        screens.setPreferredScrollableViewportSize(new java.awt.Dimension(480,
+                shown * screens.getRowHeight()));
+        javax.swing.JScrollPane screenScroll = new javax.swing.JScrollPane(screens);
+
+        javax.swing.JPanel screenBox = new javax.swing.JPanel(new BorderLayout(0, 6));
+        screenBox.setBorder(javax.swing.BorderFactory.createTitledBorder("Screens"));
+        screenBox.add(screenScroll, BorderLayout.NORTH);
+        javax.swing.JPanel under = new javax.swing.JPanel();
+        under.setLayout(new javax.swing.BoxLayout(under, javax.swing.BoxLayout.Y_AXIS));
+        under.setOpaque(false);
+        where.setAlignmentX(0f);
+        space.setAlignmentX(0f);
+        under.add(where);
+        under.add(javax.swing.Box.createVerticalStrut(6));
+        under.add(space);
+        screenBox.add(under, BorderLayout.CENTER);
 
         javax.swing.JPanel tab = new javax.swing.JPanel(new BorderLayout(8, 8));
         tab.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 4, 4, 4));
         tab.add(rows, BorderLayout.NORTH);
-        tab.add(infoScroll, BorderLayout.CENTER);
+        tab.add(screenBox, BorderLayout.CENTER);
+
+        // ENTER IS SET, from anywhere in this tab. Two bindings, because Enter is handled
+        // in two places: a text field with an action of its own fires that, and anything
+        // else in the tab - the table, the panel itself - reaches the ancestor binding.
+        // Without them the dialog's default button has it, and OK closes the dialog
+        // without ever moving the window.
+        for (javax.swing.JTextField field
+                : new javax.swing.JTextField[] { widthF, heightF, xF, yF }) {
+            field.addActionListener(e -> set.doClick());
+        }
+        tab.getInputMap(javax.swing.JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+           .put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, 0),
+                   "jrock-window-set");
+        tab.getActionMap().put("jrock-window-set", new javax.swing.AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                set.doClick();
+            }
+        });
         return tab;
+    }
+
+    // What the virtual desktop space is, which is the one thing about these numbers that
+    // has to be said in words rather than shown in a column.
+    private static final String SCREEN_SPACE_NOTE =
+            "X and Y are in the virtual desktop space: the primary screen's top-left is "
+            + "0,0, and a screen to the left of it or above it has negative coordinates.";
+
+    // The screens, one row each, with the one holding the window selected. Read-only, and
+    // not a control to be filled in: it is the map the four fields are read against.
+    private static javax.swing.JTable screenTable() {
+        javax.swing.table.DefaultTableModel model = new javax.swing.table.DefaultTableModel(
+                new Object[] { "Screen", "Size", "Top-left" }, 0) {
+            private static final long serialVersionUID = 1L;
+            @Override public boolean isCellEditable(int row, int column) { return false; }
+        };
+        javax.swing.JTable table = new javax.swing.JTable(model);
+        table.setName("screens");
+        table.setFont(plainLabelFont());
+        table.getTableHeader().setReorderingAllowed(false);
+        table.setRowSelectionAllowed(true);
+        table.setColumnSelectionAllowed(false);
+        table.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        table.setShowVerticalLines(false);
+        table.setIntercellSpacing(new java.awt.Dimension(0, 1));
+        // The numbers belong under each other, which is the whole reason this is a table
+        // and not a line of text per screen - and the window's own screen is in bold,
+        // because a selected row in a table nobody has clicked in is drawn in whatever
+        // pale grey the platform uses for "selected, not focused".
+        table.getColumnModel().getColumn(0).setCellRenderer(
+                new ScreenCell(javax.swing.SwingConstants.LEFT));
+        table.getColumnModel().getColumn(1).setCellRenderer(
+                new ScreenCell(javax.swing.SwingConstants.RIGHT));
+        table.getColumnModel().getColumn(2).setCellRenderer(
+                new ScreenCell(javax.swing.SwingConstants.RIGHT));
+        table.getColumnModel().getColumn(0).setPreferredWidth(140);
+        return table;
+    }
+
+    // Which row the window is on, kept on the table itself so the renderer can read it.
+    private static final String WINDOW_ROW = "jrock.windowRow";
+
+    private static final class ScreenCell
+            extends javax.swing.table.DefaultTableCellRenderer {
+        private static final long serialVersionUID = 1L;
+
+        ScreenCell(int alignment) {
+            setHorizontalAlignment(alignment);
+        }
+
+        @Override
+        public java.awt.Component getTableCellRendererComponent(javax.swing.JTable table,
+                Object value, boolean selected, boolean focused, int row, int column) {
+            java.awt.Component cell = super.getTableCellRendererComponent(table, value,
+                    selected, focused, row, column);
+            Object mark = table.getClientProperty(WINDOW_ROW);
+            boolean windowsOwn = mark instanceof Integer && (Integer) mark == row;
+            cell.setFont(windowsOwn ? table.getFont().deriveFont(java.awt.Font.BOLD)
+                                    : table.getFont());
+            return cell;
+        }
+    }
+
+    // The rows, and which of them is the window's. Called again after Set, because Set is
+    // what can move the window to another screen.
+    private static void refreshScreenTable(javax.swing.JTable table, JFrame frame) {
+        java.awt.Rectangle win = frame.getBounds();
+        int centerX = win.x + win.width / 2;
+        int centerY = win.y + win.height / 2;
+        java.awt.GraphicsDevice primary = java.awt.GraphicsEnvironment
+                .getLocalGraphicsEnvironment().getDefaultScreenDevice();
+        java.awt.GraphicsDevice[] devices = java.awt.GraphicsEnvironment
+                .getLocalGraphicsEnvironment().getScreenDevices();
+        javax.swing.table.DefaultTableModel model =
+                (javax.swing.table.DefaultTableModel) table.getModel();
+        model.setRowCount(0);
+        int holds = -1;
+        for (int i = 0; i < devices.length; i++) {
+            java.awt.Rectangle b = devices[i].getDefaultConfiguration().getBounds();
+            model.addRow(new Object[] {
+                "Screen " + (i + 1) + (devices[i].equals(primary) ? " (primary)" : ""),
+                b.width + "x" + b.height,
+                b.x + ", " + b.y,
+            });
+            if (b.contains(centerX, centerY)) holds = i;
+        }
+        if (holds >= 0) table.setRowSelectionInterval(holds, holds);
+        else table.clearSelection();
+    }
+
+    // Where the window is, in one sentence under the table: the screen it is on and its
+    // place on that screen, which is the number somebody moving it between monitors
+    // actually wants. Maximized is said here too - the raw bounds Windows reports for a
+    // maximized window are not the ones in the fields above, and look like an error.
+    private static String windowPlace(JFrame frame) {
+        java.awt.Rectangle win = frame.getBounds();
+        if (isMaximized(frame)) {
+            return "The window is MAXIMIZED (Windows reports it at " + win.x + ", " + win.y
+                    + ", size " + win.width + "x" + win.height + "). Set restores it "
+                    + "to normal and applies the numbers above.";
+        }
+        int centerX = win.x + win.width / 2;
+        int centerY = win.y + win.height / 2;
+        java.awt.GraphicsDevice[] devices = java.awt.GraphicsEnvironment
+                .getLocalGraphicsEnvironment().getScreenDevices();
+        for (int i = 0; i < devices.length; i++) {
+            java.awt.Rectangle b = devices[i].getDefaultConfiguration().getBounds();
+            if (b.contains(centerX, centerY)) {
+                return "The window is on Screen " + (i + 1) + ", at (" + (win.x - b.x)
+                        + ", " + (win.y - b.y) + ") on that screen.";
+            }
+        }
+        return "The window is not on any of these screens.";
     }
 
     // A field or a button at its own width, rather than stretched across the dialog by
@@ -15114,29 +15628,18 @@ public class JRock {
                 == java.awt.Frame.MAXIMIZED_BOTH;
     }
 
-    // What the Screens box says: the screens, which of them holds the window, and - when
-    // the window is maximized - the raw bounds Windows reports for it, which are not the
-    // ones in the fields above and would otherwise look like an error.
-    private static String screenReport(JFrame frame) {
-        java.awt.Rectangle win = frame.getBounds();
-        String header = isMaximized(frame)
-                ? "NOTE: window is MAXIMIZED (Windows reports it at " + win.x + "," + win.y
-                  + " size " + win.width + "x" + win.height + ").\nSet will restore it "
-                  + "to normal and use the values above.\n\n"
-                : "";
-        return header + describeScreens(win);
-    }
-
-    // Moves and resizes the window to the four fields' numbers. Whole numbers only, and
-    // a size below what the window can usefully be is raised to it rather than refused.
-    private static void applyWindowBounds(java.awt.Component parent, JFrame frame,
-                                          javax.swing.JTextField widthF,
-                                          javax.swing.JTextField heightF,
-                                          javax.swing.JTextField xF,
-                                          javax.swing.JTextField yF) {
+    // Moves and resizes the window to the four fields' numbers, and says whether it did.
+    // Whole numbers only, and a size below what the window can usefully be is raised to it
+    // rather than refused. False means nothing was moved and the operator has been told
+    // why - which is also what stops a place that was never applied being remembered.
+    private static boolean applyWindowBounds(java.awt.Component parent, JFrame frame,
+                                             javax.swing.JTextField widthF,
+                                             javax.swing.JTextField heightF,
+                                             javax.swing.JTextField xF,
+                                             javax.swing.JTextField yF) {
         try {
-            int w = Math.max(200, Integer.parseInt(widthF.getText().trim()));
-            int h = Math.max(150, Integer.parseInt(heightF.getText().trim()));
+            int w = Math.max(WINDOW_MIN_W, Integer.parseInt(widthF.getText().trim()));
+            int h = Math.max(WINDOW_MIN_H, Integer.parseInt(heightF.getText().trim()));
             int x = Integer.parseInt(xF.getText().trim());
             int y = Integer.parseInt(yF.getText().trim());
             // If maximized, restore to normal first so setBounds actually applies.
@@ -15149,11 +15652,13 @@ public class JRock {
             // says so rather than leaving the field disagreeing with the window.
             widthF.setText(String.valueOf(w));
             heightF.setText(String.valueOf(h));
+            return true;
         } catch (NumberFormatException ex) {
             javax.swing.JOptionPane.showMessageDialog(
                     javax.swing.SwingUtilities.getWindowAncestor(parent),
                     "Please enter whole numbers for width, height, X and Y.",
                     "Invalid input", javax.swing.JOptionPane.WARNING_MESSAGE);
+            return false;
         }
     }
 
@@ -15169,40 +15674,6 @@ public class JRock {
         }
         java.awt.GraphicsDevice primary = ge.getDefaultScreenDevice();
         return primary == null ? null : primary.getDefaultConfiguration().getBounds();
-    }
-
-    // Builds a human-readable description of all screens and which one currently
-    // holds the window, with the window's position relative to that screen.
-    private static String describeScreens(java.awt.Rectangle win) {
-        StringBuilder sb = new StringBuilder();
-        int centerX = win.x + win.width / 2;
-        int centerY = win.y + win.height / 2;
-
-        java.awt.GraphicsDevice[] devices = java.awt.GraphicsEnvironment
-                .getLocalGraphicsEnvironment().getScreenDevices();
-        java.awt.GraphicsDevice primary = java.awt.GraphicsEnvironment
-                .getLocalGraphicsEnvironment().getDefaultScreenDevice();
-
-        for (int i = 0; i < devices.length; i++) {
-            java.awt.GraphicsDevice dev = devices[i];
-            java.awt.Rectangle b = dev.getDefaultConfiguration().getBounds();
-            boolean isPrimary = dev.equals(primary);
-            boolean hasWindow = b.contains(centerX, centerY);
-            sb.append(hasWindow ? "> " : "  ")
-              .append("Screen ").append(i + 1)
-              .append(isPrimary ? " (primary)" : "")
-              .append(": ").append(b.width).append("x").append(b.height)
-              .append(" at (").append(b.x).append(", ").append(b.y).append(")");
-            if (hasWindow) {
-                sb.append("\n    window here; position on this screen: (")
-                  .append(win.x - b.x).append(", ").append(win.y - b.y).append(")");
-            }
-            sb.append("\n");
-        }
-        sb.append("\nCoordinates X/Y are in the virtual desktop space\n")
-          .append("(primary screen's top-left is 0,0; screens to the\n")
-          .append("left/above have negative coordinates).");
-        return sb.toString();
     }
 
     // ---- Multimodal include verification & content assembly ----------------
