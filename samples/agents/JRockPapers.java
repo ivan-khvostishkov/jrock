@@ -927,7 +927,7 @@ public final class JRockPapers {
         java.awt.Font small = base.deriveFont(java.awt.Font.PLAIN, 12f);
         java.awt.Font fixed = new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12);
 
-        folderField = new javax.swing.JTextField(folder == null ? "" : folder.toString(), 40);
+        folderField = new javax.swing.JTextField(folder == null ? "" : folder.toString(), 28);
         folderField.setFont(small);
         folderField.setToolTipText("The folder the scanner writes its PDFs into");
         javax.swing.JButton browse = new javax.swing.JButton("Browse…");
@@ -965,7 +965,7 @@ public final class JRockPapers {
         // writes, so it is the folder worth synchronising. Shown because an agent that
         // writes into a folder should say which folder, and settable here because the
         // alternative was a command-line flag that the settings file then forgot.
-        incomingField = new javax.swing.JTextField(incomingFolder().toString(), 40);
+        incomingField = new javax.swing.JTextField(incomingFolder().toString(), 28);
         incomingField.setFont(small);
         incomingField.setToolTipText("Where documents arrive, and where this agent saves "
                 + "what it is given - not the scanner's folder");
@@ -1026,7 +1026,17 @@ public final class JRockPapers {
         };
         read.addActionListener(readIt);
         nameField.addActionListener(readIt);
-        asks.add(read);
+        // THE TWO THAT NEED A NAME TYPED GO ON A ROW OF THEIR OWN. One row of six
+        // buttons, two more buttons and a field set this window's smallest width at over
+        // a thousand pixels - a window that cannot be put beside anything, for a list of
+        // file names. Two rows cost one row's height and take three hundred pixels off
+        // the width.
+        javax.swing.JPanel named = new javax.swing.JPanel(new java.awt.FlowLayout(
+                java.awt.FlowLayout.LEFT, 6, 0));
+        named.setOpaque(false);
+        named.add(new javax.swing.JLabel("Name:"));
+        named.add(nameField);
+        named.add(read);
         // Printing takes a NAME and has no button of its own for "the newest", which
         // #print still answers: a row of buttons is one stray click away from paper, and
         // the request that spends it should be one somebody typed.
@@ -1042,10 +1052,9 @@ public final class JRockPapers {
             }
             ask("#print " + typed);
         });
-        asks.add(print);
-        asks.add(nameField);
+        named.add(print);
 
-        result = new javax.swing.JTextArea(18, 76);
+        result = new javax.swing.JTextArea(14, 60);
         result.setFont(fixed);
         result.setEditable(false);
         result.setLineWrap(true);
@@ -1080,7 +1089,7 @@ public final class JRockPapers {
         north.setLayout(new javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS));
         north.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                folderRow, incomingRow, asks }) {
+                folderRow, incomingRow, asks, named }) {
             row.setAlignmentX(0f);
             row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                     row.getPreferredSize().height));

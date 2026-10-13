@@ -757,7 +757,14 @@ public final class JRockLocation {
         // was cut off on the right. A text area wraps to the width it HAS, and breaks
         // inside a word when the word is wider than that - which a file name or an
         // address, being one long token with no space in it, always is.
-        status = new javax.swing.JTextArea(1, 1);
+        // TWO ROWS, not one, and that is a size rather than a limit: pack() measures the
+        // window with whatever is in this area at the time, which is one space - and the
+        // first sentence it ever shows ("Found the place for #here: Munich, Bavaria.")
+        // wraps to two lines in a window this narrow. Packed at one row, the window had
+        // room for one, and the rows above gave up the difference: the form lost its
+        // bottom line, so "Refresh GPS every" was not on screen at all until the window
+        // was dragged taller.
+        status = new javax.swing.JTextArea(2, 1);
         status.setFont(small);
         status.setForeground(MUTED);
         status.setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 0, 0, 0));
@@ -780,10 +787,17 @@ public final class JRockLocation {
             south.add(c);
         }
 
+        // THE FORM IN THE NORTH, AND NOTHING IN THE CENTRE. A BorderLayout gives north
+        // and south the height they ask for and the rest to the centre - so with the form
+        // in the centre it was the form that shrank whenever the lines below it grew, and
+        // a GridBagLayout with less height than it needs simply does not draw its last
+        // rows. Seven settings cannot be allowed to come and go with the length of a
+        // status line; in the north they always have their height, and anything short of
+        // room for all of it is taken off the bottom, where the window's own edge is.
         javax.swing.JPanel content = new javax.swing.JPanel(new java.awt.BorderLayout());
         content.setBackground(BACKGROUND);
         content.setBorder(javax.swing.BorderFactory.createEmptyBorder(18, 18, 14, 18));
-        content.add(form, java.awt.BorderLayout.CENTER);
+        content.add(form, java.awt.BorderLayout.NORTH);
         content.add(south, java.awt.BorderLayout.SOUTH);
         window.setContentPane(content);
 

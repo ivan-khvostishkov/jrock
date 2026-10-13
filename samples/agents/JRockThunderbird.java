@@ -1628,6 +1628,14 @@ public final class JRockThunderbird {
             b.addActionListener(e -> refresh(request));
             asks.add(b);
         }
+        // And which of them are read, which is a question asked when a calendar is added
+        // and never again - so it is behind a button rather than down the side of the
+        // window (see showCalendars).
+        javax.swing.JButton include = new javax.swing.JButton("Include…");
+        include.setToolTipText("Which calendars are read: a tick each, and a calendar "
+                + "Thunderbird keeps nothing of on this disk says so");
+        include.addActionListener(e -> showCalendars());
+        asks.add(include);
 
         // The mail questions, on a row of their own: the same buttons an agent's request
         // lines are, so what the operator can see is what a model can ask for.
@@ -1660,15 +1668,25 @@ public final class JRockThunderbird {
         };
         withButton.addActionListener(askWith);
         withField.addActionListener(askWith);
-        mailAsks.add(withButton);
-        mailAsks.add(withField);
+        // ON A ROW OF ITS OWN, because it is the one that needs typing and because the
+        // mail row is what sets this window's smallest width: five buttons, a sixth and a
+        // field came to nearly nine hundred pixels, and a window that cannot be made
+        // narrower than that cannot be put beside the JRock it belongs to.
+        javax.swing.JPanel withRow = new javax.swing.JPanel(new java.awt.FlowLayout(
+                java.awt.FlowLayout.LEFT, 6, 0));
+        withRow.setOpaque(false);
+        withRow.add(label("With:"));
+        withRow.add(withField);
+        withRow.add(withButton);
 
+        // The calendars live here whether or not the dialog that shows them is open: the
+        // ticks are filled in from Thunderbird's own databases as soon as a profile is
+        // set (see fillCalendars), and what a tick changes is the excluded list, not the
+        // box. So a calendar can be switched off without this ever having been opened,
+        // and opening it shows what is already true.
         calendarBox = new javax.swing.JPanel();
         calendarBox.setLayout(new javax.swing.BoxLayout(calendarBox, javax.swing.BoxLayout.Y_AXIS));
         calendarBox.setOpaque(false);
-        javax.swing.JScrollPane calendars = new javax.swing.JScrollPane(calendarBox);
-        calendars.setBorder(javax.swing.BorderFactory.createTitledBorder("Include"));
-        calendars.setPreferredSize(new java.awt.Dimension(240, 220));
 
         briefing = new javax.swing.JTextArea(14, 60);
         briefing.setFont(fixed);
@@ -1703,7 +1721,7 @@ public final class JRockThunderbird {
         rows.setLayout(new javax.swing.BoxLayout(rows, javax.swing.BoxLayout.Y_AXIS));
         rows.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                profileRow, emailRow, asks, mailAsks }) {
+                profileRow, emailRow, asks, mailAsks, withRow }) {
             row.setAlignmentX(0f);
             rows.add(row);
         }
@@ -1713,16 +1731,11 @@ public final class JRockThunderbird {
         north.add(rows, java.awt.BorderLayout.NORTH);
         north.add(status, java.awt.BorderLayout.SOUTH);
 
-        javax.swing.JPanel middle = new javax.swing.JPanel(new java.awt.BorderLayout(10, 0));
-        middle.setOpaque(false);
-        middle.add(text, java.awt.BorderLayout.CENTER);
-        middle.add(calendars, java.awt.BorderLayout.EAST);
-
         javax.swing.JPanel content = new javax.swing.JPanel(new java.awt.BorderLayout());
         content.setBackground(BACKGROUND);
         content.setBorder(javax.swing.BorderFactory.createEmptyBorder(16, 16, 12, 16));
         content.add(north, java.awt.BorderLayout.NORTH);
-        content.add(middle, java.awt.BorderLayout.CENTER);
+        content.add(text, java.awt.BorderLayout.CENTER);
         content.add(listening, java.awt.BorderLayout.SOUTH);
         window.setContentPane(content);
 
@@ -1749,7 +1762,7 @@ public final class JRockThunderbird {
             say("Set the Thunderbird profile folder above, then press Use.");
         } else {
             showEmails();
-            showCalendars();
+            fillCalendars();
         }
     }
 
@@ -1821,13 +1834,16 @@ public final class JRockThunderbird {
         profileField.setText(profile.toString());
         writeSettings();
         showEmails();
-        showCalendars();
+        fillCalendars();
         refresh("#week");
     }
 
     // One checkbox per calendar, so a noisy one - a holiday feed of several hundred
     // entries - can be left out of a briefing without unsubscribing from it anywhere.
-    private static void showCalendars() {
+    //
+    // Filling the boxes is not showing them: they are built as soon as a profile is set,
+    // and the window that shows them is opened by the Include button (see showCalendars).
+    private static void fillCalendars() {
         READER.submit(() -> {
             Map<String, String> names;
             String note;
@@ -1914,6 +1930,55 @@ public final class JRockThunderbird {
                 say("Showing " + request + ". Nothing here ever writes to Thunderbird.");
             });
         });
+    }
+
+    // ---- Which calendars are read, in a window of its own -----------------------
+    // The ticks used to be a column down the right-hand side: two hundred and forty
+    // pixels of calendar names beside every answer, for a setting touched once when a
+    // calendar is added and then left alone for months. The briefing got that width back,
+    // and the question is on the screen when it is being asked.
+    //
+    // MODELESS, and the same dialog every time. Modeless because a tick re-asks the last
+    // question behind it (see fillCalendars) and seeing that happen is the point - the
+    // list and the briefing are two halves of one answer. The same dialog because it
+    // holds the one calendarBox there is: opening a second would move the ticks out of
+    // the first.
+    private static javax.swing.JDialog calendarsWindow;
+
+    private static void showCalendars() {
+        if (calendarsWindow == null) {
+            javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(calendarBox);
+            scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 4, 4, 4));
+            scroll.setPreferredSize(new java.awt.Dimension(320, 300));
+            javax.swing.JLabel note = new javax.swing.JLabel("A calendar with no tick is "
+                    + "left out of every answer.");
+            note.setFont(status.getFont());
+            note.setForeground(MUTED);
+            note.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 6, 2, 6));
+            javax.swing.JButton close = new javax.swing.JButton("Close");
+            javax.swing.JPanel buttons = new javax.swing.JPanel(new java.awt.FlowLayout(
+                    java.awt.FlowLayout.RIGHT, 6, 6));
+            buttons.setOpaque(false);
+            buttons.add(close);
+
+            javax.swing.JPanel body = new javax.swing.JPanel(new java.awt.BorderLayout());
+            body.setBackground(BACKGROUND);
+            body.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 8, 6, 8));
+            body.add(note, java.awt.BorderLayout.NORTH);
+            body.add(scroll, java.awt.BorderLayout.CENTER);
+            body.add(buttons, java.awt.BorderLayout.SOUTH);
+
+            calendarsWindow = new javax.swing.JDialog(window, "Calendars to include", false);
+            calendarsWindow.setContentPane(body);
+            calendarsWindow.pack();
+            close.addActionListener(e -> calendarsWindow.setVisible(false));
+        }
+        if (calendarBox.getComponentCount() == 0) {
+            say("No calendars yet - set the Thunderbird profile above, then press Use.");
+        }
+        calendarsWindow.setLocationRelativeTo(window);
+        calendarsWindow.setVisible(true);
+        calendarsWindow.toFront();
     }
 
     private static void say(String text) {

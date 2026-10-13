@@ -2453,8 +2453,13 @@ sequenceDiagram
 
 - **Every line names its calendar**, in square brackets, and `#calendars` lists them with their
   sizes — so "which calendar is that in?" is a question the model can actually answer, and a
-  noisy feed can be recognised for what it is. Each calendar also has a **checkbox** in the
-  window: *Holidays in Germany* is 546 entries and would drown a week.
+  noisy feed can be recognised for what it is. Each calendar also has a **checkbox**, behind the
+  **Include…** button: *Holidays in Germany* is 546 entries and would drown a week. The ticks
+  were a column down the right-hand side of the window — 240 pixels of calendar names beside
+  every answer, for a setting touched once when a calendar is added — so they moved into a
+  window of their own and the briefing got the width back (the agent's smallest size went from
+  1140×503 to **740×529**). It is **modeless**: a tick re-asks the last question behind it, and
+  seeing that happen is the point.
 - **Repeats are expanded**: `FREQ=DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY`, with `INTERVAL`,
   `COUNT`, `UNTIL`, `BYDAY` (weekly), `BYMONTH`, `BYMONTHDAY`, plus `EXDATE`, `RDATE` and the
   modified instances Thunderbird stores as rows of their own (a moved one says so, a cancelled
@@ -2594,13 +2599,22 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   own browsing is visible to it** and what is signed in there is what was signed in there, in
   that window, deliberately.
 
-  The agent's window shows the **full path and how big it has got** — measured on a thread of
-  its own, because a browser cache is tens of thousands of files (327 MB after a few days here)
-  and a window should not wait for a disk walk. Both numbers are there for the two questions
-  worth asking about a profile: where is it, and how do I make it forget everything? The answer
-  to the second is to delete that folder — the next page then starts from a browser that has
-  never been anywhere, consent walls and all. Nothing deletes it by itself, because the whole
-  point of keeping it is that a consent answered once stays answered.
+  The agent's **Help** window shows the **full path and how big it has got** — measured on a
+  thread of its own, because a browser cache is tens of thousands of files (327 MB after a few
+  days here) and a window should not wait for a disk walk. Both numbers are there for the two
+  questions worth asking about a profile: where is it, and how do I make it forget everything?
+  The answer to the second is to delete that folder — the next page then starts from a browser
+  that has never been anywhere, consent walls and all. Nothing deletes it by itself, because the
+  whole point of keeping it is that a consent answered once stays answered.
+
+  **Behind Help, with everything else the window used to say all the time**: the hosts (built
+  from the list the check itself uses, so it cannot describe a rule that is not enforced), the
+  two-stage address check, that nothing is clicked for you, how a page is read, and the requests
+  an agent may send. On screen for ever that was four lines of host names and two paragraphs of
+  prose — more text than controls, in a window that could not be made narrower than a thousand
+  pixels. The buttons moved under the field, the text moved behind the button, and the window's
+  smallest size went from 1173×540 to **623×420**: small enough to sit beside the JRock it
+  belongs to.
 
 | | |
 |---|---|

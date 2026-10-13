@@ -2135,7 +2135,7 @@ public final class JRockBrowser {
         java.awt.Font small = base.deriveFont(java.awt.Font.PLAIN, 12f);
         java.awt.Font fixed = new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12);
 
-        askField = new javax.swing.JTextField(46);
+        askField = new javax.swing.JTextField(28);
         askField.setFont(small);
         askField.setToolTipText("An address on one of the hosts on the list, or words to search for");
         javax.swing.JButton page = new javax.swing.JButton("Read page");
@@ -2157,6 +2157,15 @@ public final class JRockBrowser {
         javax.swing.JButton which = new javax.swing.JButton("Hosts");
         which.addActionListener(e -> ask("#hosts"));
 
+        // THE BUTTONS ON A ROW OF THEIR OWN, under the field rather than beside it. Six
+        // buttons and a label and a field on one line set the window's smallest width at
+        // something over a thousand pixels - a window that cannot be made small enough to
+        // sit beside anything, for a window whose job is to show a few lines of page.
+        javax.swing.JButton help = new javax.swing.JButton("Help");
+        help.setToolTipText("The hosts this may read, what it does with a page, and where "
+                + "its browser profile is");
+        help.addActionListener(e -> showHelp());
+
         javax.swing.JPanel buttons = new javax.swing.JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.LEFT, 6, 0));
         buttons.setOpaque(false);
@@ -2166,25 +2175,14 @@ public final class JRockBrowser {
         buttons.add(follow);
         buttons.add(what);
         buttons.add(which);
+        buttons.add(help);
 
         javax.swing.JPanel askRow = new javax.swing.JPanel(new java.awt.BorderLayout(8, 0));
         askRow.setOpaque(false);
         askRow.add(new javax.swing.JLabel("Address or search:"), java.awt.BorderLayout.WEST);
         askRow.add(askField, java.awt.BorderLayout.CENTER);
-        askRow.add(buttons, java.awt.BorderLayout.EAST);
 
-        javax.swing.JLabel allowed = new javax.swing.JLabel("<html><div style='width:680px'>"
-                + "Only these hosts, and their subdomains: <b>" + String.join(", ", ALLOWED)
-                + "</b>. The address is checked again after the page has loaded, so a "
-                + "redirect off the list is a page that does not come back. Nothing is "
-                + "clicked for you: the browser's window stays on the page, so a consent "
-                + "wall or a sign-in is yours to answer there - once, and its profile is "
-                + "kept.</div></html>");
-        allowed.setFont(small);
-        allowed.setForeground(MUTED);
-        allowed.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 2, 8, 2));
-
-        result = new javax.swing.JTextArea(18, 72);
+        result = new javax.swing.JTextArea(14, 58);
         result.setFont(fixed);
         result.setEditable(false);
         result.setLineWrap(true);
@@ -2193,10 +2191,15 @@ public final class JRockBrowser {
         scroll.setBorder(javax.swing.BorderFactory.createTitledBorder(
                 "What an agent is told"));
 
-        // Always on screen, because "which browser is this and what does it know?" is a
-        // fair question to have an answer to without reading the log - and because the
-        // answer to "how do I make it forget everything?" is this path.
-        profileLine = new javax.swing.JTextArea(1, 1);
+        // THE PROFILE LINE LIVES IN THE HELP WINDOW NOW (see showHelp), and is built here
+        // because showProfile writes into it from the moment the browser starts, whether
+        // or not anybody has opened that window yet.
+        //
+        // It was on screen all the time: two lines explaining what the profile is, then a
+        // path and a size. Both are worth having - "which browser is this and what does it
+        // know?" and "how do I make it forget everything?" - and neither is worth four
+        // lines of a small window for ever. Still selectable, so the path can be copied.
+        profileLine = new javax.swing.JTextArea(2, 44);
         profileLine.setFont(small);
         profileLine.setForeground(MUTED);
         profileLine.setEditable(false);   // but selectable: the path can be copied out
@@ -2231,20 +2234,17 @@ public final class JRockBrowser {
         north.setLayout(new javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS));
         north.setOpaque(false);
         for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                askRow, allowed }) {
+                askRow, buttons }) {
             row.setAlignmentX(0f);
             row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                     row.getPreferredSize().height));
             north.add(row);
         }
-        // The two wrapping rows are NOT capped at the height they have while the window
-        // is built - a single space each - which would be one line for ever however much
-        // arrives. They grow, and the list below gives up the room.
-        for (javax.swing.JComponent row : new javax.swing.JComponent[] {
-                profileLine, status }) {
-            row.setAlignmentX(0f);
-            north.add(row);
-        }
+        // The status line is NOT capped at the height it has while the window is built -
+        // a single space - which would be one line for ever however much arrives. It
+        // grows, and the list below gives up the room.
+        status.setAlignmentX(0f);
+        north.add(status);
 
         javax.swing.JPanel content = new javax.swing.JPanel(new java.awt.BorderLayout());
         content.setBackground(BACKGROUND);
@@ -2286,6 +2286,86 @@ public final class JRockBrowser {
     // browser cache is tens of thousands of files and hundreds of megabytes - 284 MB
     // after a few days of this - and walking it is not something a window should wait
     // for. Until then the line says the path, which is the part that was asked for.
+    // ---- Help: everything the window used to say all the time --------------------
+    // Four lines of hosts, a paragraph on what is and is not done with a page, and two
+    // lines of profile path - all of it true, all of it read once. On screen for ever it
+    // was most of a small window; here it is a button away, and the window is the size of
+    // the controls in it.
+    //
+    // The hosts are built from ALLOWED and ALLOWED_PREFIXES rather than written out, so
+    // this cannot say something the check does not do - which is the whole point of
+    // writing the list down in one place.
+    private static javax.swing.JDialog helpWindow;
+
+    private static void showHelp() {
+        if (helpWindow == null) {
+            StringBuilder text = new StringBuilder();
+            text.append("THE HOSTS THIS MAY READ, and their subdomains, and nothing else "
+                    + "ever:\n\n");
+            for (String host : ALLOWED) text.append("  ").append(host).append('\n');
+            text.append("\nPart of a host, and not the host - a path and everything under "
+                    + "it:\n\n");
+            for (String[] under : ALLOWED_PREFIXES) {
+                text.append("  ").append(under[0]).append(under[1]).append('\n');
+            }
+            text.append("\nOne page, and not its host:\n\n");
+            for (String page : ALLOWED_PAGES) text.append("  ").append(page).append('\n');
+            text.append("\nThe address is checked twice: before anything is asked of the "
+                    + "browser, and again on the address the browser ACTUALLY ENDED ON - a "
+                    + "redirect off the list is a page that does not come back.\n\n"
+                    + "NOTHING IS CLICKED FOR YOU. Not a consent wall, not a cookie "
+                    + "banner, not a sign-in: those are yours to answer, and an agent "
+                    + "answering them would be agreeing to things in your name. The "
+                    + "browser's window stays on the page, so a wall can be dealt with "
+                    + "there - once, because the profile is kept.\n\n"
+                    + "A page is READ FROM A PICTURE of it, cut into A4-shaped pieces and "
+                    + "turned into Markdown by this agent's own JRock. Links are read from "
+                    + "the live page instead, so \"follow the one about the Cray-1\" needs "
+                    + "no address - and no address is ever read out loud.\n\n"
+                    + "What an agent may ask, on 127.0.0.1:" + PORT + ":\n\n"
+                    + "  #page <site or address>   a site's front page, or one page\n"
+                    + "  #search <words>          a search, on duckduckgo.com\n"
+                    + "  #docs <question>         documentation, by the product in it\n"
+                    + "  #follow <what to open>   a link on the page just read\n"
+                    + "  #links                   what that page offers\n"
+                    + "  #hosts                   this list, as an answer\n");
+            javax.swing.JTextArea body = new javax.swing.JTextArea(text.toString());
+            body.setFont(new java.awt.Font(java.awt.Font.MONOSPACED,
+                    java.awt.Font.PLAIN, 12));
+            body.setEditable(false);
+            body.setCaretPosition(0);
+            javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(body);
+            scroll.setPreferredSize(new java.awt.Dimension(560, 380));
+
+            javax.swing.JButton close = new javax.swing.JButton("Close");
+            javax.swing.JPanel buttons = new javax.swing.JPanel(new java.awt.FlowLayout(
+                    java.awt.FlowLayout.RIGHT, 6, 6));
+            buttons.setOpaque(false);
+            buttons.add(close);
+
+            javax.swing.JPanel under = new javax.swing.JPanel(new java.awt.BorderLayout());
+            under.setOpaque(false);
+            under.add(profileLine, java.awt.BorderLayout.CENTER);
+            under.add(buttons, java.awt.BorderLayout.SOUTH);
+
+            javax.swing.JPanel content = new javax.swing.JPanel(new java.awt.BorderLayout());
+            content.setBackground(BACKGROUND);
+            content.setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 10, 8, 10));
+            content.add(scroll, java.awt.BorderLayout.CENTER);
+            content.add(under, java.awt.BorderLayout.SOUTH);
+
+            helpWindow = new javax.swing.JDialog(window, "JRock - Browser: what it may "
+                    + "read", false);
+            helpWindow.setContentPane(content);
+            helpWindow.pack();
+            close.addActionListener(e -> helpWindow.setVisible(false));
+        }
+        showProfile();      // the size again, in case the profile has grown since
+        helpWindow.setLocationRelativeTo(window);
+        helpWindow.setVisible(true);
+        helpWindow.toFront();
+    }
+
     private static void showProfile() {
         // --shot, --links and --docs start the same browser with no window of ours to
         // put this line in. They print what they find instead, so there is nothing to
