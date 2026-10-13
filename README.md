@@ -2552,9 +2552,14 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   browser starts with. A search after a restart lands in the DuckDuckGo tab that was already
   open, and the startup page is **not** re-navigated when it is already there — whatever is on
   it, results or a half-answered consent dialogue, stays. A lost session repairs itself the same
-  way: the tab is still there, so it is attached to again rather than replaced. **Nothing of the
-  browser's is ever closed** — a tab is a window you can click in — so the count stops growing
-  rather than being tidied up.
+  way: the tab is still there, so it is attached to again rather than replaced.
+
+  **The empty tabs are closed, and nothing else ever is.** The browser collects them — the
+  command line that starts one ends in `about:blank`, and a Chromium whose profile is already
+  open answers that by opening a blank tab in the window it already has — and a blank tab is a
+  blank page in a window somebody is watching hands-free. Closing an empty one takes nothing
+  away: no page, nothing signed in, nothing half read. Never the last tab, though, because
+  Chromium closes the window with it. A tab with anything at all on it is left alone.
 
   **And the browser itself is adopted, not started twice.** A Chromium asked to open a profile
   that is already open doesn't start a browser: the one holding that profile takes the request

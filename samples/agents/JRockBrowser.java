@@ -62,7 +62,9 @@
 //      read. The browser's OWN tabs count as that site's tab - the one left open on
 //      duckduckgo.com by the last run is the one a search goes into - because a tab is
 //      several hundred megabytes and a browser that collects one per request is a
-//      machine running out of memory. Nothing of the browser's is ever closed here;
+//      machine running out of memory. The EMPTY tabs are closed, and nothing else ever
+//      is: a blank tab is a blank page in a window somebody is watching hands-free,
+//      and closing one takes nothing away;
 //   2. navigates that site's tab, and waits for the page to stop changing: readyState
 //      complete AND the same measurements twice, which is what tells a page that has
 //      finished loading from one that is still filling itself in. TEN SECONDS at the
@@ -1366,20 +1368,65 @@ public final class JRockBrowser {
             if (have != null) {
                 try {
                     // Still there? A tab the operator closed, or one whose session went
-                    // with a socket, is one to find again - and adopt below usually finds
-                    // it, still open and still on that site.
+                    // with a socket, is one to find again - and the scan below usually
+                    // finds it, still open and still on that site.
                     if ("1".equals(evaluate(live, have[1], "'1'"))) session = have[1];
                 } catch (Stop gone) {
                     // It is not answering; the entry is stale either way.
                 }
                 if (session == null) TABS.remove(site);
             }
-            if (session == null) session = adopt(live, site);
+
+            // WHAT THE BROWSER HAS, read once: the tab already on this site, the empty
+            // ones, and how many tabs there are in all.
+            Set<String> ours = new LinkedHashSet<>();
+            for (String[] held : TABS.values()) ours.add(held[0]);
+            String onSite = null;
+            List<String> blanks = new ArrayList<>();
+            int pages = 0;
+            for (String target : jsonObjects(call(live, null, "Target.getTargets", "{}"),
+                    "targetInfos")) {
+                // Pages only: a worker, an extension's background page and the devtools
+                // window are all targets, and none of them is a tab to read a site in.
+                if (!"page".equals(jsonString(target, "type"))) continue;
+                String id = jsonString(target, "targetId");
+                String url = jsonString(target, "url");
+                if (id.isEmpty() || url.startsWith("devtools://")) continue;
+                pages++;
+                if (ours.contains(id)) continue;
+                if (blankTab(url)) blanks.add(id);
+                else if (onSite == null && site.equals(site(url))) onSite = id;
+            }
+
+            // THE TAB THE BROWSER ALREADY HAS, ADOPTED - the one on this site, and failing
+            // that an empty one, and only failing both a new one.
+            if (session == null && onSite != null) session = take(live, site, onSite);
+            if (session == null && !blanks.isEmpty()) {
+                session = take(live, site, blanks.remove(0));
+            }
             if (session == null) {
                 String made = call(live, null, "Target.createTarget",
                         "{\"url\":\"about:blank\"}");
+                pages++;
                 session = take(live, site, jsonString(made, "targetId"));
             }
+
+            // AND THE EMPTY TABS NOBODY IS USING GO. The operator watches this window
+            // hands-free, so a blank tab in it is a blank page they are looking at for no
+            // reason - and the browser collects them: the command line that starts one
+            // ends in about:blank, and a Chromium whose profile is already open answers
+            // that by opening a blank tab in the window it already has.
+            //
+            // Closing an EMPTY tab takes nothing away, which is why these and nothing else
+            // are closed here: there is no page on it, nothing signed in, nothing half
+            // read. Never the last one, though - Chromium closes the window with its final
+            // tab, and that would be this agent shutting its own browser.
+            for (String id : blanks) {
+                if (pages <= 1) break;
+                call(live, null, "Target.closeTarget", "{\"targetId\":\"" + id + "\"}");
+                pages--;
+            }
+
             // AND TO THE FRONT, because a tab that is not the one on top cannot be
             // photographed: Chromium is not drawing it, so Page.captureScreenshot has
             // nothing to send and never answers at all. A tab made here is in front
@@ -1399,42 +1446,18 @@ public final class JRockBrowser {
         }
     }
 
-    // THE TABS THE BROWSER ALREADY HAS, ADOPTED - a tab on that site becomes that site's
-    // tab, and failing that a blank one does.
+    // Why tab asks the browser what it has, every time:
     //
-    // This is what keeps the count down over a day. TABS is only this run's memory, and
-    // the browser outlives the run: its profile is kept, the window survives an agent that
-    // was killed rather than closed, and the operator opens tabs in it themselves.
-    // Remembering nothing about them means opening a second duckduckgo.com tab for the
-    // first search after a restart, a third after the next one, and a browser nobody
-    // closed ending up with a tab per request - which is a browser that runs the machine
-    // out of memory. Asking the browser what it has costs one call and ends that.
+    // TABS is only this run's memory, and the browser outlives the run - its profile is
+    // kept, the window survives an agent that was killed rather than closed, and the
+    // operator opens tabs in it themselves. Remembering nothing about those means opening
+    // a second duckduckgo.com tab for the first search after a restart, a third after the
+    // next one, and a browser nobody closed ending up with a tab per request, which is a
+    // browser that runs the machine out of memory. One call ends that.
     //
     // It is also how a lost session repairs itself: the tab is still there, so it is
-    // attached to again rather than replaced.
-    //
-    // NOTHING IS EVER CLOSED HERE. A tab is a window the operator can click in - a consent
-    // answered, a sign-in, something half read - so a surplus one is left where it is and
-    // simply not added to.
-    private static String adopt(WebSocket live, String site) {
-        Set<String> ours = new LinkedHashSet<>();
-        for (String[] held : TABS.values()) ours.add(held[0]);
-        String blank = null;
-        for (String target : jsonObjects(call(live, null, "Target.getTargets", "{}"),
-                "targetInfos")) {
-            // Pages only: a worker, an extension's background page and the devtools
-            // window are all targets, and none of them is a tab to read a site in.
-            if (!"page".equals(jsonString(target, "type"))) continue;
-            String id = jsonString(target, "targetId");
-            String url = jsonString(target, "url");
-            if (id.isEmpty() || ours.contains(id) || url.startsWith("devtools://")) continue;
-            if (site.equals(site(url))) return take(live, site, id);
-            if (blank == null && blankTab(url)) blank = id;
-        }
-        // The tab the browser opens by itself when it starts, taken over rather than left
-        // to sit there while a second one is made beside it.
-        return blank == null ? null : take(live, site, blank);
-    }
+    // attached to again rather than replaced. And it is where the empty tabs are found and
+    // closed, which is the only kind of tab this agent ever closes.
 
     // One tab, in this agent's hands: attached to, told to report page and script events,
     // and sized to the window pages are read in.
