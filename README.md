@@ -1705,7 +1705,7 @@ the operator as *"the papers agent did not answer"*.
 **`-cp jrock.jar` has to name a jar that is there.** Nothing downloads it: the
 [installer](#the-installer-installerinstalljrockjava) puts one in the folder it installs into
 (one level up from `Flows\`, two up from an agent's own folder), or take it from a
-[reproducible build](#reproducible-builds) artifact, or build it with
+[reproducible build](#finally-reproducible-builds) artifact, or build it with
 `java .github/build/BuildJar.java`. Running from a clone, point `-cp` at wherever you built it.
 The jar is in
 `.gitignore` and the build tool skips `.jar` files in that directory, so a local copy changes
@@ -4594,51 +4594,6 @@ fresh install of what you already have.
 clear — and writes nothing, which is what CI runs on all three platforms so the installer
 cannot rot unnoticed.
 
-## Reproducible builds
-
-CI compiles `JRock.java` with a **pinned OpenJDK 11 patch (Temurin 11.0.32+9)** and repacks
-the classes into a **byte-for-byte reproducible** `jrock.jar` (see `.github/build/BuildJar.java`).
-The same source therefore yields the **same SHA-256 and MD5 on any machine or OS**.
-
-For robustness the build runs on **three operating systems** and publishes three artifacts:
-
-- `jrock-macos-latest.zip`
-- `jrock-ubuntu-latest.zip`
-- `jrock-windows-latest.zip`
-
-Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
-(`jrock.jar.sha256`, `jrock.jar.md5`), the
-[installer](#the-installer-installerinstalljrockjava) (`InstallJRock.java`), the zipped
-source (`jrock-src.zip`, which holds `JRock.java` and every sample) and `samples/` loose
-beside it, so the prompts, the agents and the flows can all be read without unpacking
-anything. `java InstallJRock.java` is what puts the jar and each sample in a folder
-where it runs; by hand, `-cp` has to name the jar wherever you keep it. Because the
-build is reproducible, the `jrock.jar` inside all three archives is identical.
-
-To verify and run JRock from a build artifact, unzip it, then:
-
-```sh
-cd jrock-ubuntu-latest/
-
-sha256sum jrock.jar
-md5sum jrock.jar
-
-java -jar jrock.jar
-```
-
-Current build hashes (3.9.0's - 4.1.0's go here once CI has built it):
-
-```
-9c7cfc9009f8326039030b391d6e2dc9a0ce052c8f8b081b724bd760093fa03c  jrock.jar
-cc9f94edb4061e97f10ef8b02a624dce  jrock.jar
-```
-
-Or, if you want to modify the source and run it in place (no build step):
-
-```sh
-java JRock.java
-```
-
 ## Screenshots, taken by the build
 
 `.github/workflows/screenshots.yml` runs `.github/build/Screenshots.java` against the jar it has
@@ -4727,3 +4682,51 @@ today's question would send it. It is not written over either: the prompt file k
 held until something is actually asked, and then holds the question. What is attached is listed
 at startup with the token to mention it by, since a hash nobody has been shown is a file they
 cannot refer to.
+
+## Finally: reproducible builds
+
+*The last section of this README — which its title says so that the next thing added to this
+file goes above it. The hashes below are what somebody scrolling to the bottom is looking for.*
+
+CI compiles `JRock.java` with a **pinned OpenJDK 11 patch (Temurin 11.0.32+9)** and repacks
+the classes into a **byte-for-byte reproducible** `jrock.jar` (see `.github/build/BuildJar.java`).
+The same source therefore yields the **same SHA-256 and MD5 on any machine or OS**.
+
+For robustness the build runs on **three operating systems** and publishes three artifacts:
+
+- `jrock-macos-latest.zip`
+- `jrock-ubuntu-latest.zip`
+- `jrock-windows-latest.zip`
+
+Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
+(`jrock.jar.sha256`, `jrock.jar.md5`), the
+[installer](#the-installer-installerinstalljrockjava) (`InstallJRock.java`), the zipped
+source (`jrock-src.zip`, which holds `JRock.java` and every sample) and `samples/` loose
+beside it, so the prompts, the agents and the flows can all be read without unpacking
+anything. `java InstallJRock.java` is what puts the jar and each sample in a folder
+where it runs; by hand, `-cp` has to name the jar wherever you keep it. Because the
+build is reproducible, the `jrock.jar` inside all three archives is identical.
+
+To verify and run JRock from a build artifact, unzip it, then:
+
+```sh
+cd jrock-ubuntu-latest/
+
+sha256sum jrock.jar
+md5sum jrock.jar
+
+java -jar jrock.jar
+```
+
+Current build hashes (3.9.0's - 4.1.0's go here once CI has built it):
+
+```
+9c7cfc9009f8326039030b391d6e2dc9a0ce052c8f8b081b724bd760093fa03c  jrock.jar
+cc9f94edb4061e97f10ef8b02a624dce  jrock.jar
+```
+
+Or, if you want to modify the source and run it in place (no build step):
+
+```sh
+java JRock.java
+```
