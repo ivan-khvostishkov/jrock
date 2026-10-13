@@ -134,6 +134,11 @@ public final class JRockBrowser {
     // The next port after the calendar's, on the loopback interface only.
     private static final int PORT = 47474;
 
+    // What this agent is called in JRock's log, in front of every line it writes
+    // there: a transcript is read long afterwards, and a line with no name on it
+    // reads as something JRock said about itself.
+    private static final String AGENT = "Browser agent";
+
     // THE LIST. Hosts, and their subdomains, and nothing else ever.
     private static final String[] ALLOWED = {
         "duckduckgo.com",
@@ -2475,7 +2480,7 @@ public final class JRockBrowser {
         if (wide > 0) status.setSize(wide, Short.MAX_VALUE);
         status.revalidate();
         System.out.println(text);
-        JRock.automationNote("Browser agent: " + text);
+        JRock.automationNote(AGENT, text);
     }
 
     // ---- Settings --------------------------------------------------------------

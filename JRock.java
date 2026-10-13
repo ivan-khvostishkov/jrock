@@ -4109,7 +4109,10 @@ public class JRock {
         /** Replaces the prompt's text. */
         String automationSetPrompt(String text);
 
-        /** Includes a file as Ctrl+I would: "txt", "img", "imgref", "pdfhtml", "audio"... */
+        /** Includes a file as Ctrl+I would - its extension and this folder's settings decide. */
+        String automationInclude(String file);
+
+        /** The same, forcing one reading: "auto", "txt", "img", "imgref", "pdfhtml"... */
         String automationInclude(String file, String kind);
 
         /** Fetches a URL into the prompt, saved under JRock/urls/. */
@@ -4121,7 +4124,10 @@ public class JRock {
         /** The path of one JRock/messages/ file, or null when it is not there. */
         String automationMessageFile(String role, String stamp);
 
-        /** Writes Markdown as a DOCX, with every image it names placed in it. */
+        /** The log's SELECTION as a DOCX, left selected - the pair of automationSelectInLog. */
+        String automationExportSelectionDocx(String file);
+
+        /** Any Markdown as a DOCX, for text that is in no log: a file's own, a reply unfenced. */
         String automationExportDocx(String markdown, String file);
 
         /** The same for what the prompt holds, or its selection when it has one. */
@@ -4160,10 +4166,7 @@ public class JRock {
         /** Merges two one-sided scans into one two-sided document. */
         String automationMergeDuplex(String frontFile, String backFile, String outFile);
 
-        /** One line in JRock's log, which is the only place an agent can be read. */
-        String automationNote(String line);
-
-        /** The same line from a NAMED agent, and the words an agent says for itself. */
+        /** One line in JRock's log from a NAMED agent - the only place an agent can be read. */
         String automationNote(String agent, String line);
 
         /** Gives the window back: prompt editable, Send released, a line saying so. */
@@ -4194,6 +4197,9 @@ public class JRock {
         @Override public String automationSetPrompt(String text) {
             return JRock.automationSetPrompt(text);
         }
+        @Override public String automationInclude(String file) {
+            return JRock.automationInclude(file);
+        }
         @Override public String automationInclude(String file, String kind) {
             return JRock.automationInclude(file, kind);
         }
@@ -4205,6 +4211,9 @@ public class JRock {
         }
         @Override public String automationMessageFile(String role, String stamp) {
             return JRock.automationMessageFile(role, stamp);
+        }
+        @Override public String automationExportSelectionDocx(String file) {
+            return JRock.automationExportSelectionDocx(file);
         }
         @Override public String automationExportDocx(String markdown, String file) {
             return JRock.automationExportDocx(markdown, file);
@@ -4238,7 +4247,6 @@ public class JRock {
                                                       String outFile) {
             return JRock.automationMergeDuplex(frontFile, backFile, outFile);
         }
-        @Override public String automationNote(String line) { return JRock.automationNote(line); }
         @Override public String automationNote(String agent, String line) {
             return JRock.automationNote(agent, line);
         }
@@ -4803,6 +4811,28 @@ public class JRock {
     // "nothing was included" is a failure here and not a shrug, because the next step
     // is a send: Ghostscript missing, or a PDF it could not read, would otherwise go
     // out as a prompt that asks about a document and attaches none of it.
+    /**
+     * One file, included the way <em>Ctrl+I</em> would include it: THE KIND IS THE FILE'S
+     * OWN BUSINESS - its extension and this folder's include settings decide, which is
+     * what the two-argument form calls {@code "auto"}.
+     *
+     * <p>This is what a caller wants nearly always. A PDF goes in as images, as an xpdf
+     * HTML folder or as xpdf text according to <em>Include a PDF as</em> in Configure; an
+     * RTF as Markdown or as its markup; a picture with or without the Markdown reference
+     * line; each of them from a copy under {@code JRock/includes/} or where it lies. Those
+     * are settings of the folder, and an agent working in a folder should not have to
+     * repeat them in its own source.
+     *
+     * <p>The two-argument form is for the one case this cannot serve: a caller whose
+     * PROMPT depends on a particular reading. The doc inventory flow's first pass asks the
+     * model to copy {@code ![](<hash>)} references for the page images, so it includes a
+     * PDF as {@code "pdfhtml"} whatever the folder is set to - with the setting deciding,
+     * the attachment and the instructions beside it could disagree.
+     */
+    public static String automationInclude(String file) {
+        return automationInclude(file, "auto");
+    }
+
     public static String automationInclude(String file, String kind) {
         String problem = requireAutomation();
         if (problem != null) return problem;
@@ -5002,6 +5032,38 @@ public class JRock {
     // image that include's reference names. The text is selected in the log first, where it can be found,
     // so the window shows what was exported. Returns null, or why nothing was written.
     // file is written as given; the automation picks a name that is free.
+    /**
+     * THE LOG'S OWN SELECTION as a DOCX: the third of the trio an automation already has
+     * for narration - {@link #automationSelectInLog(String)}, this, and
+     * {@link #automationClearSelection()} - and the keyboard's <em>Ctrl+Shift+D</em>
+     * through the API.
+     *
+     * <p>The selection is left exactly as it was found: an automation that selected
+     * something is the one that knows when it has finished with it, and the log scrolls
+     * nowhere while a selection exists (see {@code automationClearSelection}). The same
+     * rule narration follows.
+     *
+     * <p>Use this when the text IS in the log - an answer that has just arrived, a passage
+     * out of one. Use {@link #automationExportDocx(String, String)} when it is not: a
+     * flow exporting the text of a file nobody sent, or a reply with its code fences
+     * stripped, has nothing in the transcript to select.
+     */
+    public static String automationExportSelectionDocx(String file) {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        String[] selected = { null };
+        onEdt(() -> selected[0] = live.log.selectedText());
+        if (selected[0] == null || selected[0].isBlank()) {
+            return "nothing is selected in the log - select what is to be exported first "
+                    + "(automationSelectInLog).";
+        }
+        Path target = Paths.get(file).toAbsolutePath().normalize();
+        String failure = writeMarkdownExport(live.log, selected[0], true, false,
+                "DOCX (A4 portrait)", target);
+        return failure == null ? null : "could not export " + target + ": " + failure;
+    }
+
     public static String automationExportDocx(String markdown, String file) {
         String problem = requireAutomation();
         if (problem != null) return problem;
@@ -5470,7 +5532,12 @@ public class JRock {
     // Deliberately not behind requireAutomation: an agent that never takes JRock as an
     // automation - one that only places its window beside JRock's, like the calendar
     // reader - has as much to report as one that does.
-    public static String automationNote(String line) {
+    // The line itself, once its author is in front of it. PRIVATE, because a note with
+    // nobody's name on it is a line the transcript cannot account for: read a month later,
+    // "the mail could not be read" is either JRock saying something about itself or an
+    // agent saying something about its own work, and those are not the same claim. The
+    // public way in takes the name (below).
+    private static String note(String line) {
         String problem = offEdt();
         if (problem != null) return problem;
         Ui live = ui;
@@ -5479,7 +5546,7 @@ public class JRock {
         return null;
     }
 
-    // The same line, FROM A NAMED AGENT: "Push-to-talk: something went wrong".
+    // ONE LINE IN THE LOG, FROM A NAMED AGENT: "Push-to-talk: something went wrong".
     //
     // Which is worth a method of its own because of what a SPOKEN agent does next with it.
     // Narration reads the log's selection and takes no text (see automationNarrate), so
@@ -5506,7 +5573,7 @@ public class JRock {
     public static String automationNote(String agent, String line) {
         String name = agent == null ? "" : agent.trim();
         String said = line == null ? "" : line;
-        return automationNote(name.isEmpty() ? said : name + ": " + said);
+        return note(name.isEmpty() ? said : name + ": " + said);
     }
 
     // Leaves automation mode: the prompt is editable again, Send is released, and Mic

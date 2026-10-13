@@ -52,16 +52,23 @@ class JRockAutomationApiTest {
     void theObjectFormForwards() {
         JRock.Automation api = JRock.automation();
         assertThat(api).describedAs("JRock.automation()").isNotNull();
-        // Without a window there is nothing to drive, and every call says so rather than
-        // doing anything - which is the one thing that can be asserted here, and is
-        // enough to prove the forwarding is wired: a method returning its own default
-        // would say nothing at all.
-        assertThat(api.automationWindow()).describedAs("the window, before there is one")
-                .isNull();
-        assertThat(api.automationPromptText())
-                .describedAs("the prompt's text, before there is a window").isNull();
-        assertThat(api.automationBegin("api test"))
-                .describedAs("why automationBegin refuses without a window").isNotNull();
+        assertThat(JRock.automation()).describedAs("one instance rather than a new one each time")
+                .isSameAs(api);
+
+        // COMPARED WITH THE STATICS, not with values of their own. This test says nothing
+        // about whether a window exists: these classes share a JVM, and another of them
+        // may have made one - which is what an earlier version of this test got wrong, by
+        // asserting that there was none. What it has to show is that both ways of asking
+        // reach the same code, and that is the same assertion either way.
+        //
+        // Two calls that READ and nothing else. Nothing here takes the window, sets a
+        // prompt or presses Send: a test of the wiring must not leave the application in a
+        // state the next test did not ask for.
+        assertThat(api.automationWindow()).describedAs("the window, both ways round")
+                .isSameAs(JRock.automationWindow());
+        assertThat(api.automationMessageFile("assistant", "20260101-000000-000"))
+                .describedAs("the path of a message file that does not exist, both ways round")
+                .isEqualTo(JRock.automationMessageFile("assistant", "20260101-000000-000"));
     }
 
     /** Each method as "name(paramType, paramType): returnType", which is what has to match. */

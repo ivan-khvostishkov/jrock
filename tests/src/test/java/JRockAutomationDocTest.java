@@ -107,7 +107,9 @@ class JRockAutomationDocTest extends JRockGuiFixture {
                     .describedAs("narrating with nothing selected").isNotNull();
 
             // The three steps an agent takes instead of handing over a string.
-            assertThat(JRock.automationNote(words)).isNull();
+            // Named, because a note takes its author now: the name is written in
+            // front of the words, and the words alone are what gets selected.
+            assertThat(JRock.automationNote("Push-to-talk", words)).isNull();
             assertThat(JRock.automationSelectInLog(words)).isNull();
             assertThat(logPane().text())
                     .describedAs("what was to be said is in the transcript").contains(words);
