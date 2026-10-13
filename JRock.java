@@ -197,6 +197,9 @@ public class JRock {
     // and opens at whichever is larger, so a floor set a cell or two above what a layout
     // needs is simply the size that window opens at.
     static final int CELL_W = 32;
+    // The gap between Send and the Enter tick, which is part of what has to fit
+    // when the bottom bar decides whether to show the tick at all (see fitEnter).
+    private static final int ENTER_STRUT = 10;
     static final int CELL_H = 27;
 
     // This window: 12 x 11 cells = 384 x 297. Small enough to tuck into a corner and
@@ -3187,16 +3190,13 @@ public class JRock {
         javax.swing.JPanel sendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         sendSide.add(send);
-        // NOT IN THE BROWSER. There it is a checkbox about a key, in a window that is
-        // mostly used where there is no keyboard to speak of: a phone's return key types
-        // a new line, Send is a tap, and a tick that changes what Enter does is a row of
-        // the bottom bar spent on a question nobody asked. Enter types a new line there,
-        // which is what the box says when it is unticked - and unticked is how it starts
-        // everywhere (see above), so nothing about the key changes by removing it.
-        if (!isCheerpJ()) {
-            sendSide.add(javax.swing.Box.createHorizontalStrut(10));
-            sendSide.add(enterSends);
-        }
+        // SHOWN WHILE THERE IS ROOM FOR IT, which on a phone is usually never - and that
+        // is the right answer there for the same reason it is the right answer in a
+        // narrow window: a checkbox about a key, where there is no keyboard to speak of
+        // and Send is a tap, is a row of the bottom bar spent on a question nobody asked.
+        // See fitEnter, below, for what "room" means.
+        sendSide.add(javax.swing.Box.createHorizontalStrut(ENTER_STRUT));
+        sendSide.add(enterSends);
         javax.swing.JPanel extendSide = new javax.swing.JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
         // The microphone, whenever it is open - listening or recording, from a key, the
@@ -3252,6 +3252,49 @@ public class JRock {
         buttonBar.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 14, 12));
         buttonBar.add(sendSide, BorderLayout.WEST);
         buttonBar.add(extendSide, BorderLayout.EAST);
+
+        // THE ENTER TICK GOES WHEN THERE IS NO ROOM FOR IT, and comes back when there is.
+        //
+        // This row is Send and Enter on one side, the microphone, Clock and History on the
+        // other, and a BorderLayout gives each side the width it asks for: narrower than
+        // the two of them together, it does not shrink either - they run into each other,
+        // and what the operator sees is a checkbox clipped to "E" with the mic's red dot
+        // against it. Which happens at a perfectly ordinary width, because the mic label
+        // appears and disappears while the window is not being touched.
+        //
+        // So Enter is the one that gives way. It is the least of the four: it starts
+        // unticked, it is never remembered, and what it does is also what Ctrl+Enter and
+        // Shift+Enter do whichever way it stands - while Clock and History say what goes
+        // out with the next message, and the mic says the microphone is open. Hidden, the
+        // key simply types a new line, which is what the box says when it is unticked.
+        //
+        // Measured rather than guessed from a width in pixels: what has to fit is the
+        // preferred width of both sides, and the hysteresis (one cell of the window grid)
+        // is what stops it flickering on and off while a window is being dragged.
+        javax.swing.JCheckBox enterTick = enterSends;
+        Runnable fitEnter = () -> {
+            int room = buttonBar.getWidth()
+                    - buttonBar.getInsets().left - buttonBar.getInsets().right;
+            if (room <= 0) return;                  // not laid out yet
+            int taken = extendSide.getPreferredSize().width
+                    + send.getPreferredSize().width + ENTER_STRUT;
+            int enter = enterTick.getPreferredSize().width;
+            boolean fits = enterTick.isVisible()
+                    ? taken + enter <= room
+                    : taken + enter + CELL_W <= room;   // a cell of hysteresis
+            if (fits != enterTick.isVisible()) {
+                enterTick.setVisible(fits);
+                buttonBar.revalidate();
+            }
+        };
+        buttonBar.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override public void componentResized(java.awt.event.ComponentEvent e) {
+                fitEnter.run();
+            }
+        });
+        // And whenever the other side changes width on its own, which is the microphone
+        // label appearing: the same half-second timer that shows it (see above).
+        new javax.swing.Timer(500, e -> fitEnter.run()).start();
 
         frame.add(topBar, BorderLayout.NORTH);
         frame.add(split, BorderLayout.CENTER);

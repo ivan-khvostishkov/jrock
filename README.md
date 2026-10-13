@@ -506,11 +506,22 @@ bill, and a guess is not one.
   already looking the question every new window raises — *what does Enter do here* — and the
   answer is "a new line, nothing else". It starts off, and stays off next time, so that answer
   never depends on a window that has already closed.
-  **Not in [JRock Web](#jrock-web-in-the-browser)**: there it is a checkbox about a key, in a
-  window that is mostly used where there is no keyboard to speak of — a phone's return key types
-  a new line, Send is a tap, and a tick that changes what Enter does is a row of the bottom bar
-  spent on a question nobody asked. Enter types a new line there, which is what the box says
-  when it is unticked, and unticked is how it starts everywhere.
+  **It goes when the bottom bar has no room for it**, and comes back when it has. That row is
+  Send and Enter on one side, the microphone, Clock and History on the other, and a `BorderLayout`
+  gives each side the width it asks for: narrower than the two together, it does not shrink either
+  — they run into each other, and what you see is a checkbox clipped to *"E"* against the mic's
+  red dot. Which happens at an ordinary width, because [the mic label](#mic-always-on) appears
+  and disappears while the window is not being touched.
+
+  Enter is the one that gives way, being the least of the four: it starts unticked, it is never
+  remembered, and what it does is also what Ctrl+Enter and Shift+Enter do whichever way it stands
+  — while Clock and History say what goes out with the next message and the mic says the
+  microphone is open. Hidden, the key types a new line, which is what the box says when it is
+  unticked. The test is **measured**, not a width in pixels: the preferred widths of both sides
+  against the room there is, re-checked on every resize and twice a second (the mic's own timer),
+  with one grid cell of hysteresis so it cannot flicker while a window is being dragged. Measured
+  here: with the mic showing it goes at 400 px and returns at 460, and in
+  [JRock Web](#jrock-web-in-the-browser) on a phone that means it is simply never there.
 
   **Shift+Enter is a new line whichever way the checkbox is set**, so one key always types one
   and never sends — which is what makes the checkbox safe to tick. JRock binds it
