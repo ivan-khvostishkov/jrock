@@ -4945,6 +4945,36 @@ public class JRock {
         return null;
     }
 
+    // The same line, FROM A NAMED AGENT: "Push-to-talk: something went wrong".
+    //
+    // Which is worth a method of its own because of what a SPOKEN agent does next with it.
+    // Narration reads the log's selection and takes no text (see automationNarrate), so
+    // anything said out loud has to be written down first - and an agent has two kinds of
+    // thing to say:
+    //
+    //   the model's answer, which is in the log already, as the answer. That one is
+    //   selected where it stands and read from there; writing it down again would put
+    //   every answer in the window twice, once as the answer and once as a gray copy of
+    //   it underneath;
+    //
+    //   a sentence of the agent's OWN - "something went wrong, should I try again?" -
+    //   which is in the log nowhere until it puts it there. This is how it does that.
+    //
+    // The name goes in front, so the transcript says who spoke; the agent then selects its
+    // own words alone and narrates those, and "Push-to-talk:" is read by whoever reads the
+    // log rather than out loud in the kitchen.
+    //
+    // One thing to know when the line is to be SELECTED afterwards: a gray line with a run
+    // of more than forty characters with no space in it gets a space put after the next
+    // comma or colon, so that the window can wrap it (see addWrapPoints). A spoken
+    // sentence has spaces in it and is unaffected; an agent that writes a path or an
+    // address and then looks for it again should look for a part of it without such a run.
+    public static String automationNote(String agent, String line) {
+        String name = agent == null ? "" : agent.trim();
+        String said = line == null ? "" : line;
+        return automationNote(name.isEmpty() ? said : name + ": " + said);
+    }
+
     // Leaves automation mode: the prompt is editable again, Send is released, and Mic
     // always on listens again if it is set to. note finishes the sentence "Automation
     // finished: ", or is null for the sentence on its own.

@@ -212,6 +212,12 @@ public final class JRockPushToTalk {
     // more instead of answering.
     private static final String FAILED_ALOUD = "Something went wrong. Should I try again?";
 
+    // What this agent is called in JRock's log, in front of every line it writes there -
+    // its own reports, and the sentences it says out loud (see sayOwnWords). One JRock
+    // window can be driven by one agent, but a transcript is read long afterwards, and a
+    // line with no name on it reads as something JRock said about itself.
+    private static final String AGENT = "Push-to-talk";
+
     // How often hands-free looks for a microphone that is not there.
     //
     // UNPLUGGING THE MICROPHONE IS THE MUTE BUTTON, and a headset usually has no other
@@ -663,7 +669,7 @@ public final class JRockPushToTalk {
                     reply.isBlank() ? "The reply was empty." : "No answer: " + stuck + ".",
                     sayFailed());
         }
-        String silent = sayAloud(reply);
+        String silent = sayAnswer(reply);
         return join(note, alarm, event, moved, drafted, noted, saved,
                 silent == null ? null : "Not read aloud: " + silent);
     }
@@ -948,20 +954,40 @@ public final class JRockPushToTalk {
     // SAYS SOMETHING OUT LOUD, THROUGH THE LOG. Returns null when it was said, or why
     // it could not be - which the status line reports and the turn survives.
     //
-    // Four calls, and the shape of them is the point: JRock's narration reads the log's
-    // SELECTION and takes no text, so anything said out loud has to be written down
-    // first. Which is the right way round. This agent speaks for a model whose words
-    // nobody else hears; a spoken answer with no record of it would be the one kind of
-    // output this machine cannot account for afterwards. Now the transcript holds
-    // everything that was ever said, in order, with the conversation around it - and the
-    // window shows the very words while they are being spoken.
+    // JRock's narration reads the log's SELECTION and takes no text, so anything said out
+    // loud has to be in the log first. Which is the right way round: this agent speaks for
+    // a model whose words nobody else hears, and a spoken answer with no record of it
+    // would be the one kind of output this machine cannot account for afterwards. The
+    // transcript holds everything that was ever said, in order, with the conversation
+    // around it - and the window shows the very words while they are being spoken.
     //
+    // THE ANSWER IS ALREADY THERE, and that is the difference between the two methods
+    // below. It was written down a second time as a gray line and the gray copy was what
+    // got selected, so every answer appeared twice in the window somebody was reading:
+    // once as the model's answer, once as a gray repetition of it underneath. The answer
+    // is selected where it stands now, and the gray lines are left for what is NOT in the
+    // log - this agent's own sentences.
+    //
+    // Which also made narration work where it did not: in "Dialog only" the window shows
+    // no gray lines at all, and what is not shown cannot be selected or read out.
+    private static String sayAnswer(String reply) {
+        return narrateFromLog(reply);
+    }
+
+    // This agent's OWN words, which are nowhere until it writes them: the fixed phrase a
+    // failed turn ends with, and anything else it has to say for itself. Written with its
+    // name in front (automationNote with an agent), and only the words after the name are
+    // narrated - "Push-to-talk:" is for whoever reads the transcript.
+    private static String sayOwnWords(String words) {
+        String problem = JRock.automationNote(AGENT, words);
+        if (problem != null) return problem;
+        return narrateFromLog(words);
+    }
+
     // The selection goes afterwards, because the log scrolls nowhere while one exists:
     // leaving it would stop the window following the conversation it is reading out.
-    private static String sayAloud(String words) {
-        String problem = JRock.automationNote(words);
-        if (problem != null) return problem;
-        problem = JRock.automationSelectInLog(words);
+    private static String narrateFromLog(String words) {
+        String problem = JRock.automationSelectInLog(words);
         if (problem != null) return problem;
         String silent = JRock.automationNarrate();
         JRock.automationClearSelection();
@@ -977,7 +1003,7 @@ public final class JRockPushToTalk {
     // the moment it happens. A narration already playing is stopped first by
     // automationNarrate, so the phrase never queues behind half an old answer.
     private static String sayFailed() {
-        String silent = sayAloud(FAILED_ALOUD);
+        String silent = sayOwnWords(FAILED_ALOUD);
         return silent == null ? null : "Not read aloud: " + silent;
     }
 
@@ -987,7 +1013,7 @@ public final class JRockPushToTalk {
     // so the reason is still there to read afterwards.
     private static void report(String line) {
         System.out.println(line);
-        JRock.automationNote("Push-to-talk: " + line);
+        JRock.automationNote(AGENT, line);
     }
 
     // The notes that are there, in one line; null when there are none.

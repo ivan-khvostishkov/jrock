@@ -1290,12 +1290,21 @@ the PDF's text, in reading order, rather than pictures of it.
 
 **Nothing is said aloud that is not written down.** `automationNarrate()` takes no text: it
 reads whatever is selected in the log, exactly as the menu item does. An agent that wants to say
-something therefore writes it into the log (`automationNote`), selects it
-(`automationSelectInLog`), narrates, and lets the selection go (`automationClearSelection`) —
-four calls where there was one, and the reason is the transcript. A spoken answer with no record
-of it is the one kind of output this machine cannot account for afterwards; now the log holds
-everything JRock has ever said out loud, in order, with the conversation around it, and the
-window shows the very words while they are being spoken.
+something therefore has it in the log, selects it (`automationSelectInLog`), narrates, and lets
+the selection go (`automationClearSelection`) — and the reason is the transcript. A spoken answer
+with no record of it is the one kind of output this machine cannot account for afterwards; now the
+log holds everything JRock has ever said out loud, in order, with the conversation around it, and
+the window shows the very words while they are being spoken.
+
+**And the answer is not written down twice.** The model's answer is *already* in the log, as the
+answer, so that is what gets selected and read. It used to be copied into a gray line first and
+the copy was what was narrated, which put every answer in the window twice — once as the answer,
+once as a grey repetition of it underneath. Gray lines are now for what is **not** in the log: an
+agent's own sentences, *"Something went wrong. Should I try again?"*, written with
+`automationNote(agent, line)` — the agent's name in front so the transcript says who spoke, and
+only the words after the name are selected and read out. Reading the answer where it stands also
+made narration work in *Dialog only*, where the window shows no gray lines at all and what is not
+shown cannot be selected.
 
 **The selection may be the prompt's, not only the log's.** Both export items take whichever
 selection there is, and the **prompt's wins** when both have one — which is the whole point of
@@ -3135,7 +3144,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationAwaitHeard(long millis)` | Waits for Mic always on to hear someone and for what was said to reach the prompt. Returns `{"1", null}` when it has, `{"0", null}` when nobody spoke in time, `{"0", why not}` when it cannot. A recording under way is waited out, not cut off. |
 | `automationMicReady()` | Whether there is a microphone to listen on **right now** — `null` when there is, and otherwise why not, including the one answer a listening loop cannot work out for itself: the microphone set is **not connected**. A quiet room and an unplugged microphone look identical to `automationAwaitHeard`, and they mean opposite things. |
 | `automationNarrate()` | Reads **the log's selection** aloud: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when nothing is selected, when no device is set, or when it isn't connected. **Takes no text** — see below. (Windows) |
-| `automationSelectInLog(String text)` | Selects the last place that text appears in the log, which is where `automationNote` has just put it. Refuses when it is not there (*Dialog only* hides gray lines). |
+| `automationSelectInLog(String text)` | Selects the last place that text appears in the log — the model's answer where it stands, or a line `automationNote` has just put there. Refuses when it is not there (*Dialog only* hides gray lines). |
 | `automationClearSelection()` | Lets the selection go and follows the end of the conversation again — the log scrolls nowhere while a selection exists. |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns `{ok, operator stamp, assistant stamp, why not}`. |
@@ -3145,6 +3154,7 @@ thread** — they say so rather than deadlocking if you do.
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationMergeDuplex(front, back, out)` | **Merge two-sided scans**: the same interleave as the window menu — front 1, back N, front 2, back N−1 — with the two dialogs replaced by three arguments. Both passes must have the same page count, or one of them is not the file it was taken for; refused rather than guessed at, since the mistake it makes is every back page against the wrong front. No dialog either way: an automation that cannot press OK must not be shown one. The two scans are left exactly as they were. |
 | `automationNote(String line)` | One line in JRock's log, from the agent driving it. An agent is started by `javaw` and **has no standard output at all**, and its own window has one status line the next turn overwrites — so this is the only place a reason can still be read an hour later. Needs no `automationBegin`. |
+| `automationNote(String agent, String line)` | The same line, from a **named** agent: `Push-to-talk: something went wrong`. For the sentences an agent says for itself — narration reads the log's selection, so a sentence of its own has to be written down before it can be spoken, and the model's answer never is, being there already. The agent then selects its own words alone, so the name is read by whoever reads the log rather than out loud. |
 | `automationEnd(String note)` | Gives the window back: prompt editable, Send released, Mic always on as you set it, and a log line saying so. |
 
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the
