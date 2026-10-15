@@ -1661,7 +1661,8 @@ the one before it wrote beside the document, under the document's own name:
 2. **Plain text.** That DOCX goes in [as Markdown](#rtf-and-docx-conversion-no-external-tool)
    with `jrock-prompt-doc-to-ascii.txt`, and the answer is saved as **`document.txt`**.
 3. **A name.** The text goes in with `jrock-prompt-doc-inventory.txt`, and you are offered to
-   rename the files to the name that comes back.
+   rename the files to the name that comes back — **in a field with that name already in it**,
+   so Enter files them under it and one word of typing files them under something better.
 
 Then a "Finished" dialog, and the window is yours.
 
@@ -1687,11 +1688,27 @@ the appendices, and are no use filed under a name of their own — a translation
 worse off than a copy, because its own name no longer says which document it is the translation
 *of*. So they are renamed with the rest and **keep their suffix**:
 `2026-06-14-DHL-FollowUpOnParcelDelivery-3703093896-en.docx`. The suffix is the only thing that
-tells one file of the set from another, which is why it stays, and the rename dialog lists the
-suffixed names it is about to use alongside the bare one. A suffix starts with a hyphen or an
+tells one file of the set from another, which is why it stays, and the rename question names the
+suffixes it is keeping — `-en, _SA` — rather than the full names, which depend on what you type
+into it. A suffix starts with a hyphen or an
 underscore and **nothing else** — a dot is not one, or `scan0167.Merged.pdf` would be a file of
 `scan0167.pdf`, and that merged document is the one whose own two passes the last step offers to
 delete.
+
+**The suggested name is editable, in the question itself.** It arrives in a text field with the
+model's answer already in it: **Enter** files the set under that name, **Cancel** leaves every
+file exactly as it was, and anything typed in between is the name used instead. A model reads one
+document and guesses a counterparty, a date and a subject out of it; the person at the keyboard
+knows what the page does not say — that this *Stadtsparkasse* is the one the rest of the folder
+calls `SSKM`, that the letter is about the flat and not the account it names, that the number
+worth finding it by is the one stamped on it. The answer to a name that is nearly right used to
+be **No**, and then four files renamed by hand in Explorer with their suffixes copied across by
+eye. What you type goes through the same cleaning as the model's own answer — a trailing space,
+a slash out of a pasted path, `Rechnung Mai 2026` with the spaces still in it — and a name that
+is nothing but punctuation is asked for again rather than guessed at. JRock's log keeps the
+suggestion too, whenever it is not what the files ended up being called: the names themselves no
+longer hold that, and it is the thing to read a week later when the folder looks nothing like
+the answer.
 
 **The HTML folder** is asked about on its own: its pages are working
 material for the model, and the DOCX and the TXT are the copies people read, so you choose to
@@ -1753,7 +1770,8 @@ appended.
 two-sided batch, which are merged into one document first through JRock's own duplex merge
 (`automationMergeDuplex`) because they are one letter and filing them separately would file half
 of it twice. Every question answers itself the way the person at the keyboard almost always
-answers it — yes, rename them — and the result is **printed in a line a program can read**
+answers it — yes, rename them, under the name the model gave, nobody being there to type
+another — and the result is **printed in a line a program can read**
 (`AUTO-RESULT name=… scanned=… files=…`) instead of shown in a dialog a program cannot dismiss.
 It is how the [paper docs agent](#a-seventh-agent-paper-docs-in-and-out-jrockpaperdocsjava) files a scan the
 moment it arrives, with the operator three rooms away.

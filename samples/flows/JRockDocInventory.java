@@ -52,8 +52,9 @@
 //   2. jrock-prompt-doc-to-ascii.txt    + that DOCX, as Markdown -> the document as
 //      plain text, saved as <document name>.txt beside it.
 //   3. jrock-prompt-doc-inventory.txt   + that text file          -> one file name.
-//   4. Every file of that document renamed to it, if you say so: the other formats of
-//      the same name, the InDesign layout beside them, and the ones that carry a suffix
+//   4. Every file of that document renamed to it, if you say so - and to whatever you
+//      type over it in the question, the suggestion being a suggestion: the other formats
+//      of the same name, the InDesign layout beside them, and the ones that carry a suffix
 //      - "3703093896-en.docx", "3703093896-SA.txt", a translation or an appendix - which
 //      keep their suffix. The HTML folder is kept and renamed with them, or deleted,
 //      as you say.
@@ -413,7 +414,9 @@ public final class JRockDocInventory {
 
         // ---- The rename, which is the user's call --------------------------
         // Asked rather than assumed: this is the one step that changes files the user
-        // owns, and the name is a model's suggestion, not a fact about the document.
+        // owns, and the name is a model's suggestion, not a fact about the document -
+        // which is also why the question holds it in a field to be typed over rather
+        // than in a sentence to agree with (see askRename).
         //
         // Every file of the document goes at once, or none does - the document, what this
         // run wrote, every other copy of it on the disk, and the files named after it
@@ -431,17 +434,29 @@ public final class JRockDocInventory {
         // measured against: the set is renamed, so this has to be read before any of it
         // moves.
         String filedAs = stem(chosen);
-        java.util.List<String> alsoNamed = new java.util.ArrayList<>();
-        for (String suffix : suffixesIn(files, filedAs)) alsoNamed.add(base + suffix);
-        String suffixPart = alsoNamed.isEmpty() ? ""
-                : "\n\nA suffix is what tells one file of the set from another - a "
-                        + "translation, an appendix - so the suffixed ones keep it and are "
-                        + "named\n\n" + listedNames(alsoNamed);
+        java.util.List<String> suffixes = suffixesIn(files, filedAs);
+        // THE SUFFIXES THEMSELVES, not the names they would make. The name in the dialog
+        // is edited there (see askRename), so "2026-06-14-DHL-...-en" written out here
+        // would be a promise about a name that may no longer be the name by the time the
+        // button is pressed - and a dialog that contradicts what then happens is worse
+        // than one that says less.
+        //
+        // Broken into short lines by hand, as every message here is: JOptionPane wraps a
+        // String message nowhere at all, so a sentence written as one line is a dialog as
+        // wide as that sentence.
+        String suffixPart = suffixes.isEmpty() ? ""
+                : "\n\nThe suffixed files keep their suffix - " + String.join(", ", suffixes)
+                        + " -\nwhatever name you give the set: a suffix is what tells one "
+                        + "file\nof a document from another, so the translation stays the "
+                        + "translation.";
 
         String howMany = files.size() == 1 ? "the file"
                 : files.size() == 2 ? "both files" : "all " + files.size() + " files";
-        boolean rename = ask("Rename " + howMany + " to\n\n    " + base + "\n\nfrom\n\n"
-                + listed(files) + "\nin " + dir + " ?" + suffixPart, "Rename the files?");
+        String name = askRename(base, howMany, files, dir, suffixPart);
+        boolean rename = name != null;
+        if (rename && !name.equals(base)) {
+            System.out.println("Name typed in place of the suggestion: " + name);
+        }
 
         // The HTML folder, pass one's working material: the pages for the model to read,
         // not for anybody to open. Whether it stays is asked once it is clear which name
@@ -463,9 +478,9 @@ public final class JRockDocInventory {
             // worth a sentence in the report and nothing more. Letting it out of here
             // would turn a letter that IS filed into an automation that failed, which is
             // the one outcome that would be a lie.
-            if (askKeepFolder(html, rename ? base : null)) {
+            if (askKeepFolder(html, rename ? name : null)) {
                 if (rename) {
-                    Path moved = free(dir, base, "");
+                    Path moved = free(dir, name, "");
                     try {
                         Files.move(html, moved);
                         folderNote = "the folder " + moved.getFileName() + " kept";
@@ -500,7 +515,7 @@ public final class JRockDocInventory {
                             + "\nThe suggested name was\n\n    " + base + "\n" + folderLine);
         }
         java.util.List<Path> renamed = new java.util.ArrayList<>();
-        for (Path file : files) renamed.add(renameTo(file, base, filedAs));
+        for (Path file : files) renamed.add(renameTo(file, name, filedAs));
         System.out.println("Renamed to " + named(renamed));
 
         // ---- The two passes the document was merged from -------------------
@@ -563,11 +578,18 @@ public final class JRockDocInventory {
         String scansLine = scansNote.isEmpty() ? "" : "\n" + capitalised(scansNote) + ".";
 
         if (!asking) {
-            // The one line the paper docs agent reads out of all this output.
-            System.out.println(autoResult(base, renamed.isEmpty() ? document
+            // The one line the paper docs agent reads out of all this output. The name is
+            // the suggestion under --auto, nobody being there to type another.
+            System.out.println(autoResult(name, renamed.isEmpty() ? document
                     : renamed.get(0), renamed.size()));
         }
-        return new Result("renamed to " + named(renamed) + folderPart + scansPart,
+        // What the model suggested, when that is not what the files are called: the one
+        // fact the names themselves no longer hold, and the thing to read in the log a
+        // week later when the folder looks nothing like the answer.
+        String suggestionPart = name.equals(base) ? ""
+                : "; the suggested name was " + base;
+        return new Result("renamed to " + named(renamed) + suggestionPart + folderPart
+                + scansPart,
                 "Renamed to\n\n" + listed(renamed) + "\nin " + dir + "." + "\n" + folderLine
                         + scansLine);
     }
@@ -973,7 +995,22 @@ public final class JRockDocInventory {
                 }
             }
         }
-        String name = found.replaceAll("(?i)\\.(pdf|rtf|docx|txt|png|jpe?g|gif|webp)$", "");
+        return nameSafe(found);
+    }
+
+    // One line as a file name: the extension off, the characters a name cannot hold
+    // turned into dashes, and the length capped. "" when nothing is left of it.
+    //
+    // THE SAME RULE FOR BOTH NAMES THERE ARE HERE - the one the model answered with (see
+    // baseName) and the one typed over it in the dialog (see askRename). A name typed in
+    // a hurry holds the things typing holds: a trailing space, a slash out of a path
+    // pasted whole, "Rechnung Mai 2026" with the spaces still in it. Cleaning one and
+    // not the other would mean the operator could produce a name this flow would never
+    // have chosen - and on Windows a name with a slash in it is not a name at all.
+    private static String nameSafe(String text) {
+        String name = java.text.Normalizer
+                .normalize(text.trim(), java.text.Normalizer.Form.NFC)
+                .replaceAll("(?i)\\.(pdf|rtf|docx|txt|png|jpe?g|gif|webp)$", "");
         name = name.replaceAll("[^" + NAME_CHARS + "._-]+", "-")
                 .replaceAll("-{2,}", "-");
         if (name.length() > 120) {
@@ -1305,16 +1342,6 @@ public final class JRockDocInventory {
         return text.toString();
     }
 
-    // The same, for names of files that are not there yet: what the set is about to be
-    // called.
-    private static String listedNames(java.util.List<String> names) {
-        StringBuilder text = new StringBuilder();
-        for (String name : names) {
-            text.append("    ").append(name).append('\n');
-        }
-        return text.toString();
-    }
-
     // The same names for one line of log or console, where a line is what is wanted.
     private static String named(java.util.List<Path> files) {
         java.util.List<String> names = new java.util.ArrayList<>();
@@ -1404,6 +1431,58 @@ public final class JRockDocInventory {
                 + "\n\nStart from the " + what + " instead? " + skips
                 + "\n\nAll the files are renamed either way.",
                 "Start from the " + what + "?");
+    }
+
+    // The name every file of the document is to get: the suggestion, with whatever the
+    // operator types over it, or null for "leave them alone".
+    //
+    // EDITABLE, BECAUSE A SUGGESTION IS A SUGGESTION. The model read one document and
+    // guessed a counterparty, a date and a subject out of it; the person at the keyboard
+    // knows what the page does not say - that this Stadtsparkasse is the one everything
+    // else in the folder is filed under as SSKM, that the letter is about the flat and
+    // not about the account it names, that the number worth finding it by is the one
+    // stamped on it. Before this the answer to a name that was nearly right was No, and
+    // then four files renamed by hand in Explorer with their suffixes copied across by
+    // eye, which is precisely the work this flow exists to do.
+    //
+    // ONE DIALOG, NOT TWO. The field opens with the suggestion already in it, so Enter
+    // alone is still the whole of "yes, that name" - which is what the Yes button was -
+    // and changing one word costs one word of typing. Cancel, and the window's X, leave
+    // every file exactly as it is, as No did.
+    //
+    // What comes back goes through nameSafe like the model's own answer, so a trailing
+    // space, a pasted slash or "Rechnung Mai 2026" with the spaces still in it cannot
+    // reach the file system. A name that is nothing but punctuation is asked for again
+    // rather than quietly turned into something else: it is the one case where what was
+    // meant cannot be guessed at all, and renaming four files on a guess is not the
+    // place to start.
+    private static String askRename(String base, String howMany, java.util.List<Path> files,
+                                    Path dir, String suffixPart) {
+        if (!asking) {
+            // --auto: nobody is there to read a name, let alone to type one.
+            System.out.println("Rename " + howMany + " to " + base + "? yes (auto)");
+            return base;
+        }
+        while (true) {
+            String message = "The files of this document, in " + dir + ":\n\n"
+                    + listed(files)
+                    + "\nRename " + howMany + " to this name? Edit it if it is not right.\n"
+                    + "Cancel leaves every one of them exactly as it is." + suffixPart;
+            String[] typed = { null };
+            onEdt(() -> {
+                Object answer = javax.swing.JOptionPane.showInputDialog(
+                        JRock.automationWindow(), message, "Rename the files?",
+                        javax.swing.JOptionPane.QUESTION_MESSAGE, null, null, base);
+                typed[0] = (answer == null) ? null : answer.toString();
+            });
+            if (typed[0] == null) return null;
+            String name = nameSafe(typed[0]);
+            if (!name.isEmpty()) return name;
+            tell("A file name here is letters, digits, dots, hyphens and underscores, and "
+                    + "there is none of that in\n\n    " + typed[0].trim()
+                    + "\n\nNothing has been renamed. The name is asked for again.",
+                    "That is not a file name", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     // Whether to keep the HTML folder pass one read the PDF from. Its pages are for the
