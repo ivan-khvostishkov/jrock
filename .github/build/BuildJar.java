@@ -40,8 +40,8 @@ public class BuildJar {
     // Shipped alongside the source: the sample prompts, the agents that loop on them
     // and the flows that run once. They are part of what JRock is for rather than part
     // of how it is built, and a download that has the application but none of them
-    // starts from an empty prompt. Walked whole, so samples/prompts/, samples/agents/
-    // and samples/flows/ all arrive with their names intact.
+    // starts from an empty prompt. Walked whole, so samples/simple-prompts/,
+    // samples/agents/ and samples/flows/ all arrive with their names intact.
     private static final String SAMPLES_DIR = "samples";
 
     // The folder JRock keeps its own files in, under whichever directory it runs in -

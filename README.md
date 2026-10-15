@@ -1532,9 +1532,11 @@ there for it, a chain can also run itself: see
 ```
 samples/flows/     the 7 that run ONCE, on a document you point them at,
                    each beside the prompt files it reads
-samples/agents/    the 5 that LOOP, started with JRock and staying up,
+samples/agents/    the 7 that LOOP, started with JRock and staying up,
                    each beside the prompt files it reads
-samples/prompts/   the prompts that belong to neither, for using by hand
+samples/simple-prompts/
+                   the prompts that belong to neither and have no program at
+                   all: open one with Ctrl+O, fill it in, send it yourself
 ```
 
 A prompt file sits with whatever reads it, because that is where it is looked for — an agent
@@ -1565,6 +1567,14 @@ your own:
   its own** — not *Letter*, not *Response*, but the terms that document and no other is about —
   and a **10-digit document number already in the file name** (`Document-5341797276.docx`) is
   the number it is filed under.
+- **`jrock-prompt-doc-archive-labelling.txt`** — the one in `samples/simple-prompts/`, with no
+  program behind it: read a document and answer with **a Markdown table and nothing else**, the
+  twelve fields of an archive card — document number, an ISAD(G) title and description, paper
+  format and sheets, PDF pages, printing, storage and disposal costs, the document type and the
+  year it may be destroyed after. It takes three attachments rather than one: the document, your
+  own cost instructions, and your own archive classification table, which is where the type
+  numbers and retention years come from. Open it with Ctrl+O, press Ctrl+I on each `@txt` line,
+  and send it yourself.
 - **`jrock-prompt-translate-to-english.txt`** — translate a document into English and answer
   with **nothing but the translation**, after one `Translated from: <language>` line. All of it,
   not a summary; the original's paragraphs, headings, lists, tables and page separators kept;
@@ -4159,7 +4169,8 @@ Details:
 - **The prompt library comes along.** "JRock here!" and the `.txt` verb carry
   `--prompts-dir <install folder>`, so **Ctrl+O opens your prompt library from whichever
   folder you right-clicked**. Explorer supplies the working directory; this supplies the
-  prompts directory.
+  prompts directory — the install folder, with your own saved prompts in it and
+  `SimplePrompts\` the first folder in the chooser.
 - On **Windows 11** the entries may appear under **"Show more options"**.
 
 ## Windows: agents and flows, one entry each
@@ -4541,11 +4552,14 @@ java InstallJRock.java --check    # what it would find, printed; changes nothing
 ```
 Documents\JRockAssistant\             jrock.jar + its SHA-256 and MD5
                                       JRock\ — the window's own files
-                                      jrock-prompt-*.txt — the prompt library
+                                      jrock-prompt-*.txt — your own prompts, where
+                                        Ctrl+O opens
     Agents\PushToTalk\                the agent, its prompts, its own JRock\
     Agents\Timer\                     …one folder each, because they all run at once
     Agents\Weather\
     Flows\                            every flow, their prompts, one JRock\
+    SimplePrompts\                    the prompts of no agent and no flow, to open
+                                      by hand
 ```
 
 An **agent** loops: it is started with JRock and stays up — a timer, a push-to-talk listener, a
@@ -4557,6 +4571,13 @@ A **flow** runs once, on something you point it at, and asks you for it: transla
 document, inventory that scan. Nothing loops, nothing is ever started behind you, and one
 folder does for all of them. The installer reads which is which out of the folder each one was
 shipped in — `samples/agents/` or `samples/flows/`.
+
+A **simple prompt** has no program at all — no `.java`, nothing to run, nothing to loop: it is a
+`.txt` from `samples/simple-prompts/` that you open with Ctrl+O, fill in and send yourself. They
+are one tick on the same page, and they go **together into `SimplePrompts\`**, which is their
+only copy — a prompt that lives in two folders is a prompt you edit in one of them. Ctrl+O opens
+at the top of the installation, where your own saved prompts are and where that folder is the
+first thing in the chooser.
 
 **It removes no folder, no document and no settings file. Not one, ever.** A `jrock.jar` in the
 folder is replaced, which is what installing a release means; a `jrock-config.txt`, a
@@ -4610,8 +4631,8 @@ Nine pages, in this order:
    its right-click entry goes with the rest, and its files stay where they are. The table says
    whether each one loops or runs once, how many prompt files it brings, and the folder it works
    in — editable for an agent, `Flows\` for a flow. Each is copied with the prompt files its own
-   source names, and a prompt belonging to no sample is offered its own tick into the install
-   folder, where it becomes the prompt library.
+   source names, and the **simple prompts** — the ones no agent and no flow reads — are offered
+   their own tick into `SimplePrompts\`, together, as the library they are.
 5. **Ghostscript, xpdf and sqlite3** — looked for on `PATH`, with where to get each and a
    **Retry** when you have. After the agents, because which tools are wanted depends on which
    agents are going in: `sqlite3` is only looked for when the **Thunderbird** agent is in the

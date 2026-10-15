@@ -1,0 +1,41 @@
+I am a private person. I am doing inventory of my docs. 
+From the provided document content extract and format as the markdown table with the following fields in English (translate if needed): 
+
+1. Document number  (10 digits)
+2. Title
+3. Original paper format, location
+4. Paper sheets, pcs.
+5. PDF pages, pcs.
+6. Printing & scanning costs, ct
+7. Storage costs, ct/year
+8. Disposal costs, ct
+9. Document type, no.
+10. Store until (year, incl.)
+11. Document number (again)
+12. Description
+
+The document number - internal document / archival asset / inventory number, e.g. 8220327919, can be stored inside the document and/or in the file name. If stored in both places and they disagree, take it from the file name.
+
+Title - is the short but unique title for the inventory description card acording to ISAD(G): General International Standard Archival. Description is a short description for the same purpose.Extract and include into the title or description: the correspondend organization , a physial person's name from that organization (first name, last name), email, person's title, phone number (each only if preent).
+
+Original paper format - it's A4 paper / etc., keep it empty, since you work with a digital surrogate, it's for user to fill in later. Same as Paper sheets, pcs.
+
+
+------ The document begin ------ 
+@txt
+------ The document end ------ 
+
+
+For costs calculations use the following attached internal instructions:
+------ Cost instructions begin ------ 
+@txt 6115528b552a
+------ Cost instuctions end ------ 
+
+For "Document type, no." and "Store until" use the bellow archive classification table with type numbers and their corresponding description. The year indicates the last day of this year, e.g. 2030 means store until 31.12.2030. If year is already know, write it down as: "2030 (6 years)". If year depends on some event event in the future, write it down as year + number of years: e.g. "year of contract end + 6 years". Translate into English (if needed). 
+
+------ Archive classification table begin ------ 
+@txt 2006e55f8741
+------ Archive classification table end ------ 
+
+
+Answer only with the formatted table alone, and nothing else - no explanation, no quotes.

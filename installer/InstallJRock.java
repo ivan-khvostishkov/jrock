@@ -15,6 +15,8 @@
 //         Agents\Timer\                     ...one folder each, because they all run
 //         Agents\Weather\                      at once
 //         Flows\                            every flow, their prompts, one JRock\
+//         SimplePrompts\                    the prompts of no agent and no flow, to
+//                                           open by hand with Ctrl+O
 //
 // An AGENT loops: it is started with JRock and stays up - a timer, a push-to-talk
 // listener, a calendar reader answering a port - so it gets a folder to itself, because
@@ -25,6 +27,11 @@
 // document, inventory that scan. Nothing loops, nothing is started behind you, and one
 // folder does for all of them.
 //
+// A SIMPLE PROMPT has no program at all - no .java, nothing to run: it is a .txt you open
+// with Ctrl+O, fill in and send yourself. They are shipped in samples/simple-prompts/ and
+// go into SimplePrompts\, together, where they read as the library they are instead of
+// as loose files among the jar and the settings.
+//
 // What it does, in order, and nothing else:
 //
 //   1. finds jrock.jar and samples/ beside itself;
@@ -33,7 +40,8 @@
 //   3. looks for Ghostscript and xpdf on PATH, and says where to get them;
 //   4. offers Start menu and Desktop shortcuts called "JRock Assistant";
 //   5. installs the agents and flows you tick, each with the prompt files its own source
-//      names, and - if you want them - the prompts that belong to no sample at all. With
+//      names, and - if you want them - the simple prompts, which belong to no sample at
+//      all and go together into SimplePrompts\ (see simplePrompts). With
 //      something installed already it offers THAT and nothing else: a second run is
 //      normally a new jar, not a new argument about which agents;
 //   6. opens the new jrock-config.txt for review, then bedrock-key.txt for the key;
@@ -94,9 +102,18 @@ public final class InstallJRock {
     private static final String KEY_FILE = "bedrock-key.txt";
     private static final String SHORTCUT = "JRock Assistant";
 
-    // The two folders inside it: one per agent under Agents, all the flows in Flows.
+    // The folders inside it: one per agent under Agents, all the flows in Flows, and the
+    // prompts that are nobody's - no agent, no flow - in SimplePrompts.
     private static final String AGENTS_DIR = "Agents";
     private static final String FLOWS_DIR = "Flows";
+
+    // The simple prompts' own folder, and why they have one rather than being tipped into
+    // the install folder beside the jar: they are a LIBRARY, a dozen prompts to open by
+    // hand and edit, and the install folder is where jrock.jar, two settings files, three
+    // start scripts and JRock's own working directory live. A folder with a name on it is
+    // the difference between "the prompts are in SimplePrompts" and "the prompts are the
+    // .txt files in there that are not bedrock-key.txt".
+    private static final String SIMPLE_PROMPTS_DIR = "SimplePrompts";
 
     // THE START SCRIPT, written beside the jar: one thing that starts the whole
     // installation - JRock and every agent installed with it, each in its own folder.
@@ -121,7 +138,7 @@ public final class InstallJRock {
     // What the artifact must hold, beside this installer.
     private static final String JAR = "jrock.jar";
     private static final String SAMPLES = "samples";
-    private static final String PROMPTS_SUB = "prompts";
+    private static final String SIMPLE_PROMPTS_SUB = "simple-prompts";
     private static final String AGENTS_SUB = "agents";
     private static final String FLOWS_SUB = "flows";
 
@@ -265,7 +282,7 @@ public final class InstallJRock {
     // what is there and not the whole catalogue. Turned off by the operator asking for
     // the full list, which is the only way to add something that is not installed yet.
     private static boolean updating;
-    private static boolean orphanPrompts = true;
+    private static boolean withSimplePrompts = true;
     private static boolean copySettings = true;
     private static boolean copyKey = true;
     private static boolean contextMenus = true;
@@ -409,7 +426,8 @@ public final class InstallJRock {
             System.out.println("  " + s.stem + "  (" + s.words() + ")  prompts: "
                     + s.prompts.size() + "  -> " + FLOWS_DIR);
         }
-        System.out.println("Prompts of no sample: " + orphans().size());
+        System.out.println("Simple prompts:      " + simplePrompts().size()
+                + "   (no agent, no flow -> " + SIMPLE_PROMPTS_DIR + ")");
         System.out.println("Ghostscript:         " + or(ghostscript(), "NOT on PATH"));
         System.out.println("xpdf pdftohtml:      " + or(onPath("pdftohtml"), "NOT on PATH"));
         System.out.println("xpdf pdftotext:      " + or(onPath("pdftotext"), "NOT on PATH"));
@@ -527,7 +545,7 @@ public final class InstallJRock {
                 while (m.find()) names.add(m.group());
                 for (String name : names) {
                     Path beside = dir.resolve(name);
-                    Path spare = source.resolve(SAMPLES).resolve(PROMPTS_SUB).resolve(name);
+                    Path spare = source.resolve(SAMPLES).resolve(SIMPLE_PROMPTS_SUB).resolve(name);
                     if (Files.isRegularFile(beside)) sample.prompts.add(beside);
                     else if (Files.isRegularFile(spare)) sample.prompts.add(spare);
                 }
@@ -541,7 +559,7 @@ public final class InstallJRock {
     // Every prompt file in the artifact, wherever it sits.
     private static List<Path> allPrompts() {
         List<Path> prompts = new ArrayList<>();
-        for (String sub : new String[] { PROMPTS_SUB, AGENTS_SUB, FLOWS_SUB }) {
+        for (String sub : new String[] { SIMPLE_PROMPTS_SUB, AGENTS_SUB, FLOWS_SUB }) {
             Path dir = source.resolve(SAMPLES).resolve(sub);
             if (!Files.isDirectory(dir)) continue;
             try (java.util.stream.Stream<Path> files = Files.list(dir)) {
@@ -554,13 +572,17 @@ public final class InstallJRock {
         return prompts;
     }
 
-    // The prompts in samples/prompts/, which is where a prompt that belongs to no agent
-    // and no flow is shipped: a prompt to use by hand, from JRock's own Load prompt. They
-    // have nowhere else to go, so they are offered the one folder every "JRock here!"
-    // opens its prompt library in.
-    private static List<Path> orphans() {
+    // THE SIMPLE PROMPTS: samples/simple-prompts/, which is where a prompt that belongs
+    // to no agent and no flow is shipped - one to open by hand with JRock's own Load
+    // prompt, fill in and send, with nothing driving it. No .java goes with them, which
+    // is the whole of what makes them simple.
+    //
+    // They are installed into SimplePrompts\ beside Agents\ and Flows\ (see
+    // SIMPLE_PROMPTS_DIR), and that is the only copy: a prompt in two folders is a prompt
+    // edited in one of them.
+    private static List<Path> simplePrompts() {
         List<Path> rest = new ArrayList<>();
-        Path dir = source.resolve(SAMPLES).resolve(PROMPTS_SUB);
+        Path dir = source.resolve(SAMPLES).resolve(SIMPLE_PROMPTS_SUB);
         if (!Files.isDirectory(dir)) return rest;
         try (java.util.stream.Stream<Path> files = Files.list(dir)) {
             files.filter(p -> p.getFileName().toString().endsWith(".txt"))
@@ -932,11 +954,12 @@ public final class InstallJRock {
                         }));
                 if (customise) panel.add(sampleTable(found));
             }
-            int spare = orphans().size();
+            int spare = simplePrompts().size();
             if (spare > 0) {
-                panel.add(check("Also copy the " + spare + " prompt file(s) that no agent "
-                        + "and no flow reads into " + home.getFileName(), orphanPrompts,
-                        v -> orphanPrompts = v));
+                panel.add(check("Also copy the " + spare + " simple prompt(s) - the ones no "
+                        + "agent and no flow reads - into " + home.getFileName() + "\\"
+                        + SIMPLE_PROMPTS_DIR + "\\", withSimplePrompts,
+                        v -> withSimplePrompts = v));
             }
             panel.add(note("An AGENT loops - it is started with JRock and stays up - so it "
                     + "gets a folder of its own under " + AGENTS_DIR + "\\, because JRock "
@@ -944,7 +967,10 @@ public final class InstallJRock {
                     + "the folder it works in. A FLOW runs once on something you point it "
                     + "at, so all of them share " + FLOWS_DIR + "\\. Each one is installed "
                     + "with the prompt files its own source names, beside its .java, which "
-                    + "is where it looks for them."));
+                    + "is where it looks for them. A SIMPLE PROMPT has no .java at all - you "
+                    + "open it yourself with Ctrl+O - so those go together into "
+                    + SIMPLE_PROMPTS_DIR + "\\, where they are a library and not loose files "
+                    + "among the settings."));
         }, () -> {
             if (!withSamples) return null;
             if (!updating && !customise) {
@@ -1216,6 +1242,10 @@ public final class InstallJRock {
                 panel.add(value("Flows:    " + selectedOfKind(Kind.FLOW).size()
                         + " in " + FLOWS_DIR + "\\, each run by its right-click entry"));
             }
+            if (withSimplePrompts && !simplePrompts().isEmpty()) {
+                panel.add(value("Prompts:  " + simplePrompts().size() + " in "
+                        + SIMPLE_PROMPTS_DIR + "\\, to open with Ctrl+O and send yourself"));
+            }
             panel.add(value("Starts:   " + startScriptName()
                     + ", beside the jar - which starts all of it, or none of it"));
             Path loginAt = shortcutFile(Place.STARTUP);
@@ -1271,11 +1301,13 @@ public final class InstallJRock {
                 say((s.loops() ? "Agent: " : "Flow:  ") + to + (s.prompts.isEmpty() ? ""
                         : ", with " + s.prompts.size() + " prompt file(s) beside it"));
             }
-            if (orphanPrompts) {
-                List<Path> spare = orphans();
-                for (Path p : spare) copyIfNewer(p, home.resolve(p.getFileName()));
+            if (withSimplePrompts) {
+                List<Path> spare = simplePrompts();
+                Path dir = home.resolve(SIMPLE_PROMPTS_DIR);
+                for (Path p : spare) copyIfNewer(p, dir.resolve(p.getFileName()));
                 if (!spare.isEmpty()) {
-                    say(spare.size() + " prompt file(s) of their own into " + home);
+                    say(spare.size() + " simple prompt(s), of no agent and no flow, into "
+                            + dir);
                 }
             }
             return null;
@@ -1833,7 +1865,9 @@ public final class InstallJRock {
         //
         // The prompt library IS named, because nothing else would name it: without the
         // flag, Ctrl+O would open in whichever folder was clicked rather than where the
-        // prompts are.
+        // prompts are. The install folder itself, not SimplePrompts\ inside it: a prompt
+        // saved with Ctrl+S is yours and belongs at the top, the shipped ones are one
+        // folder down and the chooser shows that folder as soon as it opens.
         String here = "\"" + javaw + "\" -jar " + quoted(jar)
                 + " --prompts-dir " + quoted(home);
         for (String root : CTX_SHELL_ROOTS) {
@@ -2550,11 +2584,13 @@ public final class InstallJRock {
         javax.swing.JTextArea area = new javax.swing.JTextArea(String.join("\n",
                 name + "\\                       " + JAR + ", its SHA-256 and MD5",
                 "    " + PRODUCT + "\\                 the window's own files",
-                "    jrock-prompt-*.txt      the prompt library",
+                "    jrock-prompt-*.txt      your own prompts - Ctrl+O opens here",
                 "    " + AGENTS_DIR + "\\<name>\\         one agent, its prompts, its own "
                         + PRODUCT + "\\",
                 "    " + FLOWS_DIR + "\\                 every flow, their prompts, one "
-                        + PRODUCT + "\\"));
+                        + PRODUCT + "\\",
+                "    " + SIMPLE_PROMPTS_DIR + "\\          the prompts of no agent and no "
+                        + "flow, to open by hand"));
         area.setEditable(false);
         area.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));
         area.setForeground(MUTED);
