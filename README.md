@@ -3903,7 +3903,15 @@ and cannot be edited at all.
 
 **Ctrl+Shift+D** and **Ctrl+Shift+R** still take either — the prompt's selection when it has one,
 the log's otherwise. One pair of keys cannot belong to two menus, and what they act on is
-whichever selection there is. Not mobile-only, and not desktop-only: it is the same code in a browser tab,
+whichever selection there is.
+
+**Ctrl+Shift+A selects the last answer**, which is the step before them and was the only one
+that needed the mouse: *draft a letter to the landlord about the heating* → **Ctrl+Shift+A** →
+**Ctrl+Shift+D**, and the draft is a DOCX. It takes the **body** of the most recent answer and
+nothing else — the role header one line above it is not part of the letter, and dragging a
+selection over an answer longer than the window takes the header in about as often as not. The
+same item is first in the log's menu, greyed out until something has been answered; pressed in
+a log with no answer in it, the key says so in the log rather than doing nothing at all. Not mobile-only, and not desktop-only: it is the same code in a browser tab,
 because both converters are built in and neither starts a process.
 
 - **RTF** is written by hand as plain ASCII: every character above it becomes a `\u` control
@@ -4035,8 +4043,12 @@ an answer is reused exactly as it was given.
 
 Right-clicking (or long-tapping on touch devices) opens a context menu:
 
-- **Log pane** — Save log copy as..., Print... When text is selected in the log, both act
-  on the **selection only**, and the menu says so (*Save selected text as...*, *Print
+- **Log pane** — *Select the last answer*, Save log copy as..., Print... The first
+  (**Ctrl+Shift+A**) selects the **body of the most recent answer, whole** — not the teal role
+  header above it, not the gray lines under it — which is the selection everything else in this
+  menu acts on: ask for a letter to be drafted, select the answer, export it as a document. It
+  is greyed out until the model has answered. When text is selected in the log, Save and Print
+  act on the **selection only**, and the menu says so (*Save selected text as...*, *Print
   selected text...*). A partial export doesn't count as saving the log, so Clear log still
   warns about unsaved changes. Two more items, *Export selected Markdown as RTF...* and
   *Export selected Markdown with images as DOCX...*, need a selection to mean anything and are
@@ -4273,6 +4285,7 @@ second variant** of its plain twin. The same list is in the window itself, behin
 | Ctrl+S | Save prompt as (a copy) |
 | Ctrl+Shift+S | Save log as (a copy, or just the selected text) |
 | Ctrl+O | Load prompt from a file (any file; binary ones are refused on load) |
+| Ctrl+Shift+A | **Select the last answer** in the log, whole — the body of it, without the role header above it; says so in the log when nothing has been answered yet |
 | Ctrl+Shift+D | Export the selection as **DOCX** — the prompt's selection, or the log's (each menu has its own item for its own side) |
 | Ctrl+Shift+R | The same selection as **RTF** |
 | Ctrl+P | Print log (or the selected text) / save as PDF |

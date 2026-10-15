@@ -2144,6 +2144,38 @@ public class JRock {
             }
         }
 
+        // The last answer the model gave, whole - the body of the most recent assistant
+        // message - or null when it has not answered in this log yet. EDT only, like
+        // every other reader of the entries.
+        String lastAnswer() {
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                Entry e = entries.get(i);
+                if (e.dialog && ROLE_ASSISTANT.equals(e.role)) return e.text;
+            }
+            return null;
+        }
+
+        // Selects that answer in the pane and scrolls it into view. False when there is
+        // no answer yet. On the EDT.
+        //
+        // THE BODY AND NOTHING ELSE: not the teal "[OPERATOR'S ASSISTANT]" line above it,
+        // not the gray lines under it. The answer is what the two exports, Save selected
+        // text and Narrate act on, and a role header dragged into a DOCX is a heading
+        // nobody wrote. By hand this is click at the top, scroll, shift-click at the
+        // bottom - on a draft longer than the window, with the header one line up and
+        // the next gray line one line down, which is a selection that is nearly right
+        // most times it is made.
+        //
+        // The ENTRY's text rather than a search of the pane for where an answer might
+        // start, because the entries are what the log is: the body went in verbatim (see
+        // renderDialog), so the last place it appears is that message and selectLast
+        // finds it. Where a gray line is reflowed on its way in (addWrapPoints) and may
+        // not be there to find at all, a dialog body always is.
+        boolean selectLastAnswer() {
+            String answer = lastAnswer();
+            return answer != null && !answer.isEmpty() && selectLast(answer);
+        }
+
         // Lets the selection go and follows the end of the conversation again. On the EDT.
         //
         // An automation that selected something in order to export it has to undo that,
@@ -3400,6 +3432,31 @@ public class JRock {
             });
         }
 
+        // Ctrl+Shift+A: SELECT THE LAST ANSWER in the log, whole - the step before the two
+        // exports below it, and until now the only one that needed the mouse. Ask for a
+        // letter to be drafted, press this, press Ctrl+Shift+D, and the draft is a DOCX;
+        // the answer never has to be dragged over.
+        //
+        // A for the selecting, under the rule the rest of these follow: Ctrl+A is select
+        // all, which a text area already does in the prompt, so the Ctrl+Shift half of it
+        // belongs to the log - where plain Ctrl+A, with the pane focused, selects the
+        // transcript entire and is not what anybody wants from a log of nine answers.
+        //
+        // A LOG WITH NO ANSWER IN IT SAYS SO, as Ctrl+Shift+U and Ctrl+Shift+L do: the
+        // menu item can be greyed out, a key cannot, and a key that does nothing at all
+        // is one somebody presses twice and then stops trusting.
+        frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_A,
+                        InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                "jrock-select-answer");
+        frame.getRootPane().getActionMap().put("jrock-select-answer", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (!log.selectLastAnswer()) {
+                    log.gray("Nothing to select: the model has not answered yet in this log.");
+                }
+            }
+        });
+
         // Ctrl+Shift+D and Ctrl+Shift+R: the two exports, which had no keys at all - and
         // they matter more now that the selection may be the PROMPT's, since the whole
         // point of that is to copy an answer down, correct a line and keep the result.
@@ -3605,6 +3662,17 @@ public class JRock {
         // SELECTION when text is selected, so the labels are rewritten each time the
         // menu opens to name what will actually be saved or printed.
         javax.swing.JPopupMenu logMenu = new javax.swing.JPopupMenu();
+        // THE SELECTION THE REST OF THIS MENU ACTS ON, made in one item - the last answer,
+        // whole (see selectLastAnswer). First, because it is the step before the others:
+        // ask for the letter, select the answer, export it as a document. Greyed out
+        // until the model has answered, there being nothing else it could mean.
+        //
+        // The prompt's menu has Select all for the same reason - a selection somebody
+        // would otherwise drag from the top of a long text to the bottom of it, which on
+        // a phone has no Ctrl+A to fall back on and in the log takes in the header line
+        // as often as not.
+        javax.swing.JMenuItem selectAnswerItem = addEditItem(logMenu,
+                "Select the last answer", output, log::selectLastAnswer);
         javax.swing.JMenuItem saveLogItem =
                 addMenuItem(logMenu, "Save log copy as...", () -> saveLogAs(frame, log));
         javax.swing.JMenuItem printLogItem =
@@ -3648,6 +3716,7 @@ public class JRock {
         logMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
                 boolean selected = log.selectedText() != null;
+                selectAnswerItem.setEnabled(log.lastAnswer() != null);
                 saveLogItem.setText(selected ? "Save selected text as..." : "Save log copy as...");
                 printLogItem.setText(selected ? "Print selected text..."  : "Print...");
                 // THE LOG'S OWN SELECTION, because this is the log's menu. The prompt's
@@ -7354,6 +7423,8 @@ public class JRock {
         keys.add(new String[] {"Ctrl+Shift+S",
                 "Save log as (a copy, or just the selected text)"});
         keys.add(new String[] {"Ctrl+O", "Load prompt from a file"});
+        keys.add(new String[] {"Ctrl+Shift+A",
+                "Select the last answer in the log, whole - the step before these two"});
         keys.add(new String[] {"Ctrl+Shift+D",
                 "Export the selected Markdown as DOCX (the prompt's selection, or the log's)"});
         keys.add(new String[] {"Ctrl+Shift+R", "The same selection as RTF"});
