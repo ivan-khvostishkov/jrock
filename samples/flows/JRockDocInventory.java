@@ -52,15 +52,19 @@
 //   2. jrock-prompt-doc-to-ascii.txt    + that DOCX, as Markdown -> the document as
 //      plain text, saved as <document name>.txt beside it.
 //   3. jrock-prompt-doc-inventory.txt   + that text file          -> one file name.
-//   4. Every file of that document renamed to it, if you say so - and the HTML folder
-//      kept and renamed with them, or deleted, as you say.
+//   4. Every file of that document renamed to it, if you say so: the other formats of
+//      the same name, the InDesign layout beside them, and the ones that carry a suffix
+//      - "3703093896-en.docx", "3703093896-SA.txt", a translation or an appendix - which
+//      keep their suffix. The HTML folder is kept and renamed with them, or deleted,
+//      as you say.
 //
 // Each pass starts from what the one before it left, so a run can start part of the
 // way down: a DOCX (or an RTF) starts at pass 2, a TXT at pass 3. And files of the same
 // name beside the document are the same document, so a PDF whose .txt or .docx is
 // already there - an earlier run's, or Acrobat's "Export to Word" - is offered the one
 // furthest down the chain instead (see laterStep): every pass skipped is a send not
-// paid for. Whichever way it goes, all of them are renamed at the end (see siblingsOf).
+// paid for. Whichever way it goes, all of them are renamed at the end (see siblingsOf),
+// the suffixed ones with the suffix that tells them apart still on them.
 //
 // The JRock window is the real one, and it is in front of you the whole way: the prompt
 // fills with include tokens as the pages are converted, the log reports every step, and
@@ -412,17 +416,32 @@ public final class JRockDocInventory {
         // owns, and the name is a model's suggestion, not a fact about the document.
         //
         // Every file of the document goes at once, or none does - the document, what this
-        // run wrote, and every other copy of it on the disk. A scan renamed without its
-        // export beside it leaves one document under two names, which is the mess this
-        // automation exists to clear up rather than to make.
+        // run wrote, every other copy of it on the disk, and the files named after it
+        // that are not copies at all: the translations, the appendices, the InDesign
+        // layout (see siblingsOf). A scan renamed without its export beside it leaves one
+        // document under two names, which is the mess this automation exists to clear up
+        // rather than to make - and a translation left behind is worse, because its own
+        // name no longer says which document it is the translation OF.
         java.util.List<Path> files = new java.util.ArrayList<>();
         files.add(chosen);
         for (Path sibling : siblingsOf(chosen)) if (!files.contains(sibling)) files.add(sibling);
         for (Path file : written) if (!files.contains(file)) files.add(file);
+
+        // The name they all go under until this line, which is what their suffixes are
+        // measured against: the set is renamed, so this has to be read before any of it
+        // moves.
+        String filedAs = stem(chosen);
+        java.util.List<String> alsoNamed = new java.util.ArrayList<>();
+        for (String suffix : suffixesIn(files, filedAs)) alsoNamed.add(base + suffix);
+        String suffixPart = alsoNamed.isEmpty() ? ""
+                : "\n\nA suffix is what tells one file of the set from another - a "
+                        + "translation, an appendix - so the suffixed ones keep it and are "
+                        + "named\n\n" + listedNames(alsoNamed);
+
         String howMany = files.size() == 1 ? "the file"
                 : files.size() == 2 ? "both files" : "all " + files.size() + " files";
         boolean rename = ask("Rename " + howMany + " to\n\n    " + base + "\n\nfrom\n\n"
-                + listed(files) + "\nin " + dir + " ?", "Rename the files?");
+                + listed(files) + "\nin " + dir + " ?" + suffixPart, "Rename the files?");
 
         // The HTML folder, pass one's working material: the pages for the model to read,
         // not for anybody to open. Whether it stays is asked once it is clear which name
@@ -481,7 +500,7 @@ public final class JRockDocInventory {
                             + "\nThe suggested name was\n\n    " + base + "\n" + folderLine);
         }
         java.util.List<Path> renamed = new java.util.ArrayList<>();
-        for (Path file : files) renamed.add(renameTo(file, base));
+        for (Path file : files) renamed.add(renameTo(file, base, filedAs));
         System.out.println("Renamed to " + named(renamed));
 
         // ---- The two passes the document was merged from -------------------
@@ -1013,33 +1032,97 @@ public final class JRockDocInventory {
         return 0;
     }
 
-    // The same document in the other formats, beside it and under the same name: the
-    // .docx and .txt of a .pdf, the .pdf of a .txt, a .png scanned of the same page, and
-    // so on. Empty when there is none. The HTML folder is not among them: see run for
-    // what becomes of it.
+    // Every other file of the same document, beside it in the same folder. Empty when
+    // there is none. The HTML folder is not among them: see run for what becomes of it.
     //
-    // Worth looking for, because such a set is what an earlier run - or Acrobat's
-    // "Export to Word" - leaves behind: one document on the disk more than once. All the
-    // copies are the same document, so all get the name the inventory settles on.
+    // Two shapes count, and the folder is READ rather than asked about candidate names,
+    // because the second shape has no list of names to try:
+    //
+    //   the same name, another extension  - "3703093896.docx" of "3703093896.pdf", the
+    //       .pdf of a .txt, the .png scanned of the same page, the .indd the layout was
+    //       made in. Such a set is what an earlier run, or Acrobat's "Export to Word",
+    //       or the designer leaves behind: one document on the disk more than once.
+    //   the same name with a SUFFIX       - "3703093896-en.docx", "3703093896_SA.txt":
+    //       the translations and the appendices, which are not copies of the document
+    //       but parts of it, and are no use filed under a name of their own.
+    //
+    // Any extension, because the list of things that belong to a document is not this
+    // flow's to close: a layout, a spreadsheet appendix, a scanner's sidecar are all
+    // named after the document they belong to, and leaving one behind splits the set -
+    // which is the mess this automation exists to clear up rather than to make.
+    //
+    // A suffix starts with a hyphen or an underscore and nothing else (see SUFFIX_START):
+    // a dot there would make "scan0167.Merged.pdf" a file of "scan0167.pdf", and the
+    // merged document is the one whose own passes the last step offers to DELETE.
     private static java.util.List<Path> siblingsOf(Path file) {
         java.util.List<Path> found = new java.util.ArrayList<>();
-        java.util.List<String> kinds = new java.util.ArrayList<>(
-                java.util.List.of(EXT_PDF, EXT_DOCX, EXT_RTF, EXT_TXT));
-        kinds.addAll(EXT_IMAGES);
-        String own = extension(file);
-        for (String other : kinds) {
-            if (other.equals(own)) continue;
-            Path beside = file.getParent().resolve(stem(file) + "." + other);
-            if (Files.isRegularFile(beside)) found.add(beside);
+        Path dir = file.getParent();
+        String stem = stem(file);
+        try (java.util.stream.Stream<Path> listing = Files.list(dir)) {
+            listing.filter(other -> !other.equals(file))
+                    .filter(Files::isRegularFile)
+                    .filter(other -> companionSuffix(stem, other) != null)
+                    .sorted()
+                    .forEach(found::add);
+        } catch (IOException cannotRead) {
+            // One document under one name is still better than none: the file that was
+            // chosen is renamed, and the console says what was not looked at.
+            System.out.println("Could not list " + dir + ", so only the document itself "
+                    + "is renamed: " + cannotRead.getMessage());
         }
         return found;
+    }
+
+    // The characters a suffix may start with. See siblingsOf for why a dot is not one.
+    private static final String SUFFIX_START = "-_";
+
+    // What file is to a document named stem: "" for another format of the same name,
+    // "-en" or "_SA" for a translation or an appendix - and null when it is no file of
+    // that document at all, which is what siblingsOf filters on.
+    //
+    // Names are compared ignoring case, as the file system this runs on does: "Scan0167"
+    // and "scan0167" are one name here, and a translation whose name was typed by hand
+    // is as much a file of the document as one a tool wrote.
+    private static String companionSuffix(String stem, Path file) {
+        String other = stem(file);
+        if (other.length() < stem.length()) return null;
+        if (!other.regionMatches(true, 0, stem, 0, stem.length())) return null;
+        String suffix = other.substring(stem.length());
+        if (suffix.isEmpty()) return "";
+        return SUFFIX_START.indexOf(suffix.charAt(0)) >= 0 ? suffix : null;
+    }
+
+    // The same, for a file already known to belong to the document: its suffix, or "" -
+    // which is what a rename keeps (see renameTo).
+    private static String suffixOf(String stem, Path file) {
+        String suffix = companionSuffix(stem, file);
+        return suffix == null ? "" : suffix;
+    }
+
+    // The suffixes among a document's files, each once and in the order they come: what
+    // the rename question has to show, because those files do not all get one name.
+    private static java.util.List<String> suffixesIn(java.util.List<Path> files, String stem) {
+        java.util.List<String> suffixes = new java.util.ArrayList<>();
+        for (Path file : files) {
+            String suffix = suffixOf(stem, file);
+            if (!suffix.isEmpty() && !suffixes.contains(suffix)) suffixes.add(suffix);
+        }
+        return suffixes;
     }
 
     // Is this file the only copy of its document? Which is what says whether a TXT is a
     // document in its own right - a note, or an answer somebody kept - or the plain text
     // of a document that is already here, written by pass two or by Acrobat.
+    //
+    // Only a twin of the same name counts, and only one of the kinds this flow reads: a
+    // translation beside a note, or a layout, is another file of the set and not this
+    // note's own text, so the note still gets the DOCX every document here gets.
     private static boolean alone(Path file) {
-        return siblingsOf(file).isEmpty();
+        String stem = stem(file);
+        for (Path sibling : siblingsOf(file)) {
+            if (suffixOf(stem, sibling).isEmpty() && passOf(sibling) != 0) return false;
+        }
+        return true;
     }
 
     // The sibling furthest down the chain from file, when one is further down than file
@@ -1222,6 +1305,16 @@ public final class JRockDocInventory {
         return text.toString();
     }
 
+    // The same, for names of files that are not there yet: what the set is about to be
+    // called.
+    private static String listedNames(java.util.List<String> names) {
+        StringBuilder text = new StringBuilder();
+        for (String name : names) {
+            text.append("    ").append(name).append('\n');
+        }
+        return text.toString();
+    }
+
     // The same names for one line of log or console, where a line is what is wanted.
     private static String named(java.util.List<Path> files) {
         java.util.List<String> names = new java.util.ArrayList<>();
@@ -1246,11 +1339,19 @@ public final class JRockDocInventory {
         return target;
     }
 
-    // Renames a file to base, keeping its extension, and returns where it went.
-    private static Path renameTo(Path file, String base) throws IOException {
+    // Renames a file to base, keeping its extension AND its suffix, and returns where it
+    // went. stem is the name the document went under until now - what the suffix is
+    // measured against (see companionSuffix).
+    //
+    // The suffix is kept because it is the only thing that tells one file of the set from
+    // another: "3703093896-en.docx" and "3703093896-SA.docx" both renamed to the bare
+    // name would be one name, one extension and two files, so the second would land as
+    // "...-2.docx" through free() and the translation would be a number nobody can read.
+    private static Path renameTo(Path file, String base, String stem) throws IOException {
         String name = file.getFileName().toString();
         int dot = name.lastIndexOf('.');
-        Path target = free(file.getParent(), base, dot > 0 ? name.substring(dot) : "");
+        Path target = free(file.getParent(), base + suffixOf(stem, file),
+                dot > 0 ? name.substring(dot) : "");
         Files.move(file, target);
         return target;
     }

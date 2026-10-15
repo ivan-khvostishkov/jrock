@@ -1561,7 +1561,10 @@ your own:
   *Bayerische Landesbank* → `BayernLB`). The name is in **`A-Z`, `a-z`, digits and hyphens
   only** — no umlauts, accents or spaces, which are written out instead (*München* →
   `Muenchen`, *ß* → `ss`) — so it opens and places everywhere: Adobe InDesign, for one, will
-  not place a `.docx` with an umlaut in its name.
+  not place a `.docx` with an umlaut in its name. The title has to **identify the document on
+  its own** — not *Letter*, not *Response*, but the terms that document and no other is about —
+  and a **10-digit document number already in the file name** (`Document-5341797276.docx`) is
+  the number it is filed under.
 - **`jrock-prompt-translate-to-english.txt`** — translate a document into English and answer
   with **nothing but the translation**, after one `Translated from: <language>` line. All of it,
   not a summary; the original's paragraphs, headings, lists, tables and page separators kept;
@@ -1663,9 +1666,24 @@ offered there: the include asks about that one itself.
 
 **Files of the same name are one document filed more than once.** So the set is followed in
 every direction: pick any and the others are found beside it. The rename at the end moves
-**every file of the document** — the PDF or the image, the DOCX, the TXT, any RTF — all to the
-same name, together or not at all. Half a document renamed is the mess this automation exists to
-clear up, not to make. **The HTML folder** is asked about on its own: its pages are working
+**every file of the document** — the PDF or the image, the DOCX, the TXT, any RTF, the `.indd`
+the layout was made in, a spreadsheet appendix, a scanner's sidecar: whatever in that folder
+carries the document's name, whatever its extension — all to the same name, together or not at
+all. Half a document renamed is the mess this automation exists to clear up, not to make.
+
+**A suffix on the name is another file of the same document, not another document.**
+`3703093896-en.docx` and `3703093896_SA.txt` beside `3703093896.pdf` are the translations and
+the appendices, and are no use filed under a name of their own — a translation left behind is
+worse off than a copy, because its own name no longer says which document it is the translation
+*of*. So they are renamed with the rest and **keep their suffix**:
+`2026-06-14-DHL-FollowUpOnParcelDelivery-3703093896-en.docx`. The suffix is the only thing that
+tells one file of the set from another, which is why it stays, and the rename dialog lists the
+suffixed names it is about to use alongside the bare one. A suffix starts with a hyphen or an
+underscore and **nothing else** — a dot is not one, or `scan0167.Merged.pdf` would be a file of
+`scan0167.pdf`, and that merged document is the one whose own two passes the last step offers to
+delete.
+
+**The HTML folder** is asked about on its own: its pages are working
 material for the model, and the DOCX and the TXT are the copies people read, so you choose to
 **delete it**, or keep it and have it renamed with the files. It is found under the name the
 include actually gives it — the whole file name with `.html` after it,
