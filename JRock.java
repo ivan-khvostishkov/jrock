@@ -1479,20 +1479,102 @@ public class JRock {
         System.out.println("");
         System.out.println("Ask, and press Enter. Ctrl+C ends it, and so does an empty "
                 + "line.");
-        java.io.BufferedReader in = new java.io.BufferedReader(
-                new java.io.InputStreamReader(System.in, StandardCharsets.UTF_8));
+        // THE CONSOLE ITSELF READS THE TYPING, where there is one - not an
+        // InputStreamReader over System.in, which is what this did and what made a
+        // Russian question arrive as blanks.
+        //
+        // Two things were wrong with the stream. The charset was assumed to be UTF-8,
+        // and a Windows console hands typed text to a process in ITS CODE PAGE (cp866 or
+        // cp1251 for Russian, cp437 or cp850 on a Western install). And on a console
+        // that has been put into UTF-8 with chcp 65001 - the setting that is supposed to
+        // make all of this work - reading typed non-ASCII as a BYTE STREAM is broken in
+        // cmd.exe itself: the characters come back as nothing at all, which is the "all
+        // the Russian turned into spaces" this fixes.
+        //
+        // System.console() goes through the platform's console API instead, and on a
+        // modern JDK that is the wide-character one (java.io.Console is JLine-backed
+        // since JDK 20), so what the keyboard sent is what arrives - code page or no code
+        // page. Line editing and a history of previous questions come with it.
+        //
+        // Redirected input has no console and keeps the stream, as UTF-8: a pipe or a
+        // file is written by a program, and a program writes UTF-8. So
+        // "echo ... | java JRock.java --cli" still reads the way it did.
+        java.io.Console console = System.console();
+        java.nio.charset.Charset typing = cliCharset();
+        if (console != null && !typing.equals(StandardCharsets.UTF_8)) {
+            // Said once, before the first question rather than after it: on a code page
+            // with no Cyrillic, Greek or Han in it at all, Windows drops those characters
+            // on the way IN - before any Java code sees them - and nothing here can put
+            // back what never arrived. chcp has to be run before this process starts.
+            System.out.println("This console reads in " + typing.name()
+                    + ". For Cyrillic, Greek, Han or accents, run  chcp 65001  first (and "
+                    + "use a TrueType console font).");
+        }
+        java.io.BufferedReader in = console != null ? null : new java.io.BufferedReader(
+                new java.io.InputStreamReader(System.in, typing));
         while (true) {
             System.out.print("\n> ");
             System.out.flush();
             String line;
             try {
-                line = in.readLine();
+                line = console != null ? console.readLine() : in.readLine();
             } catch (java.io.IOException ended) {
                 return 0;
             }
             if (line == null || line.isBlank()) return 0;
+            // A replacement character means the bytes were not what they were decoded as,
+            // and the question would go out with holes in it. Said, and not sent: a
+            // request paid for to ask half a question is worse than a line of advice.
+            if (line.indexOf('�') >= 0) {
+                System.out.println("That line holds characters this console did not pass "
+                        + "on as " + typing.name() + ", so nothing was sent. Run  chcp "
+                        + "65001  and start JRock again, or ask in ASCII.");
+                continue;
+            }
             cliAsk(log, input, line);
         }
+    }
+
+    // What the keyboard's bytes are to be read as at a --cli prompt.
+    //
+    // UTF-8 was assumed here, and on Windows that is simply wrong: a console hands typed
+    // text to a process in ITS CODE PAGE - cp866 or cp1251 for Russian, cp437 or cp850 on
+    // a Western install, cp65001 only if somebody has run chcp - and those bytes decoded
+    // as UTF-8 are replacement characters, one per letter. A Russian question therefore
+    // arrived at the model as blanks, which is exactly what it looked like.
+    //
+    // Asked of the console itself where the JDK will say (Console.charset, JDK 17+),
+    // then of the properties that hold the same answer, then the platform default. By
+    // REFLECTION because this compiles to release 11, where that method does not exist:
+    // the call is what a modern JVM answers best and the properties are what an older one
+    // has, and both beat guessing.
+    //
+    // REDIRECTED INPUT STAYS UTF-8, and that is deliberate: a pipe or a file is written
+    // by a program, a program writes UTF-8, and there is no console whose code page could
+    // be meant instead. "echo ... | java JRock.java --cli" therefore keeps working as it
+    // did, while what a person types is read the way their console sent it.
+    private static java.nio.charset.Charset cliCharset() {
+        java.io.Console console = System.console();
+        if (console == null) return StandardCharsets.UTF_8;
+        try {
+            Object said = java.io.Console.class.getMethod("charset").invoke(console);
+            if (said instanceof java.nio.charset.Charset) {
+                return (java.nio.charset.Charset) said;
+            }
+        } catch (ReflectiveOperationException | RuntimeException notOnThisJdk) {
+            // Older JVM: the properties below are where the same answer is kept.
+        }
+        for (String property : new String[] { "stdin.encoding", "sun.stdin.encoding",
+                                              "native.encoding", "sun.jnu.encoding" }) {
+            String name = System.getProperty(property);
+            if (name == null || name.isBlank()) continue;
+            try {
+                return java.nio.charset.Charset.forName(name.trim());
+            } catch (RuntimeException unknownName) {
+                // Try the next one; an unreadable name is no answer at all.
+            }
+        }
+        return java.nio.charset.Charset.defaultCharset();
     }
 
     // Waits for the startup to finish saying what it has to say.
