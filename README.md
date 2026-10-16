@@ -602,12 +602,25 @@ bill, and a guess is not one.
   transcript.
 - **History** mode (Ctrl+E): each send includes the prior dialog so the model sees a
   continuous conversation (stateless multi-turn) — or only its last requests, each with its
-  answer, when a [**History limit**](#configure-dialog-top-left-button) is set. In this mode role headers are
-  timestamped (e.g. `[OPERATOR'S ASSISTANT] · Mon, 14 Sep 2026, 10:01:34`) so the
-  time order of stateless turns is visible. The day and month are abbreviated, and the names and
-  their order are your locale's own: a header is a role and a date on one line, and spelled out
-  in full it is wider than a phone's screen, so every message in the transcript would cost two
-  lines instead of one. That timestamp is also what History goes by:
+  answer, when a [**History limit**](#configure-dialog-top-left-button) is set. In this mode role headers
+  carry **the time and who said it**:
+
+  ```
+  [HUMAN OPERATOR] · Fri, 16 Oct 2026, 14:22 · Ivan
+  [OPERATOR'S ASSISTANT] · Fri, 16 Oct 2026, 14:22 · JRock
+  ```
+
+  The time makes the order of stateless turns visible, **to the minute** — a header is read, not
+  measured, and nobody ever wanted to know that an answer came back at 10:01:34 rather than
+  10:01 (the seconds are still in the stamp that names every message file, where two sends in one
+  minute must not be one file). The day and month are abbreviated and the names and their order
+  are your locale's own: a header is a role and a date on one line, and spelled out in full it is
+  wider than a phone's screen. **`JRock` is written after an answer's time, and your own name
+  after a question's** — if you have given one in [Configure](#configure-dialog-top-left-button);
+  without it a question's header ends at the time. A transcript read a year later is a
+  conversation between two parties neither of whom is otherwise named on it, and a log from a
+  folder an agent works in is one where *who* is the question. That timestamp is also what
+  History goes by:
   it sends **only the messages that were sent with History ticked**, and their answers. Untick
   it to ask a **side question**, and the question and its answer stay out of the conversation:
   tick it again and the dialog goes on as if they had never been asked. The headers are kept in
@@ -730,15 +743,34 @@ these stateless turns visible.*
 ## Clock
 
 **Clock** — the checkbox left of *History*, **on by default** — sends the current
-local time with each message, as one extra `system` message ahead of the dialog:
+local time with each message, as one extra `system` message ahead of the dialog — and with it
+**your name**, when one is set in [Configure](#configure-dialog-top-left-button):
 
 ```
-<clock><now>2026-09-22 14:07:31 +02:00 Europe/Berlin</now></clock>
+The current date and time is 2026-09-22 14:07:31 +02:00 (Europe/Berlin). The operator you are
+talking to is called Ivan.
 ```
 
 The zone is named in full (`Europe/Berlin`), not just offset: a model that knows the zone knows
 about summer time, holidays and business hours, which an offset alone doesn't say. Without this
 a model has no idea what day it is - the request carries no clock of its own.
+
+**Plain sentences, not markup.** This used to be `<clock><now>…</now></clock>`, and the argument
+for that shape was that tags mark injected context off from the conversation so that nothing in
+it can be read as something you said. But the message is sent with role `system`, which marks it
+off already — that is what the role is *for* — and tags buy nothing a model needs twice. What
+they cost is read by everything else: a sentence is what a language model reads best, it is what
+the smaller models read *at all* (the push-to-talk appendix is prose for the same reason), and it
+is what you see in the raw request in your own log. Markup in a conversation with something that
+speaks language is a habit rather than a requirement. The sentences are in **English** even where
+the conversation is not: the model reads them, and a model asked in Russian answers in Russian
+whatever language it was told the time in.
+
+**Your name is optional and off until you set it.** *Your name:* in Configure's General tab,
+kept per folder as `operator$` — because a folder is often an agent's rather than a person's: the
+push-to-talk folder is *Ivan* and the one a flow files letters in is nobody. Empty is the whole
+of "not set": no sentence is sent, and your header lines end at the time. With no name and Clock
+unticked there is no `system` message at all.
 
 The checkbox is kept per folder, as `clock$` in
 [`JRock/jrock-config.txt`](#persistence-crash-recovery--full-local-history), so a folder whose
@@ -846,6 +878,8 @@ from inside the running application, and different for every way of launching it
   `record-transcribe$` (`true`/`false`) says whether a recording is transcribed.
   `record-always-on$` (`true`/`false`) is [Mic always on](#mic-always-on).
   `clock$` (`true`/`false`) is the [**Clock**](#clock) checkbox; absent is `true`.
+  `operator$` is your own name, written after the time on your header lines and sent with
+  the clock; absent is not set, and nothing is sent or shown.
   `history$` (`true`/`false`) is the [**History**](#conversation-log) checkbox; absent is `false`.
   `history-limit$` is the [**History limit**](#configure-dialog-top-left-button), a number of
   requests; absent is unlimited, and it is written only once there is a limit.
@@ -3736,6 +3770,12 @@ the one they are looking for.
   this host. Prices come from the card for the **region named in the host**, so a host that
   names none simply has no cost line, the same silence a card gives for a region it has no
   row for.
+- **Your name** — optional, and the only row here that is about the person rather than the
+  machine. Set it and two things follow: the model is told, with the clock, *"The operator
+  you are talking to is called Ivan."*, and your own header lines in the transcript end
+  with it (`[HUMAN OPERATOR] · Fri, 16 Oct 2026, 14:22 · Ivan`), where the model's end with
+  `JRock`. Kept per folder as `operator$`, because a folder is often an agent's rather than a
+  person's. Empty is the whole of "not set": nothing is sent, and nothing is shown.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
   `JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
   folder's [agent](#windows-agents-and-flows-one-entry-each) a different agent from the same

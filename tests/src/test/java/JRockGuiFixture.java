@@ -93,6 +93,7 @@ abstract class JRockGuiFixture {
     private static final List<String> CONFIG_FIELDS = Arrays.asList(
             "workingDir", "promptsDir", "promptsDirNote", "apiKey", "ENDPOINT",
             "endpointSource", "REGION", "MODEL_ID", "availableModels", "imagesDpi",
+            "operatorName",
             "autoBackupLog",
             "pdfIncludeMode", "rtfIncludeMode", "includeMarkdownRefs", "includeProcessedCopies",
             "missingIncludeStopsSend", "promptCacheOn");

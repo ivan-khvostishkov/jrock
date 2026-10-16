@@ -116,6 +116,11 @@ public class JRock {
     // Application version.
     private static final String VERSION = "5.0.0";
 
+    // What this program is called, where it says so to a person: the name written after
+    // the time on every answer's header line (see dialog), which is the one place in a
+    // transcript that says who the other party was.
+    private static final String PRODUCT = "JRock";
+
     // Project home page (linked from the About line in the Configure dialog).
     private static final String GITHUB_URL = "https://github.com/ivan-khvostishkov/jrock";
 
@@ -1084,6 +1089,15 @@ public class JRock {
     // Whether the Clock checkbox is ticked: true or false, and absent is true - the
     // checkbox's default.
     private static final String CONFIG_CLOCK = "clock";
+    // THE OPERATOR'S OWN NAME, when they give one: written at the end of their own
+    // header lines, and sent to the model beside the clock (see clockMessage).
+    //
+    // Empty by default and empty is the whole of "not set": nothing is sent, and the
+    // header reads as it always did. Per folder like everything else here, because a
+    // folder is often an agent's rather than a person's - the push-to-talk folder is
+    // "Ivan" and the one a flow files letters in is nobody.
+    private static final String CONFIG_OPERATOR = "operator";
+    private static volatile String operatorName = "";
     // How many earlier requests History sends, each with the answers after it: a
     // positive number, and absent (or 0) is all of them. Per folder, like the model it
     // is usually a matter of - one model's context holds a long conversation, another's
@@ -1182,6 +1196,7 @@ public class JRock {
             micAlwaysOn = "true".equalsIgnoreCase(settings.get(CONFIG_RECORD_ALWAYS_ON));
             windowBounds = trimmed(settings.get(CONFIG_WINDOW));
             clockOn = !"false".equalsIgnoreCase(settings.get(CONFIG_CLOCK));
+            operatorName = trimmed(settings.get(CONFIG_OPERATOR));
             historyLimit = parseHistoryLimit(settings.get(CONFIG_HISTORY_LIMIT), 0);
             historyOn = "true".equalsIgnoreCase(settings.get(CONFIG_HISTORY));
             pdfIncludeMode = pdfModeOf(settings.get(CONFIG_PDF_MODE));
@@ -1248,6 +1263,7 @@ public class JRock {
         }
         appendSetting(text, CONFIG_WINDOW, windowBounds);             // blank: left out
         appendSetting(text, CONFIG_CLOCK, String.valueOf(clockOn));
+        appendSetting(text, CONFIG_OPERATOR, operatorName);          // blank: left out
         appendSetting(text, CONFIG_HISTORY, String.valueOf(historyOn));
         if (historyLimit > 0) {   // unlimited: left out, which reads back as unlimited
             appendSetting(text, CONFIG_HISTORY_LIMIT, String.valueOf(historyLimit));
@@ -1908,8 +1924,15 @@ public class JRock {
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
 
     // Human-readable local date/time in the user's locale (e.g. "Mon, 14 Sep 2026,
-    // 10:01:34"). Used for the startup line and, with History on, the dialog header
+    // 10:01"). Used for the startup line and, with History on, the dialog header
     // timestamps.
+    //
+    // TO THE MINUTE, not to the second. A header is read, not measured: nobody has ever
+    // wanted to know that an answer came back at 10:01:34 rather than 10:01, and the two
+    // characters bought a narrower window and a longer line to read on a phone. The
+    // SECONDS ARE STILL THERE where they do work - in the stamp that names every message
+    // file (STAMP_FMT, to the millisecond, because two sends in one minute must not be
+    // one file) and in what the model is told the time is (CLOCK_FMT).
     //
     // Abbreviated - "Mon" and "Sep", not "Monday" and "September" - because a header
     // is a role and a date on one line, and on a phone the spelled-out form is wider
@@ -1926,7 +1949,7 @@ public class JRock {
                 + ", "
                 + java.time.format.DateTimeFormatter
                       .ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM,
-                                           java.time.format.FormatStyle.MEDIUM)
+                                           java.time.format.FormatStyle.SHORT)
                       .withLocale(locale)
                       .format(now);
     }
@@ -1947,13 +1970,37 @@ public class JRock {
     private static final DateTimeFormatter CLOCK_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss xxx");
 
-    // The clock message body, in the tagged form the model is meant to read it in.
-    // Deliberately machine-shaped rather than localized: this one is addressed to the
-    // model, not to the user (humanNow above is the user's copy).
-    private static String clockMessage() {
-        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
-        return "<clock><now>" + now.format(CLOCK_FMT) + " " + now.getZone()
-                + "</now></clock>";
+    // WHAT THE MODEL CANNOT KNOW BY ITSELF, as two plain sentences: the time here, and
+    // who it is talking to when the operator has said. Null when there is neither - no
+    // clock and no name is no message at all.
+    //
+    // PLAIN LANGUAGE, NOT TAGS. This was "<clock><now>...</now></clock>", and the
+    // argument for that shape was that it marks the injected context off from the
+    // conversation so nothing in it can be read as something the operator said. But the
+    // message is sent with role "system", which marks it off already - that is what the
+    // role is for - and tags buy nothing a model needs twice. What they cost is read by
+    // everything else: a sentence is what a language model reads best, it is what the
+    // smaller models read AT ALL (the push-to-talk appendix is prose for that reason),
+    // and it is what the operator sees in the raw request in their own log. Markup in a
+    // conversation with something that speaks language is a habit, not a requirement.
+    //
+    // Still not localized, and that is a different question: the sentences are in English
+    // because the model reads them, and a model asked in Russian answers in Russian
+    // whatever language it was told the time in. humanNow is the user's copy.
+    private static String contextMessage(boolean clock) {
+        String who = operatorName.trim();
+        if (!clock && who.isEmpty()) return null;
+        StringBuilder said = new StringBuilder();
+        if (clock) {
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+            said.append("The current date and time is ").append(now.format(CLOCK_FMT))
+                .append(" (").append(now.getZone()).append(").");
+        }
+        if (!who.isEmpty()) {
+            if (said.length() > 0) said.append(' ');
+            said.append("The operator you are talking to is called ").append(who).append('.');
+        }
+        return said.toString();
     }
 
     // ---- Multimodal includes (Ctrl+I) --------------------------------------
@@ -2099,7 +2146,21 @@ public class JRock {
             }
             SwingUtilities.invokeLater(() -> {
                 String stamp = LocalDateTime.now().format(STAMP_FMT);
-                String suffix = withTimestamp ? " \u00B7 " + humanNow() : "";
+                // AND WHO SAID IT, after the time: "JRock" for an answer, and the
+                // operator's own name for a question when they have given one (see
+                // CONFIG_OPERATOR). A transcript read a year later is a conversation
+                // between two parties neither of whom is named on it otherwise - and a
+                // log from a folder an agent works in is one where "who" is the question.
+                //
+                // ONLY WHERE THERE IS A TIMESTAMP, and that is not cosmetic: a header
+                // suffix is what says this message was sent with History on, and
+                // dialogHistory sends exactly the messages whose suffix is not empty. A
+                // name on a side question would put it back into the conversation it was
+                // asked outside of.
+                String who = ROLE_ASSISTANT.equals(role) ? PRODUCT : operatorName.trim();
+                String suffix = withTimestamp
+                        ? " \u00B7 " + humanNow() + (who.isEmpty() ? "" : " \u00B7 " + who)
+                        : "";
                 Entry e = new Entry(true, role, stamp, text, suffix);
                 entries.add(e);
                 logCopySaved = false;
@@ -6632,6 +6693,16 @@ public class JRock {
         // Select all has nothing to select in a field that opens empty. No log here: a
         // modal dialog has none to write to (see addPasteMenu).
         addPasteMenu(keyF, null);
+        // THE OPERATOR'S OWN NAME, which is the only thing in this dialog that is about
+        // the person rather than the machine: written after the time on their own header
+        // lines, and told to the model beside the clock (see contextMessage). Empty is
+        // not set, and not set is how it was before this existed.
+        javax.swing.JTextField operatorF = new javax.swing.JTextField(operatorName, 30);
+        operatorF.setName("operator");
+        operatorF.setToolTipText("Your name, if you want the model told it and your own "
+                + "lines in the transcript to carry it. Sent with the clock, as \"The "
+                + "operator you are talking to is called ...\"; leave it empty and "
+                + "nothing is sent and nothing changes.");
         javax.swing.JTextField endpointF = new javax.swing.JTextField(ENDPOINT, 30);
         endpointF.setName("endpoint");
         endpointF.setToolTipText("The Chat Completions URL every request goes to. "
@@ -7019,6 +7090,7 @@ public class JRock {
                 isCheerpJ() ? pasteRow(keyF, "key") : keyF);
         addRow(general, c, row++, "API endpoint:", endpointF);
         addRow(general, c, row++, "Model:", modelF);
+        addRow(general, c, row++, "Your name:", operatorF);
         addRow(general, c, row++, "", autoBackupF);
         addRow(general, c, row++, "History limit:", historyRow);
         addRow(general, c, row++, "", cacheF);
@@ -7239,6 +7311,9 @@ public class JRock {
             endpointSource = null;
             applyRegionOfEndpoint();
         }
+        // One line, trimmed, and whatever is typed: a name is a name. Emptied, it is
+        // unset again - and the next request carries no name and no header does either.
+        operatorName = operatorF.getText().replaceAll("\\s+", " ").trim();
         Object selected = modelF.getEditor().getItem();  // typed or picked value
         String m = (selected == null ? "" : selected.toString().trim());
         if (!m.isEmpty()) { MODEL_ID = m; }
@@ -7838,6 +7913,11 @@ public class JRock {
             + "role header, which History turns on, is written for you and is never sent. "
             + "Untick Clock and the model is told nothing about the time, however many "
             + "dates the transcript shows.\n\n"
+            + "Your name, in Configure, is optional and off until you set it. Given one, "
+            + "it goes to the model with the clock (\"The operator you are talking to is "
+            + "called ...\") and is written after the time on your own header lines; the "
+            + "model's own lines say JRock there. Empty is not set: nothing is sent, and "
+            + "nothing is shown.\n\n"
             + "Every button and checkbox in the window has a right-click - or long-press "
             + "- menu of its own saying what it does, and the status label beside "
             + "Configure holds the backup, restore and window items.\n\n"
@@ -18177,11 +18257,14 @@ public class JRock {
         // become image/text parts). verifyIncludes() has already run in the UI.
         java.util.List<Part> parts = buildParts(prompt);
 
-        // The clock, when the checkbox is on: read once here, so the request, the
-        // masked copy in the log and the file on disk all carry the same instant. Its
-        // own file in JRock/messages/ is written at the same time, for the record -
-        // nothing ever reads it back (see writeMessageFile).
-        String clockNow = clock ? clockMessage() : null;
+        // The context message - the clock when the checkbox is on, the operator's name
+        // when one is set, or nothing at all when neither (see contextMessage). Read once
+        // here, so the request, the masked copy in the log and the file on disk all carry
+        // the same instant. Its own file in JRock/messages/ is written at the same time,
+        // for the record - nothing ever reads it back (see writeMessageFile), and it is
+        // still filed under the CLOCK role, which is the name every log written so far
+        // uses for this message.
+        String clockNow = contextMessage(clock);
         if (clockNow != null) {
             writeMessageFile(ROLE_CLOCK, LocalDateTime.now().format(STAMP_FMT), clockNow);
         }
