@@ -2230,11 +2230,33 @@ the voice, so the microphone doesn't record the last answer as the next question
   working folder itself and not `JRock/` inside it: those hold the API key, the conversation and
   the log, and a folder destined for somebody's cloud should hold what was asked for and nothing
   else. It is made the first time something is written into it.
-- **Saving an answer as a document.** *"I'm saving the last answer to a file"* exports **the
-  answer before that sentence** — the thing the operator just liked — through JRock's own
-  *Export selected Markdown with images as DOCX*, into `PTTFiles/` as
-  `2026-10-12-0043-ptt.docx`. The previous answer and never the sentence asking for it: the
-  request is not the thing they liked.
+- **Putting something in a file, which is three different things.** The sentence the model says
+  decides which, and the [paper docs agent](#a-seventh-agent-paper-docs-in-and-out-jrockpaperdocsjava)
+  does the keeping in every case — it owns the folder, and it has the flow that names documents:
+  - *"I'm saving the last answer to a file"* — **the answer before that sentence**, the thing the
+    operator just heard and liked. The previous answer and never the sentence asking for it: the
+    request is not the thing they liked.
+  - *"I'm saving the message to a file"* (or *the letter*, *the page*, *the attachment*) — **the
+    document an agent handed over**, as it was handed over. This is the half that was missing. A
+    message out of the mailbox, the invoice attached to it, the text of a scanned letter, a page
+    off the web: all of them arrive **formatted**, none of them is ever read aloud — what the
+    operator hears is the model's few sentences *about* them — so *"save that e-mail"* had
+    nothing to act on but those few sentences. The operator wanted the invoice, not a summary of
+    the invoice.
+  - *"I'm writing a document: …"* — **a document that does not exist yet**. "Draft a reply to that
+    e-mail and save it", "write a letter to the landlord about the heating". The model is sent
+    **back to work with a different prompt** — `jrock-prompt-ptt-document.txt` beside the agent,
+    which asks for the document itself and nothing else, where the appendix asks for short spoken
+    sentences — with what the operator asked for in `#what` and the last handed-over document in
+    `#material`. **Nothing of what comes back is read aloud**: reading a letter to somebody who
+    asked for it in writing is a minute of listening to something they are going to read anyway.
+
+  All three end the same way: the document goes into **`Incoming/`** as a Word document named by
+  the doc inventory flow, and the agent **says where it went** — *"Saved into Incoming as DHL,
+  Follow Up On Parcel Delivery, 14 June 2026, document number 5 2 8 1 8 8 3 2 1 7."* That
+  sentence replaces the model's own: a save asked for across a room used to be answered on a
+  screen nobody was looking at, and two narrations at once would have cut each other off. A save
+  that could not be spoken, or that failed, ends in the usual *"Something went wrong."*
 - **A new time for an appointment of your own.** An answer that says *"I'm proposing to move
   event a3f91c to 2026-10-20 at 14:30"* — the id being the one the calendar answer printed —
   sends `#move` to the Thunderbird agent, which composes the update to you for you to send. You
@@ -3198,7 +3220,9 @@ sequenceDiagram
   reading one out is — more firmly so here, where a guess costs paper. In the window the button
   needs a name typed into the field: a row of buttons is one stray click away from a sheet of
   paper.
-- **Keeping an answer** — *"I'm saving the last answer to a file"* — sends the Markdown here.
+- **Keeping an answer, a handed-over document, or one written to order** — *"I'm saving the last
+  answer to a file"*, *"I'm saving the message to a file"*, *"I'm writing a document: …"* — all
+  three send the Markdown here.
   The agent writes it to `saved-<stamp>.txt` in the incoming folder and runs the flow on that. A
   `.txt` standing on its own is a document in its own right, so the flow exports it as a **DOCX
   with its pictures placed** (JRock's own Markdown writer, no send — the text is already the

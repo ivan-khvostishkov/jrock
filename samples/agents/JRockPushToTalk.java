@@ -377,6 +377,46 @@ public final class JRockPushToTalk {
             + "(?:the message |message )?([0-9a-fA-F]{6}):\\s*(.+)",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
 
+    // THE SAME, FOR THE DOCUMENT AN AGENT HANDED OVER rather than for an answer: "I'm
+    // saving the message to a file". Which is the half that was missing, and the reason
+    // this exists at all.
+    //
+    // A message out of the mailbox, the attachment read with it, the text of a scanned
+    // letter, a page off the web: those arrive FORMATTED and are never read aloud - what
+    // the operator hears is the model's few sentences about them. So "save that e-mail to
+    // a file" could not work: the only thing a save could reach was the spoken answer,
+    // and the document itself was unreachable from the one sentence anybody would say
+    // about it. The nouns here are deliberately none of SAVE's (answer, reply, draft,
+    // text), so the two sentences cannot both match.
+    private static final java.util.regex.Pattern SAVE_DOCUMENT = java.util.regex.Pattern.compile(
+            "I(?:['’]m| am) saving (?:the|that|this) "
+            + "(?:document|message|letter|mail|e-?mail|attachment|page|calendar) "
+            + "to a (?:file|document)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    // AND THE ONE THAT WRITES A DOCUMENT RATHER THAN SAYING ANYTHING: "I'm writing a
+    // document: <what it is to be>". Everything after the colon is the instruction, over
+    // as many lines as it takes, which is why this is DOTALL.
+    //
+    // A letter to the landlord, a reply to draft, a summary of the message just read: the
+    // operator asks for it out loud and wants it ON DISK, not read back to them. So the
+    // model is sent BACK to work with a different prompt (see DOCUMENT_PROMPT) - one that
+    // asks for the document itself and nothing else, where the appendix asks for spoken
+    // sentences - and what comes back is not narrated at all. It is saved, and what the
+    // room hears is where it went.
+    private static final java.util.regex.Pattern WRITE_DOCUMENT = java.util.regex.Pattern.compile(
+            "I(?:['’]m| am) (?:writing|drafting|preparing|making) (?:a|the) "
+            + "(?:document|letter|e-?mail draft|draft document|written reply):"
+            + "\\s*(.+)",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
+    // The prompt a document is written with, beside this file: #what is what the operator
+    // asked for, #material whatever it is to be written from (the message that was just
+    // read, the letter off the scanner) - empty when there is none.
+    private static final String DOCUMENT_PROMPT = "jrock-prompt-ptt-document.txt";
+    private static final String WHAT_PLACEHOLDER = "#what";
+    private static final String MATERIAL_PLACEHOLDER = "#material";
+
     // A NOTE TO SELF: "I'm making a note: <the note>". Everything after the colon is
     // the note itself, over as many lines as it takes, which is why this is DOTALL.
     private static final java.util.regex.Pattern NOTE = java.util.regex.Pattern.compile(
@@ -386,6 +426,16 @@ public final class JRockPushToTalk {
 
     // The answer before this one, which is what the save sentence saves.
     private static volatile String lastAnswer;
+
+    // And the last DOCUMENT an agent handed over, with a word for what it is: the
+    // formatted thing that was never read aloud (see SAVE_DOCUMENT and remember).
+    private static volatile String lastDocument;
+    private static volatile String lastDocumentWhat;
+
+    // Whether the sentence saying where a document went was actually spoken. A save that
+    // failed, or a speaker that is not set, says nothing - and a turn that said nothing
+    // ends in the fixed phrase like any other failure (see the end of converse).
+    private static volatile boolean saidWhereItWent;
 
     // Coordinates in a location line, as the geo location agent writes them - which the model
     // may already have from it, and then they are used as they are.
@@ -581,6 +631,7 @@ public final class JRockPushToTalk {
                 }
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(events[0]));
+                remember(events[0], "the calendar");
                 answer = sendAndRead("Sent the calendar, waiting for the reply\u2026");
             } else if (mail.matches()) {
                 // The mail is read off this machine by the Thunderbird agent, out of
@@ -601,6 +652,7 @@ public final class JRockPushToTalk {
                     break;
                 }
                 check(JRock.automationClearPrompt());
+                remember(mailbox[0], "the message");
                 if (mailbox[0].startsWith(CONTENT)) {
                     // One message, handed over as a document - the same way a scanned
                     // letter is.
@@ -644,6 +696,7 @@ public final class JRockPushToTalk {
                 // letter that IS filed.
                 if (postAsked.startsWith(FILING_REQUEST)) sayFiled(letters[0]);
                 check(JRock.automationClearPrompt());
+                remember(letters[0], "the letter");
                 if (letters[0].startsWith(CONTENT)) {
                     String problem = includeDocument(letters[0]);
                     if (problem != null) {
@@ -676,6 +729,7 @@ public final class JRockPushToTalk {
                 }
                 check(JRock.automationClearPrompt());
                 check(JRock.automationSetPrompt(page[0]));
+                remember(page[0], "the page");
                 answer = sendAndRead("Sent the page, waiting for the reply\u2026");
             } else if (!askedWeather && weather.matches()) {
                 askedWeather = true;
@@ -704,12 +758,33 @@ public final class JRockPushToTalk {
         String moved = movedIn(reply);
         String drafted = draftIn(reply);
         String noted = noteIn(reply);
+        // BEFORE the save, because this one WRITES the document a save would then be
+        // asked about - and because it sends again, which has to happen before anything
+        // is read out (see wroteIn).
+        saidWhereItWent = false;
+        String wrote = wroteIn(reply);
         String saved = savedIn(reply);
         // What the NEXT save would save: this answer, unless this answer was itself a
         // command about the last one.
-        if (saved == null && drafted == null) lastAnswer = reply;
+        if (saved == null && drafted == null && wrote == null) lastAnswer = reply;
         if (handsFreeTurn && !handsFree) {
-            return join(note, alarm, event, moved, drafted, noted, saved);
+            return join(note, alarm, event, moved, drafted, noted, saved, wrote);
+        }
+        // SOMETHING WENT INTO A FILE, and what the room heard was where it went (see
+        // keepAsDocument). Two things must not happen now.
+        //
+        // The document must not be READ OUT: that is a letter read aloud to somebody who
+        // asked for it in writing, and sayAnswer would read it, the document being the
+        // last answer in the log after wroteIn's own send. And the model's own "I'm
+        // saving the message to a file" must not be read over the sentence that says
+        // where it now is - a second narration stops the first one mid-word, so the
+        // operator would be told that something is being saved instead of where it went.
+        //
+        // A save or a write that could not be spoken at all - no speaker, or it failed -
+        // ends like any other failed turn: the fixed phrase, which is the one they know.
+        if (wrote != null || saved != null) {
+            return join(note, alarm, event, moved, drafted, noted, saved, wrote,
+                    saidWhereItWent ? null : sayFailed());
         }
         // An answer of nothing at all - a reply that arrived empty - is a failed turn to
         // anyone listening, however well the request itself went: reading it out loud
@@ -890,6 +965,24 @@ public final class JRockPushToTalk {
         }
         // Anything else is a letter's name, which is what the operator says.
         return "#file " + asked;
+    }
+
+    // KEEPS WHAT AN AGENT HANDED OVER, so that "save the message to a file" has something
+    // to save and "write me a reply to it" has something to write from.
+    //
+    // The CONTENT header comes off: what is kept is the document, not the line that says
+    // which kind of document it is. A handover that carries nothing is not remembered at
+    // all - the one before it is still the last document there was, and a save that
+    // reaches for it is better than a save that finds nothing.
+    private static void remember(String handed, String what) {
+        String text = handed == null ? "" : handed;
+        if (text.startsWith(CONTENT)) {
+            String[] split = text.split("\n", 2);
+            text = split.length > 1 ? split[1] : "";
+        }
+        if (text.isBlank()) return;
+        lastDocument = text.trim();
+        lastDocumentWhat = what;
     }
 
     // A DOCUMENT an agent handed over - a scanned letter, an e-mail - as a file in the
@@ -1376,22 +1469,107 @@ public final class JRockPushToTalk {
     // thing they liked. JRock exports it the same way the window's own menu does - the
     // Markdown laid out as A4 with any picture it refers to placed in it - so a drafted
     // letter comes out as a letter rather than as a wall of text.
+    // TWO THINGS CAN BE SAVED, and the sentence says which: the last ANSWER, which the
+    // operator has heard, or the last DOCUMENT an agent handed over, which they have not
+    // (see SAVE_DOCUMENT). The second was the one that could not be reached: a message
+    // out of the mailbox, the invoice attached to it, the text of a scanned letter - all
+    // of them arrive formatted, none of them is ever read aloud, and "save that e-mail to
+    // a file" had nothing to act on but the few spoken sentences about it.
     private static String savedIn(String answer) {
-        if (!SAVE.matcher(answer).find()) return null;
-        String keep = lastAnswer;
+        boolean document = SAVE_DOCUMENT.matcher(answer).find();
+        if (!document && !SAVE.matcher(answer).find()) return null;
+        String keep = document ? lastDocument : lastAnswer;
         if (keep == null || keep.isBlank()) {
-            return "Nothing saved: there is no earlier answer in this conversation.";
+            return document
+                    ? "Nothing saved: no document has been handed over in this conversation."
+                    : "Nothing saved: there is no earlier answer in this conversation.";
         }
-        // THE PAPERS AGENT KEEPS IT, and this agent only hands it over. Documents are
-        // what that agent is for: it has the folder the operator synchronises, it has the
-        // flow that names things, and it already reads everything in there back out. This
-        // one has a microphone and a model, which is a different job - and the markdown
-        // travels between them as every other document here already does.
-        String[] saved = askAgent(PAPERS_PORT, "#save " + keep, "paper docs",
-                "JRockPaperDocs.java");
+        String what = document
+                ? (lastDocumentWhat == null ? "the document" : lastDocumentWhat)
+                : "the answer";
+        return keepAsDocument(keep, what);
+    }
+
+    // HANDS A DOCUMENT TO THE PAPER DOCS AGENT TO KEEP, and says out loud where it went.
+    //
+    // That agent is what documents are for: it has the folder the operator synchronises,
+    // it has the flow that names things, and it reads everything in there back out again.
+    // This one has a microphone and a model, which is a different job - and the markdown
+    // travels between them as every other document here already does. What comes back is
+    // its own sentence, "Saved in Incoming as <name>.docx."
+    //
+    // SAID ALOUD, which it was not. A save is asked for across a room and answered on a
+    // screen nobody is looking at: the operator said "put that in a file" and heard
+    // nothing at all back, and the one fact they wanted - that it is on the disk, and
+    // under what name - sat in a status line. It is spoken as words (see readableName),
+    // because the name is a date, a counterparty, a title and a ten-digit number.
+    //
+    // The long timeout, not the lookup one: a save drives the doc inventory flow, which
+    // is three model passes over the document, and a socket that gives up at three
+    // minutes reports a failure for a document that is in fact being written.
+    private static String keepAsDocument(String markdown, String what) {
+        later(() -> setState(State.ANSWERING, "Saving " + what + "…"));
+        String[] saved = askAgent(PAPERS_PORT, "#save " + markdown, "paper docs",
+                "JRockPaperDocs.java", FILING_TIMEOUT_MS);
         if (saved[0] == null) return "Not saved: " + saved[1];
         report("paper docs: " + saved[0].replace("\n", " "));
-        return saved[0].split("\n", 2)[0].trim();
+        String first = saved[0].split("\n", 2)[0].trim();
+        String silent = sayOwnWords(spokenSave(first));
+        saidWhereItWent = silent == null;
+        if (silent != null) System.out.println("Where it was saved, not read aloud: " + silent);
+        return first;
+    }
+
+    // The paper docs agent's own "Saved in Incoming as <name>.docx." with the name turned
+    // into something a voice can read. Anything else it says is said as it stands.
+    private static String spokenSave(String sentence) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^Saved in (.+) as (.+?)(\\.docx|\\.txt)?\\.?$",
+                        java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(sentence.trim());
+        if (!m.matches()) return sentence;
+        return "Saved into " + m.group(1) + " as " + readableName(m.group(2)) + ".";
+    }
+
+    // WRITES A DOCUMENT AND SAVES IT, SAYING NOTHING OF WHAT IS IN IT, if the answer asks
+    // for one. Returns null when it does not, and otherwise what became of it.
+    //
+    // The turn the operator asks for in one sentence and wants on the disk: "draft a reply
+    // to that e-mail", "write a letter to the landlord about the heating", "put that
+    // message into a document for me". A spoken answer is the wrong shape for all of
+    // them - and reading a letter out loud to somebody who asked for it in writing is a
+    // minute of listening to something they are going to read anyway.
+    //
+    // SO THE MODEL IS SENT BACK TO WORK WITH A DIFFERENT PROMPT. The appendix that drives
+    // every other turn asks for short spoken sentences with no formatting in them, which
+    // is the opposite of a document; DOCUMENT_PROMPT asks for the document itself and
+    // nothing else, with the material to write it from under it - the message that was
+    // just read, the letter off the scanner, whatever the last handover was (see
+    // remember). Nothing of what comes back is narrated: it is saved, and what the room
+    // hears is where it went.
+    private static String wroteIn(String answer) {
+        java.util.regex.Matcher m = WRITE_DOCUMENT.matcher(answer);
+        if (!m.find()) return null;
+        String what = m.group(1).trim();
+        if (what.isEmpty()) return "No document written: the answer said nothing about it.";
+        String prompt = read(ownDirectory().resolve(DOCUMENT_PROMPT));
+        if (prompt == null) return "No document written: there is no " + DOCUMENT_PROMPT + ".";
+        String material = lastDocument == null ? "" : lastDocument;
+        prompt = prompt.replace(WHAT_PLACEHOLDER, what)
+                       .replace(MATERIAL_PLACEHOLDER, material);
+        later(() -> setState(State.ANSWERING, "Writing the document…"));
+        sayWait();
+        check(JRock.automationClearPrompt());
+        check(JRock.automationSetPrompt(prompt));
+        String document = sendAndRead("Sent the instruction, waiting for the document…");
+        if (document == null || document.isBlank()) {
+            return "No document written: the reply was empty.";
+        }
+        // What was written is now the document to hand (see remember): "and save it as
+        // well" or "put that in the post folder too" has something to act on.
+        lastDocument = document.trim();
+        lastDocumentWhat = "the document";
+        return keepAsDocument(document, "the document");
     }
 
     // Puts in the calendar what an answer says it is putting there, if it says so.

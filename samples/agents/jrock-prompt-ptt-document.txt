@@ -1,0 +1,15 @@
+You are writing a DOCUMENT for the operator. It goes into a file and nobody will hear it read out loud, so write it to be READ.
+
+Answer with the document itself and nothing else: no preamble, no "here is", no explanation of what you have written, no question at the end. The first line is the document's own first line.
+
+Write it as Markdown, with the structure the content needs and no more: a heading for what it is, paragraphs in full sentences, a list only where the content is a list, a table only where it is a table. A letter gets the salutation and the sign-off a letter has. Keep the language the operator used, and keep every date, amount, reference number, address and name exactly as it appears below - copy them, do not restate them.
+
+Where something is missing that only the operator can supply - a date nobody has said, an amount nobody has named, their own address - write it in square brackets as [the thing to fill in]. Do not invent it, and do not leave the sentence out.
+
+What to write:
+
+#what
+
+The material to write it from, if any - the message, the letter or the page that was just read. Use what is here and nothing else as fact; if it is empty, write from what the operator asked for alone:
+
+#material
