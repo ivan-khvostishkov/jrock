@@ -813,6 +813,38 @@ the length of a zip would stall typing rather than the write, an OS file lock me
 editor or sync client that may be in that folder too, and the browser build's filesystem has no
 such lock to take.
 
+## Cleaning up (the window menu)
+
+**Click the `JRock/` label beside Configure → Cleanup JRock files...** — beside Backup log... and
+Load from backup..., because the backups are half of what it deletes.
+
+Two things in a JRock folder **grow**: the converted copies under `JRock/includes/` — every page
+of every PDF as a PNG, a CSV per spreadsheet sheet, the Markdown of every DOCX — and the
+`jrock-backup-*.zip` files in the working directory, each one the whole folder zipped again. A
+year of filing letters is a gigabyte of page images nobody will open.
+
+1. **A dialog asks for a number of days**, **10** by default. Everything older than that, in
+   those two places, goes.
+2. **It says what it found before it deletes anything**: how many files, how many bytes, how many
+   of each kind, and that they do **not** go to the Recycle Bin.
+3. The log names the total, and **names any file that would not delete** — a file held open by
+   something is worth knowing about by name rather than by count.
+
+**`JRock/messages/` is never touched**, and that is the point of doing this by hand rather than on
+a timer: the messages are the transcript's own evidence — every request and every reply, in full,
+as text — and text is nothing. A thousand exchanges is a few megabytes, and what was actually
+said is the one thing anybody asks for a year later. The log, the prompt, the settings and the key
+are left alone too, and so are `urls/` and `wav/`.
+
+Judged by the **file system's own modification time**, and nothing else: a converted copy carries
+no date of its own (its name is its source's), and "how long has this been sitting here" is
+exactly what a modification time answers — the same date Explorer shows. Only the files directly
+in those two folders are considered: `includes/` is flat by design, and the working directory
+holds your own documents, which a cleanup has no business walking into.
+
+An attachment whose converted copy has been deleted **cannot be sent again** — the log says so if
+one is asked for, and the original file is of course untouched.
+
 ## Merging PDFs (Ghostscript)
 
 **Click the `JRock/` label beside Configure → Merge PDFs...** — under *Merge two-sided (duplex)
@@ -4212,8 +4244,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   [**Persistence**](#persistence-crash-recovery--full-local-history)), then Merge two-sided
   (duplex) PDF scans... and Merge PDFs... above their own separator (see [**merging duplex
   scans**](#merging-duplex-scans-ghostscript) and [**merging
-  PDFs**](#merging-pdfs-ghostscript)), then Backup log... and Load from backup... (see
-  [**backup and restore**](#backup-and-restore)); in the **browser**, also Show/hide the page
+  PDFs**](#merging-pdfs-ghostscript)), then Backup log..., Load from backup... and
+  Cleanup JRock files... (see [**backup and restore**](#backup-and-restore) and [**cleaning
+  up**](#cleaning-up-the-window-menu)); in the **browser**, also Show/hide the page
   header & footer. The Explorer entries are not here at all — they are the
   [installer's](#the-installer-installerinstalljrockjava), which is what keeps this window the
   same window on three platforms. A label with a caret is a target that is always there,
