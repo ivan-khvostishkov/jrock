@@ -3927,8 +3927,14 @@ Configure, kept per folder as `record-always-on$`) and the microphone listens al
 **Speech** starts a recording, as if you had pressed Ctrl+Space. **1.5 s of quiet** ends it, and
 it is included or transcribed like any other.
 
-- **Nothing from before the moment it was heard is kept.** Start with a word to be heard by, e.g.
-  *"Hey, Tovarisch, what is …"*, and the words after it are recorded.
+- **The two seconds before it was heard are in the recording.** Speech is recognised *by having
+  been spoken* — about 0.2 s of voice, and a syllable or two to be sure it is not a door — so the
+  words that did the recognising were already over by the time anything was being kept, and a
+  question came out as *"…varisch, what is the weather"*. The microphone's last **2 s** are
+  therefore held in a ring buffer all the time it is listening, and that is what the recording
+  starts with: you can simply start talking. (It used to be "start with a word to be heard by",
+  e.g. *"Hey, Tovarisch, what is …"* — which was a workaround for a buffer.) The log says how
+  much of the before went in, and those seconds of room tone trouble no recognizer.
 - **What counts as speech:** loud enough over the room's own noise, most of it in the voice band
   (250–4000 Hz), for about 0.2 s, and spread over many frequencies. It doesn't matter who is
   speaking; a voice on the radio is a voice too. A **doorbell or a phone ringing** is one or two

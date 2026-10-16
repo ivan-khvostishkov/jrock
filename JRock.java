@@ -9675,9 +9675,9 @@ public class JRock {
     // ---- Mic always on ------------------------------------------------------
     // The microphone stays open and listens (see listenForVoice), and speech starts a
     // recording as Ctrl+Space would; RECORD_SILENCE_MS of quiet ends it, and it is
-    // included or transcribed like any other. Nothing is kept from before the moment it
-    // was heard, so a sentence gets a word in front of it to be heard by -
-    // "Hey, Tovarisch, ...". Per folder, as record-always-on$ in the config.
+    // included or transcribed like any other. The two seconds BEFORE it was heard are
+    // part of the recording (see PRE_ROLL_MS), so a sentence needs no word in front of it
+    // to be heard by. Per folder, as record-always-on$ in the config.
     private static final String CONFIG_RECORD_ALWAYS_ON = "record-always-on";
     private static volatile boolean micAlwaysOn = false;
     // The line the listener has open, or null when it is not listening; and the one a
@@ -9696,6 +9696,20 @@ public class JRock {
     private static volatile long recordReadAt = Long.MAX_VALUE;
     private static final long LISTEN_STALL_MS = 1500;
     private static final int RECORD_SILENCE_MS = 1500;
+    // HOW MUCH OF WHAT CAME BEFORE THE TRIGGER IS KEPT, which is the difference between
+    // a recording of a question and a recording of most of one.
+    //
+    // Speech is recognised BY having been spoken: Ears wants SPEECH_MS of voice before it
+    // says so (and a syllable or two to be sure it is not a door), and until this the
+    // recording started from the moment it said it - so the first word was already over
+    // by the time anything was being kept. What came out was "...varisch, what is the
+    // weather", and the advice was to put a word in front of every sentence to be heard
+    // by. Which is a workaround for a buffer that was two seconds and a few lines away.
+    //
+    // Two seconds, not a quarter of one: it costs 64 KB of room tone at 16 kHz, a
+    // recognizer is not troubled by silence in front of a sentence, and somebody who
+    // starts talking as they reach the desk is the ordinary case rather than the edge.
+    private static final int PRE_ROLL_MS = 2000;
     // Held from automationBegin to automationEnd: Mic always on does not listen then,
     // whatever it is set to - a prompt nobody may type into is not one to speak into
     // either. automationListen lifts it for an automation that wants to be spoken to.
@@ -9765,6 +9779,17 @@ public class JRock {
                     javax.sound.sampled.AudioFormat format = line.getFormat();
                     Ears ears = new Ears(format.getSampleRate());
                     byte[] buf = new byte[ears.chunkBytes(format.getChannels())];
+                    // The last PRE_ROLL_MS of what the room sounded like, round and round
+                    // in one buffer: when speech is finally recognised, this is what was
+                    // said just before it was. Whole frames, so the wrap cannot land in
+                    // the middle of a sample - line.read always brings a multiple of the
+                    // frame size, and a ring whose length is one too stays aligned.
+                    int perSecond = (int) format.getSampleRate() * format.getFrameSize();
+                    byte[] ring = new byte[Math.max(format.getFrameSize(),
+                            (int) ((long) perSecond * PRE_ROLL_MS / 1000)
+                                    / format.getFrameSize() * format.getFrameSize())];
+                    int ringAt = 0;
+                    boolean ringFull = false;
                     long checkAt = System.currentTimeMillis() + 2000;
                     long dataAt = System.currentTimeMillis();
                     while (micAlwaysOn && !micMuted && recording == null && ears.heard == null
@@ -9780,6 +9805,13 @@ public class JRock {
                             continue;
                         }
                         ears.feed(buf, n, format.getChannels());
+                        for (int at = 0; at < n; ) {
+                            int take = Math.min(ring.length - ringAt, n - at);
+                            System.arraycopy(buf, at, ring, ringAt, take);
+                            at += take;
+                            ringAt += take;
+                            if (ringAt == ring.length) { ringAt = 0; ringFull = true; }
+                        }
                         if (System.currentTimeMillis() > checkAt) {   // pulled out?
                             checkAt += 2000;
                             if (inputMixer(device) == null) break;
@@ -9793,6 +9825,15 @@ public class JRock {
                         continue;
                     }
                     ears.quietMs = 0;
+                    // Oldest first: from the write point round to the write point.
+                    byte[] before;
+                    if (ringFull) {
+                        before = new byte[ring.length];
+                        System.arraycopy(ring, ringAt, before, 0, ring.length - ringAt);
+                        System.arraycopy(ring, 0, before, ring.length - ringAt, ringAt);
+                    } else {
+                        before = java.util.Arrays.copyOf(ring, ringAt);
+                    }
                     onEdt(() -> {
                         if (recording == null && !micMuted) {
                             // Speaking over a narration stops it, the way one person
@@ -9807,7 +9848,8 @@ public class JRock {
                                 log.gray("Narration stopped: speech heard.");
                             }
                             heardPromptBefore = input.getText();
-                            startRecording(frame, input, log, extend.getAsBoolean(), line, ears);
+                            startRecording(frame, input, log, extend.getAsBoolean(), line,
+                                    ears, before);
                             heardRecording = recording;
                         } else {
                             line.close();   // Ctrl+Space got there first, or a mute
@@ -10123,15 +10165,21 @@ public class JRock {
     // of its own, so a slow driver does not hold up the window.
     private static void startRecording(JFrame frame, JTextArea input, LogView log,
                                        boolean extend) {
-        startRecording(frame, input, log, extend, null, null);
+        startRecording(frame, input, log, extend, null, null, null);
     }
 
     // The same, from Mic always on: heardOn is the line the listener heard something on,
     // taken over as it is so nothing is lost to reopening it, and ears goes on listening
     // - for the silence that ends this recording, rather than a key.
+    //
+    // before is what the microphone heard in the two seconds BEFORE the trigger (see
+    // PRE_ROLL_MS), which goes into the recording ahead of everything read from here on:
+    // speech is recognised by having been spoken, so the words that did the recognising
+    // are in that buffer and nowhere else.
     private static void startRecording(JFrame frame, JTextArea input, LogView log,
                                        boolean extend,
-                                       javax.sound.sampled.TargetDataLine heardOn, Ears ears) {
+                                       javax.sound.sampled.TargetDataLine heardOn, Ears ears,
+                                       byte[] before) {
         if (isCheerpJ()) {
             recordInBrowser(input, log, extend);
             return;
@@ -10181,9 +10229,19 @@ public class JRock {
                 recordLine = line;
                 format = line.getFormat();
                 int second = (int) format.getSampleRate() * format.getFrameSize();
+                // THE PRE-ROLL GOES IN FIRST, before a byte is read here: it is the two
+                // seconds the trigger was recognised in, and the sentence starts in it.
+                double rolled = 0;
+                if (before != null && before.length > 0) {
+                    bytes.write(before, 0, before.length);
+                    rolled = before.length / (double) second;
+                }
                 log.gray(ears != null
                         ? "Heard " + ears.heard + ": recording from " + device + " until it "
-                          + "is quiet again (or Ctrl+Space)."
+                          + "is quiet again (or Ctrl+Space)"
+                          + (rolled <= 0 ? "." : ", with the "
+                            + String.format(java.util.Locale.ROOT, "%.1f", rolled)
+                            + " s before it.")
                         : "Recording from " + device + " (" + (int) format.getSampleRate()
                           + " Hz" + (format.getChannels() == 2 ? ", stereo" : "") + ")... "
                           + "Ctrl+Space again to stop.");
