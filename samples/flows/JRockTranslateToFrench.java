@@ -8,7 +8,10 @@
 //                                                     [--prompts-dir <dir>] [document]
 //
 // Without the document it asks for one in a file chooser, opened in the folder this was
-// started in - which, from the right-click menu, is the folder that was clicked. The
+// started in - which, from the right-click menu, is the folder that was clicked. CANCEL
+// THAT CHOOSER AND THE JROCK WINDOW OPENS ANYWAY, with nothing run and no automation on
+// it: this entry is also the quickest way to a JRock in the folder you clicked, for a
+// setting, the log, or a cleanup. The
 // prompt it needs it finds beside itself, in whichever folder this file is in.
 //
 // The jar is wherever the installer put it - one folder up from samples/flows/,
@@ -131,7 +134,9 @@ public final class JRockTranslateToFrench {
             stopped = ex.getClass().getSimpleName() + ": " + ex.getMessage();
         }
 
-        // Nothing to say: the chooser was cancelled, and nothing has been started.
+        // Nothing to say: the chooser was cancelled, so nothing was run - and the
+        // window that was opened instead (see run) is the operator's now, with no
+        // automation to end and no dialog to show about it.
         if (summary == null && stopped == null) return;
 
         // The prompt becomes editable again and Send is released whatever happened - an
@@ -168,7 +173,20 @@ public final class JRockTranslateToFrench {
         Path document = (told.document != null)
                 ? told.document : chooseDocument(told.chooserStart());
         if (document == null) {
-            System.out.println("No document chosen - nothing to do.");
+            // CANCELLED IS NOT "NOTHING TO DO". The chooser is also how this flow gets
+            // opened on purpose with nothing to translate: its right-click entry is often
+            // the quickest way to a JRock window in the folder that was clicked - to
+            // change a setting there, to read the log, to clean the folder up. Closing
+            // the chooser used to end the process, and the operator had to go and find
+            // JRock itself.
+            //
+            // So the window opens, and NO automation is begun on it: the prompt is
+            // editable, Send works, and it is nobody's but the operator's. Nothing is
+            // sent, nothing is asked, and main() returns - the process lives on with the
+            // window, Swing's event thread not being a daemon.
+            System.out.println("No document chosen - opening the JRock window instead.");
+            JRock.main(told.forJRock.toArray(new String[0]));
+            check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
             return null;
         }
         if (!Files.isRegularFile(document)) throw new Stop("not a file: " + document);

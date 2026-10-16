@@ -8,7 +8,10 @@
 //                                               [document.pdf|.png|.jpg|.docx|.rtf|.txt]
 //
 // Without the document it asks for one in a file chooser, opened in the folder this was
-// started in - which, from the right-click menu, is the folder that was clicked. The
+// started in - which, from the right-click menu, is the folder that was clicked. CANCEL
+// THAT CHOOSER AND THE JROCK WINDOW OPENS ANYWAY, with nothing run and no automation on
+// it: this entry is also the quickest way to a JRock in the folder you clicked, for a
+// setting, the log, or a cleanup. The
 // three prompts it needs it finds BESIDE ITSELF, in whichever folder this file is in,
 // which is why the installer copies a flow and its prompts into one folder and never
 // splits them.
@@ -185,7 +188,9 @@ public final class JRockDocInventory {
             stopped = ex.getClass().getSimpleName() + ": " + ex.getMessage();
         }
 
-        // Nothing to say: the chooser was cancelled, and nothing has been started.
+        // Nothing to say: the chooser was cancelled, so nothing was run - and the
+        // window that was opened instead (see run) is the operator's now, with no
+        // automation to end and no dialog to show about it.
         if (done == null && stopped == null) return;
 
         // The prompt becomes editable again and Send is released whatever happened - an
@@ -250,7 +255,26 @@ public final class JRockDocInventory {
         Path chosen = (told.document != null)
                 ? told.document : chooseDocument(told.chooserStart());
         if (chosen == null) {
-            System.out.println("No document chosen - nothing to do.");
+            // CANCELLED IS NOT "NOTHING TO DO". This flow's right-click entry is often
+            // the quickest way to a JRock window in the folder that was clicked - to
+            // change a setting there, to read the log, to clean the folder up with
+            // "Cleanup JRock files..." - and closing the chooser used to end the process,
+            // leaving the operator to go and find JRock itself.
+            //
+            // So the window opens with NO automation begun on it (not startJRock, which
+            // takes it): the prompt is editable, Send works, and it is the operator's.
+            // main() returns, and the process lives on with the window - Swing's event
+            // thread is not a daemon.
+            //
+            // Not under --auto, where nobody is there to be given a window and whoever
+            // started this is waiting for the process to END (see main): a window held
+            // open by a flow with nothing to file would be a flow that never answers.
+            System.out.println("No document chosen.");
+            if (!asking) return null;
+            System.out.println("Opening the JRock window instead.");
+            JRock.main(told.forJRock.toArray(new String[0]));
+            check(JRock.automationAwaitReady(READY_TIMEOUT_MS));
+            started = true;   // nothing else may start a second window in this process
             return null;
         }
         if (!Files.isRegularFile(chosen)) throw new Stop("not a file:\n\n    " + chosen);

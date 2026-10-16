@@ -1717,6 +1717,14 @@ java -cp jrock.jar JRockDocInventory.java scan.jpg       # an image, a DOCX, an 
 java -cp jrock.jar JRockDocInventory.java --working-dir D:\HPScan   # that folder's settings
 ```
 
+**Cancel the chooser and the JRock window opens anyway** — with nothing run and no automation on
+it: an editable prompt, a working Send, the folder's own log. A flow's right-click entry is often
+the quickest way to a JRock *in the folder you clicked* — to change a setting there, to read the
+log, to clean the folder up — and closing the chooser used to end the process and leave you to go
+and find JRock yourself. (Under `--auto` it does not: whoever started the flow is waiting for the
+process to end, and a window held open by a flow with nothing to file is a flow that never
+answers.) Every flow does this, the six translators included.
+
 It reads three prompts out of its own directory and runs them as a chain, each pass reading what
 the one before it wrote beside the document, under the document's own name:
 
