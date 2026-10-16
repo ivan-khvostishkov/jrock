@@ -1954,6 +1954,17 @@ the voice, so the microphone doesn't record the last answer as the next question
   window, goes into **JRock's log** to be read afterwards (an agent started by `javaw` has no
   console to print it to), and when the phrase itself cannot be read aloud — no speaker set —
   that is shown too. A missing microphone is **not** one of these: see the mute button above.
+- **Before every tool call it says *"One moment, please."***  A turn is often not one send but
+  a chain: the calendar agent reading Thunderbird's index, the Thunderbird agent searching a
+  mailbox, the paper docs agent looking in the scanner's folder — or **filing** a letter, which
+  is minutes — the browser agent photographing a page and having a model of its own read it.
+  Until the answer comes back there is nothing to hear, and the status line that says *"Reading
+  the web…"* is no use to somebody three steps from the screen, which is the whole reason this
+  agent talks. It is said **before each call**, because a turn is often several of them — a list
+  of mail and then one message off that list, a front page and then a page it pointed at — and
+  not twice within six seconds, since a second phrase would cut the first one off mid-word and
+  *"One mom– One moment, please"* sounds like a fault rather than a courtesy. The phrase is said
+  by the agent, so it is in the transcript with everything else it ever said out loud.
 - **While the model thinks, the line is not quite silent.** From the moment the recording stops
   to the moment something is said, the speaker JRock narrates on carries **the odd crackle** —
   the way an analogue line crackles: a scratch of a millisecond or twenty, every couple of

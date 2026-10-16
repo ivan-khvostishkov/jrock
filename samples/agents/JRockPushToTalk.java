@@ -215,6 +215,36 @@ public final class JRockPushToTalk {
     // more instead of answering.
     private static final String FAILED_ALOUD = "Something went wrong. Should I try again?";
 
+    // WHAT THE ROOM HEARS BEFORE A TOOL CALL, which is where a turn goes quiet.
+    //
+    // Every one of these asks another program for something, and none of them is quick:
+    // the calendar agent reads Thunderbird's index, the Thunderbird agent searches a
+    // mailbox, the paper docs agent looks in the scanner's folder - and files a letter,
+    // which is minutes - and the browser agent photographs a page and has a model of its
+    // own read it. Until now the operator let go of the button and nothing happened at
+    // all: the status line says "Reading the web...", and a status line is no use to
+    // somebody three steps from the screen, which is the whole reason this agent talks.
+    //
+    // Said BEFORE EACH CALL, because a turn is often several of them: a list of mail and
+    // then one message off that list, a front page and then a page it pointed at. Each
+    // one is another wait, and a wait nobody announced is a machine that has stopped
+    // working as far as the room can tell.
+    //
+    // A sentence with "please" in it rather than "Working" or a beep, for the reason
+    // FAILED_ALOUD is a sentence: this voice has been answering in sentences all day.
+    private static final String WAIT_ALOUD = "One moment, please.";
+
+    // Not twice inside this, though. Two calls that come straight after one another - a
+    // location looked up and then the weather for it - would have the second phrase cut
+    // the first one off mid-word, automationNarrate stopping whatever is playing, and
+    // "One mom- One moment, please" sounds like a fault rather than a courtesy.
+    private static final long WAIT_ALOUD_EVERY_MS = 6_000;
+
+    // When it was last said. One worker thread does every turn, so this is read and
+    // written on that thread alone; volatile because the window's thread may be the one
+    // that sees it next (see sayWait).
+    private static volatile long saidWaitAt;
+
     // What this agent is called in JRock's log, in front of every line it writes there -
     // its own reports, and the sentences it says out loud (see sayOwnWords). Given to
     // automationBegin, which keeps it and prefixes the notes with it: the name is said
@@ -1014,6 +1044,18 @@ public final class JRockPushToTalk {
         return silent;
     }
 
+    // Says WAIT_ALOUD out loud before a tool call, unless it has just been said (see
+    // WAIT_ALOUD_EVERY_MS). Says nothing about failing to say it except on the console:
+    // the phrase is a courtesy, and a turn must not end because a courtesy went
+    // unspoken - no speaker set on this JRock, or the one set unplugged.
+    private static void sayWait() {
+        long now = System.currentTimeMillis();
+        if (now - saidWaitAt < WAIT_ALOUD_EVERY_MS) return;
+        saidWaitAt = now;
+        String silent = sayOwnWords(WAIT_ALOUD);
+        if (silent != null) System.out.println("\"" + WAIT_ALOUD + "\" not read aloud: " + silent);
+    }
+
     // Says FAILED_ALOUD out loud, and returns what the status line should add about
     // saying it - null when it was said, the reason when it could not be (no speaker set
     // on this JRock, or the one set is not connected).
@@ -1066,6 +1108,11 @@ public final class JRockPushToTalk {
     // model's own request instead of an answer.
     private static String[] askAgent(int port, String line, String what, String file,
                                      int timeoutMs) {
+        // HERE, and not in each branch of the turn: this is the one method every tool
+        // call in this agent goes through - the calendar, the mail, the post, a web page,
+        // a location, the weather - so the announcement cannot be forgotten by whoever
+        // adds the next one.
+        sayWait();
         try (java.net.Socket agent = new java.net.Socket()) {
             agent.connect(new java.net.InetSocketAddress(
                     java.net.InetAddress.getLoopbackAddress(), port), AGENT_CONNECT_MS);
