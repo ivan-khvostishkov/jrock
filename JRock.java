@@ -6316,6 +6316,79 @@ public class JRock {
         };
         comp.addMouseListener(h);
         comp.addMouseMotionListener(h);
+        // A menu open over text freezes the text's selection (see freezeSelectionWhileOpen).
+        if (comp instanceof javax.swing.text.JTextComponent) {
+            freezeSelectionWhileOpen((javax.swing.text.JTextComponent) comp, menu);
+        }
+    }
+
+    // While this menu is open, the selection in the text under it does not move.
+    //
+    // THE CASE IS A FINGER, and on a touch screen it is every time: select a paragraph of
+    // the log, hold to open the menu, then slide down the items to "Export selected
+    // Markdown with images as DOCX...". That slide is, as far as the toolkit is concerned,
+    // a drag across the component the menu is sitting on - so it took the selection with
+    // it, and by the time the finger arrived at the item the selection the item was about
+    // to act on had shrunk to whatever was under the finger on the way. A paragraph
+    // selected carefully became a one-word document. There is no second pointer to hold
+    // the text still with, and no right-click that would leave the finger off the glass.
+    //
+    // A NAVIGATION FILTER is where this belongs rather than swallowing mouse events on
+    // the way in: every way a caret can move - a drag, an arrow key, a select from code -
+    // goes through setDot and moveDot, so one filter refuses all of them at once and
+    // there is no second path left for a toolkit to surprise us down. A filter already on
+    // the component is kept and delegated to.
+    //
+    // It is let go of as the menu CLOSES, and not after the chosen item has run: Swing
+    // clears the menu's path before it fires the item, so an item whose whole job is to
+    // move the caret - Select the last answer, Select all, Paste - still does.
+    private static void freezeSelectionWhileOpen(javax.swing.text.JTextComponent comp,
+                                                 javax.swing.JPopupMenu menu) {
+        javax.swing.text.NavigationFilter inner = comp.getNavigationFilter();
+        boolean[] frozen = { false };
+        comp.setNavigationFilter(new javax.swing.text.NavigationFilter() {
+            @Override public void setDot(FilterBypass bypass, int dot,
+                                         javax.swing.text.Position.Bias bias) {
+                if (frozen[0]) return;
+                if (inner != null) inner.setDot(bypass, dot, bias);
+                else super.setDot(bypass, dot, bias);
+            }
+
+            @Override public void moveDot(FilterBypass bypass, int dot,
+                                          javax.swing.text.Position.Bias bias) {
+                if (frozen[0]) return;
+                if (inner != null) inner.moveDot(bypass, dot, bias);
+                else super.moveDot(bypass, dot, bias);
+            }
+
+            // Not gated: this one ANSWERS a question (where would the caret go next)
+            // rather than moving anything, and the answer is wanted either way.
+            @Override public int getNextVisualPositionFrom(
+                    javax.swing.text.JTextComponent text, int pos,
+                    javax.swing.text.Position.Bias bias, int direction,
+                    javax.swing.text.Position.Bias[] biasRet)
+                    throws javax.swing.text.BadLocationException {
+                return inner != null
+                        ? inner.getNextVisualPositionFrom(text, pos, bias, direction, biasRet)
+                        : super.getNextVisualPositionFrom(text, pos, bias, direction, biasRet);
+            }
+        });
+        menu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent event) {
+                frozen[0] = true;
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent event) {
+                frozen[0] = false;
+            }
+
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent event) {
+                frozen[0] = false;
+            }
+        });
     }
 
     // Opens a popup menu on any press - a right-click, a left-click or a tap - for a
