@@ -2301,7 +2301,8 @@ the voice, so the microphone doesn't record the last answer as the next question
   log, and the fixed phrase is what gets spoken.
 - **The web.** When the whole answer is *"I need the web: …"* — `site zdnet.com`,
   `search <words>`, `docs <question with the product in it>`,
-  `follow <what to open> on <address>`, `links on <address>` — the agent asks
+  `follow <what to open> on <address>`, `links on <address>`,
+  `parcel <tracking number>` — the agent asks
   the [browser agent](#a-sixth-agent-the-web-by-looking-at-it-jrockbrowserjava) on
   `127.0.0.1:47474` and puts the Markdown it gets back into the next prompt. The slowest of
   them: a browser, a render, six photographs and a model. **Two layers, carrying
@@ -3006,7 +3007,34 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
 | `#docs how do I set a baseline grid in indesign` | a question looked up in a product's own documentation, by walking its labels |
 | `#follow the AI link on https://www.zdnet.com/news/` | the matching link on that page, found in its DOM |
 | `#links on https://www.zdnet.com/` | what else can be opened there, in words |
+| `#parcel 5500148972` | where a parcel is: the tracking page on parcelsapp.com, waited for and read |
 | `#hosts` | the list |
+
+#### Where is my parcel (`#parcel`)
+
+The one host here that is **asked a question** rather than read: `parcelsapp.com` takes a
+tracking number, asks the carriers, and puts what they say on one page — so the page *is* the
+answer, and a photograph of it read by a model is the whole of the work.
+
+**The address is the model's, not this code's.** Nothing in the agent knows what a
+parcelsapp.com tracking URL looks like, which is the same rule the [weather
+agent](#a-fourth-agent-weather-jrockweatherjava) follows for open-meteo: a URL built by
+concatenation in an agent is a URL somebody has to come back and edit in that file when the site
+moves its paths. `jrock-prompt-parcel-url.txt` beside the agent asks the model for the address
+that tracks this number, and what comes back is checked like any other — **https, and on the host
+list** — so a model that answers with somewhere else gets nowhere. The tracking number itself is
+checked to be letters, digits and dashes before it goes into a prompt.
+
+**And it waits for the tracking**, which is the part a news page never needs. The page arrives
+`complete` and **empty** and then fills in as each carrier answers, so the ordinary settle — *the
+same size twice* — is satisfied long before there is anything to read. For a parcel the agent
+waits up to **90 seconds**, until the **number is on the page** and the page has been the same
+size for **eight polls** (about three seconds) rather than two, because every carrier that
+answers changes it again. The log says which of those it got: settled, still changing when the
+time ran out, or the number never appearing at all.
+
+Push-to-talk reaches it with *"I need the web: parcel 5500148972"* — the number is the only thing
+passed on, the carrier is not named and no address is built anywhere but in the model.
 
 #### Looking something up in documentation (`#docs`)
 

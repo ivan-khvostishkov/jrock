@@ -963,7 +963,13 @@ public final class JRockPushToTalk {
                 // indesign". The words a model reaches for when the question is about a
                 // program it knows has a manual.
                 { "docs", "#docs" }, { "documentation", "#docs" }, { "manual", "#docs" },
-                { "help", "#docs" }, { "look up", "#docs" } }) {
+                { "help", "#docs" }, { "look up", "#docs" },
+                // A PARCEL, which is the one thing on that agent that is asked rather
+                // than read: a tracking number goes to parcelsapp.com, and what comes
+                // back is the tracking page read out as text.
+                { "parcel", "#parcel" }, { "track", "#parcel" },
+                { "tracking", "#parcel" }, { "parcelsapp", "#parcel" },
+                { "parcelsapp.com", "#parcel" } }) {
             if (lower.equals(shape[0])) return shape[1];
             if (lower.startsWith(shape[0] + " ")) {
                 return shape[1] + " " + asked.substring(shape[0].length()).trim();

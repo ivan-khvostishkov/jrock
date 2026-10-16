@@ -157,6 +157,11 @@ public final class JRockBrowser {
         "news9live.com",
         "officechai.com",
         "latestly.com",
+        // NOT A NEWS SITE: the one place here that is asked a question rather than read.
+        // parcelsapp.com tracks a parcel by its number, across the carriers, on one page
+        // - and the page is the answer, which is why it is read the same way a news page
+        // is: photographed, and the picture read by a model (see parcel).
+        "parcelsapp.com",
     };
 
     // PART OF A HOST, AND NOT THE HOST. The third kind of entry, between a whole host and
@@ -203,6 +208,30 @@ public final class JRockBrowser {
 
     // The prompt that turns the photograph into Markdown, beside this file.
     private static final String PROMPT = "jrock-prompt-page-to-markdown.txt";
+
+    // THE ADDRESS OF A TRACKING PAGE IS ASKED OF THE MODEL, not built here, and that is
+    // the same rule the weather agent follows: a URL assembled by string concatenation in
+    // an agent is a URL that has to be changed here when the site changes its paths, by
+    // somebody reading this file. The model knows what parcelsapp.com's tracking
+    // addresses look like; it is told the number and asked for the address, and what comes
+    // back is checked against the host list like any other (see parcel).
+    private static final String PARCEL_PROMPT = "jrock-prompt-parcel-url.txt";
+    private static final String NUMBER_PLACEHOLDER = "#number";
+
+    // A tracking number: letters, digits and the dashes some carriers put in them. Not a
+    // URL and not a path - what comes in is checked to be this and nothing else, because
+    // it goes into a prompt.
+    private static final java.util.regex.Pattern TRACKING =
+            java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9-]{3,39}");
+
+    // A TRACKING PAGE IS NOT READY WHEN IT HAS LOADED. The page arrives as a shell and
+    // then asks the carriers, which takes seconds to tens of seconds, so the ordinary
+    // settle - complete, and the same size twice - is satisfied long before there is
+    // anything to read. These are what it waits for instead: a minute and a half at the
+    // most, and the page the same size eight polls running (three seconds) rather than
+    // two, because every answer that arrives from a carrier changes it again.
+    private static final long PARCEL_TIMEOUT_MS = 90_000;
+    private static final int PARCEL_STABLE = 8;
 
     // What this agent remembers: where the browser is, and the two numbers worth
     // changing. Beside this file, like every other agent's settings.
@@ -486,10 +515,17 @@ public final class JRockBrowser {
                 return docs(rest);
             case "#links":
                 return links(rest);
+            case "#parcel":
+            case "#track":
+                if (rest.isEmpty()) {
+                    throw new Stop("#parcel wants a tracking number, as #parcel 5500148972.");
+                }
+                return parcel(rest);
             default:
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
                         + "#page <site or address>, #search <words>, #docs <question with "
-                        + "the product in it>, #follow <what to open>, #links or #hosts.");
+                        + "the product in it>, #follow <what to open>, #parcel <tracking "
+                        + "number>, #links or #hosts.");
         }
     }
 
@@ -609,6 +645,87 @@ public final class JRockBrowser {
                 + "\"indesign\", \"lightroom\", \"bedrock\". A search goes to DuckDuckGo. "
                 + "The list is in the agent's own source: nothing in a request can add "
                 + "to it.").toString();
+    }
+
+    // ---- A parcel, tracked -----------------------------------------------------------
+    // WHERE IS MY PARCEL, answered the same way everything else here is answered: by
+    // looking at a page. parcelsapp.com takes a tracking number, asks the carriers, and
+    // puts what they say on one page - so the page is the answer, and a photograph of it
+    // read by a model is the whole of the work.
+    //
+    // THE ADDRESS IS THE MODEL'S, NOT THIS CODE'S. Nothing here knows what a
+    // parcelsapp.com tracking URL looks like, and that is deliberate - the same rule the
+    // weather agent follows for open-meteo. A URL built by concatenation in an agent is a
+    // URL that somebody has to come back and edit in this file when the site moves its
+    // paths; a model asked "what is the address that tracks this number" answers today's.
+    // What comes back is checked like any other address - https, and on the host list -
+    // so a model that answers with somewhere else gets nowhere.
+    //
+    // AND IT WAITS FOR THE TRACKING, which is the part a news page never needs: the page
+    // arrives complete and empty and then fills in as each carrier answers (see the
+    // fetchInto that takes patience). Up to a minute and a half, until the number is on
+    // the page and the page has stopped changing.
+    private static String parcel(String asked) {
+        String number = asked.trim();
+        if (!TRACKING.matcher(number).matches()) {
+            throw new Stop("\"" + number + "\" is not a tracking number: letters, digits "
+                    + "and dashes, four characters or more.");
+        }
+        Path prompt = ownDirectory().resolve(PARCEL_PROMPT);
+        if (!Files.isRegularFile(prompt)) {
+            throw new Stop("there is no " + prompt + ", and that prompt is what asks the "
+                    + "model for the tracking address.");
+        }
+        String text = textOf(prompt);
+        if (text == null) throw new Stop(prompt + " could not be read.");
+        later(() -> say("Asking the model for the tracking address for " + number + "…"));
+        check(JRock.automationClearPrompt());
+        check(JRock.automationSetPrompt(text.replace(NUMBER_PLACEHOLDER, number)));
+        JRock.Sent sent = JRock.automationSend(SEND_TIMEOUT_MS);
+        if (!sent.ok()) {
+            throw new Stop("the model did not answer with an address: "
+                    + (sent.failure() == null ? "no reason given" : sent.failure()));
+        }
+        Path file = JRock.automationMessageFile("assistant", sent.assistant());
+        if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
+        String reply = textOf(file);
+        if (reply == null) throw new Stop("the reply could not be read.");
+        java.util.regex.Matcher found =
+                java.util.regex.Pattern.compile("https://\\S+").matcher(reply);
+        if (!found.find()) {
+            throw new Stop("the model's reply has no address in it: \"" + reply.trim() + "\".");
+        }
+        String url = found.group().replaceAll("[.,;:!?)\\]\"']+$", "");
+        String site = checkedHost(url, " for a parcel");
+        later(() -> say("Tracking " + number + " at " + url + " (" + site
+                + " is on the list)."));
+
+        java.util.function.Consumer<String> note = said -> later(() -> say(said));
+        WebSocket live = browserSocket(note);
+        String tab = tab(live, site(url));
+        note.accept("Using the tab for " + site(url) + ".");
+        String landed = fetchInto(live, tab, url, note, PARCEL_TIMEOUT_MS, PARCEL_STABLE,
+                number);
+        Page page = photograph(live, tab, landed, note);
+        later(() -> say("Reading the tracking from its picture…"));
+        String markdown = toMarkdown(page);
+        return "Parcel: " + number
+                + "\nSite: " + page.site
+                + (page.title.isEmpty() ? "" : "\nPage: " + page.title)
+                + "\nURL: " + page.url + "   (for your next request - never read an address "
+                + "out loud)\n\n" + markdown
+                + "\n\n(This is what the tracking page showed. If it shows nothing yet, the "
+                + "carriers had not answered: say so, and the operator can ask again in a "
+                + "few minutes.)";
+    }
+
+    // One text file as a string, or null when it will not read.
+    private static String textOf(Path file) {
+        try {
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        } catch (IOException cannotRead) {
+            return null;
+        }
     }
 
     // A page, read: photographed, and then read out of the photograph by a model.
@@ -1350,18 +1467,35 @@ public final class JRockBrowser {
     // thing a site may do at any moment. Returns the address it ended on.
     private static String fetchInto(WebSocket live, String tab, String url,
                                     java.util.function.Consumer<String> note) {
+        return fetchInto(live, tab, url, note, LOAD_TIMEOUT_MS, 2, null);
+    }
+
+    // The same, with the patience spelled out: how long at the most, how many polls the
+    // page has to be the same size for, and a word that has to be ON the page before any
+    // of that counts (null for none).
+    //
+    // THE THIRD ONE IS WHAT A TRACKING PAGE NEEDS. A page that asks somebody else a
+    // question - the carriers, in parcelsapp.com's case - arrives complete and empty, and
+    // "complete, and the same size twice" is then true of a page with nothing on it. The
+    // number being tracked is the one thing that is certain to be there when there is
+    // something to read, so it is waited for; and the stability window is longer, because
+    // every carrier that answers changes the page again.
+    private static String fetchInto(WebSocket live, String tab, String url,
+                                    java.util.function.Consumer<String> note,
+                                    long timeoutMs, int stable, String needle) {
         long started = System.currentTimeMillis();
         String failed = jsonString(call(live, tab, "Page.navigate",
                 "{\"url\":" + quote(url) + "}"), "errorText");
         if (!failed.isEmpty()) throw new Stop("the browser could not open it: " + failed);
 
         // Loaded is not the same as finished: a page that is still filling itself in
-        // keeps changing size. Both have to be true - complete, and the same twice - or
-        // ten seconds have to have passed.
+        // keeps changing size. Both have to be true - complete, and the same size for as
+        // many polls as the caller asked for - or the time has to run out.
         String state = "";
         String measured = "";
         int same = 0;
-        while (System.currentTimeMillis() - started < LOAD_TIMEOUT_MS) {
+        boolean shows = needle == null || needle.isEmpty();
+        while (System.currentTimeMillis() - started < timeoutMs) {
             sleep(SETTLE_POLL_MS);
             state = evaluate(live, tab, "document.readyState");
             String now = evaluate(live, tab, "String(document.documentElement."
@@ -1369,11 +1503,19 @@ public final class JRockBrowser {
                     + "document.body.innerHTML.length : 0)");
             same = now.equals(measured) ? same + 1 : 0;
             measured = now;
-            if ("complete".equals(state) && same >= 2) break;
+            if (!shows) {
+                shows = "1".equals(evaluate(live, tab, "(document.body && "
+                        + "document.body.innerText.indexOf(" + quote(needle)
+                        + ") >= 0) ? '1' : '0'"));
+            }
+            if ("complete".equals(state) && same >= stable && shows) break;
         }
         note.accept("Loaded in " + (System.currentTimeMillis() - started)
                 + " ms (readyState " + state
-                + (same >= 2 ? ", settled)." : ", still changing when time ran out)."));
+                + (needle == null || needle.isEmpty() ? ""
+                   : shows ? ", \"" + needle + "\" is on the page"
+                           : ", \"" + needle + "\" never appeared")
+                + (same >= stable ? ", settled)." : ", still changing when time ran out)."));
 
         String landed = evaluate(live, tab, "location.href");
         if (landed.isEmpty()) landed = url;

@@ -1,0 +1,5 @@
+Tell me the web address on parcelsapp.com that tracks the parcel with the number below, in English. It will be opened as it is, in a browser, by a program - so it has to be the page that shows the tracking itself, not a search page and not the site's front page.
+
+Reply with the address alone, on one line, with nothing before or after it.
+
+Parcel number: #number
