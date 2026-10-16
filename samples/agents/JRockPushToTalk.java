@@ -636,6 +636,13 @@ public final class JRockPushToTalk {
                     note = "Post not read: " + letters[1];
                     break;
                 }
+                // FILED, AND SAID SO AT ONCE, in this agent's own voice (see sayFiled).
+                // Filing takes minutes and ends in one thing the operator wants to hear:
+                // what the letter is now called. Waiting for the model to phrase that -
+                // which is what the next send does - means waiting again, and if that
+                // send or this socket goes wrong they are told nothing at all about a
+                // letter that IS filed.
+                if (postAsked.startsWith(FILING_REQUEST)) sayFiled(letters[0]);
                 check(JRock.automationClearPrompt());
                 if (letters[0].startsWith(CONTENT)) {
                     String problem = includeDocument(letters[0]);
@@ -708,18 +715,25 @@ public final class JRockPushToTalk {
         // anyone listening, however well the request itself went: reading it out loud
         // would be silence, which is the one thing a spoken answer cannot be.
         //
-        // A reply that is STILL a request is the same kind of failure. "I need your mail:
-        // message 0d613e" read out to somebody who asked what their post says is the
-        // machine talking to itself, and they are still waiting for the answer. So it is
-        // shown, because it says what the model wanted, and the fixed phrase is what they
-        // hear - the one they already know means "say it again".
-        if (reply.isBlank() || stuck != null) {
-            if (stuck != null) report("that turn ended without an answer: " + stuck + ".");
+        // A reply that is STILL A REQUEST is the same kind of failure, and it is now
+        // CAUGHT rather than described (see requestIn). "I need the post: file it" read
+        // out to somebody who asked for their letter to be filed is the machine talking
+        // to itself - and the letter may well have been filed, which makes it worse
+        // rather than better. It happens when a tool call comes back empty or late: the
+        // loop breaks with the model's own request still in hand, and until now that
+        // request was what got read aloud. So it is SHOWN, because it says what the model
+        // wanted, and the fixed phrase is what they hear - the one they already know
+        // means "say it again".
+        String asking = requestIn(reply);
+        if (reply.isBlank() || stuck != null || asking != null) {
+            String why = stuck != null ? stuck
+                    : asking != null ? "the model was still asking for " + asking : null;
+            if (why != null) report("that turn ended without an answer: " + why + ".");
             return join(note, alarm, event, moved, drafted, noted, saved,
-                    reply.isBlank() ? "The reply was empty." : "No answer: " + stuck + ".",
+                    reply.isBlank() ? "The reply was empty." : "No answer: " + why + ".",
                     sayFailed());
         }
-        String silent = sayAnswer(reply);
+        String silent = sayAnswer();
         return join(note, alarm, event, moved, drafted, noted, saved,
                 silent == null ? null : "Not read aloud: " + silent);
     }
@@ -1011,37 +1025,159 @@ public final class JRockPushToTalk {
     // transcript holds everything that was ever said, in order, with the conversation
     // around it - and the window shows the very words while they are being spoken.
     //
-    // THE ANSWER IS ALREADY THERE, and that is the difference between the two methods
-    // below. It was written down a second time as a gray line and the gray copy was what
-    // got selected, so every answer appeared twice in the window somebody was reading:
-    // once as the model's answer, once as a gray repetition of it underneath. The answer
-    // is selected where it stands now, and the gray lines are left for what is NOT in the
-    // log - this agent's own sentences.
+    // THERE ARE EXACTLY TWO THINGS WORTH SAYING, and one call for each: the model's last
+    // answer, which is already in the log as a dialog message, and this agent's own last
+    // note, which is a gray line it wrote itself. Neither takes any text - the thing to
+    // say is identified by WHERE IT IS - so a sentence that differs by a newline or a
+    // space from what was written cannot be selected as nothing and then said as nothing.
     //
-    // Which also made narration work where it did not: in "Dialog only" the window shows
-    // no gray lines at all, and what is not shown cannot be selected or read out.
-    private static String sayAnswer(String reply) {
-        return narrateFromLog(reply);
+    // The answer is selected where it stands, not written down again: a gray copy of
+    // every answer underneath the answer made the window show each of them twice, and in
+    // "Dialog only" - which shows no gray lines at all - the copy could not be selected
+    // or read out.
+    private static String sayAnswer() {
+        return narrateSelection(JRock.automationSelectLastAnswer());
     }
 
     // This agent's OWN words, which are nowhere until it writes them: the fixed phrase a
-    // failed turn ends with, and anything else it has to say for itself. Written with its
-    // name in front (automationNote with an agent), and only the words after the name are
-    // narrated - "Push-to-talk:" is for whoever reads the transcript.
+    // failed turn ends with, "One moment, please", what became of a letter. Written with
+    // its name in front (automationNote with an agent), and only the words after the name
+    // are narrated - "Push-to-talk:" is for whoever reads the transcript.
     private static String sayOwnWords(String words) {
         String problem = JRock.automationNote(words);
         if (problem != null) return problem;
-        return narrateFromLog(words);
+        return narrateSelection(JRock.automationSelectLastNote());
     }
 
-    // The selection goes afterwards, because the log scrolls nowhere while one exists:
-    // leaving it would stop the window following the conversation it is reading out.
-    private static String narrateFromLog(String words) {
-        String problem = JRock.automationSelectInLog(words);
+    // Reads whatever one of those two selected, and lets the selection go afterwards:
+    // the log scrolls nowhere while a selection exists, so leaving it would stop the
+    // window following the conversation it has just read out.
+    private static String narrateSelection(String problem) {
         if (problem != null) return problem;
         String silent = JRock.automationNarrate();
         JRock.automationClearLogSelection();
         return silent;
+    }
+
+    // WHAT BECAME OF A FILED LETTER, said out loud as soon as the filing comes back.
+    //
+    // The paper docs agent answers a filing request with four lines - "Filed: <name>",
+    // "Scanned: <when>", "Files renamed: <n>", and how to ask about it - and the one
+    // thing the operator standing by the scanner wants is the first of them. They asked
+    // for a letter to be filed, heard "One moment, please", and then waited minutes
+    // through Ghostscript, xpdf and three model passes.
+    //
+    // THE NAME IS SPOKEN AS WORDS AND NOT READ OUT AS A FILE NAME (see readableName):
+    // "2026-06-14-DHL-FollowUpOnParcelDelivery-5281883217" is a date, a counterparty, a
+    // title and a document number, and said as it is written it is noise.
+    private static void sayFiled(String answer) {
+        String name = lineAfter(answer, "Filed:");
+        if (name == null || name.isBlank()) return;   // not a filing answer after all
+        String silent = sayOwnWords("Filed as " + readableName(name) + ".");
+        if (silent != null) System.out.println("What was filed, not read aloud: " + silent);
+    }
+
+    // The rest of the line that starts with label, or null when there is none.
+    private static String lineAfter(String text, String label) {
+        for (String line : (text == null ? "" : text).split("\\R")) {
+            String said = line.trim();
+            if (said.regionMatches(true, 0, label, 0, label.length())) {
+                return said.substring(label.length()).trim();
+            }
+        }
+        return null;
+    }
+
+    // A document's file name as something to say out loud: the inventory name's four
+    // parts, each in the form a voice can read.
+    //
+    //     2026-06-14-DHL-FollowUpOnParcelDelivery-5281883217
+    //  -> "DHL, Follow Up On Parcel Delivery, 14 June 2026, document number
+    //      5 2 8 1 8 8 3 2 1 7"
+    //
+    // The DATE first off the front, because an ISO date read aloud is "two thousand and
+    // twenty-six dash zero six"; the ten-digit NUMBER off the end, spaced into single
+    // digits, because a reference number read as a number ("five billion two hundred and
+    // eighty-one million...") is a number nobody can write down; the COUNTERPARTY as it
+    // stands, being an abbreviation somebody chose to be said; and the TITLE split at its
+    // capitals, which is what CamelCase is for.
+    //
+    // A name that is not in that shape - a document filed before this convention, or one
+    // renamed by hand - has its hyphens read as spaces and its capitals split, which is
+    // worse than nothing in no case and better in most.
+    private static String readableName(String name) {
+        String rest = name.trim();
+        String date = null;
+        java.util.regex.Matcher iso =
+                java.util.regex.Pattern.compile("^(\\d{4}-\\d{2}-\\d{2})-(.*)$").matcher(rest);
+        if (iso.matches()) {
+            date = spokenDate(iso.group(1));
+            rest = iso.group(2);
+        }
+        String number = null;
+        String suffix = null;
+        // The number, and after it the suffix one file of a document may carry - "-en"
+        // for a translation, "-SA" for the signed copy with its appendices scanned. A
+        // filing answer names the document itself and so carries none, but a name typed
+        // in by hand may, and a number read as part of a word is a number lost.
+        java.util.regex.Matcher tail = java.util.regex.Pattern
+                .compile("^(.*)-(\\d{10})([-_][A-Za-z0-9]+)?$").matcher(rest);
+        if (tail.matches()) {
+            rest = tail.group(1);
+            number = spacedDigits(tail.group(2));
+            suffix = tail.group(3) == null ? null : tail.group(3).substring(1);
+        }
+        StringBuilder said = new StringBuilder();
+        int dash = rest.indexOf('-');
+        if (dash > 0) {
+            said.append(rest, 0, dash).append(", ").append(spacedWords(rest.substring(dash + 1)));
+        } else {
+            said.append(spacedWords(rest));
+        }
+        if (date != null) said.append(", ").append(date);
+        if (number != null) said.append(", document number ").append(number);
+        if (suffix != null) said.append(", ").append(suffix);
+        return said.toString();
+    }
+
+    // "2026-06-14" -> "14 June 2026". In English, as every phrase this agent says of its
+    // own is (see FAILED_ALOUD): the answers are in the operator's language because the
+    // model writes them, and these are not the model's.
+    private static String spokenDate(String iso) {
+        try {
+            return java.time.LocalDate.parse(iso).format(java.time.format.DateTimeFormatter
+                    .ofPattern("d MMMM yyyy", java.util.Locale.ENGLISH));
+        } catch (java.time.format.DateTimeParseException notADate) {
+            return iso;
+        }
+    }
+
+    // "5281883217" -> "5 2 8 1 8 8 3 2 1 7", which is how a voice reads out a reference.
+    private static String spacedDigits(String digits) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < digits.length(); i++) {
+            out.append(i == 0 ? "" : " ").append(digits.charAt(i));
+        }
+        return out.toString();
+    }
+
+    // "FollowUpOnParcelDelivery-en" -> "Follow Up On Parcel Delivery en": the hyphens as
+    // spaces, and a space before a capital that follows a lower-case letter or a digit.
+    private static String spacedWords(String text) {
+        String words = text.replace('-', ' ').replace('_', ' ');
+        return words.replaceAll("(?<=[a-z0-9])(?=[A-Z])", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    // What the answer is still ASKING for, in two words, or null when it is an answer.
+    private static String requestIn(String answer) {
+        String said = answer == null ? "" : answer.trim();
+        if (LOCATION_REQUEST.matcher(said).matches()) return "the location";
+        if (WEATHER_REQUEST.matcher(said).matches()) return "the weather";
+        if (CALENDAR_REQUEST.matcher(said).matches()) return "the calendar";
+        if (MAIL_REQUEST.matcher(said).matches()) return "the mail";
+        if (WEB_REQUEST.matcher(said).matches()) return "the web";
+        if (POST_REQUEST.matcher(said).matches()) return "the post";
+        return null;
     }
 
     // Says WAIT_ALOUD out loud before a tool call, unless it has just been said (see

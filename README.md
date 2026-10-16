@@ -1506,8 +1506,9 @@ the PDF's text, in reading order, rather than pictures of it.
 
 **Nothing is said aloud that is not written down.** `automationNarrate()` takes no text: it
 reads whatever is selected in the log, exactly as the menu item does. An agent that wants to say
-something therefore has it in the log, selects it (`automationSelectInLog`), narrates, and lets
-the selection go (`automationClearLogSelection`) — and the reason is the transcript. A spoken answer
+something therefore has it in the log, selects it (`automationSelectLastNote` for its own words,
+`automationSelectLastAnswer` for the model's), narrates, and lets the selection go
+(`automationClearLogSelection`) — and the reason is the transcript. A spoken answer
 with no record of it is the one kind of output this machine cannot account for afterwards; now the
 log holds everything JRock has ever said out loud, in order, with the conversation around it, and
 the window shows the very words while they are being spoken.
@@ -2137,6 +2138,16 @@ the voice, so the microphone doesn't record the last answer as the next question
   not twice within six seconds, since a second phrase would cut the first one off mid-word and
   *"One mom– One moment, please"* sounds like a fault rather than a courtesy. The phrase is said
   by the agent, so it is in the transcript with everything else it ever said out loud.
+- **A filed letter is announced as soon as it is filed**, in the agent's own voice: *"Filed as
+  DHL, Follow Up On Parcel Delivery, 14 June 2026, document number 5 2 8 1 8 8 3 2 1 7."* Filing
+  drives the whole [doc inventory flow](#automating-the-chain-jrockdocinventoryjava) and takes
+  minutes, and it ends in the one thing the operator by the scanner wants to hear: what the
+  letter is called now. Waiting for the model to phrase that — which is what the next send does —
+  means waiting again, and if that send or the socket goes wrong they are told nothing at all
+  about a letter that **is** filed. The name is said **as words**: the date out of the front (an
+  ISO date read aloud is *"two thousand and twenty-six dash zero six"*), the ten-digit number off
+  the end and spoken digit by digit (a reference read as a number is one nobody can write down),
+  the counterparty as it stands, and the title split at its capitals.
 - **While the model thinks, the line is not quite silent.** From the moment the recording stops
   to the moment something is said, the speaker JRock narrates on carries **the odd crackle** —
   the way an analogue line crackles: a scratch of a millisecond or twenty, every couple of
@@ -2228,6 +2239,13 @@ the voice, so the microphone doesn't record the last answer as the next question
   **"Something went wrong. Should I try again?"** and the window shows what the model kept asking for — because
   *"I need your mail: message 0d613e"*, read out to somebody who asked what their post says, is
   the machine talking to itself while they are still waiting.
+
+  **And a turn that ends on a request is never read out**, however it got there. The one that
+  found this: a letter was filed, the paper docs agent took longer than its socket allowed to say
+  so, the loop broke with the model's *"I need the post: file it"* still in hand — and that was
+  what the room heard, about a letter that had in fact been filed. A reply that still matches one
+  of these request shapes is now treated as the failure it is: shown in the window, named in the
+  log, and the fixed phrase is what gets spoken.
 - **The web.** When the whole answer is *"I need the web: …"* — `site zdnet.com`,
   `search <words>`, `docs <question with the product in it>`,
   `follow <what to open> on <address>`, `links on <address>` — the agent asks
@@ -3494,7 +3512,7 @@ String   automationMergeDuplex(String front, String back, String out)
 // Saying things, and being read afterwards
 String   automationNote(String line)                          // named by automationBegin
 String   automationSelectLastAnswer()
-String   automationSelectInLog(String text)
+String   automationSelectLastNote()
 String   automationClearLogSelection()
 String   automationNarrate()
 boolean  automationStopNarration()
@@ -3547,12 +3565,12 @@ nothing more subtle than that. What each one does, in full:
 | `automationMicReady()` | Whether there is a microphone to listen on **right now** — `null` when there is, and otherwise why not, including the one answer a listening loop cannot work out for itself: the microphone set is **not connected**. A quiet room and an unplugged microphone look identical to `automationAwaitHeard`, and they mean opposite things. |
 | `automationNarrate()` | Reads **the log's selection** aloud: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when nothing is selected, when no device is set, or when it isn't connected. **Takes no text** — see below. (Windows) |
 | `automationSelectLastAnswer()` | Selects **the whole of the last answer** — the body of the most recent assistant message, without the role header above it or the gray lines under it. `Ctrl+Shift+A` by hand. The one to reach for: the answer is found by **where it is** rather than by its text, so nothing is passed in, nothing has to match, and a flow cannot miss it by a trailing newline or by the ``` fence the model put round it. Refuses when nothing has been answered yet. |
-| `automationSelectInLog(String text)` | Selects the last place that text appears in the log — the model's answer where it stands, or a line `automationNote` has just put there. Refuses when it is not there (*Dialog only* hides gray lines). |
+| `automationSelectLastNote()` | Selects **the last line `automationNote` wrote** — its words alone, without the agent's name that goes in front of them in the log. The other half of the pair: there are exactly two things worth saying aloud, the model's last answer and the agent's own last note, and **neither call takes any text**. It replaced `automationSelectInLog(String)`, which took any string and looked for the last place it appeared: an agent had to hand back a copy of what it had just written, and a copy differing by a newline, a space or a ``` fence selected nothing and was then narrated as nothing. Refuses when nothing has been noted (and *Dialog only* hides gray lines). |
 | `automationClearLogSelection()` | Lets the selection go and follows the end of the conversation again — the log scrolls nowhere while a selection exists. |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns a **`Sent`**: `ok()`, `failure()`, and the two moments it wrote as `LocalDateTime`s — which is what `automationMessageFile` takes, so nothing has to be parsed on the way. |
 | `automationMessageFile(String role, LocalDateTime stamp)` | The **absolute `Path`** of one `JRock/messages/` file, or `null` when there is none. `role` is `"operator"` or `"assistant"`; the stamp is one of the two `Sent` hands back, so there is no text to parse in either direction. |
-| `automationExportSelectionDocx(String file)` | **The log's own selection** as a DOCX — `Ctrl+Shift+D` through the API, and the third of the trio narration already uses: `automationSelectInLog`, this, `automationClearLogSelection`. The selection is **left as it was found**, an automation being the one that knows when it has finished with it. Refuses when nothing is selected. |
+| `automationExportSelectionDocx(String file)` | **The log's own selection** as a DOCX — `Ctrl+Shift+D` through the API, and the third of the trio narration already uses: `automationSelectLastAnswer`, this, `automationClearLogSelection`. The selection is **left as it was found**, an automation being the one that knows when it has finished with it. Refuses when nothing is selected. |
 | `automationExportPromptDocx(String file)` | **What the prompt holds** — or its selection, when it has one. Where an automation's own text goes: there is no call that takes Markdown as an argument, because an export is of something the window is **showing**, and a document nobody can see on screen is one nobody can check before it is written. No model, no send, nothing cleared: the prompt is a sheet of paper here. It is what `Ctrl+Shift+D` does by hand when the selection is the prompt's, offered to an automation that has written something and wants it as a file. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
 | `automationMergeDuplex(front, back, out)` | **Merge two-sided scans**: the same interleave as the window menu — front 1, back N, front 2, back N−1 — with the two dialogs replaced by three arguments. Both passes must have the same page count, or one of them is not the file it was taken for; refused rather than guessed at, since the mistake it makes is every back page against the wrong front. No dialog either way: an automation that cannot press OK must not be shown one. The two scans are left exactly as they were. |

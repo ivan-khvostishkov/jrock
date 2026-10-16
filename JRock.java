@@ -4545,11 +4545,11 @@ public class JRock {
         /** Reads the log's selection aloud, on the speaker in Configure. Null, or why not. */
         String automationNarrate();
 
-        /** Selects the last place that text appears in the log. Null, or why it is not there. */
-        String automationSelectInLog(String text);
-
         /** Selects the whole of the last answer in the log. Null, or why there is none. */
         String automationSelectLastAnswer();
+
+        /** Selects the last line automationNote wrote. Null, or why there is none. */
+        String automationSelectLastNote();
 
         /** Lets the log's selection go, so it follows the conversation again. Null, or why not. */
         String automationClearLogSelection();
@@ -4626,11 +4626,11 @@ public class JRock {
             return JRock.automationStopRecording(timeoutMillis);
         }
         @Override public String automationNarrate() { return JRock.automationNarrate(); }
-        @Override public String automationSelectInLog(String text) {
-            return JRock.automationSelectInLog(text);
-        }
         @Override public String automationSelectLastAnswer() {
             return JRock.automationSelectLastAnswer();
+        }
+        @Override public String automationSelectLastNote() {
+            return JRock.automationSelectLastNote();
         }
         @Override public String automationClearLogSelection() {
             return JRock.automationClearLogSelection();
@@ -5103,6 +5103,9 @@ public class JRock {
         // is prefixed with it, so an agent names itself once here rather than in every
         // line (see automationNote).
         automationName = what == null ? "" : what.trim();
+        // A new run has said nothing yet: the last note of the run before it is not this
+        // one's to select, however recently it was written (see automationSelectLastNote).
+        lastNote = null;
         setMicMuted(true);
         onEdt(() -> {
             live.input.setEditable(false);
@@ -5522,7 +5525,7 @@ public class JRock {
 
     /**
      * THE LOG'S OWN SELECTION as a DOCX: the third of the trio an automation already has
-     * for narration - {@link #automationSelectInLog(String)}, this, and
+     * for narration - {@link #automationSelectLastAnswer()}, this, and
      * {@link #automationClearLogSelection()} - and the keyboard's <em>Ctrl+Shift+D</em>
      * through the API.
      *
@@ -5544,7 +5547,7 @@ public class JRock {
         onEdt(() -> selected[0] = live.log.selectedText());
         if (selected[0] == null || selected[0].isBlank()) {
             return "nothing is selected in the log - select what is to be exported first "
-                    + "(automationSelectInLog).";
+                    + "(automationSelectLastAnswer).";
         }
         Path target = Paths.get(file).toAbsolutePath().normalize();
         String failure = writeMarkdownExport(live.log, selected[0], true, false,
@@ -5703,7 +5706,7 @@ public class JRock {
     // could speak words that appear nowhere, and a spoken answer with no record of it is
     // the one kind this machine must not produce. An agent says what it means to say the
     // way a person would: put it in the log (automationNote), select it
-    // (automationSelectInLog), narrate, and let the selection go
+    // (automationSelectLastNote), narrate, and let the selection go
     // (automationClearLogSelection). The transcript then holds everything JRock has said out
     // loud, in order, with the rest of the conversation around it.
     //
@@ -5731,7 +5734,8 @@ public class JRock {
         onEdt(() -> selected[0] = live.log.selectedText());
         if (selected[0] == null) {
             return "nothing is selected in the log - put what is to be said there and "
-                    + "select it first (automationNote, automationSelectInLog).";
+                    + "select it first (automationNote + automationSelectLastNote, or "
+                    + "automationSelectLastAnswer).";
         }
         String text = narrationText(selected[0]);
         if (text.isBlank()) return "there is nothing to narrate - the text is only markup.";
@@ -5753,9 +5757,9 @@ public class JRock {
     // a flow - keep the reply, take the fence off it, hand the text back to be found
     // again - become one.
     //
-    // automationSelectInLog stays, and is not the same thing: it selects any text, which
-    // is how an agent narrates ITS OWN words (automationNote writes a gray line, and a
-    // gray line is nobody's answer). See the pair of them in JRockPushToTalk.
+    // Its pair is automationSelectLastNote below, for the other thing there is to say out
+    // loud: an agent's OWN words. Between them there is nothing left for a call that took
+    // arbitrary text to do.
     public static String automationSelectLastAnswer() {
         String problem = requireAutomation();
         if (problem != null) return problem;
@@ -5765,26 +5769,40 @@ public class JRock {
         return found[0] ? null : "there is no answer in the log to select.";
     }
 
-    // Selects the last place that text appears in the log, which is where a line just
-    // written with automationNote is. Returns null, or why it could not be found - in
-    // "Dialog only" mode a gray line is not shown at all, and what is not shown cannot
-    // be selected or narrated.
+    // Selects THE LAST LINE automationNote WROTE - its words alone, without the agent's
+    // name in front of them. Returns null, or why there is nothing to select.
     //
-    // The pair of this and automationClearLogSelection exists so that narration has a
-    // SOURCE rather than an argument: the window shows what is being said while it is
-    // being said, and the transcript keeps it afterwards.
+    // Which is the other half of narration having a SOURCE rather than an argument: an
+    // agent says something of its own by writing it down (automationNote), selecting it,
+    // narrating, and letting the selection go - so the transcript holds everything the
+    // machine has ever said out loud, in order, with the conversation around it, and the
+    // window shows the very words while they are being spoken.
     //
-    // For an ANSWER, automationSelectLastAnswer above is the one to call: it needs no
-    // text at all, and cannot be defeated by a fence or a newline.
-    public static String automationSelectInLog(String text) {
+    // THIS REPLACED automationSelectInLog(String), which took any text and looked for the
+    // last place it appeared. That was one call doing two jobs with one hand tied: an
+    // agent had to hand back a copy of what it had just written, and a copy that differed
+    // by a newline, a trailing space or a ``` fence selected nothing and was narrated as
+    // nothing. There are exactly two things worth saying aloud - the model's last answer
+    // and the agent's own last note - and each of them now has a call that cannot be
+    // handed the wrong string, because it is handed no string at all.
+    //
+    // The name goes in the log and NOT into the narration (see automationNote): "Push to
+    // talk:" in front of every sentence is for whoever reads the transcript afterwards,
+    // not for the room.
+    public static String automationSelectLastNote() {
         String problem = requireAutomation();
         if (problem != null) return problem;
-        if (text == null || text.isBlank()) return "there is no text to select.";
+        String words = lastNote;
+        if (words == null || words.isBlank()) {
+            return "nothing has been noted yet, so there is nothing to select "
+                    + "(automationNote writes the line this selects).";
+        }
         Ui live = ui;
         boolean[] found = { false };
-        onEdt(() -> found[0] = live.log.selectLast(text.trim()));
+        onEdt(() -> found[0] = live.log.selectLast(words.trim()));
         return found[0] ? null
-                : "that text is not in the log as it stands (Dialog only hides gray lines).";
+                : "the last note is not in the log as it stands (Dialog only hides gray "
+                  + "lines).";
     }
 
     // Lets the selection go, and follows the end of the conversation again. Returns null.
@@ -6111,8 +6129,14 @@ public class JRock {
     public static String automationNote(String line) {
         String name = automationName;
         String said = line == null ? "" : line;
+        // Kept for automationSelectLastNote, which is how this line gets read out loud:
+        // the WORDS, without the name written in front of them in the log.
+        lastNote = said;
         return note(name.isEmpty() ? said : name + ": " + said);
     }
+
+    // What the last automationNote wrote, its own words alone (see automationSelectLastNote).
+    private static volatile String lastNote;
 
     // Leaves automation mode: the prompt is editable again, Send is released, and Mic
     // always on listens again if it is set to. note finishes the sentence "Automation

@@ -118,11 +118,16 @@ class JRockAutomationDocTest extends JRockGuiFixture {
             assertThat(JRock.automationNarrate())
                     .describedAs("narrating with nothing selected").isNotNull();
 
-            // The three steps an agent takes instead of handing over a string.
-            // Named, because a note takes its author now: the name is written in
-            // front of the words, and the words alone are what gets selected.
+            // The three steps an agent takes instead of handing over a string. Note,
+            // select, narrate - and the select takes NO text: there is one call for the
+            // agent's own last note and one for the model's last answer, so a sentence
+            // that differs by a space from what was written cannot be selected as
+            // nothing and said as nothing.
+            //
+            // Named, because a note takes its author: the name is written in front of
+            // the words in the log, and the words alone are what gets selected.
             assertThat(JRock.automationNote(words)).isNull();
-            assertThat(JRock.automationSelectInLog(words)).isNull();
+            assertThat(JRock.automationSelectLastNote()).isNull();
             assertThat(logPane().text())
                     .describedAs("what was to be said is in the transcript").contains(words);
             assertThat(logPane().target().getSelectedText())
@@ -134,9 +139,10 @@ class JRockAutomationDocTest extends JRockGuiFixture {
             assertThat(logPane().target().getSelectedText())
                     .describedAs("the selection after clearing it").isNull();
 
-            // A line that was never logged cannot be selected, so it cannot be said.
-            assertThat(JRock.automationSelectInLog("something nobody ever wrote"))
-                    .describedAs("selecting text that is not in the log").isNotNull();
+            // And with nothing answered in this log, there is no answer to select -
+            // the other half of the pair, which refuses rather than selecting the note.
+            assertThat(JRock.automationSelectLastAnswer())
+                    .describedAs("selecting an answer in a log that has none").isNotNull();
         } finally {
             JRock.automationEnd("done");
         }
