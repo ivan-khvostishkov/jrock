@@ -2124,13 +2124,26 @@ the voice, so the microphone doesn't record the last answer as the next question
   is in JRock's transcript either way.
 - **The recording comes first in the prompt.** That is what Voxtral wants (see
   [what an audio include is sent as](#what-an-audio-include-is-sent-as)): it takes a recording as the question and answers it.
-  After it comes **the appendix**, `jrock-prompt-push-to-talk-appendix.txt` beside the agent,
-  with `#now` in it replaced by the time the question was asked, e.g. `Friday, 25 September
-  2026, 10:01:34 Europe/Berlin (Central European Summer Time, CEST, UTC+02:00)` — the date,
-  the day of the week and the time zone in full, in English. Voxtral does not work with
+  After it come **the three parts of the appendix** — `jrock-prompt-ptt-answering.txt`
+  (how to answer), `-asking.txt` (what it may ask for) and `-doing.txt` (the sentences that make
+  something happen), beside the agent — and then the time, on the last line: `Friday, 25
+  September 2026, 10:01:34 Europe/Berlin (Central European Summer Time, CEST, UTC+02:00)`, the
+  date, the day of the week and the time zone in full, in English. Voxtral does not work with
   JRock's own **Clock**, which goes as a system prompt, so the agent tells it the time this way.
-  The file is read again every turn: edit it, and the next question goes with the new one.
-  Without it the agent does not start.
+  The files are read again every turn: edit one, and the next question goes with the new one.
+  Without them the agent does not start.
+
+  **They are included, not pasted**, and that is the difference between a readable transcript
+  and an unreadable one. It was one file pasted into the prompt, which put twenty thousand
+  characters of instructions into the window and into the log **on every turn**: the question
+  and the answer — the only two things anybody opens a transcript for — sat buried between two
+  walls of the same text, and debugging a wrong answer meant scrolling past the appendix to find
+  it. An [include](#multimodal-includes-ctrli) is one line: JRock copies the file, hashes it, and
+  the prompt carries `@txt <12 hex digits>` where the text would have been. The model gets every
+  word; the window gets a line; and **the hash is the same every turn**, because the file is —
+  which is also why the time is the last line of the prompt rather than a placeholder inside a
+  part. Three parts rather than one because they are read for different reasons, and the one
+  somebody is debugging is usually `-doing.txt`.
 - **The microphone and the speaker are JRock's to choose.** If either is not set, the agent's
   window says so. Open **Configure** in JRock's own window, open the **Narrate on** or
   **Record from** dropdown to see what this machine has, pick one, and carry on. An answer that

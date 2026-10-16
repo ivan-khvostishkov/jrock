@@ -60,12 +60,14 @@
 // closing this window hands JRock back to you with it.
 //
 // The recording goes first in the prompt - which is what Voxtral wants (see the
-// README): it takes a recording as the question and answers it. After it comes the
-// appendix, jrock-prompt-push-to-talk-appendix.txt beside this file, with #now in it
-// replaced by the date, the time, the day of the week and the time zone in full: Voxtral
-// does not work with JRock's own Clock, which goes as a system prompt, so what it needs
-// for "what day is it" comes this way instead. The file is read again every turn, so an
-// edit to it counts from the next question on.
+// README): it takes a recording as the question and answers it. After it come the three
+// parts of the appendix, jrock-prompt-ptt-answering.txt, -asking.txt and -doing.txt
+// beside this file, INCLUDED as text files rather than pasted in (see PROMPT_PARTS): a
+// line each in the prompt, every word of them in the request. Then the date, the time,
+// the day of the week and the time zone in full, on the last line - Voxtral does not work
+// with JRock's own Clock, which goes as a system prompt, so what it needs for "what day
+// is it" comes this way instead. The files are read again every turn, so an edit to one
+// counts from the next question on.
 //
 // Alarms: an answer that says "Now is hh:mm:ss, I'm setting an alarm for hh:mm:ss" -
 // which the appendix asks the model for - is taken at its word. The first time is checked
@@ -156,11 +158,32 @@ public final class JRockPushToTalk {
     // rename would leave every one of those tokens pointing at nothing.
     private static final String PAPERS_SUB = "papers";
 
-    // What goes after every recording, expected beside this file; and the placeholder in
-    // it that becomes the time the question was asked.
-    private static final String PROMPT_APPENDIX = "jrock-prompt-push-to-talk-appendix.txt";
-    private static final String NOW_PLACEHOLDER = "#now";
-    private static Path appendix;
+    // WHAT GOES AFTER EVERY RECORDING: three files beside this one, INCLUDED rather than
+    // pasted into the prompt.
+    //
+    // It was one file and it was pasted in, which put twenty thousand characters of
+    // instructions into the prompt - and so into the window, and into the transcript -
+    // on every single turn. The log became unreadable: the one thing anybody looks at a
+    // transcript for, the question and the answer, was buried between two walls of the
+    // same text repeated every few lines, and debugging a wrong answer meant scrolling
+    // past the appendix to find it.
+    //
+    // An include is a line. JRock copies the file, hashes it, and the prompt carries
+    // "@txt <12 hex digits>" where the text would have been - the model gets every word
+    // of it, the window shows a line, and the hash is the SAME every turn because the
+    // file is. (The time is the one thing that changes, and it is the last line of the
+    // prompt instead: see answer. Edit a part and the next turn includes the new one,
+    // under a new hash, which is how it was before.)
+    //
+    // THREE PARTS RATHER THAN ONE, because they are read for different reasons: how to
+    // answer at all, what may be asked for, and the sentences that make something
+    // happen. A part is what somebody debugging opens, and the one being debugged is
+    // usually the third.
+    private static final String[] PROMPT_PARTS = {
+            "jrock-prompt-ptt-answering.txt",
+            "jrock-prompt-ptt-asking.txt",
+            "jrock-prompt-ptt-doing.txt" };
+    private static final java.util.List<Path> appendixParts = new java.util.ArrayList<>();
 
     // Why a step failed, in one sentence (see check).
     private static final class Stop extends RuntimeException {
@@ -503,8 +526,11 @@ public final class JRockPushToTalk {
 
     public static void main(String[] args) {
         try {
-            appendix = mustExist(ownDirectory().resolve(PROMPT_APPENDIX));
-            System.out.println("Appendix: " + appendix);
+            for (String part : PROMPT_PARTS) {
+                Path file = mustExist(ownDirectory().resolve(part));
+                appendixParts.add(file);
+                System.out.println("Appendix part: " + file);
+            }
             // JRock's own flags go straight through. A bare argument would be a prompt
             // file JRock loads - harmless, since the prompt is cleared a line later.
             JRock.main(args);
@@ -576,10 +602,19 @@ public final class JRockPushToTalk {
     private static String answer(boolean handsFreeTurn) {
         String prompt = JRock.automationPromptText();
         if (prompt == null) throw new Stop("the prompt could not be read.");
-        String after = read(appendix);
-        if (after == null) throw new Stop("there is no " + appendix + ".");
-        after = after.replace(NOW_PLACEHOLDER, now()).replaceAll("\\s+$", "");
-        check(JRock.automationSetPrompt(prompt.replaceAll("\\s+$", "") + "\n\n" + after + "\n"));
+        // The recording's own token, then the three parts of the appendix as INCLUDES
+        // (see PROMPT_PARTS): a line each in the prompt, every word of them in the
+        // request. The recording stays first, which is what Voxtral wants.
+        check(JRock.automationSetPrompt(prompt.replaceAll("\\s+$", "") + "\n"));
+        for (Path part : appendixParts) check(JRock.automationInclude(part));
+        // AND THE TIME, LAST, as the one thing that changes between two turns - which is
+        // why it is here and not in a file: a part with the time in it would hash
+        // differently every turn, and the point of including them is that they do not.
+        // Part one says to look for it on this line.
+        String withParts = JRock.automationPromptText();
+        if (withParts == null) throw new Stop("the prompt could not be read.");
+        check(JRock.automationSetPrompt(withParts.replaceAll("\\s+$", "")
+                + "\n\nThe current date and time is " + now() + ".\n"));
         String answer = sendAndRead("Waiting for the reply\u2026");
         // A request for the location or the weather is not shown or read aloud: the
         // operator did not ask for it, and what it asks for goes to the model instead.
