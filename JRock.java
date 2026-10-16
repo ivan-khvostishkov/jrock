@@ -4540,6 +4540,9 @@ public class JRock {
         /** Selects the last place that text appears in the log. Null, or why it is not there. */
         String automationSelectInLog(String text);
 
+        /** Selects the whole of the last answer in the log. Null, or why there is none. */
+        String automationSelectLastAnswer();
+
         /** Lets the log's selection go, so it follows the conversation again. Null, or why not. */
         String automationClearLogSelection();
 
@@ -4617,6 +4620,9 @@ public class JRock {
         @Override public String automationNarrate() { return JRock.automationNarrate(); }
         @Override public String automationSelectInLog(String text) {
             return JRock.automationSelectInLog(text);
+        }
+        @Override public String automationSelectLastAnswer() {
+            return JRock.automationSelectLastAnswer();
         }
         @Override public String automationClearLogSelection() {
             return JRock.automationClearLogSelection();
@@ -5728,6 +5734,29 @@ public class JRock {
         return null;
     }
 
+    // Selects THE WHOLE OF THE LAST ANSWER in the log - the body of the most recent
+    // assistant message, without the role header above it or the gray lines under it.
+    // Returns null, or why there is nothing to select. Ctrl+Shift+A by hand.
+    //
+    // The call to reach for, and the one every flow that exports or narrates an answer
+    // should be using: the answer is identified by WHERE IT IS rather than by its text,
+    // so nothing has to be passed in, nothing has to match, and a flow cannot miss by a
+    // trailing newline or by the ``` fence a model put round its answer. Three lines of
+    // a flow - keep the reply, take the fence off it, hand the text back to be found
+    // again - become one.
+    //
+    // automationSelectInLog stays, and is not the same thing: it selects any text, which
+    // is how an agent narrates ITS OWN words (automationNote writes a gray line, and a
+    // gray line is nobody's answer). See the pair of them in JRockPushToTalk.
+    public static String automationSelectLastAnswer() {
+        String problem = requireAutomation();
+        if (problem != null) return problem;
+        Ui live = ui;
+        boolean[] found = { false };
+        onEdt(() -> found[0] = live.log.selectLastAnswer());
+        return found[0] ? null : "there is no answer in the log to select.";
+    }
+
     // Selects the last place that text appears in the log, which is where a line just
     // written with automationNote is. Returns null, or why it could not be found - in
     // "Dialog only" mode a gray line is not shown at all, and what is not shown cannot
@@ -5736,6 +5765,9 @@ public class JRock {
     // The pair of this and automationClearLogSelection exists so that narration has a
     // SOURCE rather than an argument: the window shows what is being said while it is
     // being said, and the transcript keeps it afterwards.
+    //
+    // For an ANSWER, automationSelectLastAnswer above is the one to call: it needs no
+    // text at all, and cannot be defeated by a fence or a newline.
     public static String automationSelectInLog(String text) {
         String problem = requireAutomation();
         if (problem != null) return problem;

@@ -3310,6 +3310,7 @@ String   automationMergeDuplex(String front, String back, String out)
 
 // Saying things, and being read afterwards
 String   automationNote(String line)                          // named by automationBegin
+String   automationSelectLastAnswer()
 String   automationSelectInLog(String text)
 String   automationClearLogSelection()
 String   automationNarrate()
@@ -3362,6 +3363,7 @@ nothing more subtle than that. What each one does, in full:
 | `automationAwaitHeard(long millis)` | Waits for a recording [**Mic always on**](#mic-always-on) made. Returns a **`Heard`**: `heard()` when something was said and has reached the prompt, `quiet()` when the room was silent for this timeout — go round again — and `failure()` when it cannot listen at all. Three outcomes, which is why it is a type and not a boolean. |
 | `automationMicReady()` | Whether there is a microphone to listen on **right now** — `null` when there is, and otherwise why not, including the one answer a listening loop cannot work out for itself: the microphone set is **not connected**. A quiet room and an unplugged microphone look identical to `automationAwaitHeard`, and they mean opposite things. |
 | `automationNarrate()` | Reads **the log's selection** aloud: Markdown stripped, played on **Narrate on**. Returns once it has started, and plays on in the background. Refuses when nothing is selected, when no device is set, or when it isn't connected. **Takes no text** — see below. (Windows) |
+| `automationSelectLastAnswer()` | Selects **the whole of the last answer** — the body of the most recent assistant message, without the role header above it or the gray lines under it. `Ctrl+Shift+A` by hand. The one to reach for: the answer is found by **where it is** rather than by its text, so nothing is passed in, nothing has to match, and a flow cannot miss it by a trailing newline or by the ``` fence the model put round it. Refuses when nothing has been answered yet. |
 | `automationSelectInLog(String text)` | Selects the last place that text appears in the log — the model's answer where it stands, or a line `automationNote` has just put there. Refuses when it is not there (*Dialog only* hides gray lines). |
 | `automationClearLogSelection()` | Lets the selection go and follows the end of the conversation again — the log scrolls nowhere while a selection exists. |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |

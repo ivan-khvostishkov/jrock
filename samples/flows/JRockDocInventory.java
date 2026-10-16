@@ -346,13 +346,18 @@ public final class JRockDocInventory {
             dropPlaceholders();
             check(JRock.automationInclude(document));
             sayWhatArrived();
-            String markdown = unfenced(reply(JRock.automationSend(REPLY_TIMEOUT_MS)));
+            // The send is checked; its text is not wanted here at all.
+            reply(JRock.automationSend(REPLY_TIMEOUT_MS));
             wordFile = free(dir, stem(document), "." + EXT_DOCX);
-            // EXPORTED FROM THE LOG, where the answer already is. unfenced only takes a
-            // ``` line off each end, so what is left is a contiguous run of the answer as
-            // the log holds it - selectable, and the same document. Selected, written,
-            // and let go of: the log scrolls nowhere while a selection stands.
-            check(JRock.automationSelectInLog(markdown));
+            // EXPORTED FROM THE LOG, where the answer already is - and selected by WHERE
+            // IT IS rather than by its own text (automationSelectLastAnswer). Handing the
+            // reply back to be found again was three lines and two ways to miss: a
+            // trailing newline, or the ``` fence a model puts round an answer when it was
+            // asked for Markdown, which had to be taken off here before the text would
+            // match what the log showed. The export takes that fence off itself now.
+            // Selected, written, and let go of: the log scrolls nowhere while a selection
+            // stands.
+            check(JRock.automationSelectLastAnswer());
             check(JRock.automationExportSelectionDocx(wordFile.toString()));
             JRock.automationClearLogSelection();
             written.add(wordFile);
@@ -1177,18 +1182,6 @@ public final class JRockDocInventory {
             }
         }
         return null;
-    }
-
-    // A reply with the ``` fence a model put around it anyway taken off: the DOCX is to
-    // hold the Markdown, not a code block of it.
-    private static String unfenced(String reply) {
-        String trimmed = reply.trim();
-        if (!trimmed.startsWith("```") || !trimmed.endsWith("```") || trimmed.length() < 6) {
-            return reply;
-        }
-        int firstLine = trimmed.indexOf('\n');
-        if (firstLine < 0) return reply;
-        return trimmed.substring(firstLine + 1, trimmed.length() - 3).trim() + "\n";
     }
 
     // ---- An image as an A4 PDF ---------------------------------------------
