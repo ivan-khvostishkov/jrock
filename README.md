@@ -3617,6 +3617,15 @@ that is there, and every one of them **blocks and must not be called on the even
 thread** — they say so rather than deadlocking if you do. They are also listed, all of them
 together, as [`JRock.Automation`](#the-cheat-sheet-jrockautomation).
 
+#### One breaking change in 5.1.0
+
+`automationSelectInLog(String text)` is **gone**, replaced by `automationSelectLastNote()`
+beside `automationSelectLastAnswer()` (both below). An agent or flow of your own that calls
+the old one will not compile against this jar; the fix is one line, and which of the two
+replaces it depends on what was being selected — the model's last answer, or the agent's own
+last note. Everything else added since 5.0.0 is additive: the samples in this release are
+written against the new pair.
+
 #### The cheat sheet: `JRock.Automation`
 
 **The whole surface in one declaration**, for reading rather than for calling: `public interface
@@ -5264,7 +5273,8 @@ md5sum jrock.jar
 java -jar jrock.jar
 ```
 
-Current build hashes, 5.0.0, the same from all three runners:
+Current build hashes, 5.0.0, the same from all three runners — **5.1.0's go here once CI has
+built it**, which is the only place these numbers can honestly come from:
 
 ```
 05f4a427a1a749f50d79f24d09d5a59700fda82218c8c91eafb293dc7860480f  jrock.jar

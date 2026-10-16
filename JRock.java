@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "5.0.0";
+    private static final String VERSION = "5.1.0";
 
     // What this program is called, where it says so to a person: the name written after
     // the time on every answer's header line (see dialog), which is the one place in a
