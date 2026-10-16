@@ -3943,6 +3943,10 @@ public class JRock {
         // keyboard and the menu reach the same place.
         useBrowserClipboard(output, log, false);   // read-only: copy only
         useBrowserClipboard(input, log, true);
+        // And Ctrl+V in the prompt goes through JRock's paste, so that a file copied in
+        // Explorer pastes here as its path too (see pasteThroughJRock): the rule is the
+        // same everywhere there is something to paste into, or it is not a rule.
+        pasteThroughJRock(input, log);
 
         // The window's own menu, which hangs from the JRock/ status label beside
         // Configure: what the JRock folder holds, the duplex merge, then the backup pair;
@@ -4088,6 +4092,7 @@ public class JRock {
         javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
         addEditItem(menu, "Paste", field, () -> clipboardPaste(field, log));
         attachPopup(field, menu);
+        pasteThroughJRock(field, log);
         useBrowserClipboard(field, log, true);
     }
 
@@ -4173,7 +4178,26 @@ public class JRock {
         addEditItem(menu, "Paste", field, () -> clipboardPaste(field, log));
         addEditItem(menu, "Select all", field, field::selectAll);
         attachPopup(field, menu);
+        pasteThroughJRock(field, log);
         useBrowserClipboard(field, log, true);
+    }
+
+    // Ctrl+V on this field goes through JRock's own paste and not Swing's.
+    //
+    // ONE REASON, AND IT IS THE FILE MANAGER: a file copied in Explorer is on the
+    // clipboard as a FILE, not as text, and Swing's paste action asks for a string, is
+    // told there is none, and does nothing whatever - no error, no sound, no hint that
+    // the clipboard is holding the very thing the field is asking for. JRock's paste
+    // pastes its path (see clipboardFilePaths). The menu item already went this way;
+    // the key is how anybody actually pastes, and the two have to agree.
+    private static void pasteThroughJRock(javax.swing.text.JTextComponent field, LogView log) {
+        if (field == null || !field.isEditable()) return;
+        field.getActionMap().put(javax.swing.text.DefaultEditorKit.pasteAction,
+                new AbstractAction() {
+                    @Override public void actionPerformed(ActionEvent event) {
+                        clipboardPaste(field, log);
+                    }
+                });
     }
 
     // ---- A dropdown that filters itself as you type -------------------------
@@ -6170,6 +6194,13 @@ public class JRock {
     }
 
     private static void clipboardPaste(javax.swing.text.JTextComponent comp, LogView log) {
+        // A FILE COPIED IN A FILE MANAGER PASTES AS ITS PATH (see clipboardFilePaths):
+        // the field is asking for a name, and the clipboard is holding the file itself.
+        String files = clipboardFilePaths();
+        if (files != null) {
+            comp.replaceSelection(files);
+            return;
+        }
         if (!isCheerpJ()) { comp.paste(); return; }
         try {
             String[] r = bridgeReply(browserClipboardRead());
@@ -6184,6 +6215,53 @@ public class JRock {
                     + "). Pasting what was last copied inside JRock instead.");
         }
         comp.paste();
+    }
+
+    // What the clipboard holds after a copy in a FILE MANAGER: a list of files, not a
+    // string. Returns the text to paste for it - one absolute path, or several in the
+    // quoted form a chooser's name box reads - or null when the clipboard holds no files,
+    // which is when an ordinary text paste is what was meant.
+    //
+    // Ctrl+C in Explorer puts exactly this on the clipboard, and a paste into the Include
+    // dialog's File name box did NOTHING AT ALL: the paste asks for a string, the
+    // clipboard says it has no string, and that is the end of it - no error, no sound,
+    // and no hint that the thing in the clipboard is the file the dialog is asking for.
+    // What was left was to type the path out, or to go and find the folder in the chooser
+    // again, both of which the clipboard had already answered.
+    //
+    // SEVERAL FILES are written as "a" "b" "c", which is a chooser's own syntax for
+    // opening more than one at once (see addCopyPasteMenu) and what Explorer's "Copy as
+    // path" writes for a multiple selection. ONE file is written bare: quotes around a
+    // single name in a field that takes one name are a name with quotes in it.
+    private static String clipboardFilePaths() {
+        try {
+            java.awt.datatransfer.Clipboard board =
+                    java.awt.Toolkit.getDefaultToolkit().getSystemClipboard();
+            java.awt.datatransfer.DataFlavor asFiles =
+                    java.awt.datatransfer.DataFlavor.javaFileListFlavor;
+            if (!board.isDataFlavorAvailable(asFiles)) return null;
+            Object data = board.getData(asFiles);
+            if (!(data instanceof java.util.List)) return null;
+            java.util.List<String> paths = new ArrayList<>();
+            for (Object one : (java.util.List<?>) data) {
+                if (one instanceof java.io.File) {
+                    paths.add(((java.io.File) one).getAbsolutePath());
+                }
+            }
+            if (paths.isEmpty()) return null;
+            if (paths.size() == 1) return paths.get(0);
+            StringBuilder quoted = new StringBuilder();
+            for (String path : paths) {
+                quoted.append(quoted.length() == 0 ? "" : " ")
+                      .append('"').append(path).append('"');
+            }
+            return quoted.toString();
+        } catch (Throwable noFilesThere) {
+            // A clipboard another process owns for the moment, a flavour that will not
+            // read, a browser with no system clipboard at all: there is no path to paste,
+            // and the text paste the caller does next is the right answer anyway.
+            return null;
+        }
     }
 
     // ---- Hosting page chrome (browser only) --------------------------------
