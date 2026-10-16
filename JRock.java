@@ -3972,6 +3972,9 @@ public class JRock {
         windowMenu.addSeparator();
         addMenuItem(windowMenu, "Merge two-sided (duplex) PDF scans...",
                 () -> mergeDuplexScans(frame, log));
+        // And the plain one, under it: any number of PDFs, in the order they are picked,
+        // a + b + c = d. The clever merge above it is the special case.
+        addMenuItem(windowMenu, "Merge PDFs...", () -> mergePdfs(frame, log));
         windowMenu.addSeparator();
         addMenuItem(windowMenu, "Backup log...", () -> backupLog(frame, log, sendGate, true));
         addMenuItem(windowMenu, "Load from backup...",
@@ -12842,6 +12845,13 @@ public class JRock {
          */
         void interleave(JFrame frame, LogView log, Path front, Path back, int sheets,
                         Path out);
+
+        /**
+         * Writes every page of every file in inputs into out, in the order they are
+         * given and each document's pages in its own order, and says in the log (and
+         * through duplexNote, on failure) how that went. Off the EDT.
+         */
+        void concatenate(JFrame frame, LogView log, java.util.List<Path> inputs, Path out);
     }
 
     // The engine in use, chosen once by pdf().
@@ -12885,6 +12895,17 @@ public class JRock {
                 return;
             }
             ghostscriptInterleave(frame, log, gs, front, back, sheets, out);
+        }
+
+        @Override
+        public void concatenate(JFrame frame, LogView log, java.util.List<Path> inputs,
+                                Path out) {
+            String gs = findGhostscript();   // windowed where there is one
+            if (gs == null) {
+                ghostscriptMissing(frame, log, "merge PDFs");
+                return;
+            }
+            ghostscriptConcatenate(frame, log, gs, inputs, out);
         }
 
         @Override
@@ -13007,6 +13028,13 @@ public class JRock {
                                int sheets, Path out) {
             duplexNote(frame, log, "PDF.js reads PDFs and does not write them, so the "
                     + "merge is not available in the browser.");
+        }
+
+        @Override
+        public void concatenate(JFrame frame, LogView log, java.util.List<Path> inputs,
+                                Path out) {
+            duplexNote(frame, log, "PDF.js reads PDFs and does not write them, so "
+                    + "merging them is not available in the browser.");
         }
 
         @Override
@@ -13191,6 +13219,124 @@ public class JRock {
     //
     // Runs on the EDT as far as its two dialogs; the counting and the merge, which wait
     // for a subprocess each, go to a worker.
+    // ---- Merge PDFs (the window menu) --------------------------------------
+    // a + b + c = d: every page of every file picked, in the order they are picked,
+    // each document's own pages in its own order. The plain concatenation the duplex
+    // merge next door is the clever version of.
+    //
+    // THE ORDER IS SHOWN BEFORE ANYTHING RUNS, and that is the one thing this dialog has
+    // to get right. A chooser's multiple selection comes back in no dependable order -
+    // which is why the duplex merge sorts its pair by name rather than trusting it (see
+    // frontThenBack) - but here there is nothing to sort by: a + c + b is a perfectly
+    // good answer if that is what somebody meant, and no rule about names could know. So
+    // the order that WILL be used is listed, numbered, and confirmed; typing the names
+    // into the File name box in the order wanted is what settles it, and the list is
+    // where that is checked. Merging twenty pages the wrong way round is cheap to do and
+    // tedious to undo.
+    private static void mergePdfs(JFrame frame, LogView log) {
+        PdfEngine engine = pdf();
+        if (!engine.writesPdf()) {
+            // Said before any file is picked, so nobody chooses five PDFs for nothing.
+            mergeWarn(frame, "Merging PDFs needs a PDF writer, and this browser's PDF "
+                    + "engine (" + engine.name() + ") reads PDFs only. Merge them with "
+                    + "the desktop build of JRock, which uses Ghostscript.");
+            return;
+        }
+        if (!engine.ready(frame, log, "merge PDFs")) return;
+
+        javax.swing.JFileChooser chooser =
+                new javax.swing.JFileChooser(scanChooserDir.start());
+        chooser.setDialogTitle("Merge PDFs: pick them in the order they are to go");
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "PDF files (*.pdf)", "pdf"));
+        chooser.setMultiSelectionEnabled(true);
+        // The names in the File Name box, in quotes, is how a touch device selects more
+        // than one - and here it is also how the ORDER is given (see addCopyPasteMenu).
+        addCopyPasteMenu(findFileNameField(chooser), log);
+        if (chooser.showOpenDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        scanChooserDir.remember(chooser);
+
+        java.io.File[] picked = chooser.getSelectedFiles();
+        if (picked == null || picked.length < 2) {
+            mergeWarn(frame, "Pick two or more PDF files. "
+                    + (picked == null ? 0 : picked.length) + " were selected.");
+            return;
+        }
+        java.util.List<Path> inputs = new ArrayList<>();
+        for (java.io.File one : picked) {
+            inputs.add(one.toPath().toAbsolutePath().normalize());
+        }
+
+        StringBuilder order = new StringBuilder();
+        for (int i = 0; i < inputs.size(); i++) {
+            order.append("    ").append(i + 1).append(". ")
+                 .append(inputs.get(i).getFileName()).append('\n');
+        }
+        int yes = javax.swing.JOptionPane.showConfirmDialog(frame,
+                "Merge these " + inputs.size() + " PDFs in this order?\n\n" + order
+                + "\nEvery page of each, in each document's own order.\nTo change the "
+                + "order, cancel and type the names into the File name\nbox in the order "
+                + "you want them.",
+                "Merge PDFs", javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.QUESTION_MESSAGE);
+        if (yes != javax.swing.JOptionPane.OK_OPTION) return;
+
+        javax.swing.JFileChooser save =
+                new javax.swing.JFileChooser(scanChooserDir.start());
+        save.setDialogTitle("Save the merged PDF as");
+        save.setSelectedFile(scanChooserDir.startFile(mergedPdfName(inputs.get(0))));
+        save.setAcceptAllFileFilterUsed(false);
+        save.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "PDF files (*.pdf)", "pdf"));
+        addCopyPasteMenu(findFileNameField(save), log);
+        if (save.showSaveDialog(frame) != javax.swing.JFileChooser.APPROVE_OPTION) return;
+        scanChooserDir.remember(save);
+        final Path out = withExtension(save.getSelectedFile().toPath(), "pdf")
+                .toAbsolutePath().normalize();
+        if (inputs.contains(out)) {
+            mergeWarn(frame, "That name is one of the files being merged, which the merge "
+                    + "reads as it writes. Choose another.");
+            return;
+        }
+
+        final java.util.List<Path> merging = inputs;
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                engine.concatenate(frame, log, merging, out);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();   // surfaces anything doInBackground threw
+                } catch (Exception ex) {
+                    log.gray("The merge failed: " + ex.getMessage());
+                }
+                log.gray("");   // closes the block, one per merge
+            }
+        }.execute();
+    }
+
+    // The default name for a plain merge: "scan0166-merged.pdf" beside "scan0166.pdf".
+    // The first file names it because its page 1 is the merged document's page 1 - and
+    // NOT ".Merged.pdf", which is the duplex merge's name: the two are different
+    // documents made of the same scans, and a name that said neither which would be a
+    // folder nobody can read afterwards.
+    private static String mergedPdfName(Path first) {
+        String name = first.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return (dot > 0 ? name.substring(0, dot) : name) + "-merged.pdf";
+    }
+
+    // The warning dialog this feature's own refusals use, titled as the menu item is.
+    private static void mergeWarn(JFrame frame, String message) {
+        javax.swing.JOptionPane.showMessageDialog(frame, message,
+                "Merge PDFs", javax.swing.JOptionPane.WARNING_MESSAGE);
+    }
+
     private static void mergeDuplexScans(JFrame frame, LogView log) {
         PdfEngine engine = pdf();
         if (!engine.writesPdf()) {
@@ -13461,6 +13607,94 @@ public class JRock {
         // only good copy of the batch.
         log.gray("The two scans are untouched; look through the merge before deleting "
                 + "them.");
+    }
+
+    // Every page of every input into out, in the order they were given: a + b + c = d.
+    //
+    // ONE GHOSTSCRIPT RUN, and the order is the argument order: pdfwrite writes pages in
+    // the order they are interpreted, and Ghostscript interprets its files left to right
+    // (the same property the duplex interleave is built on, with page ranges in front of
+    // each name). So there is no page arithmetic here at all, and nothing to count: a
+    // document's own pages keep their own order because nothing asks for them one by one.
+    //
+    // Named relative to the folder they share, where they share one, for the reason
+    // ghostscriptInterleave does it: Windows stops accepting a command line at 32767
+    // characters, and twenty scans with long paths are closer to that than they look.
+    private static void ghostscriptConcatenate(JFrame frame, LogView log, String gs,
+                                               java.util.List<Path> inputs, Path out) {
+        Path dir = inputs.get(0).getParent();
+        boolean relative = dir != null;
+        for (Path one : inputs) {
+            relative = relative && dir.equals(one.getParent());
+        }
+        boolean windowed = isWindowedGhostscript(gs);
+        java.util.List<String> cmd = new java.util.ArrayList<>();
+        cmd.add(gs);
+        cmd.add("-dNOPAUSE"); cmd.add("-dBATCH"); cmd.add("-dSAFER");
+        if (!windowed) cmd.add("-sstdout=%stderr");   // see includePdf for why
+        cmd.add("-sDEVICE=pdfwrite");
+        cmd.add("-o"); cmd.add(out.toString());
+        for (Path one : inputs) {
+            cmd.add(relative ? one.getFileName().toString() : one.toString());
+        }
+        int length = String.join(" ", cmd).length();
+        if (isWindows() && length > 30_000) {
+            duplexNote(frame, log, inputs.size() + " files need a " + fmtNum(length)
+                    + "-character command line, which is past what Windows accepts "
+                    + "(32767). Put them in a folder with a short path, or merge them in "
+                    + "two halves and then merge the halves.");
+            return;
+        }
+
+        log.gray("Merging " + inputs.size() + " PDFs with Ghostscript (" + gs + "), in "
+                + "this order, into " + out + ":");
+        for (int i = 0; i < inputs.size(); i++) {
+            log.gray("  " + (i + 1) + ". " + inputs.get(i));
+        }
+        if (windowed) {
+            log.gray("Ghostscript reports its progress in its own window; it closes "
+                    + "when the merge finishes.");
+        }
+        int code;
+        try {
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            if (relative) pb.directory(dir.toFile());
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (!line.isBlank()) log.gray("gs: " + line.trim());
+                }
+            }
+            code = p.waitFor();
+        } catch (IOException ex) {
+            duplexNote(frame, log, "Ghostscript failed to run: " + ex.getMessage());
+            return;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            duplexNote(frame, log, "The merge was interrupted; " + out
+                    + " is whatever Ghostscript had written by then.");
+            return;
+        }
+        if (code != 0) {
+            duplexNote(frame, log, "Ghostscript exited with code " + code + ", so " + out
+                    + " is not a finished merge."
+                    + (windowed ? " It reported the reason in its own window." : ""));
+            return;
+        }
+        long size = -1;
+        try {
+            size = Files.size(out);
+        } catch (IOException ignore) { /* the line below simply says less */ }
+        int pages = pdf().pageCount(out, log);
+        log.gray("Merged " + inputs.size() + " PDFs into " + out
+                + (pages < 0 ? "" : " (" + pages + " pages")
+                + (size < 0 ? (pages < 0 ? "" : ")") : (pages < 0 ? " (" : ", ")
+                        + fmtNum(size) + " bytes)"));
+        log.gray("The files that went in are untouched; look through the merge before "
+                + "deleting any of them.");
     }
 
     // The default name for a merge: "scan0166.Merged.pdf" beside "scan0166.pdf". The

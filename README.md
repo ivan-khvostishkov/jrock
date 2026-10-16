@@ -56,7 +56,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
 - **Merge two-sided (duplex) scans** — the two passes a sheet feeder produces, the fronts in
   order and the backs in reverse, interleaved into one PDF by the same Ghostscript
-  ([**merging duplex scans**](#merging-duplex-scans-ghostscript)).
+  ([**merging duplex scans**](#merging-duplex-scans-ghostscript)) — **or merge PDFs plainly**,
+  any number of them, in the order you pick them: *a* + *b* + *c* = *d*.
 - **Fetch a URL** (Ctrl+U), not just a file: an address is downloaded into `JRock/urls/` and
   attached as text or as a picture according to the `Content-Type` it answered with, with a
   Markdown link to where it came from above the token ([**fetching a URL**](#fetching-a-url)).
@@ -811,6 +812,35 @@ it. No lock is taken on the folder: JRock's own writes happen on the UI thread, 
 the length of a zip would stall typing rather than the write, an OS file lock means nothing to the
 editor or sync client that may be in that folder too, and the browser build's filesystem has no
 such lock to take.
+
+## Merging PDFs (Ghostscript)
+
+**Click the `JRock/` label beside Configure → Merge PDFs...** — under *Merge two-sided (duplex)
+PDF scans...*, which is the clever version of this one.
+
+*a* + *b* + *c* = *d*: every page of every file you pick, in the order you pick them, each
+document's own pages in its own order. A letter and its appendices into one document; a scan that
+came out of the feeder in three goes; the pages somebody sent you one at a time.
+
+1. A **multi-select file chooser**, filtered to PDFs — **pick them in the order they are to go**.
+   Typing the names into the File Name box in quotes is what settles that order (and on a touch
+   device it is how more than one file is picked at all).
+2. **The order is listed back, numbered, and confirmed** before anything runs. This is the one
+   thing the dialog has to get right: a chooser's multiple selection comes back in no dependable
+   order, and here there is nothing to sort by — *a* + *c* + *b* is a perfectly good answer if
+   that is what you meant, and no rule about names could know. Twenty pages merged the wrong way
+   round are cheap to make and tedious to undo, so the list is where you check it.
+3. **Save the merged PDF as** — offered as `<first file>-merged.pdf`, deliberately not the
+   duplex merge's `.Merged.pdf`: they are two different documents made of the same scans. A name
+   that is one of the files going in is refused, since the merge reads as it writes.
+4. **One Ghostscript run**, and the order is the argument order: `pdfwrite` writes pages in the
+   order they are interpreted and Ghostscript interprets its files left to right. No page
+   arithmetic, nothing counted, so a document's pages keep their own order because nothing asks
+   for them one by one. The log names every file in the order used, then the result with its page
+   count and size — and says that the files that went in are untouched.
+
+In the **browser** build there is no Ghostscript and PDF.js does not write PDFs, so the item says
+so instead of doing nothing.
 
 ## Merging duplex scans (Ghostscript)
 
@@ -4174,8 +4204,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   plain click or tap rather than a right-click, the label being there for nothing else. *What is
   in the JRock folder...* first, naming every file and subfolder JRock can keep there (see
   [**Persistence**](#persistence-crash-recovery--full-local-history)), then Merge two-sided
-  (duplex) PDF scans... above its own separator (see [**merging duplex
-  scans**](#merging-duplex-scans-ghostscript)), then Backup log... and Load from backup... (see
+  (duplex) PDF scans... and Merge PDFs... above their own separator (see [**merging duplex
+  scans**](#merging-duplex-scans-ghostscript) and [**merging
+  PDFs**](#merging-pdfs-ghostscript)), then Backup log... and Load from backup... (see
   [**backup and restore**](#backup-and-restore)); in the **browser**, also Show/hide the page
   header & footer. The Explorer entries are not here at all — they are the
   [installer's](#the-installer-installerinstalljrockjava), which is what keeps this window the
