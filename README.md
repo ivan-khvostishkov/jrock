@@ -123,12 +123,112 @@ you need it in** — whether that shape is a page out of the printer, a file som
 edit, or copy flowing into a layout. And the loop closes, because a transcript printed to PDF
 with Ctrl+P can be included straight back as page images in the next prompt.
 
+**Which tools to keep beside JRock for all this** — and what to do with a scanned PDF too long to
+send at all — is answered in [**Recommended tooling**](#recommended-tooling-faq) below.
+
 ## Requirements
 
 - **Minimum: JDK 11** — needed for single-file source launch (JEP 330) and
   `java.net.http.HttpClient`. On JDK 8-10 it won't run as a single file.
 - **Maximum: none** — uses only core JDK APIs (`javax.swing`, `java.net.http`). Runs on
   the latest JDK.
+
+## Recommended tooling (FAQ)
+
+JRock needs **a JDK and nothing else** to run. Three outside tools unlock features, and two
+commercial ones are worth having if your work is paper — not because JRock is missing something,
+but because OCR and typesetting are other people's trades and the files pass between them
+cleanly.
+
+**What JRock itself shells out to, and for what:**
+
+| Tool | Needed for | Without it |
+|---|---|---|
+| **[Ghostscript](https://ghostscript.com/releases/gsdnld.html)** | a PDF included as **page images** ([PDF conversion](#pdf-conversion-ghostscript)), **[merging PDFs](#merging-pdfs-ghostscript)**, **[merging duplex scans](#merging-duplex-scans-ghostscript)** | the PDF filter and both merges say so and stop; everything else works |
+| **[xpdf](https://www.xpdfreader.com/download.html)** (`pdftohtml`, `pdftotext`) | a PDF included **as HTML with its pictures**, or **as text** ([PDF as HTML or text](#pdf-as-html-or-text-xpdf)) | those two include modes say so; page images are unaffected |
+| **`sqlite3`** | the **Thunderbird agent** only, which reads the mail and calendar index ([the Thunderbird agent](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava)) | that one agent says so |
+
+Everything else is in-process on the bare JDK: RTF, DOCX and XLSX in **and** out, image sizing,
+the A4 PDF a filed image gets, narration on Windows' own voices. In the browser there is no
+process to start at all, and [PDF.js](#working-with-pdfs) stands in for Ghostscript's reading
+half.
+
+### How do I turn an answer into a PDF?
+
+Two ways, and they are for different things.
+
+- **Ctrl+P** prints the transcript — or just the selected answer — to a printer or to a PDF
+  writer (*Microsoft Print to PDF* on Windows) ([printing](#printing--pdf-ctrlp)). This is the
+  quick copy: a record of what was said, in the window's own font.
+- **Ctrl+Shift+D** exports the selection as a **DOCX** ([Markdown
+  export](#markdown-export-rtf-and-docx)) — A4 portrait or landscape, 2 cm margins, headings and
+  tables as real formatting, pictures placed at their physical size, and the paragraphs under
+  **named styles** (*Normal*, *Heading 1–6*, *Code*, *Quote*). That DOCX is the file you hand to
+  whatever makes the finished page:
+  - **Adobe InDesign** — place the DOCX and it maps the document's style *names* onto your own
+    paragraph styles, so the copy lands in your template's typography rather than a converter's
+    idea of it. Export from there and the PDF is **typeset**, and it is where a print-ready
+    **PDF/X-4** comes from (fonts embedded, colour managed, transparency live) — which is what a
+    printer asks for and what no "print to PDF" produces.
+  - **Adobe Acrobat** — open the DOCX and save as PDF, or use *Create PDF*. No typesetting, but
+    a correct, searchable PDF in one step, and Acrobat is where you would then sign, redact or
+    combine it.
+
+### I have no InDesign or Acrobat. What then?
+
+Word, Pages and LibreOffice all open the DOCX and all export PDF; LibreOffice does it from the
+command line too (`soffice --convert-to pdf`). The typography is the application's rather than
+yours, which for a letter nobody is going to typeset is the right trade. **Export selected
+Markdown as RTF...** is the same idea one standard lower — no style names, but everything opens
+an RTF.
+
+### A scanned PDF is too big for the model. What do I do?
+
+OCR it, and send the text instead of the pictures. A scan goes in as **page images**, one PNG per
+page, and a long document is the one case where that stops working: a hundred pages of A4 at the
+default 150 dpi is far more than any model's context will hold, and even where it fits you are
+paying for pictures of words. The way through is to turn the pages into a text document once, outside JRock,
+with a tool whose whole job that is:
+
+1. **OCR the scan.** **[ABBYY FineReader](https://www.abbyy.com/finereader/)** is the
+   recommendation — it is the best of them on bad scans, multi-column pages and tables, and it
+   keeps the layout while it does it. **Acrobat**'s *Scan & OCR → Recognize Text* is the
+   alternative you may already own.
+2. **Save the recognised PDF beside the original, as `<name>_recognized.pdf`.** The original scan
+   stays exactly as it came off the glass — OCR is a guess about letters, and the page images are
+   the evidence — and the name says which is which.
+3. **Export that to `<name>.docx`**, from ABBYY or from Acrobat (*Export to Word*).
+4. **Include the DOCX** as [**DOCX as Markdown text**](#rtf-and-docx-conversion-no-external-tool).
+   Headings, bold, italic and tables survive into the Markdown as structure the model reads, and
+   one text include is an order of magnitude cheaper than sixty page images — with no DPI to
+   choose and no page limit to run into.
+
+**And those names are what the [doc inventory flow](#automating-the-chain-jrockdocinventoryjava)
+is built for.** With `file.pdf`, `file_recognized.pdf` and `file.docx` in one folder, run the flow
+on **`file.pdf`** (or on `file.docx`): it offers to **start from the `.docx`** — skipping the
+page-image pass and its send altogether — and at the end it renames **all three together** to the
+name it settles on, keeping `_recognized` on the one that carries it, since a suffix is how it
+tells one file of a document from another. Start it on `file_recognized.pdf` and you get a
+document of its own: the set is found from the **base** name outwards, so the name without a
+suffix is the one to point it at.
+
+### When should a scan still go in as page images?
+
+When the **layout carries meaning** and the document is short enough to fit: a form where the
+boxes matter, a letter whose stamp, signature or handwritten note is half the answer, a table
+whose rules an OCR might read wrongly. Page images are the document *as it looks* and no
+extractor's guess sits between the model and the page — which is why they are JRock's default for
+a PDF. The question is only ever size: a letter or a few dozen pages, images; a hundred-page
+contract, OCR it first.
+
+### The PDF already has a text layer. Do I need OCR at all?
+
+No — that is what **xpdf** is there for. A born-digital PDF (one exported from Word, or a bank
+statement off a website) carries its text, and *Include a PDF as* → **HTML with pictures** or
+**text** reads it out in-process and in a second, with no OCR and no page images
+([PDF as HTML or text](#pdf-as-html-or-text-xpdf)). **A scan has no text layer at all**, and
+`pdftotext` on one returns nothing: that empty answer is the test — if the text comes back blank
+or as gibberish, the document is pictures of words and step 1 above is where to go.
 
 ## Getting started
 
@@ -336,7 +436,9 @@ and the PDF that comes out is typeset rather than printed from a text editor. **
 Markdown as RTF...** is the lower standard for the same idea: no style names, but anything that
 opens an RTF — Word, Pages, LibreOffice, TextEdit, WordPad — will read it. Neither is mobile-only:
 the two items are in the log's context menu wherever JRock runs, and on the desktop they are the
-short way from an answer to a document somebody else can edit.
+short way from an answer to a document somebody else can edit. See [**Recommended
+tooling**](#recommended-tooling-faq) for the whole of that road — the DOCX, InDesign or Acrobat,
+and PDF/X-4 at the end of it.
 
 ### What native mobile support would take
 
