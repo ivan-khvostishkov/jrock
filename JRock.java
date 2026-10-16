@@ -4094,6 +4094,147 @@ public class JRock {
         useBrowserClipboard(field, log, true);
     }
 
+    // ---- A dropdown that filters itself as you type -------------------------
+    // For the Model row, where the list is every model this account can reach - dozens of
+    // ids, most of them sharing a vendor prefix, each long enough that finding one by
+    // scrolling means reading them all. The field is free text and stays free text; what
+    // this adds is that typing into it NARROWS THE LIST instead of merely sitting there.
+    //
+    // The mechanics, which are the whole of it:
+    //
+    //   the text is a model's whole name - picked, or typed out in full -> the list is
+    //       ALL of them again, and the dropdown closes: there is nothing left to choose,
+    //       and the next click on the arrow is a click on the full list.
+    //   the text is anything else                                       -> the list is
+    //       the ones that CONTAIN what was typed, and the dropdown opens by itself.
+    //   the text is empty                                               -> all of them.
+    //
+    // CONTAINS, not starts-with: the part of a model id anybody remembers is in the
+    // middle of it. "grok", "sonnet", "haiku" is what gets typed; the vendor in front is
+    // the half nobody can recall.
+    //
+    // Typing is read from KEY RELEASES and not from the document, and that is not a
+    // detail: with the dropdown open, Down and Up put the highlighted item into the
+    // editor, which a document listener cannot tell from typing - so arrowing to the
+    // second item would have looked like "the whole name is typed" and shut the popup on
+    // the first keypress. Navigation and commit keys are therefore skipped here, and what
+    // happens after an item is PICKED (by click, or by Enter) is the action listener's
+    // business below.
+    private static void filterAsYouType(javax.swing.JComboBox<String> box) {
+        java.awt.Component component = box.getEditor().getEditorComponent();
+        if (!(component instanceof javax.swing.text.JTextComponent)) return;
+        javax.swing.text.JTextComponent editor = (javax.swing.text.JTextComponent) component;
+
+        // THE FULL LIST, TAKEN ONCE. The box's own model holds a subset most of the time,
+        // so reading the list back out of it later would narrow the narrowed list and
+        // never let it widen again. Wired after the items are in.
+        java.util.List<String> all = new ArrayList<>();
+        for (int i = 0; i < box.getItemCount(); i++) all.add(box.getItemAt(i));
+        if (all.isEmpty()) return;      // nothing fetched yet: nothing to filter
+
+        // Raised while this code is the one changing the box, so that the events its own
+        // swaps fire are not read back as the user doing something.
+        boolean[] filtering = { false };
+
+        editor.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override public void keyReleased(java.awt.event.KeyEvent event) {
+                switch (event.getKeyCode()) {
+                    case java.awt.event.KeyEvent.VK_UP:
+                    case java.awt.event.KeyEvent.VK_DOWN:
+                    case java.awt.event.KeyEvent.VK_PAGE_UP:
+                    case java.awt.event.KeyEvent.VK_PAGE_DOWN:
+                    case java.awt.event.KeyEvent.VK_ENTER:
+                    case java.awt.event.KeyEvent.VK_ESCAPE:
+                    case java.awt.event.KeyEvent.VK_TAB:
+                        return;         // choosing, not typing
+                    default:
+                        if (!filtering[0]) narrowTo(box, editor, all, filtering);
+                }
+            }
+        });
+
+        // A PICK, by click or by Enter: the editor now holds a whole name, so the list
+        // goes back to all of them for the next click on the arrow. Nothing else to do -
+        // Swing closes the popup on a pick by itself.
+        box.addActionListener(event -> {
+            if (filtering[0]) return;
+            // After the event, not during it: the editor is given the picked item as part
+            // of this notification, and what is wanted is the state it leaves behind.
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                if (!box.isShowing()) return;
+                swapItems(box, editor, all, filtering);
+            });
+        });
+    }
+
+    // One pass of the filter: the list the box offers, the popup, and the typing left
+    // exactly as it was typed. On the event thread, after the keystroke that asked for it.
+    private static void narrowTo(javax.swing.JComboBox<String> box,
+                                 javax.swing.text.JTextComponent editor,
+                                 java.util.List<String> all, boolean[] filtering) {
+        // showPopup on a box that is not on the screen throws, and by now the dialog may
+        // have been closed under us - OK and Cancel are one keystroke away from here.
+        if (!box.isShowing()) return;
+        String typed = editor.getText().trim();
+        boolean whole = all.contains(typed);
+        java.util.List<String> matches = new ArrayList<>();
+        if (!typed.isEmpty() && !whole) {
+            String needle = typed.toLowerCase(java.util.Locale.ROOT);
+            for (String item : all) {
+                if (item.toLowerCase(java.util.Locale.ROOT).contains(needle)) matches.add(item);
+            }
+        }
+        // Nothing matches what is being typed, which is allowed and not an error: the
+        // field is free text, and a model id this machine's list has never heard of is
+        // still a model id. The whole list goes back and no popup is opened on it - an
+        // empty dropdown in front of the name somebody is halfway through typing is a
+        // dropdown that has to be dismissed before they can finish.
+        boolean offer = !matches.isEmpty();
+        boolean swapped = swapItems(box, editor, offer ? matches : all, filtering);
+        if (whole) {
+            if (box.isPopupVisible()) box.hidePopup();
+            return;
+        }
+        // Opened again rather than left as it was, when it was open: the popup is laid
+        // out and sized for the list it had at the moment it opened.
+        if (offer || (swapped && box.isPopupVisible())) {
+            if (box.isPopupVisible()) box.hidePopup();
+            box.showPopup();
+        }
+    }
+
+    // Puts items into the box without disturbing what is in the editor, and says whether
+    // that was a change at all. A model swapped for the same list is a popup that
+    // flickers and a caret that jumps, for nothing.
+    private static boolean swapItems(javax.swing.JComboBox<String> box,
+                                     javax.swing.text.JTextComponent editor,
+                                     java.util.List<String> items, boolean[] filtering) {
+        if (box.getItemCount() == items.size()) {
+            boolean same = true;
+            for (int i = 0; same && i < items.size(); i++) {
+                same = items.get(i).equals(box.getItemAt(i));
+            }
+            if (same) return false;
+        }
+        String text = editor.getText();
+        int caret = editor.getCaretPosition();
+        filtering[0] = true;
+        try {
+            box.setModel(new javax.swing.DefaultComboBoxModel<>(items.toArray(new String[0])));
+            // NOTHING IS PICKED while something is being typed: a selected item writes
+            // itself into the editor, over the typing. The name is set again when the
+            // text IS one of the items, so that the list opens with it highlighted; and
+            // what the dialog reads on OK is the editor's own text either way (see the
+            // apply block), so neither costs anything.
+            box.setSelectedItem(items.contains(text.trim()) ? text.trim() : null);
+            editor.setText(text);
+            editor.setCaretPosition(Math.min(caret, text.length()));
+        } finally {
+            filtering[0] = false;
+        }
+        return true;
+    }
+
     // ---- "What does this do?" popups ---------------------------------------
     // Every button and checkbox in the window answers a right-click - or a long press
     // on a touch screen - with its name and a few plain sentences on what it does.
@@ -6209,6 +6350,7 @@ public class JRock {
         // available models (empty until the first successful /v1/models call).
         javax.swing.JComboBox<String> modelF =
                 new javax.swing.JComboBox<>(availableModels.toArray(new String[0]));
+        modelF.setName("model");
         modelF.setEditable(true);
         modelF.setSelectedItem(MODEL_ID);   // shows current value; typeable
         modelF.setFont(modelF.getFont().deriveFont(java.awt.Font.PLAIN));  // not bold
@@ -6220,6 +6362,14 @@ public class JRock {
         if (modelEditor instanceof javax.swing.text.JTextComponent) {
             addCopyPasteMenu((javax.swing.text.JTextComponent) modelEditor, null);
         }
+        // And typing into it NARROWS THE LIST (see filterAsYouType): a dozen vendors'
+        // worth of model ids is a list nobody scrolls twice. Wired last, with the items
+        // in and the current model showing, because that is the list it takes as the
+        // whole one.
+        modelF.setToolTipText("The model every send goes to. Type any part of a name - "
+                + "\"grok\", \"sonnet\" - and the list narrows to what holds it; pick one, "
+                + "or type an id of your own, which this list need not have in it.");
+        filterAsYouType(modelF);
 
         // Narrate's output device: free text like the model, over a list that is filled
         // the first time somebody opens it (see listOnOpen). Empty by default, and
