@@ -485,7 +485,12 @@ bill, and a guess is not one.
 
 - The transcript shows **branded role headers** (`[HUMAN OPERATOR]` / `[OPERATOR'S
   ASSISTANT]`) in a teal brand color, with the actual dialog text in black and all
-  system/status output in gray.
+  system/status output in gray. A header has a **blank line under it**, which is a Markdown
+  decision rather than a cosmetic one: a selection is exported as Markdown
+  ([Ctrl+Shift+D](#markdown-export-rtf-and-docx)), and in Markdown a line directly under
+  another line is the *same paragraph* — so a header and the first line of the answer used to
+  arrive in the DOCX run together in one sentence. The empty line makes the header a paragraph
+  of its own. It is not stored in the main log: the renderer adds it, on every start.
 - **Dialog only** mode (Ctrl+D) hides the gray system lines, leaving a clean, copy-pastable
   transcript.
 - **History** mode (Ctrl+E): each send includes the prior dialog so the model sees a

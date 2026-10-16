@@ -1935,10 +1935,10 @@ public class JRock {
     // re-rendered on demand and rewritten to disk after every change.
     //
     //   GRAY   entry -> app/system text (gray). Stored INLINE in the main log.
-    //   DIALOG entry -> a human or assistant message. Rendered as a teal header
-    //                   + black body + blank line. The body is stored in its OWN
-    //                   file under logs/ (append-only, never modified); the main
-    //                   log stores only a reference: the header line + "@<stamp>".
+    //   DIALOG entry -> a human or assistant message. Rendered as a teal header, a
+    //                   blank line, the black body, and a blank line. The body is stored
+    //                   in its OWN file under logs/ (append-only, never modified); the
+    //                   main log stores only a reference: the header line + "@<stamp>".
     //
     // "Dialog only" mode hides GRAY entries, leaving a clean transcript of just
     // the headers + dialog, which matches `cat JRock/messages/*.txt`.
@@ -2206,14 +2206,16 @@ public class JRock {
 
         // Serializes the FULL log (all entries, regardless of "Dialog only" view)
         // to plain text for export: each dialog entry as its "[role]<suffix>"
-        // header line followed by its body, gray entries as their line. This is
-        // the on-screen transcript, not the on-disk @<stamp> reference form.
+        // header line, a blank line, then its body; gray entries as their line. This is
+        // the on-screen transcript, not the on-disk @<stamp> reference form - so the
+        // blank line the header is rendered with is here too (see renderDialog), a saved
+        // log being read as Markdown as often as the pane's own selection is.
         String fullText() {
             StringBuilder sb = new StringBuilder();
             for (Entry e : entries) {
                 if (e.dialog) {
                     sb.append('[').append(e.role).append(']').append(e.headerSuffix).append('\n');
-                    sb.append(e.text).append('\n');
+                    sb.append('\n').append(e.text).append('\n');
                 } else {
                     sb.append(e.text).append('\n');
                 }
@@ -2287,12 +2289,13 @@ public class JRock {
             return timeline(loaded);
         }
 
-        // Parses the main log. The file is a bit-perfect copy of the pane text,
-        // with exactly ONE transformation: a role header line ("[HUMAN OPERATOR]"
-        // / "[OPERATOR'S ASSISTANT]") is followed by an "@<stamp>" line that stands
-        // in for the message body. On load we expand that single @<stamp> line back
-        // to the message file's verbatim contents (like #include). Every other line
-        // - including empty lines - is a plain gray line, reproduced as-is.
+        // Parses the main log. The file is the pane text as persistMainLog writes it: a
+        // role header line ("[HUMAN OPERATOR]" / "[OPERATOR'S ASSISTANT]") is followed by
+        // an "@<stamp>" line that stands in for the message body, and the blank line the
+        // pane shows between the two is not in the file at all - the renderer adds it.
+        // On load we expand that single @<stamp> line back to the message file's verbatim
+        // contents (like #include). Every other line - including empty lines - is a plain
+        // gray line, reproduced as-is.
         private java.util.List<Entry> parseMainLog(Path from) {
             java.util.List<Entry> out = new ArrayList<>();
             String content = readFileQuietly(from);
@@ -2347,13 +2350,23 @@ public class JRock {
             }
         }
 
-        // Renders the branded header and the (possibly multi-line) body. In the
-        // normal view the blank line after a message comes from a separate gray ""
+        // Renders the branded header, a blank line, and the (possibly multi-line) body.
+        // In the normal view the blank line AFTER a message comes from a separate gray ""
         // entry. In "Dialog only" mode those gray separators are hidden, so we add
         // one blank line here to keep messages visually separated. This affects
         // only the on-screen view, never the stored entries or files.
+        //
+        // THE BLANK LINE UNDER THE HEADER IS A MARKDOWN DECISION, not a cosmetic one.
+        // What is selected in this pane is exported as Markdown (Ctrl+Shift+D, and
+        // Ctrl+Shift+A selects an answer to export), and in Markdown a line directly
+        // under another line is the SAME paragraph - so a selection that took the header
+        // in arrived in the DOCX as "[OPERATOR'S ASSISTANT] Dear Mrs Baumgartner," run
+        // together in one sentence, in body type, with the heading gone. One empty line
+        // makes the header a paragraph of its own, which is what it looks like on screen
+        // and now what it is in the document too.
         private void renderDialog(Entry e) {
             appendStyled("[" + e.role + "]" + e.headerSuffix, BRAND);
+            appendStyled("", java.awt.Color.BLACK);
             appendStyled(e.text, java.awt.Color.BLACK);
             if (dialogOnly) appendStyled("", java.awt.Color.BLACK);
         }
@@ -2396,11 +2409,13 @@ public class JRock {
         }
 
         // ---- Persistence ---------------------------------------------------
-        // Writes the main log as a bit-perfect copy of the pane, with exactly one
-        // transformation: a dialog entry's body is collapsed to a single "@<stamp>"
-        // line under its role header. Every entry (gray or dialog) contributes its
-        // own "<line>\n"; no extra blank lines are added. The blank line seen after
-        // a message is a separate gray "" entry, written like any other line.
+        // Writes the main log as a copy of the pane, with two differences, both of them
+        // the renderer's: a dialog entry's body is collapsed to a single "@<stamp>"
+        // line under its role header, and the blank line renderDialog puts BETWEEN the
+        // header and the body is not stored - rendering adds it again, loaded or not, so
+        // storing it would double it on the next start. Every entry (gray or dialog)
+        // contributes its own "<line>\n"; no other blank lines are added. The blank line
+        // seen after a message is a separate gray "" entry, written like any other line.
         //   gray entry   -> "<text>\n"
         //   dialog entry -> "[<ROLE>]<headerSuffix>\n" + "@<stamp>\n"
         //     (headerSuffix is "" normally, or " <localized time>" in extend mode)
