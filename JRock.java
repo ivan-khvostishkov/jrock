@@ -3082,10 +3082,17 @@ public class JRock {
                 return;
             }
 
+            // WHICH MODEL, in the line that says a call is going out. The path is the
+            // same for every model there is - "Calling /openai/v1/chat/completions ..."
+            // nine times over says nothing about the one thing that differs between two
+            // sends, and the folder's model is exactly what somebody reading a log after
+            // the event wants to know: it is set per folder, changed in Configure, and
+            // the cost line further down is only meaningful next to it.
+            String calling = "Calling [" + MODEL_ID + "] at " + pathOf(endpoint());
             log.gray(extend
-                    ? "Calling " + pathOf(endpoint()) + " (extend: " + history.size() + " prior turns"
+                    ? calling + " (extend: " + history.size() + " prior turns"
                       + (historyLimit > 0 ? ", History limit " + historyLimit : "") + ") ..."
-                    : "Calling " + pathOf(endpoint()) + " ...");
+                    : calling + " ...");
             // The line is not quite silent while the answer is on its way (see crackleOn).
             crackleOn();
             new SwingWorker<String[], Void>() {

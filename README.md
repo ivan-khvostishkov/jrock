@@ -491,6 +491,10 @@ bill, and a guess is not one.
   another line is the *same paragraph* — so a header and the first line of the answer used to
   arrive in the DOCX run together in one sentence. The empty line makes the header a paragraph
   of its own. It is not stored in the main log: the renderer adds it, on every start.
+- A send says **which model** it is calling, not just where:
+  `Calling [xai.grok-4.3] at /openai/v1/chat/completions ...`. The path is the same for every
+  model there is, and the model is the thing that differs between two sends — and the one the
+  cost line below it is only meaningful next to.
 - **Dialog only** mode (Ctrl+D) hides the gray system lines, leaving a clean, copy-pastable
   transcript.
 - **History** mode (Ctrl+E): each send includes the prior dialog so the model sees a
@@ -4050,7 +4054,7 @@ is **answered again from that answer, with no call to Bedrock**:
 Local prompt cache: this prompt was answered before - reusing JRock/messages/20261009-101500-120-assistant.txt, with no call to Bedrock.
 ```
 
-in place of the `Calling /openai/v1/chat/completions ...` line, and the reply is logged as a
+in place of the `Calling [xai.grok-4.3] at /openai/v1/chat/completions ...` line, and the reply is logged as a
 reply like any other. "Answered before" means **any** message in `JRock/messages/` — not only
 the ones the log still shows: every `-operator.txt` there, by the SHA-256 of its text, paired
 with the `-assistant.txt` written after it. A request that failed has no answer after it and is
