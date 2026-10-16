@@ -1877,6 +1877,24 @@ underscore and **nothing else** — a dot is not one, or `scan0167.Merged.pdf` w
 `scan0167.pdf`, and that merged document is the one whose own two passes the last step offers to
 delete.
 
+**What a suffix means is yours to decide — JRock only keeps it attached.** There is no list of
+known suffixes in the code and there should not be: the flow's rule is "a hyphen or an underscore
+and then anything", so a convention of your own survives a rename without anybody teaching it to
+the program. The one in use here, for the record:
+
+| Name | What it is |
+|---|---|
+| `file.pdf` | **the document itself** — the scan as it came off the glass, or the PDF as it arrived |
+| `file_recognized.pdf` | the same pages with a **text layer**, from [OCR](#recommended-tooling-faq) |
+| `file-S.pdf`, `file-SS.pdf` | the **signed** copy, scanned back in after signing (`-SS` where it is the signed *and* stamped one) |
+| `file-SA.pdf` | the signed copy **with its appendices** scanned too — one PDF of everything that went in the envelope |
+| `file-RFS.pdf` | **reduced file size**, from ABBYY FineReader's *File → Reduce File Size…* — the copy to attach to an e-mail |
+| `file-en.docx`, `file-SA.txt` | a **translation**, an appendix as text — anything the set needs that is not another format of the same pages |
+| `file.indd` | the **InDesign layout** it was typeset in, which is not a copy of the document at all |
+
+All of them are renamed together with the document and keep their suffix, so a folder filed a
+year ago still says which file is the signed one and which is the small one to send.
+
 **The suggested name is editable, in the question itself.** It arrives in a text field with the
 model's answer already in it: **Enter** files the set under that name, **Cancel** leaves every
 file exactly as it was, and anything typed in between is the name used instead. A model reads one
