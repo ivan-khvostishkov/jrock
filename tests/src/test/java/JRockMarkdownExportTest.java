@@ -77,10 +77,10 @@ class JRockMarkdownExportTest {
             "| EMEA | 12 |",
             "");
 
-    /** The five parts of the smallest package a word processor will open. */
+    /** The six parts of the smallest package a word processor will open. */
     private static final String[] DOCX_PARTS = {
             "[Content_Types].xml", "_rels/.rels", "word/_rels/document.xml.rels",
-            "word/styles.xml", "word/document.xml" };
+            "word/styles.xml", "word/footer1.xml", "word/document.xml" };
 
     /** A hash of the shape JRock gives an include: twelve lowercase hex digits. */
     private static final String HASH = "0123456789ab";
@@ -123,7 +123,7 @@ class JRockMarkdownExportTest {
     }
 
     @Test
-    @DisplayName("the DOCX is a valid package: five parts, all well-formed, styles named")
+    @DisplayName("the DOCX is a valid package: six parts, all well-formed, styles named")
     void writesDocxWithNamedStyles() throws Exception {
         Map<String, byte[]> parts = unzip(docx(export(MARKDOWN)));
         assertThat(parts.keySet()).describedAs("the parts of the package")
@@ -146,6 +146,48 @@ class JRockMarkdownExportTest {
                 .contains("<w:i/>")                           // the italic one
                 .contains("<w:tbl>").contains("<w:tblHeader/>")
                 .contains("München");                    // UTF-8, as the part declares
+    }
+
+    @Test
+    @DisplayName("every DOCX carries the footer: who made it, and where it came from")
+    void writesTheBrandedFooter() throws Exception {
+        Map<String, byte[]> parts = unzip(docx(export(MARKDOWN)));
+
+        // A footer is three things agreeing, and any one of them missing is a footer Word
+        // does not show however well-formed the part is: the content type that says what
+        // the part is, the relationship that lets document.xml point at it, and the
+        // reference in the section that does point at it.
+        assertThat(text(parts.get("[Content_Types].xml")))
+                .describedAs("the footer part's content type")
+                .contains("PartName=\"/word/footer1.xml\"")
+                .contains("wordprocessingml.footer+xml");
+        assertThat(text(parts.get("word/_rels/document.xml.rels")))
+                .describedAs("the relationship document.xml points at")
+                .contains("Id=\"rFooter\"").contains("Target=\"footer1.xml\"");
+        String body = text(parts.get("word/document.xml"));
+        assertThat(body).describedAs("the section's footer reference, first in w:sectPr")
+                .contains("<w:sectPr><w:footerReference w:type=\"default\" r:id=\"rFooter\"/>")
+                // Declared even in a document with no picture and no link in it, or r:id
+                // above is not a reference to anything.
+                .contains("xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/"
+                        + "2006/relationships\"");
+
+        String footer = text(parts.get("word/footer1.xml"));
+        assertThat(footer).describedAs("word/footer1.xml")
+                .contains("<w:t xml:space=\"preserve\">Created by JRock</w:t>")
+                .contains("<w:t xml:space=\"preserve\">jrock.nosocial.net</w:t>")
+                // The tab, and the right stop it runs to: what holds the two ends of one
+                // line apart, at the right margin of the text frame.
+                .contains("<w:tab/>")
+                .contains("<w:tab w:val=\"right\" w:pos=\"9638\"/>")
+                // Small and gray: a mark on the page, not part of what the page says.
+                .contains("w:val=\"808080\"").contains("<w:sz w:val=\"16\"/>");
+
+        // The stop moves with the page, as the table width does: the address sits on the
+        // landscape right margin and not 5 cm inside it.
+        String wide = text(unzip(docx(export(MARKDOWN, null, true))).get("word/footer1.xml"));
+        assertThat(wide).describedAs("the landscape footer's right tab stop")
+                .contains("<w:tab w:val=\"right\" w:pos=\"14570\"/>");
     }
 
     @Test

@@ -15758,11 +15758,16 @@ public class JRock {
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
         private static final String RELS_NS =
                 "http://schemas.openxmlformats.org/package/2006/relationships";
-        // Declared on w:document only when there is a picture or a link in it: r for the
-        // relationship a drawing or a w:hyperlink points at, and the three DrawingML
-        // namespaces a drawing itself is written in.
-        private static final String DRAWING_NS = " xmlns:r=\"" + R_NS + "\""
-                + " xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/"
+        // r, for every relationship the document points at by id: the footer, a drawing,
+        // a w:hyperlink. On w:document ALWAYS, because the footer reference is in every
+        // document this writes (see footerXml) - and declared here on its own rather than
+        // inside DRAWING_NS, which would make it a duplicate attribute in a document that
+        // has a picture in it as well.
+        private static final String R_NS_ATTR = " xmlns:r=\"" + R_NS + "\"";
+        // The three DrawingML namespaces a drawing is written in, declared only when
+        // there is a picture to write.
+        private static final String DRAWING_NS =
+                " xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/"
                 + "wordprocessingDrawing\""
                 + " xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\""
                 + " xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"";
@@ -15772,6 +15777,28 @@ public class JRock {
         private static final String SVG_BLIP_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}";
         private static final String SVG_BLIP_NS =
                 "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
+        // ---- The footer, which is on every page of every DOCX this writes ----
+        //
+        // Two ends of one line: who made the document on the left, where it came from on
+        // the right. 8pt gray, which is small enough to read as a mark on the page rather
+        // than as part of what the page says - the document is the answer, not an
+        // advertisement for the thing that wrote it.
+        //
+        // In the FOOTER rather than in the text, because a document gets passed on: the
+        // letter is printed, scanned, forwarded, pasted into something else, and the one
+        // thing that survives all of that is what is printed on every page of it. And it
+        // is one line, not a logo: a picture in the footer would be a picture in the
+        // media of every export, and a document whose first page is 40 KB of somebody
+        // else's branding is one people strip before they send it.
+        private static final String FOOTER_LEFT = "Created by JRock";
+        private static final String FOOTER_RIGHT = "jrock.nosocial.net";
+        private static final int FOOTER_SIZE = 16;           // half-points, so 8pt
+        private static final String FOOTER_GRAY = "808080";
+        private static final String FOOTER_PART = "word/footer1.xml";
+        // The id document.xml names it by. A word rather than a number, so it cannot
+        // collide with the rId<n> an image gets or the rLink<n> a link gets.
+        private static final String FOOTER_REL = "rFooter";
+
         private static final String CONTENT_TYPES_HEAD = XML_HEAD
                 + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/"
                 + "content-types\">"
@@ -15783,6 +15810,8 @@ public class JRock {
                 + "vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
                 + "<Override PartName=\"/word/styles.xml\" ContentType=\"application/"
                 + "vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
+                + "<Override PartName=\"/" + FOOTER_PART + "\" ContentType=\"application/"
+                + "vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>"
                 + "</Types>";
         private static final String ROOT_RELS = XML_HEAD
                 + "<Relationships xmlns=\"" + RELS_NS + "\">"
@@ -15790,7 +15819,7 @@ public class JRock {
                 + " Target=\"word/document.xml\"/></Relationships>";
 
         /**
-         * The document as a .docx: the five parts of the smallest package Word, Pages,
+         * The document as a .docx: the six parts of the smallest package Word, Pages,
          * LibreOffice and a layout application will all open, plus one media part per
          * picture it places.
          */
@@ -15802,6 +15831,7 @@ public class JRock {
                 entry(zip, "_rels/.rels", ROOT_RELS);
                 entry(zip, "word/_rels/document.xml.rels", documentRels());
                 entry(zip, "word/styles.xml", styles());
+                entry(zip, FOOTER_PART, footerXml());
                 entry(zip, "word/document.xml", documentXml());
                 for (Image image : media.values()) {
                     entry(zip, "word/media/" + image.part(), image.bytes);
@@ -15836,14 +15866,18 @@ public class JRock {
             return xml.append(CONTENT_TYPES_TAIL).toString();
         }
 
-        // What word/document.xml is allowed to point at: the styles, one image part per
-        // placed picture under the id the drawing names (see docxDrawing), and one
-        // external address per link under the id its w:hyperlink names (see docxRuns).
+        // What word/document.xml is allowed to point at: the styles, the footer, one
+        // image part per placed picture under the id the drawing names (see docxDrawing),
+        // and one external address per link under the id its w:hyperlink names (see
+        // docxRuns). A part not named here is a part Word does not read, however
+        // correctly it is written and whatever the content types say about it.
         private String documentRels() {
             StringBuilder xml = new StringBuilder(XML_HEAD);
             xml.append("<Relationships xmlns=\"").append(RELS_NS).append("\">")
                .append("<Relationship Id=\"rId1\" Type=\"").append(R_NS)
-               .append("/styles\" Target=\"styles.xml\"/>");
+               .append("/styles\" Target=\"styles.xml\"/>")
+               .append("<Relationship Id=\"").append(FOOTER_REL).append("\" Type=\"")
+               .append(R_NS).append("/footer\" Target=\"footer1.xml\"/>");
             for (Image image : media.values()) {
                 xml.append("<Relationship Id=\"rId").append(image.relId).append("\" Type=\"")
                    .append(R_NS).append("/image\" Target=\"media/").append(image.part())
@@ -15901,10 +15935,39 @@ public class JRock {
             return xml.toString();
         }
 
+        // The footer part: one paragraph with its two ends held apart by a RIGHT TAB STOP
+        // on the right margin, which is how a word processor puts two things on one line
+        // and keeps them there. The stop is measured from the instance's own page width,
+        // so a landscape export puts the address on the landscape right margin.
+        //
+        // Not a two-cell table, which is what this looked like at first: a table in the
+        // footer of every document is a table the next person has to notice before they
+        // edit the footer, and one that some importers bring in as a table in the body.
+        //
+        // The run properties are written twice over - once in w:pPr/w:rPr for the
+        // paragraph mark, once per run - because a reader that only honours one of them
+        // must still show 8pt gray rather than 11pt black.
+        private String footerXml() {
+            String runProps = "<w:rPr><w:color w:val=\"" + FOOTER_GRAY + "\"/>"
+                    + "<w:sz w:val=\"" + FOOTER_SIZE + "\"/></w:rPr>";
+            StringBuilder xml = new StringBuilder(XML_HEAD);
+            xml.append("<w:ftr xmlns:w=\"").append(W_NS).append("\"><w:p><w:pPr>")
+               .append("<w:tabs><w:tab w:val=\"right\" w:pos=\"")
+               .append(pageWidth - 2 * MARGIN).append("\"/></w:tabs>")
+               .append("<w:spacing w:after=\"0\"/>")
+               .append(runProps)
+               .append("</w:pPr><w:r>").append(runProps)
+               .append("<w:t xml:space=\"preserve\">").append(xml(FOOTER_LEFT))
+               .append("</w:t></w:r><w:r>").append(runProps)
+               .append("<w:tab/><w:t xml:space=\"preserve\">").append(xml(FOOTER_RIGHT))
+               .append("</w:t></w:r></w:p></w:ftr>");
+            return xml.toString();
+        }
+
         private String documentXml() {
             StringBuilder xml = new StringBuilder(XML_HEAD);
-            xml.append("<w:document xmlns:w=\"").append(W_NS).append('"');
-            if (!media.isEmpty() || !links.isEmpty()) xml.append(DRAWING_NS);
+            xml.append("<w:document xmlns:w=\"").append(W_NS).append('"').append(R_NS_ATTR);
+            if (!media.isEmpty()) xml.append(DRAWING_NS);
             xml.append("><w:body>");
             for (Block block : blocks) docx(xml, block);
             // An empty paragraph to end on: a body whose last element is a table is
@@ -15913,8 +15976,13 @@ public class JRock {
             // width above was measured against. Landscape says so as well as measuring
             // it - a reader that only looks at w:orient would print the right way round,
             // and one that only looks at the two dimensions already has them.
+            // The footer reference comes FIRST in w:sectPr: the schema puts the header
+            // and footer references ahead of the page itself, and Word reads a section
+            // whose elements are out of order as a document to be repaired.
             xml.append("<w:p/>")
-               .append("<w:sectPr><w:pgSz w:w=\"").append(pageWidth)
+               .append("<w:sectPr><w:footerReference w:type=\"default\" r:id=\"")
+               .append(FOOTER_REL).append("\"/>")
+               .append("<w:pgSz w:w=\"").append(pageWidth)
                .append("\" w:h=\"").append(pageHeight)
                .append(landscape ? "\" w:orient=\"landscape\"/>" : "\"/>")
                .append("<w:pgMar w:top=\"").append(MARGIN).append("\" w:right=\"")

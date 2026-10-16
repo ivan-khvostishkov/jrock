@@ -3936,11 +3936,19 @@ because both converters are built in and neither starts a process.
   word, so no encoding anywhere can change what the file says. Swing's `RTFEditorKit` reads the
   import direction but does *not* write this one — its writer has no notion of a table, and a
   table is half of what a document is for.
-- **DOCX** is a five-part OOXML package (`[Content_Types].xml`, two `_rels`, `word/styles.xml`,
-  `word/document.xml`) zipped with `java.util.zip`, plus one `word/media/` part per picture it
-  places. The paragraphs carry **named styles** — Normal, Heading 1–6, Code, Quote — and the page
-  is A4 with 2 cm margins, which is why this is the format to export for typesetting: a layout
-  application imports a document by mapping style *names* onto its own.
+- **DOCX** is a six-part OOXML package (`[Content_Types].xml`, two `_rels`, `word/styles.xml`,
+  `word/footer1.xml`, `word/document.xml`) zipped with `java.util.zip`, plus one `word/media/`
+  part per picture it places. The paragraphs carry **named styles** — Normal, Heading 1–6, Code,
+  Quote — and the page is A4 with 2 cm margins, which is why this is the format to export for
+  typesetting: a layout application imports a document by mapping style *names* onto its own.
+- **A footer on every page**: `Created by JRock` at the left margin, `jrock.nosocial.net` at the
+  right, in 8pt gray. One paragraph, with the two ends held apart by a **right tab stop** on the
+  right margin — which moves with the page, so a landscape export puts the address on the
+  landscape margin. Deliberately a line of text and not a logo: a picture in the footer would be
+  a picture in the media of every export. It is in the footer and not in the text because a
+  document gets passed on — printed, scanned, forwarded, pasted into something else — and what
+  is printed on every page is the part that survives that. The DOCX *importer* ignores headers
+  and footers, so a document exported and included again comes back as the Markdown it was.
 - **Which A4** is the DOCX save dialog's file-type dropdown: **DOCX document as A4 portrait** or
   **as A4 landscape**. Same extension either way, so what you type is unaffected; the orientation
   is a property of the document, and the save dialog is the last moment anybody is asked anything.
