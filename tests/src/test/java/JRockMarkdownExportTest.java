@@ -149,6 +149,37 @@ class JRockMarkdownExportTest {
     }
 
     @Test
+    @DisplayName("a ``` fence round the whole answer is not in the document")
+    void stripsTheFenceAModelPutsRoundItsAnswer() throws Exception {
+        // What a model very often answers with when it is asked for Markdown: the
+        // Markdown, inside a fence that says it is Markdown.
+        Object fenced = export("```markdown\n" + MARKDOWN + "\n```\n");
+        assertThat(fencedFlag(fenced)).describedAs("that a fence was taken off").isTrue();
+        String body = text(unzip(docx(fenced)).get("word/document.xml"));
+        assertThat(body).describedAs("word/document.xml of the fenced answer")
+                // The heading is a heading, not a line of code: read as Markdown with the
+                // fence still on it, the whole letter was one Code block and the two
+                // fence lines were text at each end of it.
+                .contains("<w:pStyle w:val=\"Heading1\"/>")
+                .contains("<w:tbl>")
+                .doesNotContain("```")
+                .doesNotContain("<w:pStyle w:val=\"Code\"/>");
+
+        // The same answer without the fence is the same document, which is the point:
+        // nothing else is treated differently.
+        assertThat(blocks(fenced)).describedAs("the blocks of the fenced answer")
+                .isEqualTo(blocks(export(MARKDOWN)));
+
+        // A fence INSIDE an answer is a code block the model meant, and stays one.
+        Object code = export("# Title\n\n```java\nint x = 1;\n```\n\nAfter it.\n");
+        assertThat(fencedFlag(code)).describedAs("a fence in the middle is not a wrapper")
+                .isFalse();
+        assertThat(text(unzip(docx(code)).get("word/document.xml")))
+                .describedAs("the code block the model meant")
+                .contains("<w:pStyle w:val=\"Code\"/>");
+    }
+
+    @Test
     @DisplayName("every DOCX carries the footer: who made it, and where it came from")
     void writesTheBrandedFooter() throws Exception {
         Map<String, byte[]> parts = unzip(docx(export(MARKDOWN)));
@@ -608,6 +639,11 @@ class JRockMarkdownExportTest {
 
     private static boolean simplified(Object document) throws Exception {
         return (Boolean) call(document, "simplified");
+    }
+
+    /** Whether a ``` fence round the whole text was taken off before it was read. */
+    private static boolean fencedFlag(Object document) throws Exception {
+        return (Boolean) call(document, "fenced");
     }
 
     private static int images(Object document) throws Exception {

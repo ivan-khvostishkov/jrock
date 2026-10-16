@@ -15108,6 +15108,11 @@ public class JRock {
         MarkdownExport document = asDocx
                 ? MarkdownExport.of(markdown, INCLUDES, landscape)
                 : MarkdownExport.of(markdown);
+        if (document.fenced()) {
+            log.gray("The selection was wrapped in a ``` fence - the model saying \"this "
+                    + "is Markdown\" rather than Markdown - so the two fence lines are not "
+                    + "in the document.");
+        }
         // Anything the selection referred to and this could not place: said here, before
         // the result line, because the export goes ahead either way and the reference is
         // left in the text as it stands.
@@ -15130,6 +15135,38 @@ public class JRock {
             log.gray("Could not export " + kind + " to " + target + ": " + ex);
             return ex.getMessage() == null ? ex.toString() : ex.getMessage();
         }
+    }
+
+    // A whole text with the ``` fence that was put AROUND it taken off - "```markdown" on
+    // the first line, "```" on the last - and everything else left exactly as it is.
+    //
+    // Asked for because a model asked to answer in Markdown very often answers with a
+    // fenced block of Markdown: the fence is it saying "this is Markdown", not Markdown.
+    // Exported as it stands, the whole letter became ONE CODE BLOCK in the document -
+    // Consolas, indented, no headings, no tables, no pictures placed - and the two fence
+    // lines came out as text at the top and the bottom of it.
+    //
+    // ONLY A FENCE ROUND THE WHOLE OF IT. A fence in the MIDDLE of an answer is a code
+    // block the model meant, and the document should hold it as one; so this takes the
+    // first line only when it opens a fence, the last only when it closes one, and
+    // refuses the pair when anything between them opens or closes another (an answer that
+    // is two fenced blocks is not one fenced block, whatever its ends look like).
+    static String unfenced(String text) {
+        String[] lines = text.split("\n", -1);
+        int first = 0, last = lines.length - 1;
+        while (first <= last && lines[first].isBlank()) first++;
+        while (last > first && lines[last].isBlank()) last--;
+        if (last - first < 1) return text;
+        if (!lines[first].trim().matches("```+[a-zA-Z0-9_+-]*")) return text;
+        if (!lines[last].trim().matches("```+")) return text;
+        for (int i = first + 1; i < last; i++) {
+            if (lines[i].trim().startsWith("```")) return text;
+        }
+        StringBuilder inside = new StringBuilder();
+        for (int i = first + 1; i < last; i++) {
+            inside.append(lines[i]).append(i + 1 < last ? "\n" : "");
+        }
+        return inside.toString();
     }
 
     /** The path with the format's extension, unless it already ends in it. */
@@ -15237,6 +15274,11 @@ public class JRock {
         private List<Run> pending;         // body text being gathered across lines
         private boolean simplified;
 
+        // Whether what came in was wrapped in a ``` fence that was taken off again. Worth
+        // a line in the log: a document whose first line was "```markdown" until a moment
+        // ago is one somebody may want to look at.
+        private boolean fenced;
+
         // hash -> file for the session's includes, or null when this export does not
         // place pictures at all (the RTF path). Then: every hash looked up so far, so a
         // file is read once however often it is referred to; the images the document
@@ -15303,6 +15345,14 @@ public class JRock {
                                  boolean landscape) {
             String text = markdown == null ? "" : markdown;
             MarkdownExport document = new MarkdownExport(includes, landscape);
+            // THE ``` FENCE A MODEL PUTS ROUND ITS ANSWER comes off before a word of it
+            // is read as Markdown (see unfenced): the fence is the model saying "this is
+            // Markdown", and read AS Markdown it says the opposite - the whole letter is
+            // one code block, in Consolas, with no headings, no tables and no pictures
+            // placed, and the two fence lines printed at the top and the bottom of it.
+            String inside = unfenced(text);
+            document.fenced = !inside.equals(text);
+            text = inside;
             try {
                 document.parse(text);
             } catch (RuntimeException ex) {
@@ -15332,6 +15382,9 @@ public class JRock {
 
         /** Whether the Markdown had to be given up on and written as plain lines. */
         boolean simplified() { return simplified; }
+
+        /** Whether a ``` fence round the whole text was taken off (see unfenced). */
+        boolean fenced() { return fenced; }
 
         /** How many pictures the document places, i.e. how many go into the package. */
         int images() { return media.size(); }

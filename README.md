@@ -3950,6 +3950,14 @@ because both converters are built in and neither starts a process.
   part per picture it places. The paragraphs carry **named styles** — Normal, Heading 1–6, Code,
   Quote — and the page is A4 with 2 cm margins, which is why this is the format to export for
   typesetting: a layout application imports a document by mapping style *names* onto its own.
+- **A ``` fence round the whole selection comes off** before a word of it is read. A model asked
+  for Markdown very often answers with the Markdown *inside* a fence — ` ```markdown ` on the
+  first line, ` ``` ` on the last — which is it saying "this is Markdown" rather than Markdown.
+  Read as it stands, the whole letter became **one code block**: Consolas, indented, no headings,
+  no tables, no pictures placed, with the two fence lines as text at each end. A fence in the
+  *middle* of an answer is a code block the model meant and stays one, and so does an answer that
+  is two fenced blocks: only a fence around the whole of it is a wrapper. The log says when one
+  was taken off.
 - **A footer on every page**: `Created by JRock` at the left margin, `jrock.nosocial.net` at the
   right, in 8pt gray. One paragraph, with the two ends held apart by a **right tab stop** on the
   right margin — which moves with the page, so a landscape export puts the address on the
