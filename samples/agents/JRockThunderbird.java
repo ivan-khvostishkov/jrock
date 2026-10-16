@@ -386,6 +386,12 @@ public final class JRockThunderbird {
             case "#move":
             case "#propose":
                 return moveEvent(line.substring(what.length()).trim(), zone);
+            case "#rename":
+                return renameEvent(line.substring(what.length()).trim(), zone);
+            case "#busy":
+                return markEvent(line.substring(what.length()).trim(), zone, true);
+            case "#free":
+                return markEvent(line.substring(what.length()).trim(), zone, false);
             case "#mail":
                 return mail(daysIn(parts, 1, 0), zone);
             case "#message":
@@ -407,7 +413,8 @@ public final class JRockThunderbird {
                 throw new Stop("\"" + line + "\" is not something this agent answers. Ask "
                         + "#today, #week, #next [n], #range <from> <to>, #calendars, "
                         + "#tentative [days] or "
-                        + "#new <date> [time] <name> or #move <id> <date> [time] about "
+                        + "#new <date> [time] [+busy] <name>, #move <id> <date> [time], "
+                        + "#rename <id> <name>, #busy <id> or #free <id> about "
                         + "the calendar, or #mail [days], "
                         + "#unanswered [days], #with <somebody>, #senders [days], "
                         + "#message <id or words>, #reply <id> <text> or #mailboxes "
@@ -1030,7 +1037,8 @@ public final class JRockThunderbird {
     private static String newEvent(String spec) {
         if (spec.isEmpty()) {
             throw new Stop("#new wants a date, an optional time and a name, as "
-                    + "#new 2026-10-15 14:00 Dentist.");
+                    + "#new 2026-10-15 14:00 Dentist - with +busy before the name for an "
+                    + "event that is to block the time.");
         }
         String[] bits = spec.split("\\s+", 2);
         LocalDate day = date(bits[0]);
@@ -1045,6 +1053,18 @@ public final class JRockThunderbird {
             if (hour > 23 || minute > 59) throw new Stop("\"" + clock.group() + "\" is not a time.");
             at = LocalTime.of(hour, minute);
             rest = rest.substring(clock.end()).trim();
+        }
+        // BUSY OR FREE, and FREE unless it says otherwise (see ics for why). "+busy" or
+        // "+free" right after the time, and taken off the name: a marker with a plus in
+        // front of it, because "busy" on its own is a word that starts a real title -
+        // "Busy day, keep clear" would have lost its first word to a flag.
+        boolean transparent = true;
+        java.util.regex.Matcher shows =
+                Pattern.compile("^\\+(busy|free)(?=\\s|$)", Pattern.CASE_INSENSITIVE)
+                        .matcher(rest);
+        if (shows.find()) {
+            transparent = !"busy".equalsIgnoreCase(shows.group(1));
+            rest = rest.substring(shows.end()).trim();
         }
         if (rest.isEmpty()) throw new Stop("#new wants a name for the event.");
         String summary = rest.length() > 200 ? rest.substring(0, 200).trim() : rest;
@@ -1063,7 +1083,8 @@ public final class JRockThunderbird {
         Path file;
         try {
             file = Files.createTempFile("jrock-event-", ".ics");
-            Files.write(file, ics(day, at, summary, email).getBytes(StandardCharsets.UTF_8));
+            Files.write(file, ics(day, at, summary, email, transparent)
+                    .getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             throw new Stop("the .ics file could not be written: " + ex.getMessage());
         }
@@ -1101,7 +1122,8 @@ public final class JRockThunderbird {
     // The event as an iCalendar invitation. UTC throughout for a timed event, so no
     // VTIMEZONE has to be written and nothing can be read an hour out; a plain date for
     // an all-day one, which is the one case that must not be converted at all.
-    private static String ics(LocalDate day, LocalTime at, String summary, String email) {
+    private static String ics(LocalDate day, LocalTime at, String summary, String email,
+                              boolean transparent) {
         DateTimeFormatter utc = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
         DateTimeFormatter date = DateTimeFormatter.ofPattern("yyyyMMdd");
         String stamp = ZonedDateTime.now(ZoneOffset.UTC).format(utc);
@@ -1131,6 +1153,7 @@ public final class JRockThunderbird {
                 "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:" + email,
                 "SEQUENCE:0",
                 "STATUS:CONFIRMED",
+                "TRANSP:" + (transparent ? "TRANSPARENT" : "OPAQUE"),
                 "END:VEVENT",
                 "END:VCALENDAR",
                 "");
@@ -2045,63 +2068,10 @@ public final class JRockThunderbird {
             at = LocalTime.of(hour, minute);
         }
 
-        // The event, by the short handle a briefing prints or by its whole UID.
-        String asked = parts[0].trim();
-        Path where = null;
-        String[] event = null;
-        for (Path db : databases()) {
-            for (String[] row : query(db, "SELECT cal_id, id, title, event_start, event_end,"
-                    + " event_start_tz, recurrence_id, ical_status FROM cal_events"
-                    + " WHERE recurrence_id IS NULL")) {
-                if (row.length < 8) continue;
-                if (!asked.equalsIgnoreCase(handle(row[0], row[1]))
-                        && !asked.equalsIgnoreCase(row[1])) {
-                    continue;
-                }
-                where = db;
-                event = row;
-                break;
-            }
-            if (event != null) break;
-        }
-        if (event == null) {
-            throw new Stop("no event has the id \"" + asked + "\". Ask for the calendar "
-                    + "again - every line carries its id - and use the one on the line.");
-        }
-
-        Set<String> mine = new LinkedHashSet<>();
-        try {
-            for (String[] one : identities()) mine.add(one[1].toLowerCase(Locale.ROOT));
-        } catch (Stop ignored) {
-            // No prefs.js: then nothing is known to be the operator's own.
-        }
-        // Whose event it is. No organizer at all is an appointment somebody typed into
-        // their own calendar, which is the commonest kind there is and as much theirs as
-        // one that names them.
-        String[] organizer = organizerOf(where, event[0], event[1]);
-        if (organizer != null && !mine.contains(organizer[0].toLowerCase(Locale.ROOT))) {
-            throw new Stop("\"" + event[2] + "\" is organised by "
-                    + (organizer[1].isEmpty() ? organizer[0] : organizer[1])
-                    + ", not by you, so it is not yours to move. Ask them to.");
-        }
-        // Who else is on it. One other participant is one person who would turn up at
-        // the old time, and nothing here writes to them.
-        List<String> others = otherAttendees(where, event[0], event[1], mine);
-        if (!others.isEmpty()) {
-            throw new Stop("\"" + event[2] + "\" has " + others.size()
-                    + (others.size() == 1 ? " other participant (" : " other participants (")
-                    + String.join(", ", others.subList(0, Math.min(3, others.size())))
-                    + (others.size() > 3 ? ", ..." : "")
-                    + "), so moving it is something they have to be told about. Do that one "
-                    + "in Thunderbird.");
-        }
-        String from = attendeeAddress(where, event[0], event[1], mine);
-        if (from == null && organizer != null) from = organizer[0];
-        if (from == null) from = eventEmail.trim();
-        if (from == null || from.isEmpty()) {
-            throw new Stop("no address of yours is on \"" + event[2] + "\" and none is set "
-                    + "in this window, so there is nothing to send the update from.");
-        }
+        Changeable it = changeable(parts[0].trim(), "move");
+        Path where = it.db;
+        String[] event = it.event;
+        String from = it.from;
 
         // The new time, the old length. A meeting moved is the same meeting: nothing here
         // shortens or stretches it, which is not what was asked for.
@@ -2117,8 +2087,11 @@ public final class JRockThunderbird {
         Path file;
         try {
             file = Files.createTempFile("jrock-move-", ".ics");
-            Files.write(file, moveIcs(event, from, now, length, allDay,
-                    sequenceOf(where, event[0], event[1]) + 1)
+            Files.write(file, updateIcs(event[1], from, now, length, allDay,
+                    sequenceOf(where, event[0], event[1]) + 1,
+                    event[2] == null ? "(no title)" : event[2],
+                    "TRANSPARENT".equalsIgnoreCase(
+                            propertyOf(where, event[0], event[1], "TRANSP")))
                     .getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             throw new Stop("the .ics file could not be written: " + ex.getMessage());
@@ -2158,12 +2131,229 @@ public final class JRockThunderbird {
                 + "when it arrives - that is what moves it in the calendar.";
     }
 
+    // AN APPOINTMENT THIS AGENT MAY CHANGE: the row, the database it is in, and the
+    // address to send the update from.
+    private static final class Changeable {
+        final Path db;
+        final String[] event;
+        final String from;
+
+        Changeable(Path db, String[] event, String from) {
+            this.db = db; this.event = event; this.from = from;
+        }
+    }
+
+    // One event, found by the short handle a briefing prints or by its whole UID, and
+    // CHECKED TO BE THE OPERATOR'S OWN - or a Stop saying why it is not theirs to change.
+    // verb finishes the sentence "not yours to <verb>", so each request refuses in its
+    // own words.
+    //
+    // One method for the three things that change an event, because the rule is the same
+    // one and it is the whole of what makes this safe to do by voice (see moveEvent): an
+    // event somebody else organised is theirs, and one with another participant on it
+    // cannot be changed without telling them - which is a conversation, not a command
+    // shouted across a room.
+    private static Changeable changeable(String asked, String verb) {
+        if (asked.isEmpty()) throw new Stop("no event was named.");
+        Path where = null;
+        String[] event = null;
+        for (Path db : databases()) {
+            for (String[] row : query(db, "SELECT cal_id, id, title, event_start, event_end,"
+                    + " event_start_tz, recurrence_id, ical_status FROM cal_events"
+                    + " WHERE recurrence_id IS NULL")) {
+                if (row.length < 8) continue;
+                if (!asked.equalsIgnoreCase(handle(row[0], row[1]))
+                        && !asked.equalsIgnoreCase(row[1])) {
+                    continue;
+                }
+                where = db;
+                event = row;
+                break;
+            }
+            if (event != null) break;
+        }
+        if (event == null) {
+            throw new Stop("no event has the id \"" + asked + "\". Ask for the calendar "
+                    + "again - every line carries its id - and use the one on the line.");
+        }
+
+        Set<String> mine = new LinkedHashSet<>();
+        try {
+            for (String[] one : identities()) mine.add(one[1].toLowerCase(Locale.ROOT));
+        } catch (Stop ignored) {
+            // No prefs.js: then nothing is known to be the operator's own.
+        }
+        // Whose event it is. No organizer at all is an appointment somebody typed into
+        // their own calendar, which is the commonest kind there is and as much theirs as
+        // one that names them.
+        String[] organizer = organizerOf(where, event[0], event[1]);
+        if (organizer != null && !mine.contains(organizer[0].toLowerCase(Locale.ROOT))) {
+            throw new Stop("\"" + event[2] + "\" is organised by "
+                    + (organizer[1].isEmpty() ? organizer[0] : organizer[1])
+                    + ", not by you, so it is not yours to " + verb + ". Ask them to.");
+        }
+        // Who else is on it. One other participant is one person who would turn up at
+        // the old time, or under the old name, and nothing here writes to them.
+        List<String> others = otherAttendees(where, event[0], event[1], mine);
+        if (!others.isEmpty()) {
+            throw new Stop("\"" + event[2] + "\" has " + others.size()
+                    + (others.size() == 1 ? " other participant (" : " other participants (")
+                    + String.join(", ", others.subList(0, Math.min(3, others.size())))
+                    + (others.size() > 3 ? ", ..." : "")
+                    + "), so changing it is something they have to be told about. Do that "
+                    + "one in Thunderbird.");
+        }
+        String from = attendeeAddress(where, event[0], event[1], mine);
+        if (from == null && organizer != null) from = organizer[0];
+        if (from == null) from = eventEmail.trim();
+        if (from == null || from.isEmpty()) {
+            throw new Stop("no address of yours is on \"" + event[2] + "\" and none is set "
+                    + "in this window, so there is nothing to send the update from.");
+        }
+        return new Changeable(where, event, from);
+    }
+
+    // ---- Renaming one, and marking it busy or free -----------------------------------
+    // THE OTHER TWO THINGS THAT CAN BE DONE TO AN APPOINTMENT OF YOUR OWN, both of them
+    // the same mechanism as a move and neither of them touching its time: a new title,
+    // and whether it makes you look busy.
+    //
+    // "#rename a3f91c Dentist, with the X-ray" and "#busy a3f91c" / "#free a3f91c". The
+    // rules are the move's rules, for the move's reasons (see moveEvent): an event
+    // somebody else organised is theirs to rename, and one with other people on it
+    // cannot be changed without telling them. Everything else goes out as an update -
+    // same UID, SEQUENCE one higher - and Thunderbird's window opens with it for the
+    // operator to send.
+    private static String renameEvent(String spec, ZoneId zone) {
+        String[] parts = spec.trim().split("\\s+", 2);
+        if (parts.length < 2 || parts[1].trim().isEmpty()) {
+            throw new Stop("#rename wants an event and a new name, as "
+                    + "#rename a3f91c Dentist, with the X-ray.");
+        }
+        String title = parts[1].trim();
+        if (title.length() > 200) title = title.substring(0, 200).trim();
+        Changeable it = changeable(parts[0].trim(), "rename");
+        String was = it.event[2] == null ? "(no title)" : it.event[2];
+        if (title.equals(was)) {
+            return "\"" + was + "\" is already called that; nothing was prepared.";
+        }
+        String file = update(it, zone, title, transparentNow(it), "Renamed: " + title,
+                "An appointment of yours, under a new name.\r\n\r\nWas: " + was
+                        + "\r\nNow: " + title);
+        return "New name for \"" + was + "\": \"" + title + "\"."
+                + "\nThunderbird is composing it from " + it.from + " to " + it.from
+                + ", as an update to that appointment (" + file + ")."
+                + "\nPress Ctrl+Enter in that window to send it, then accept the update "
+                + "when it arrives - that is what renames it in the calendar.";
+    }
+
+    // BUSY OR FREE, which is the one thing about an appointment that other people's
+    // software reads rather than people: TRANSP in the calendar standard, "shows as" in
+    // every calendar application. An event marked free is in the calendar and visible and
+    // does not make the operator look unavailable - which is what most of what this agent
+    // puts there should be (see ics), and the reason this exists is to say so afterwards
+    // about the ones that are not.
+    private static String markEvent(String spec, ZoneId zone, boolean busy) {
+        String asked = spec.trim().split("\\s+", 2)[0].trim();
+        if (asked.isEmpty()) {
+            throw new Stop("#" + (busy ? "busy" : "free") + " wants an event, as #"
+                    + (busy ? "busy" : "free") + " a3f91c.");
+        }
+        Changeable it = changeable(asked, "mark");
+        String title = it.event[2] == null ? "(no title)" : it.event[2];
+        boolean wasTransparent = transparentNow(it);
+        if (wasTransparent == !busy) {
+            return "\"" + title + "\" already shows as " + (busy ? "busy" : "free")
+                    + "; nothing was prepared.";
+        }
+        String shows = busy ? "busy" : "free";
+        String file = update(it, zone, title, !busy, "Shows as " + shows + ": " + title,
+                "An appointment of yours, which now shows as " + shows + ".\r\n\r\n"
+                        + title + "\r\nWas: shows as " + (wasTransparent ? "free" : "busy")
+                        + "\r\nNow: shows as " + shows);
+        return "\"" + title + "\" now shows as " + shows + " instead of "
+                + (wasTransparent ? "free" : "busy")
+                + ".\nThunderbird is composing it from " + it.from + " to " + it.from
+                + ", as an update to that appointment (" + file + ")."
+                + "\nPress Ctrl+Enter in that window to send it, then accept the update "
+                + "when it arrives - that is what changes it in the calendar.";
+    }
+
+    // Whether the event shows as free right now, as its own TRANSP says. An event with no
+    // TRANSP on it is OPAQUE by the standard's own default, which is what a calendar
+    // application writes when nobody has said otherwise.
+    private static boolean transparentNow(Changeable it) {
+        return "TRANSPARENT".equalsIgnoreCase(
+                propertyOf(it.db, it.event[0], it.event[1], "TRANSP"));
+    }
+
+    // One update, written and handed to Thunderbird: the event as it stands, with
+    // whatever this change makes different. Returns the .ics file it wrote, for the
+    // sentence that says what is waiting to be sent.
+    //
+    // The TIME IS THE EVENT'S OWN here - a rename is not a move, and neither is "show me
+    // as free" - so it is read back off the row rather than taken from the request.
+    private static String update(Changeable it, ZoneId zone, String summary,
+                                 boolean transparent, String subject, String body) {
+        Instant was = start(it.event);
+        Duration length = Duration.between(was, end(it.event));
+        boolean allDay = FLOATING.equalsIgnoreCase(
+                it.event[5] == null ? "" : it.event[5].trim());
+        ZonedDateTime when = ZonedDateTime.ofInstant(was, allDay ? ZoneOffset.UTC : zone);
+        Path file;
+        try {
+            file = Files.createTempFile("jrock-update-", ".ics");
+            Files.write(file, updateIcs(it.event[1], it.from, when, length, allDay,
+                    sequenceOf(it.db, it.event[0], it.event[1]) + 1, summary, transparent)
+                    .getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new Stop("the .ics file could not be written: " + ex.getMessage());
+        }
+        Path thunderbird = thunderbird();
+        if (thunderbird == null) {
+            throw new Stop("Thunderbird was not found, and it is what sends the update.");
+        }
+        String identity = identityOf(it.from);
+        String compose = "from=" + encode(it.from)
+                + ",to=" + encode(it.from)
+                + (identity == null ? "" : ",preselectid=" + identity)
+                + ",subject=" + encode(subject)
+                + ",body=" + encode(body + "\r\n\r\nAccept the update when it arrives and "
+                        + "the calendar follows. Sent by the JRock Thunderbird agent, to "
+                        + "itself.")
+                + ",attachment=" + file.toUri();
+        try {
+            new ProcessBuilder(thunderbird.toString(), "-compose", compose)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+        } catch (IOException ex) {
+            throw new Stop("Thunderbird would not start: " + ex.getMessage());
+        }
+        return file.toString();
+    }
+
+    // One property of one event out of the calendar's own table, or "" when it has none.
+    private static String propertyOf(Path db, String calId, String id, String key) {
+        for (String[] row : query(db, "SELECT value FROM cal_properties"
+                + " WHERE cal_id = " + text(calId) + " AND item_id = " + text(id)
+                + " AND key = " + text(key) + " LIMIT 1")) {
+            if (row.length > 0 && row[0] != null) return row[0].trim();
+        }
+        return "";
+    }
+
     // The update itself: the same UID, so the calendar knows which appointment is meant,
     // and a SEQUENCE one higher than it carries, which is how a calendar tells an update
     // from the invitation it replaces. The operator is the organizer and the only
     // attendee, because that is the only kind of event this is allowed on.
-    private static String moveIcs(String[] event, String from, ZonedDateTime when,
-                                  Duration length, boolean allDay, int sequence) {
+    // AND IT CARRIES TRANSP, which it did not. An update with no TRANSP on it is OPAQUE
+    // by the standard's own default - so every move of an event that showed as free used
+    // to quietly make it show as busy. It is written out explicitly, with whatever the
+    // event has now, and a move changes the time and nothing else.
+    private static String updateIcs(String uid, String from, ZonedDateTime when,
+                                    Duration length, boolean allDay, int sequence,
+                                    String summary, boolean transparent) {
         DateTimeFormatter utc = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
         DateTimeFormatter date = DateTimeFormatter.ofPattern("yyyyMMdd");
         String stamp = ZonedDateTime.now(ZoneOffset.UTC).format(utc);
@@ -2183,15 +2373,17 @@ public final class JRockThunderbird {
                 "PRODID:-//NoSocial.Net//JRock Thunderbird Agent//EN",
                 "METHOD:REQUEST",
                 "BEGIN:VEVENT",
-                "UID:" + event[1],
+                "UID:" + uid,
                 "DTSTAMP:" + stamp,
                 start,
                 end,
-                "SUMMARY:" + icsText(event[2] == null ? "(no title)" : event[2]),
+                "SUMMARY:" + icsText(summary == null || summary.isEmpty()
+                        ? "(no title)" : summary),
                 "ORGANIZER:mailto:" + from,
                 "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:" + from,
                 "SEQUENCE:" + sequence,
                 "STATUS:CONFIRMED",
+                "TRANSP:" + (transparent ? "TRANSPARENT" : "OPAQUE"),
                 "END:VEVENT",
                 "END:VCALENDAR",
                 "");

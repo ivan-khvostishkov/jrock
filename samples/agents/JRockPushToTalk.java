@@ -312,6 +312,30 @@ public final class JRockPushToTalk {
             + "(\\d{4}-\\d{2}-\\d{2})(?: at (\\d{1,2}:\\d{2}))?,? (?:named|called) (.+)",
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
+    // "..., showing as busy" on the end of that sentence, which is the one thing about a
+    // new event the operator may want other people's software to see. Everything this
+    // agent puts in the calendar shows as FREE unless this is there (see the calendar
+    // agent's ics): a reminder to post a letter is not a reason for anybody to be told
+    // the operator is unavailable.
+    private static final java.util.regex.Pattern SHOWS_BUSY = java.util.regex.Pattern.compile(
+            ",?\\s*(?:and )?(?:showing|shown|marked|mark it) as busy\\s*\\.?\\s*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    // THE SENTENCE THAT RENAMES ONE: the id the briefing printed, and the new name. Said
+    // out loud before anything happens, as the move is, so no appointment is touched that
+    // the operator did not hear named.
+    private static final java.util.regex.Pattern RENAME = java.util.regex.Pattern.compile(
+            "I(?:['’]m| am) renaming (?:the )?(?:event|meeting|appointment) "
+            + "([0-9a-fA-F]{6}|\\S+@\\S+) to:?\\s*(.+)",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
+    // And the one that changes whether it makes the operator look busy - the thing other
+    // people's software reads rather than people: "I'm marking event a3f91c as busy".
+    private static final java.util.regex.Pattern MARK = java.util.regex.Pattern.compile(
+            "I(?:['’]m| am) marking (?:the )?(?:event|meeting|appointment) "
+            + "([0-9a-fA-F]{6}|\\S+@\\S+) as (busy|free)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
     // The timer agent's port - JRockTimer.PORT, the first of JRock's agents' ports - and
     // how long it has to answer, on the same machine.
     private static final int TIMER_PORT = 47470;
@@ -791,6 +815,8 @@ public final class JRockPushToTalk {
         String alarm = alarmIn(reply);
         String event = eventIn(reply);
         String moved = movedIn(reply);
+        String renamed = renamedIn(reply);
+        String marked = markedIn(reply);
         String drafted = draftIn(reply);
         String noted = noteIn(reply);
         // BEFORE the save, because this one WRITES the document a save would then be
@@ -803,7 +829,8 @@ public final class JRockPushToTalk {
         // command about the last one.
         if (saved == null && drafted == null && wrote == null) lastAnswer = reply;
         if (handsFreeTurn && !handsFree) {
-            return join(note, alarm, event, moved, drafted, noted, saved, wrote);
+            return join(note, alarm, event, moved, renamed, marked, drafted, noted,
+                    saved, wrote);
         }
         // SOMETHING WENT INTO A FILE, and what the room heard was where it went (see
         // keepAsDocument). Two things must not happen now.
@@ -818,8 +845,8 @@ public final class JRockPushToTalk {
         // A save or a write that could not be spoken at all - no speaker, or it failed -
         // ends like any other failed turn: the fixed phrase, which is the one they know.
         if (wrote != null || saved != null) {
-            return join(note, alarm, event, moved, drafted, noted, saved, wrote,
-                    saidWhereItWent ? null : sayFailed());
+            return join(note, alarm, event, moved, renamed, marked, drafted, noted,
+                    saved, wrote, saidWhereItWent ? null : sayFailed());
         }
         // An answer of nothing at all - a reply that arrived empty - is a failed turn to
         // anyone listening, however well the request itself went: reading it out loud
@@ -839,12 +866,12 @@ public final class JRockPushToTalk {
             String why = stuck != null ? stuck
                     : asking != null ? "the model was still asking for " + asking : null;
             if (why != null) report("that turn ended without an answer: " + why + ".");
-            return join(note, alarm, event, moved, drafted, noted, saved,
+            return join(note, alarm, event, moved, renamed, marked, drafted, noted, saved,
                     reply.isBlank() ? "The reply was empty." : "No answer: " + why + ".",
                     sayFailed());
         }
         String silent = sayAnswer();
-        return join(note, alarm, event, moved, drafted, noted, saved,
+        return join(note, alarm, event, moved, renamed, marked, drafted, noted, saved,
                 silent == null ? null : "Not read aloud: " + silent);
     }
 
@@ -1463,6 +1490,49 @@ public final class JRockPushToTalk {
         return first.isEmpty() ? "New time proposed." : first;
     }
 
+    // Renames an appointment, if the answer says it is renaming one. Returns null when it
+    // does not, and otherwise what became of it.
+    //
+    // The same shape as the move above it, and for the same reasons: the calendar agent
+    // sends an UPDATE - the same event, a SEQUENCE one higher, the new name - which
+    // Thunderbird composes and the operator sends. An appointment somebody else organised,
+    // or one with other people on it, comes back refused with who they are.
+    private static String renamedIn(String answer) {
+        java.util.regex.Matcher m = RENAME.matcher(answer);
+        if (!m.find()) return null;
+        String name = m.group(2).trim().replaceAll("[.\\s]+$", "")
+                .replaceAll("^[\"'“‘]|[\"'”’]$", "").trim();
+        if (name.isEmpty()) return "Not renamed: the answer gave no new name.";
+        String[] renamed = askAgent(CALENDAR_PORT, "#rename " + m.group(1) + " " + name,
+                "Thunderbird", "JRockThunderbird.java");
+        if (renamed[0] == null) return "Not renamed: " + renamed[1];
+        report("calendar: " + renamed[0].replace("\n", " "));
+        String first = renamed[0].split("\n", 2)[0].trim();
+        return first.isEmpty() ? "Renamed." : first;
+    }
+
+    // Marks an appointment busy or free, if the answer says it is marking one. Returns
+    // null when it does not.
+    //
+    // Which is the one property of an appointment that OTHER PEOPLE'S software reads: a
+    // calendar marked busy is what makes a scheduling tool say the operator is not
+    // available. Everything this agent creates shows as free (see the calendar agent's
+    // ics), and this is how the exceptions are said afterwards.
+    private static String markedIn(String answer) {
+        java.util.regex.Matcher m = MARK.matcher(answer);
+        if (!m.find()) return null;
+        boolean busy = "busy".equalsIgnoreCase(m.group(2));
+        String[] marked = askAgent(CALENDAR_PORT,
+                (busy ? "#busy " : "#free ") + m.group(1), "Thunderbird",
+                "JRockThunderbird.java");
+        if (marked[0] == null) {
+            return "Not marked as " + (busy ? "busy" : "free") + ": " + marked[1];
+        }
+        report("calendar: " + marked[0].replace("\n", " "));
+        String first = marked[0].split("\n", 2)[0].trim();
+        return first.isEmpty() ? "Marked as " + (busy ? "busy" : "free") + "." : first;
+    }
+
     // Puts a drafted reply into Thunderbird's compose window, if the answer says it is
     // preparing one. Returns null when it does not.
     //
@@ -1630,8 +1700,17 @@ public final class JRockPushToTalk {
         // and without quotes around it, which a model puts there about half the time.
         String name = m.group(3).trim().replaceAll("[.\\s]+$", "")
                 .replaceAll("^[\"'“‘]|[\"'”’]$", "").trim();
+        // "... showing as busy" on the end is not part of the name (see SHOWS_BUSY): it
+        // is the one thing about a new event that other people's software reads, and
+        // everything this agent puts in the calendar shows as FREE without it.
+        boolean busy = SHOWS_BUSY.matcher(name).find();
+        if (busy) {
+            name = SHOWS_BUSY.matcher(name).replaceFirst("").trim()
+                    .replaceAll("[,.\\s]+$", "").trim();
+        }
         if (name.isEmpty()) return "Event not created: the answer named no event.";
-        String request = "#new " + day + (at == null ? "" : " " + at) + " " + name;
+        String request = "#new " + day + (at == null ? "" : " " + at)
+                + (busy ? " +busy" : "") + " " + name;
         String[] made = askAgent(CALENDAR_PORT, request, "calendar", "JRockThunderbird.java");
         if (made[0] == null) return "Event not created: " + made[1];
         // The agent's first line is the one worth a status line; the rest tells the

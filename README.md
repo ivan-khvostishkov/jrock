@@ -2218,6 +2218,13 @@ the voice, so the microphone doesn't record the last answer as the next question
   The first time is checked against the computer's clock first, and a model more than two
   minutes off sets nothing. The status line says what became of the alarm: set, refused, or
   not set because the timer agent isn't running.
+- **Renaming one, or marking it busy or free.** *"I'm renaming event a3f91c to: Dentist, with
+  the X-ray"* and *"I'm marking event a3f91c as busy"* (or *as free*) send `#rename`, `#busy` and
+  `#free` to the Thunderbird agent, which composes the update for you to send — same event, same
+  time, new name or a different *shows as*. Said out loud before anything happens, as the move
+  is, so no appointment is touched that you did not hear named. Everything the agent **creates**
+  shows as free; *"…, showing as busy"* on the end of the new-event sentence is how an event that
+  is meant to block the time gets created that way.
 - **A new event in the calendar.** An answer that says *"I'm putting it in the calendar on
   YYYY-MM-DD at HH:MM, named …"* — the appendix asks the model for this sentence too, in English
   whatever the language — sends `#new` to the [calendar
@@ -2586,6 +2593,9 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   | `#calendars` | the calendars, and how many events each holds |
   | `#new 2026-10-15 14:00 Dentist` | a new event, by post (below) — an hour long unless the calendar says otherwise |
   | `#new 2026-12-24 Christmas Eve` | the same with no time given, which makes it an event for the whole day |
+  | `#new 2026-10-15 14:00 +busy Dentist` | the same, blocking the time — everything is created **free** without `+busy` |
+  | `#rename a3f91c Dentist, with the X-ray` | a new **name** for an appointment of your own, by the id on its line |
+  | `#busy a3f91c` / `#free a3f91c` | whether it blocks your time, changed afterwards |
 
   ```
   This week, Sun 11 Oct to Sat 17 Oct 2026 (Europe/Berlin):
@@ -2640,6 +2650,23 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   (RFC 5546), which is what Thunderbird reads as *this event has moved* rather than as a new
   one. Accept the update when it arrives and the calendar follows. The new time keeps the
   appointment's **original length**, and nothing is sent until you press Ctrl+Enter.
+- **Everything it creates shows as FREE, unless you say otherwise.** `TRANSP` in the calendar
+  standard, *shows as* in every calendar application, and the one property of an appointment that
+  **other people's software reads rather than people**: an event marked busy is what makes a
+  scheduling tool tell somebody you are unavailable. Nearly everything an agent puts in a
+  calendar should not do that — a reminder to post a letter, a note that a parcel is due, a
+  dentist's appointment you are not asking anybody's permission for — so free is the default and
+  `+busy` is the exception, said deliberately (*"…, showing as busy"* through push-to-talk). It is
+  written out explicitly rather than left to the standard, whose own default is the opposite.
+- **`#rename` and `#busy`/`#free` are the same mechanism as `#move`**, under the same rule: your
+  own appointment, nobody else on it. A new title, or a different *shows as*, goes out as an
+  update — same UID, `SEQUENCE` one higher — and nothing else about the event changes: a rename
+  is not a move, and neither is "show me as free". An appointment that already reads the way you
+  are asking for comes back saying so, and nothing is prepared.
+
+  This also fixed a quiet bug in `#move`: the update it wrote carried no `TRANSP` at all, and an
+  update without one is **`OPAQUE` by the standard's own default** — so moving an event that
+  showed as free used to make it show as busy. Every update carries the event's own value now.
 - **A new event goes by post, to you from yourself.** `#new` is the one thing here that is not
   read-only, and it still writes nothing to a calendar: it writes a temporary `.ics` file and has
   **Thunderbird** compose a mail with that invitation attached, **from** the address picked in the
