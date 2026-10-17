@@ -5095,11 +5095,24 @@ Nine pages, in this order:
    An entry under `HKEY_LOCAL_MACHINE` that somebody else wrote needs an administrator to
    remove: it is named in the log and left alone, and nothing else waits for it. The whole
    command line of every entry written goes into the log.
-9. **Installed** — offers **Run JRock and its agents at login**, and then runs
-   `JRockStart.cmd` (see below), which is what starts the installation from here on. Also
-   reports anything of JRock already running (a JVM with the jar or a sample on its command
-   line, which is not a shell whose folder is named after JRock nor an editor with
-   `jrock-config.txt` open), because the script is about to ask what to do about it.
+9. **Installed** — two ticks and one button: **Run JRock and its agents at login**, and **Run
+   JRock and its agents now, as this installer finishes**. The button says what the ticks
+   mean — **Finish & run >** when *now* is ticked, **Finish >** when it is not — and it is
+   the only way off the page, because the **Close** button is hidden here.
+
+   **Because starting it now is a question, not the way out.** *"Install it, I will reboot
+   and let it come up at login"* is an ordinary thing to want, and a last page whose only
+   forward button runs JRock answers that with Close — which throws the page's answers away
+   instead of applying them: the login entry you had just unticked, with *Will be removed*
+   printed under it, stayed on the machine and started JRock again at the next login. Both
+   ticks are applied by the button now, whichever way they are set, and `JRockStart.cmd`
+   (see below) runs only if you asked for it.
+
+   With *now* ticked the page also reports anything of JRock already running (a JVM with the
+   jar or a sample on its command line, which is not a shell whose folder is named after
+   JRock nor an editor with `jrock-config.txt` open), because the script is about to ask what
+   to do about it. With *now* unticked it says the opposite: nothing is started, anything
+   running is left alone, and here is where the start script lives for when you want it.
 
 **One script starts the installation, and it looks before it starts.** The installer writes
 `JRockStart.cmd` and `JRockStart.ps1` beside the jar, with the command lines it would have used
@@ -5126,7 +5139,8 @@ that script — all of it, agents included, because *run it at login* means all 
 no point. Unlike the Start menu and Desktop ticks it does **not** default to on: it starts as
 whatever you chose last time, read off the disk, because adding an autostart entry is a decision
 about somebody's machine. Unticking it when it is there removes it, the same way the other two
-work.
+work — written or removed when the last page's **Finish** button is pressed, whether or not
+JRock is being started now.
 
 **A previous install is read, not guessed.** The Explorer entries already hold the folder the
 jar is in, which agents and flows are installed and where each one works, so those become the

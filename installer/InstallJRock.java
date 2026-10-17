@@ -276,6 +276,11 @@ public final class InstallJRock {
     // an autostart entry is a decision about somebody's machine, and the honest default
     // is whatever they chose last time (see main, where it is read off the disk).
     private static boolean startup;
+    // Start it as the installer finishes. ON by default, because installing something and
+    // then using it is the usual order - but a tick rather than the only way out, so
+    // "install now, start it at the next login" is a thing you can say on the last page
+    // without closing the window on it.
+    private static boolean runNow = true;
     private static boolean withSamples = true;
     private static boolean customise;
     // Something is installed already, so this run is an UPDATE of it: the page offers
@@ -385,7 +390,10 @@ public final class InstallJRock {
         final String title;
         final java.util.function.Consumer<javax.swing.JPanel> build;
         final java.util.function.Supplier<String> onNext;
-        String nextLabel = "Next >";
+        // ASKED AT EVERY REDRAW rather than stored once, because a tick can change what
+        // the button is going to do: the last page reads "Finish & run >" or "Finish >"
+        // depending on whether JRock is being started now.
+        java.util.function.Supplier<String> nextLabel = () -> "Next >";
 
         Step(String title, java.util.function.Consumer<javax.swing.JPanel> build,
              java.util.function.Supplier<String> onNext) {
@@ -824,7 +832,7 @@ public final class InstallJRock {
             if (found.isEmpty()) return "No agents or flows in " + SAMPLES + "/.";
             return null;
         }));
-        steps.get(0).nextLabel = "Next >";
+        steps.get(0).nextLabel = () -> "Next >";
 
         // 2. The one folder, and the jar into it.
         steps.add(new Step("Where everything goes", panel -> {
@@ -1232,7 +1240,15 @@ public final class InstallJRock {
             return installEntries();
         }));
 
-        // 9. Done, and running it.
+        // 9. Done. Two ticks - at login, and now - and one button that does what they say.
+        //
+        // BOTH ARE QUESTIONS, and starting it now is only one of them. "Install it, I will
+        // reboot and let it come up at login" is an ordinary thing to want, and a page
+        // whose only way forward is "Run JRock >" answers it with Close - which abandons
+        // the login tick instead of applying it, so an unticked autostart entry that the
+        // page said would be removed stayed on the machine and started JRock again at the
+        // next login. The tick is applied by the button, so the button has to be the way
+        // out whether or not anything is started: it reads "Finish & run >" or "Finish >".
         steps.add(new Step("Installed", panel -> {
             panel.add(text("JRock is installed."));
             panel.add(value("Folder:   " + home));
@@ -1255,24 +1271,59 @@ public final class InstallJRock {
                     redraw();
                 }));
                 if (!startup && Files.exists(loginAt)) {
-                    panel.add(alarm("Will be removed: " + loginAt));
+                    panel.add(alarm("Will be removed when you press the button below: "
+                            + loginAt));
                 }
             }
+            panel.add(check("Run JRock and its agents now, as this installer finishes",
+                    runNow, v -> {
+                        runNow = v;
+                        redraw();
+                    }));
             List<Running> running = runningJRock();
-            if (!running.isEmpty()) {
-                panel.add(note("Some of JRock is running: " + runningList(running)
-                        + ". The script will name what it finds and ask whether to stop "
-                        + "all of it and start again - a no leaves it exactly as it is."));
+            if (runNow) {
+                if (!running.isEmpty()) {
+                    panel.add(note("Some of JRock is running: " + runningList(running)
+                            + ". The script will name what it finds and ask whether to stop "
+                            + "all of it and start again - a no leaves it exactly as it is."));
+                } else {
+                    panel.add(note("Nothing of JRock is running, so the script will start it "
+                            + "without a word: JRock in " + home.getFileName()
+                            + (selectedOfKind(Kind.AGENT).isEmpty() ? "."
+                            : ", and each agent in its own folder. The flows are not started: "
+                              + "a flow is one run you ask for, from its right-click entry.")));
+                }
             } else {
-                panel.add(note("Nothing of JRock is running, so the script will start it "
-                        + "without a word: JRock in " + home.getFileName()
-                        + (selectedOfKind(Kind.AGENT).isEmpty() ? "."
-                        : ", and each agent in its own folder. The flows are not started: "
-                          + "a flow is one run you ask for, from its right-click entry.")));
+                panel.add(note("Nothing is started: the install is finished and this window "
+                        + "closes, with JRock left exactly as untouched as it is now"
+                        + (running.isEmpty() ? "" : " - including the "
+                          + (running.size() == 1 ? "one" : running.size() + " of it")
+                          + " already running (" + runningList(running) + "), left alone "
+                          + "rather than restarted") + ". "
+                        + (startup ? "It all comes up at your next login, from the tick "
+                                     + "above - which is the reason to leave this off."
+                                   : "Start it whenever you like: " + startScriptName()
+                                     + " in the install folder, or the Start menu shortcut, "
+                                     + "or this installer again.")));
             }
         }, () -> {
+            // The ticks first, and they are applied whichever way the page was answered:
+            // the login entry is a decision about the machine, not a side effect of
+            // starting JRock.
             if (startup) shortcut(Place.STARTUP);
             else removeShortcut(Place.STARTUP);
+            if (!runNow) {
+                say("Nothing started - " + startScriptName() + " in " + home
+                        + " starts it all whenever you want it.");
+                javax.swing.JOptionPane.showMessageDialog(window,
+                        "Installed, and nothing started.\n\n"
+                        + (startup ? "It all starts at your next login.\n\n" : "")
+                        + "Run " + startScriptName() + " in " + home + " whenever you want "
+                        + "everything started: it looks for what is already there first.",
+                        "JRock", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                window.dispose();
+                return null;
+            }
             String problem = runStartScript();
             if (problem != null) return problem;
             javax.swing.JOptionPane.showMessageDialog(window,
@@ -1283,7 +1334,8 @@ public final class InstallJRock {
             window.dispose();
             return null;
         }));
-        steps.get(steps.size() - 1).nextLabel = "Run JRock >";
+        steps.get(steps.size() - 1).nextLabel =
+                () -> runNow ? "Finish & run >" : "Finish >";
     }
 
     // ---- Copying ---------------------------------------------------------------
@@ -2389,7 +2441,13 @@ public final class InstallJRock {
         content.revalidate();
         content.repaint();
         back.setEnabled(at > 0);
-        next.setText(step.nextLabel);
+        next.setText(step.nextLabel.get());
+        // NO CLOSE ON THE LAST PAGE. Its ticks are applied by its own button, so a Close
+        // beside them is a way to answer the page and have the answer thrown away - the
+        // login entry you just unticked, and the page said would go, left on the machine.
+        // "Finish >" is that page's way out; the window's own close box is still there for
+        // anyone who means to abandon it.
+        cancel.setVisible(at < steps.size() - 1);
     }
 
     // Said twice: into the window's log, and onto standard output - which is what
