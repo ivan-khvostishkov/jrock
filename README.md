@@ -890,6 +890,8 @@ from inside the running application, and different for every way of launching it
   `history$` (`true`/`false`) is the [**History**](#conversation-log) checkbox; absent is `false`.
   `history-limit$` is the [**History limit**](#configure-dialog-top-left-button), a number of
   requests; absent is unlimited, and it is written only once there is a limit.
+  `request-extra$` is [**extra fields for the request body**](#extra-request-fields-request-extra),
+  the one setting with no row in the Configure dialog.
 
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser both
@@ -919,6 +921,39 @@ images-dpi$
 A value being a whole line of its own is the whole point: it can be cut and pasted **as a line**
 in any text editor, with no quoting, no escaping and no "everything after the `=`, but trimmed"
 to get wrong. Lines starting with `'` are comments, and blank lines separate the pairs.
+
+### Extra request fields (`request-extra`)
+
+One JSON object, on one line, whose fields go into **every** Chat Completions request beside
+`model` and `messages`:
+
+```
+request-extra$
+{"temperature":0.2,"modalities":["text","image"]}
+```
+
+For the endpoint that wants a field JRock has no setting of its own for. Chat Completions is a
+specification with a great many optional parameters and a great many implementations, and which
+of them one model behind one endpoint needs is not something this program can know the whole of:
+a model that returns a picture only when the request says which output modalities it will take, a
+sampling parameter a particular deployment insists on, a field an endpoint grew last month.
+Setting it here beats waiting for JRock to grow a checkbox for each one.
+
+- **The only setting with no row in the Configure dialog**, deliberately. What belongs in it is a
+  line of JSON out of somebody else's API reference, and a dialog can neither check that nor
+  explain it. The file is where a line like that is pasted, edited, and commented out again with
+  a leading `'`.
+- JRock **does not read the fields and has no opinion about them**. They are put in as written,
+  so a wrong one comes back as the endpoint's own error message — which is the useful answer —
+  and the [raw request in the log](#conversation-log) shows exactly what went out, extra fields
+  and all, because the real request and the log's copy are built by the same code.
+- The one thing checked is that the value **is one balanced JSON object**. A paste that lost its
+  last brace is reported in the startup log and ignored, rather than failing every send on a
+  request nobody can read. When it is set and usable, the startup log prints it in full: a field
+  that changes what every request asks for should be visible at the top of the log, not left to
+  be noticed in the raw request of the first send.
+- It is **written back as it was read**. No dialog sets it, so nothing in JRock would otherwise
+  stop a line it knows nothing about from being dropped the next time any other setting is saved.
 
 ## Backup and restore
 

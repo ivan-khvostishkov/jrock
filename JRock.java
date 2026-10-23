@@ -1146,6 +1146,34 @@ public class JRock {
     private static final String CONFIG_PROMPT_CACHE = "local-prompt-cache";
     private static volatile boolean promptCacheOn = true;
 
+    // EXTRA FIELDS FOR THE REQUEST BODY: a JSON object, on one line, whose fields are put
+    // into every Chat Completions request beside "model" and "messages" - or absent, which
+    // is the plain request JRock has always sent.
+    //
+    //   request-extra$
+    //   {"temperature":0.2,"modalities":["text","image"]}
+    //
+    // For the endpoint that wants a field JRock has no setting of its own for. A Chat
+    // Completions endpoint is a specification with a lot of optional parameters and a lot
+    // of implementations, and which of them one model behind one endpoint needs is not
+    // something this program can know the whole of: a model that returns a picture only
+    // when the request says which output modalities it will take, a sampling parameter a
+    // particular deployment insists on, a field an endpoint added last month. Setting it
+    // here beats waiting for JRock to grow a checkbox for each one.
+    //
+    // CONFIG-FILE ONLY, on purpose, and not in the Configure dialog: what belongs in it
+    // is a line of JSON out of somebody else's API reference, and a dialog cannot check
+    // that or explain it. The file is where a line like that is pasted, edited and
+    // commented out again.
+    //
+    // JRock does not read the fields and has no opinion about them. They are put in as
+    // they are written, so a wrong one comes back as the endpoint's own error - which is
+    // the useful answer, and the raw request in the log shows exactly what was sent.
+    // Checked only for being a balanced JSON object, so a truncated paste is caught here
+    // rather than failing every send (see requestExtraFields).
+    private static final String CONFIG_REQUEST_EXTRA = "request-extra";
+    private static volatile String requestExtra = "";
+
     // Written above the settings, and the only documentation the format needs. The
     // format itself exists for one reason: a value is a whole line of its own, so it
     // can be cut and pasted as a line - no quoting, no escaping, and no "everything
@@ -1208,6 +1236,7 @@ public class JRock {
             missingIncludeStopsSend =
                     !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_MISSING_STOPS_SEND)));
             promptCacheOn = !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROMPT_CACHE)));
+            requestExtra = trimmed(settings.get(CONFIG_REQUEST_EXTRA));
             settingsSource = "JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
@@ -1274,6 +1303,10 @@ public class JRock {
         appendSetting(text, CONFIG_PROCESSED_COPIES, String.valueOf(includeProcessedCopies));
         appendSetting(text, CONFIG_MISSING_STOPS_SEND, String.valueOf(missingIncludeStopsSend));
         appendSetting(text, CONFIG_PROMPT_CACHE, String.valueOf(promptCacheOn));
+        // Written back as it was read, blank left out: no dialog sets it, so this is the
+        // one thing that keeps a line nobody here understands from being dropped the next
+        // time anything else is saved.
+        appendSetting(text, CONFIG_REQUEST_EXTRA, requestExtra);
         atomicWriteQuietly(configFile(), text.toString());
     }
 
@@ -2715,6 +2748,17 @@ public class JRock {
         }
         log.gray("Configured model: " + MODEL_ID);
         resolveAndLogCard(MODEL_ID, log);
+        // Only when the file sets it, and in full: a field that changes what every
+        // request asks for has to be visible at the top of the log, not left to be
+        // noticed in the raw request of the first send (see CONFIG_REQUEST_EXTRA).
+        String extraProblem = requestExtraProblem();
+        if (extraProblem != null) {
+            log.gray("Extra request fields (" + CONFIG_REQUEST_EXTRA + "$): "
+                    + extraProblem + " - " + requestExtra);
+        } else if (!requestExtraFields().isEmpty()) {
+            log.gray("Extra request fields, in every request beside model and messages: "
+                    + requestExtra);
+        }
         // Only when it has been changed: silent for everyone on the default, but
         // applying the dialog re-runs this report, so a change is acknowledged.
         // Every conversion logs its full Ghostscript command line anyway, -r and all.
@@ -19296,7 +19340,8 @@ public class JRock {
 
     // Builds the OpenAI Chat Completions request JSON around a messages array.
     // Used for both the real request and its masked display copy, so they stay
-    // in lockstep (same model, same fields).
+    // in lockstep (same model, same fields) - the extra fields included, so the raw
+    // request in the log is what went out.
     //
     // No max_tokens: the request deliberately carries no output cap, so each model
     // applies its own default. Capping it here would silently truncate long replies
@@ -19304,8 +19349,38 @@ public class JRock {
     private static String chatRequestBody(CharSequence messagesJson) {
         return "{"
                 + "\"model\":\"" + jsonEscape(MODEL_ID) + "\","
+                + requestExtraFields()
                 + "\"messages\":" + messagesJson
                 + "}";
+    }
+
+    // The request-extra setting as fields ready to go into the body: its JSON object
+    // without the braces and with a comma after it, or "" when there is none.
+    //
+    // The value is put in as it was written, because what it means belongs to the
+    // endpoint and not to JRock (see CONFIG_REQUEST_EXTRA). The one thing checked is
+    // that it IS one balanced JSON object - a paste that lost its last brace would
+    // otherwise make every send fail on a request nobody can read, and the reason would
+    // be a parse error from the other end rather than the line that caused it.
+    private static String requestExtraFields() {
+        String extra = requestExtra == null ? "" : requestExtra.trim();
+        if (extra.isEmpty()) return "";
+        if (!extra.startsWith("{") || endOfJsonObject(extra, 0) != extra.length() - 1) {
+            return "";   // said once at startup, by requestExtraProblem
+        }
+        String fields = extra.substring(1, extra.length() - 1).trim();
+        return fields.isEmpty() ? "" : fields + ",";
+    }
+
+    /** What is wrong with the request-extra setting, or null when there is nothing. */
+    private static String requestExtraProblem() {
+        String extra = requestExtra == null ? "" : requestExtra.trim();
+        if (extra.isEmpty()) return null;
+        if (!extra.startsWith("{") || endOfJsonObject(extra, 0) != extra.length() - 1) {
+            return "not one balanced JSON object, so it is ignored: the value has to be "
+                    + "a single {...} on one line";
+        }
+        return null;
     }
 
     private static String jsonEscape(String s) {

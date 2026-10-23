@@ -149,6 +149,63 @@ class JRockConfigureTest extends JRockGuiFixture {
                 .doesNotContain(FAKE_API_KEY);
     }
 
+    @Test
+    @DisplayName("request-extra$ goes into every request body, and survives a save that follows")
+    void putsTheExtraRequestFieldsIntoTheBodyAndKeepsThem() throws Exception {
+        awaitReadyCount(1);
+
+        // A field only the endpoint knows the meaning of, which is the whole point of the
+        // setting: JRock has no row for it, reads nothing out of it, and puts it in as it
+        // stands. Two of them, one nested, because that is the shape these arrive in.
+        String extra = "{\"modalities\":[\"text\",\"image\"],"
+                + "\"extra_body\":{\"vendor\":{\"some_config\":{\"flag\":false}}}}";
+        field("requestExtra").set(null, extra);
+
+        // 1. In the body, beside model and messages - and the body is built by the one
+        //    method the real request and the log's copy both use.
+        java.lang.reflect.Method chatRequestBody =
+                JRock.class.getDeclaredMethod("chatRequestBody", CharSequence.class);
+        chatRequestBody.setAccessible(true);
+        assertThat((String) chatRequestBody.invoke(null, "[{\"role\":\"user\"}]"))
+                .describedAs("the request body")
+                .contains("\"modalities\":[\"text\",\"image\"]")
+                .contains("\"extra_body\":{\"vendor\":{\"some_config\":{\"flag\":false}}}")
+                .contains("\"messages\":[{\"role\":\"user\"}]");
+
+        // 2. AND IT SURVIVES THE NEXT SAVE. No dialog sets this one, so nothing else
+        //    would stop a line JRock knows nothing about from being dropped the next time
+        //    any other setting is written - which happens on its own, when the window is
+        //    moved (see rememberBoundsAsTheyChange).
+        java.lang.reflect.Method save = JRock.class.getDeclaredMethod("saveConfigQuietly");
+        save.setAccessible(true);
+        save.invoke(null);
+        Path config = workingDirectory().resolve("JRock").resolve("jrock-config.txt");
+        assertThat(new String(Files.readAllBytes(config), StandardCharsets.UTF_8))
+                .describedAs("JRock/jrock-config.txt after a save")
+                .contains("request-extra$\n" + extra);
+
+        // 3. A value that is not one balanced JSON object - a paste that lost its last
+        //    brace - is reported and ignored, rather than failing every send on a request
+        //    nobody can read.
+        java.lang.reflect.Method problem =
+                JRock.class.getDeclaredMethod("requestExtraProblem");
+        problem.setAccessible(true);
+        field("requestExtra").set(null, "{\"modalities\":[\"text\"");
+        assertThat((String) problem.invoke(null))
+                .describedAs("what is wrong with a truncated value")
+                .contains("not one balanced JSON object");
+        assertThat((String) chatRequestBody.invoke(null, "[]"))
+                .describedAs("the body built from a broken value")
+                .isEqualTo("{\"model\":\"" + field("MODEL_ID").get(null) + "\",\"messages\":[]}");
+
+        // And a brace inside a string is text, not structure: this one is balanced.
+        field("requestExtra").set(null, "{\"note\":\"}\"}");
+        assertThat((String) problem.invoke(null))
+                .describedAs("a brace inside a string").isNull();
+
+        field("requestExtra").set(null, "");   // left as it was found
+    }
+
     /** The dialog's one JPasswordField: the Bedrock API key row. */
     private JTextComponentFixture apiKeyField(JOptionPaneFixture dialog) {
         return dialog.textBox(new GenericTypeMatcher<JPasswordField>(JPasswordField.class) {
