@@ -49,9 +49,9 @@
 //      Markdown with image references, exported as <document name>.docx beside it -
 //      by the same writer as "Export selected Markdown with images as DOCX...", so
 //      the pictures the answer refers to are in the DOCX. A PDF goes in as HTML, by
-//      xpdf's pdftohtml into the folder <document name> beside it (with JRock's own
-//      dialogs: create the folder, or include the one already there); an image is a
-//      one-page document and goes in as itself.
+//      xpdf's pdftohtml into JRock/includes/ - JRock's own folder, so nothing is
+//      written beside the document and there is nothing to ask about or tidy up
+//      afterwards; an image is a one-page document and goes in as itself.
 //   2. jrock-prompt-doc-to-ascii.txt    + that DOCX, as Markdown -> the document as
 //      plain text, saved as <document name>.txt beside it.
 //   3. jrock-prompt-doc-inventory.txt   + that text file          -> one file name.
@@ -59,8 +59,7 @@
 //      type over it in the question, the suggestion being a suggestion: the other formats
 //      of the same name, the InDesign layout beside them, and the ones that carry a suffix
 //      - "3703093896-en.docx", "3703093896-SA.txt", a translation or an appendix - which
-//      keep their suffix. The HTML folder is kept and renamed with them, or deleted,
-//      as you say.
+//      keep their suffix.
 //
 // Each pass starts from what the one before it left, so a run can start part of the
 // way down: a DOCX (or an RTF) starts at pass 2, a TXT at pass 3. And files of the same
@@ -487,61 +486,15 @@ public final class JRockDocInventory {
             System.out.println("Name typed in place of the suggestion: " + name);
         }
 
-        // The HTML folder, pass one's working material: the pages for the model to read,
-        // not for anybody to open. Whether it stays is asked once it is clear which name
-        // it would stay under - and a folder kept is renamed with the rest.
-        //
-        // NAMED THE WAY JROCK'S OWN INCLUDE NAMES IT: the whole file name with ".html"
-        // after it, "scan0167.Merged.pdf.html" - not the stem, which would turn
-        // "report.pdf" into a folder called "report" and collide with the user's own
-        // files. Look for the wrong name and there is nothing to ask about, nothing to
-        // rename and nothing in the log: a folder of page images stays beside every
-        // letter that is filed.
-        Path html = dir.resolve(chosen.getFileName() + ".html");
-        String folderNote = "";
-        boolean tidyWrong = false;   // something in this folder would not move or delete
-        if (Files.isDirectory(html)) {
-            // Whatever happens to it, this is working material and the document is
-            // already named: a folder that will not move or will not delete - a sync
-            // client holding a page open, a viewer, a scanner watching the folder - is
-            // worth a sentence in the report and nothing more. Letting it out of here
-            // would turn a letter that IS filed into an automation that failed, which is
-            // the one outcome that would be a lie.
-            if (askKeepFolder(html, rename ? name : null)) {
-                if (rename) {
-                    Path moved = free(dir, name, "");
-                    try {
-                        Files.move(html, moved);
-                        folderNote = "the folder " + moved.getFileName() + " kept";
-                    } catch (IOException ex) {
-                        tidyWrong = true;
-                        folderNote = "the folder " + html.getFileName()
-                                + " kept under its own name - it could not be renamed: "
-                                + ex.getMessage();
-                    }
-                } else {
-                    folderNote = "the folder " + html.getFileName() + " kept";
-                }
-            } else {
-                try {
-                    deleteTree(html);
-                    folderNote = "the folder " + html.getFileName() + " deleted";
-                } catch (IOException ex) {
-                    tidyWrong = true;
-                    folderNote = "the folder " + html.getFileName()
-                            + " could not be deleted: " + ex.getMessage();
-                }
-            }
-            System.out.println(folderNote);
-        }
-        String folderLine = folderNote.isEmpty() ? "" : "\n" + capitalised(folderNote) + ".";
-        String folderPart = folderNote.isEmpty() ? "" : "; " + folderNote;
-
+        // NOTHING OF PASS ONE IS LEFT TO TIDY UP. The HTML pages xpdf made of a PDF are
+        // working material for the model, not copies for anybody to open, and JRock writes
+        // them into its own JRock/includes/ folder - so the document's folder holds the
+        // document and the files named after it, and nothing else this flow has to ask
+        // about, rename or delete.
         if (!rename) {
-            return new Result("kept " + named(files) + "; the suggested name was " + base
-                    + folderPart,
+            return new Result("kept " + named(files) + "; the suggested name was " + base,
                     "Nothing was renamed:\n\n" + listed(files)
-                            + "\nThe suggested name was\n\n    " + base + "\n" + folderLine);
+                            + "\nThe suggested name was\n\n    " + base + "\n");
         }
         java.util.List<Path> renamed = new java.util.ArrayList<>();
         for (Path file : files) renamed.add(renameTo(file, name, filedAs));
@@ -560,24 +513,21 @@ public final class JRockDocInventory {
         //
         // THE GATE IS EVERYTHING-WENT-RIGHT, NOT NEARLY. The pair was merged; the merge
         // reported no problem (or this method would have stopped); every file of the
-        // document was renamed, which is this line above; the renamed document is there
-        // and is bigger than either pass on its own, which a truncated merge would not
-        // be; and the folder tidy-up had nothing to report. Anything else and both scans
-        // stay, because whatever is interfering with one file in this folder is a reason
-        // not to delete another one beside it.
+        // document was renamed, which is this line above; and the renamed document is
+        // there and is bigger than either pass on its own, which a truncated merge would
+        // not be. Anything else and both scans stay, because whatever is interfering with
+        // one file in this folder is a reason not to delete another one beside it.
         //
-        // Interactively it is asked, as the rename and the folder are - and the question
-        // says that this does not go through the Recycle Bin, because it does not.
-        // --auto deletes them, which is what the operator asked --auto for.
+        // Interactively it is asked, as the rename is - and the question says that this
+        // does not go through the Recycle Bin, because it does not. --auto deletes them,
+        // which is what the operator asked --auto for.
         String scansNote = "";
         if (frontPass != null && !renamed.isEmpty()) {
             Path filed = renamed.get(0);              // the document itself: files.get(0)
             long whole = sizeOf(filed);
             long front = sizeOf(frontPass);
             long back = sizeOf(backPass);
-            if (tidyWrong) {
-                scansNote = "the two scans kept - the folder beside them would not tidy up";
-            } else if (front <= 0 || back <= 0 || whole <= front || whole <= back) {
+            if (front <= 0 || back <= 0 || whole <= front || whole <= back) {
                 // Either a pass has already gone, or the merged document is no bigger
                 // than one of them: not the shape of a merge that holds both.
                 scansNote = "the two scans kept - " + filed.getFileName()
@@ -617,10 +567,8 @@ public final class JRockDocInventory {
         // week later when the folder looks nothing like the answer.
         String suggestionPart = name.equals(base) ? ""
                 : "; the suggested name was " + base;
-        return new Result("renamed to " + named(renamed) + suggestionPart + folderPart
-                + scansPart,
-                "Renamed to\n\n" + listed(renamed) + "\nin " + dir + "." + "\n" + folderLine
-                        + scansLine);
+        return new Result("renamed to " + named(renamed) + suggestionPart + scansPart,
+                "Renamed to\n\n" + listed(renamed) + "\nin " + dir + "." + scansLine);
     }
 
     // ---- The command line --------------------------------------------------
@@ -1099,7 +1047,7 @@ public final class JRockDocInventory {
     }
 
     // Every other file of the same document, beside it in the same folder. Empty when
-    // there is none. The HTML folder is not among them: see run for what becomes of it.
+    // there is none.
     //
     // Two shapes count, and the folder is READ rather than asked about candidate names,
     // because the second shape has no list of names to try:
@@ -1194,9 +1142,6 @@ public final class JRockDocInventory {
     // The sibling furthest down the chain from file, when one is further down than file
     // itself: a .txt before a .docx before an .rtf. Null when there is none - and for a
     // TXT, which starts at the last pass already.
-    //
-    // The HTML folder is not offered here: asking about it is JRock's own include's
-    // business, which offers the folder already there in place of a new conversion.
     private static Path laterStep(Path file) {
         int from = passOf(file);
         for (String ext : LATER_FIRST) {
@@ -1333,16 +1278,6 @@ public final class JRockDocInventory {
         } catch (IOException notThere) {
             return -1;
         }
-    }
-
-    // Deletes a folder and everything in it, deepest first.
-    private static void deleteTree(Path root) throws IOException {
-        java.util.List<Path> all = new java.util.ArrayList<>();
-        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
-            walk.forEach(all::add);
-        }
-        java.util.Collections.reverse(all);
-        for (Path p : all) Files.delete(p);
     }
 
     private static String capitalised(String s) {
@@ -1502,9 +1437,6 @@ public final class JRockDocInventory {
         }
     }
 
-    // Whether to keep the HTML folder pass one read the PDF from. Its pages are for the
-    // model, not for people - the DOCX and the TXT are the readable copies - so whether
-    // it stays is the user's call; a folder kept is renamed with the files.
     // Whether the two passes a duplex document was merged from may go. Every page of both
     // is in the document that has just been named, so what is being deleted is the
     // duplicate and not the letter - but it is still the only other copy on this disk,
@@ -1521,27 +1453,6 @@ public final class JRockDocInventory {
                 + filed.getFileName() + "\n\nDelete the two scans? They do NOT go to the "
                 + "Recycle Bin.\n\nNo keeps them - and they will go on looking like a "
                 + "letter nobody has filed.", "Delete the two scans?");
-    }
-
-    private static boolean askKeepFolder(Path folder, String newName) {
-        if (!asking) {
-            // The one question --auto does not answer with a yes. Every other question
-            // here is some form of "carry on", and yes is what the person at the keyboard
-            // would say; this one is "leave a folder of page images beside the letter",
-            // and nobody filing by voice from across the room is asking for that - the
-            // DOCX and the TXT are the copies to read. The generic yes answered it three
-            // times on this machine, and the three folders are still there.
-            System.out.println("Keep the HTML folder? no (auto: " + folder.getFileName()
-                    + " is working material, and nobody is here to want it kept)");
-            return false;
-        }
-        return ask("The folder\n\n    " + folder.getFileName() + "\n\nholds the HTML pages "
-                + "xpdf made of the PDF: working material for the model, not for people "
-                + "- the DOCX and the TXT are the copies to read.\n\nKeep it? "
-                + (newName != null ? "Yes keeps it, renamed to\n\n    " + newName + "\n\n"
-                                   : "Yes keeps it as it is. ")
-                + "No deletes it and everything in it.",
-                "Keep the HTML folder?");
     }
 
     // Every dialog below belongs to JRock's own window, so none of them can be lost

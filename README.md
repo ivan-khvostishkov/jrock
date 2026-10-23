@@ -199,9 +199,16 @@ with a tool whose whole job that is:
    the evidence — and the name says which is which.
 3. **Export that to `<name>.docx`**, from ABBYY or from Acrobat (*Export to Word*).
 4. **Include the DOCX** as [**DOCX as Markdown text**](#rtf-and-docx-conversion-no-external-tool).
-   Headings, bold, italic and tables survive into the Markdown as structure the model reads, and
-   one text include is an order of magnitude cheaper than sixty page images — with no DPI to
-   choose and no page limit to run into.
+   Headings, bold, italic, tables **and the pictures** survive into the Markdown as structure the
+   model reads, and one text include with a handful of pictures in it is an order of magnitude
+   cheaper than sixty page images — with no DPI to choose and no page limit to run into.
+
+   **A DOCX is enough to carry the graphics, which is why the 1:1 reading belongs out here.** A
+   model shown a long document as page images does not reliably transcribe every one of them —
+   it may summarise, or skip a section that repeats — and that is fine for a summary or for the
+   [doc inventory flow](#automating-the-chain-jrockdocinventoryjava), but a faithful page-for-page
+   transcript of a PDF is work for ABBYY or Acrobat, which do it properly. Let them make the
+   DOCX; JRock takes the DOCX whole, pictures included, and gives it back the same way.
 
 **And those names are what the [doc inventory flow](#automating-the-chain-jrockdocinventoryjava)
 is built for.** With `file.pdf`, `file_recognized.pdf` and `file.docx` in one folder, run the flow
@@ -821,7 +828,7 @@ written atomically, so a crash or a failed write never leaves a truncated file:
   | `scan.pdf` as page images | `scan.pdf.gs.001.png`, `…002.png`, … (`.pdfjs.` in the browser) |
   | `scan.pdf` as xpdf text / HTML | `scan.pdf.txt` / the folder `scan.pdf.html` |
   | `notes.rtf` as Markdown | `notes.rtf.md` |
-  | `report.docx` | `report.docx.md` |
+  | `report.docx` | `report.docx.md`, and `report.docx.image1.png` … for its pictures |
   | `book.xlsx` | `book.xlsx.Sheet1.csv`, one per sheet |
 
   There are **no per-conversion subfolders**. The names already guarantee uniqueness, so folders
@@ -1096,14 +1103,17 @@ Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs*
    - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
    - **PDF files** — as page images (one PNG per page), as an **HTML folder** (xpdf's
-     `pdftohtml -nofonts` into a folder beside the PDF, then included as **Include directory...**
-     would) or as **text** (`pdftotext -enc UTF-8` into a `.txt` beside it) — whichever
+     `pdftohtml -nofonts` into a folder under `JRock/includes/`, then included as **Include
+     directory...** would) or as **text** (`pdftotext -enc UTF-8` into a `.txt` there) — whichever
      **Include PDF as** in [Configure](#configure-dialog-top-left-button) says, and the filter
      names it ([details](#pdf-as-html-or-text-xpdf)). The browser has no xpdf and always reads
      page images.
    - **RTF files** — converted to Markdown, or sent as is, markup and all, for a model that
      reads (and writes) the format itself: **Include RTF as** in Configure
-   - **DOCX files, as Markdown text** — tables included
+   - **DOCX files, as Markdown text** — tables and **pictures** included: each picture is
+     written beside the Markdown and referred to from it where the document draws it, so a
+     document exported as DOCX and included back is the same document
+     ([details](#rtf-and-docx-conversion-no-external-tool))
    - **XLSX files, as CSV text, one file per sheet** —
      ([details](#xlsx-conversion-no-external-tool))
 
@@ -1572,19 +1582,20 @@ sent or cleared: the prompt is read, not consumed.
 - **PDF as text, with xpdf** runs `pdftotext -enc UTF-8 <pdf> <name>.txt` and includes that file
   as `@txt`, as it is.
 
-The output goes **beside the PDF, named after the whole of its name**: `report.pdf` gives the
-folder `report.pdf.html` or the file `report.pdf.txt` — extension and all, deliberately, because
-the stem alone would turn `report.pdf` into `report.txt`, and that is a name a text file of your
-own can already have. Everything an include is made from shares one folder, so a conversion must
-not be able to land on top of something that was put there.
+The output goes **under `JRock/includes/`, named after the whole of the PDF's name**: `report.pdf`
+gives the folder `report.pdf.html` or the file `report.pdf.txt` there — extension and all,
+deliberately, because the stem alone would turn `report.pdf` into `report.txt`, and that is a name
+a text file of your own can already have. Everything an include is made from shares that one
+folder, so a conversion must not be able to land on top of something that was put there.
 
-JRock asks before creating it, and if it is already there it asks whether to include it as it is
-instead — so a conversion done once, and perhaps edited since, is reused, and nothing you have is
-overwritten. **Under an automation it does not ask**, and answers both questions with yes itself:
-an automation that stops for a dialog is not an automation, and the program that asked for the
-conversion can mean nothing else by asking. Nothing can be lost by it either — a new folder is
-written beside the PDF under the PDF's own name, and one already there is reused untouched — and
-the log records that the question was answered and that nobody was asked. The command and the
+**Nothing is asked, and the folder your documents are in is not written into.** The pages are
+working material for the model — the readable copies are whatever you export — so they go where
+the Markdown of every converted document and every processed copy already goes, they are cleaned
+up by age with the rest of them (**Cleanup JRock files...**), and a document folder keeps the
+document and nothing else. That is also why there is nothing left to answer: the conversion is
+JRock's own file, so creating it needs no permission, and an earlier conversion of the same PDF is
+replaced rather than reused, so the pages always say what the PDF says now. It needs **Include
+from processed copies in `JRock/includes/`** on, like every other conversion. The command and the
 tool's own output are echoed to the log. If a tool isn't found on your PATH, JRock logs a note
 and, when a person is there to read it, shows a dialog and opens xpdf's download page.
 
@@ -1628,9 +1639,10 @@ reference, a table cell — so the conversion reads that structure rather than g
 font sizes:
 
 - Output is written under **`JRock/includes/`**, named `<docxname>.md` — `quarterly.docx` becomes
-  `quarterly.docx.md`, the same rule as for RTF.
-- Only `word/document.xml` is read, with its relationships part for link addresses, and only
-  these parts of it:
+  `quarterly.docx.md`, the same rule as for RTF — with the document's pictures beside it under
+  the same prefix (see below).
+- Only `word/document.xml` is read, with its relationships part for link addresses and picture
+  parts, and only these parts of it:
 
   | In the document | In the Markdown |
   |---|---|
@@ -1643,12 +1655,40 @@ font sizes:
   | `w:tab`, `w:br`, `w:cr` in a run | a space; a `w:noBreakHyphen` a `-` |
   | runs Word split mid-word | one word — adjacent runs with the same bold/italic are joined back together |
   | a `w:hyperlink`, a `w:fldSimple` or a field spelled out over runs with a `HYPERLINK` instruction | `[its text](its address)` — the address read from `word/_rels/document.xml.rels` for a `w:hyperlink`; a link to a bookmark (`w:anchor`) stays plain text |
+  | a `w:drawing` (`a:blip`) or a `w:pict` (`v:imagedata`) | `![its alt text](the file it was written to)`, where the document draws it |
 
   Markdown's own characters in the text are escaped here too, so a document about asterisks
   still says so, and a `[`, `]` in a link's text or a space or parenthesis in its address is
   escaped so the link stays one link.
+
+**And the pictures come out with it.** A `.docx` is the format that carries a document's graphics
+without a PDF's page-image reading, so a document included here keeps them:
+
+- Every picture the document draws is written beside the Markdown, **byte for byte**, named for
+  the whole of the document's name and the picture's own part: `quarterly.docx.image1.png`,
+  `quarterly.docx.photo.png`. A picture the document places twice is written once.
+- The Markdown refers to it by that name, on the spot where the document draws it — in a
+  paragraph of its own, or inside a sentence, wherever that is. The alt text in the square
+  brackets is the **alternative text** the document gives the picture (Word's *Alt Text* box);
+  where it gives none, the file's own name stands there.
+- Each picture is included as an `@img` token of its own, so the model reading the document is
+  given the pictures of it as well as the words, and the [**DOCX
+  export**](#markdown-export-rtf-and-docx) can place them again under the names the text refers
+  to them by.
+- So the round trip holds: **export a document as DOCX with its images, include it back, and it
+  is the same document** — text, structure and graphics. That is what the format is for; a
+  reading that keeps only the words is what TXT and RTF are there for. It is also what makes a
+  DOCX the thing to hand to a word processor or an OCR tool and take back again — Acrobat's or
+  ABBYY's *Export to Word* of a scan goes straight back in.
+- A picture the document only **links to** on the web has no bytes in the package, so there is
+  nothing to write out and no reference is written for it. Nor is one in a format a request
+  cannot carry — a pasted chart or an equation is usually an **EMF** or a **WMF**, and a request
+  takes PNG, JPEG, GIF and WEBP: a reference to a picture neither the model nor the export could
+  read would be a reference to a hole in the document. The log names the formats it passed over,
+  so *"where did that chart go"* has an answer; saving the document with those pictures as PNG
+  brings them in.
 - **Not** read: `numbering.xml` (so every list level is a `-`, and numbered lists are not
-  renumbered), headers, footers and footnotes, embedded images, colours, alignment and
+  renumbered), headers, footers and footnotes, colours, alignment and
   underline (which has no Markdown of its own, same as on the RTF side). With track changes on,
   an insertion is read as the text it is and a **deletion is not read at all** — `w:delText` is
   text someone took out, not text the document says.
@@ -1865,15 +1905,15 @@ answers.) Every flow does this, the six translators included.
 It reads three prompts out of its own directory and runs them as a chain, each pass reading what
 the one before it wrote beside the document, under the document's own name:
 
-1. **Markdown, then a DOCX.** A PDF is converted to HTML by xpdf's `pdftohtml`, into the folder
-   `document/` — with the [same dialogs as the include filter](#pdf-as-html-or-text-xpdf) when a
-   person is there to answer them, and **answered for you under an automation** (see below): create
-   the folder, or include the one already there — and each page image goes in with its
-   `![...](<file name>)` reference. An image is a one-page document and goes in as itself, with its
-   reference; it also gets a **PDF copy to print from**, `document.pdf`: one A4 page, the image
-   centred at 300 dpi, or shrunk to fit inside 30 mm margins when it is bigger than that, never
-   enlarged. `jrock-prompt-doc-to-markdown.txt` answers with Markdown, which is selected in the
-   log and exported as **`document.docx`**, pictures and all.
+1. **Markdown, then a DOCX.** A PDF is converted to HTML by xpdf's `pdftohtml`, into
+   [`JRock/includes/`](#pdf-as-html-or-text-xpdf) — JRock's own folder, so nothing is written
+   beside the document, nothing is asked, and there is nothing to tidy up afterwards — and each
+   page image goes in with its `![...](<file name>)` reference. An image is a one-page document and
+   goes in as itself, with its reference; it also gets a **PDF copy to print from**,
+   `document.pdf`: one A4 page, the image centred at 300 dpi, or shrunk to fit inside 30 mm
+   margins when it is bigger than that, never enlarged. `jrock-prompt-doc-to-markdown.txt` answers
+   with Markdown, which is selected in the log and exported as **`document.docx`**, pictures and
+   all.
 2. **Plain text.** That DOCX goes in [as Markdown](#rtf-and-docx-conversion-no-external-tool)
    with `jrock-prompt-doc-to-ascii.txt`, and the answer is saved as **`document.txt`**.
 3. **A name.** The text goes in with `jrock-prompt-doc-inventory.txt`, and you are offered to
@@ -1888,8 +1928,7 @@ of them, because that menu hands over whatever was clicked, and a file sent and 
 before anyone notices is a poor way to find out. And a PDF or an image whose `.txt` or `.docx` is
 already beside it — an earlier run's, or Acrobat's *Export to Word* — gets an offer to **start
 from the one furthest down the chain** instead: the `.txt` before the `.docx`, since every pass
-skipped is a send not paid for (*"All the files are renamed either way"*). The HTML folder is not
-offered there: the include asks about that one itself.
+skipped is a send not paid for (*"All the files are renamed either way"*).
 
 **Files of the same name are one document filed more than once.** So the set is followed in
 every direction: pick any and the others are found beside it. The rename at the end moves
@@ -1944,15 +1983,13 @@ suggestion too, whenever it is not what the files ended up being called: the nam
 longer hold that, and it is the thing to read a week later when the folder looks nothing like
 the answer.
 
-**The HTML folder** is asked about on its own: its pages are working
-material for the model, and the DOCX and the TXT are the copies people read, so you choose to
-**delete it**, or keep it and have it renamed with the files. It is found under the name the
-include actually gives it — the whole file name with `.html` after it,
-`scan0167.Merged.pdf.html` — and `--auto` is the one question it answers with **no**, because
-nobody filing a letter by voice from across a room is asking for a folder of page images beside
-it. A folder that will not move or will not delete (a sync client holding a page open, a viewer,
-a scanner watching the folder) is **one sentence in the report and nothing more**: the letter is
-filed, and turning that into a failed automation would be a lie about what happened.
+**Nothing of pass one is left to tidy up.** The HTML pages xpdf made of the PDF are working
+material for the model — the DOCX and the TXT are the copies people read — and JRock writes them
+into its own [`JRock/includes/`](#pdf-as-html-or-text-xpdf) folder, cleaned up by age with
+everything else there. So the document's folder holds the document and the files named after it,
+and there is no folder of page images to be asked about, renamed or deleted: one question fewer
+in the flow, and nothing left beside a filed letter that a sync client can hold open while
+something tries to delete it.
 
 **And the two scans a two-sided letter was merged from are deleted**, last of all and only
 once everything before it has gone right. Every page of both is in the merged document — the
@@ -1963,10 +2000,10 @@ to see what has **not** been dealt with: two leftovers there are a letter that s
 unfiled, and *"file it"* on them would file the same letter again from scratch.
 
 The gate is everything-went-right, not nearly. The pair was merged; every file of the document
-was renamed; the renamed document is there and is **bigger than either pass on its own**, which
-a truncated merge would not be; and the folder tidy-up had nothing to report. Anything else and
-both scans stay, because whatever is interfering with one file in that folder is a reason not
-to delete another beside it. A delete that fails is a sentence in the report, like the folder's.
+was renamed; and the renamed document is there and is **bigger than either pass on its own**,
+which a truncated merge would not be. Anything else and both scans stay, because whatever is
+interfering with one file in that folder is a reason not to delete another beside it. A delete
+that fails is a sentence in the report.
 Interactively it is **asked** — and the question says that this does not go through the Recycle
 Bin, because it does not; `--auto` deletes them, which is what `--auto` is for.
 
@@ -3996,14 +4033,27 @@ again — with the dialog still open. **Enter** in this tab is Set, not OK: ever
 settings OK saves, but here the button that does the work is Set, and Enter reaching OK would
 close the dialog without moving anything.
 
-**Set also remembers.** The four numbers go into this folder's `JRock/jrock-config.txt`
-(`window=x,y,width,height`), and the next start opens the window there instead of centred — a
-window put on the second monitor for a reason belongs there tomorrow too, and each folder's JRock
-can have its own corner of the screen. Only that button writes it: a window dragged about by its
-title bar changes nothing, since a drag is not a decision about where this folder's window
-belongs. A remembered place that is on **no screen any more** — a laptop that was docked when Set
-was pressed — is ignored, with a line in the log saying so, rather than opening the window where
-nobody can reach it. **Cancel** is still the way out that leaves the rest of the dialog alone.
+**Where the window is left is where it opens.** Every move and every resize — the title bar, a
+corner, a window manager tiling it, the browser page resizing itself around it — is written to
+this folder's `JRock/jrock-config.txt` as `window=x,y,width,height` once the window has stood
+still for a moment, and the next start opens it there instead of centred. Nothing has to be
+pressed for that: the size you dragged the window to is the size you want it, and a window put on
+the second monitor for a reason belongs there tomorrow too. Each folder's JRock keeps its own
+corner of the screen.
+
+It is **one write per drag, not one per pixel** — the window has to settle first — and a
+**maximized** window is not written at all: the bounds a maximized frame reports are the ones its
+invisible borders need rather than a place anybody chose, so the size it had before it was
+maximized is what comes back. A remembered place that is on **no screen any more** — a laptop
+that was docked when it was written — is ignored, with a line in the log saying so, rather than
+opening the window where nobody can reach it.
+
+**Set remembers the same way**, so **Cancel** is the way out that leaves the rest of the dialog
+alone; this tab is for placing the window exactly, to the pixel, which a mouse cannot do.
+
+In the **browser** it also saves a resize at every start. CheerpJ sizes the window to the page it
+is in, and with the page's size already in the configuration the window is that size from the
+first paint instead of being built at JRock's default size and laid out a second time.
 
 ### Every window's smallest size, on a 32×27 grid
 
@@ -4360,9 +4410,11 @@ paragraph of text"; if it throws anyway, the document is rebuilt as one paragrap
 the log says so — *the text is all there, the formatting is not*. The log line reports what was
 written: the file, the block and table counts, and the byte count.
 
-A `.docx` written here reads back through **DOCX as Markdown text** as the same Markdown, give
-or take the two honest differences a round trip has: a table's header row is written bold, so
-it comes back as bold markup, and column alignment is layout the import doesn't read.
+A `.docx` written here reads back through **DOCX as Markdown text** as the same Markdown,
+**pictures and all** — each one written out beside the Markdown and referred to from the place in
+the text it was placed at ([details](#rtf-and-docx-conversion-no-external-tool)) — give or take
+the two honest differences a round trip has: a table's header row is written bold, so it comes
+back as bold markup, and column alignment is layout the import doesn't read.
 
 ### Images in the DOCX
 
@@ -4744,10 +4796,11 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   PDF is written by hand (`A4Pdf`) so its page box is exactly A4: `gs -sPAPERSIZE=a4` is the
   rounded 595 × 842 pt, which would rasterise one pixel narrower.
 - **`JRockXpdfIncludeTest`** includes the same two-page PDF with *PDF as text, with xpdf* and
-  *PDF as HTML folder, with xpdf*, answering **Yes** to the create question, and checks the
-  `.txt` or the folder appeared beside the PDF with both pages' text in it, and that the prompt
-  gained the `@txt` tokens. A third test puts a hand-edited `.txt` there first and checks it is
-  included as it is, with no conversion run and nothing overwritten.
+  *PDF as HTML folder, with xpdf*, and checks the `.txt` or the folder appeared under
+  `JRock/includes/` with both pages' text in it, that **nothing was written beside the PDF**, and
+  that the prompt gained the `@txt` tokens. A third test puts an earlier conversion there first
+  and checks it was replaced; a fourth turns **Include from processed copies** off and checks the
+  reading is refused with the setting named.
 - **`JRockRtfIncludeTest`** includes an RTF through the real include dialog with the *RTF as
   Markdown text* filter, and compares the file under `JRock/includes/` against the **whole
   expected Markdown** — headings from the font sizes, bold and italic as markup, Word's bullets
@@ -4762,14 +4815,22 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   `JRock/includes/quarterly.docx.md` against the **whole expected Markdown** — headings from the
   styles (spelled both `Heading1` and `heading 2`), runs Word split mid-word joined back into
   words, a toggle switched off with `w:val="false"`, list markup that carries no bullet
-  character at all, a hyperlink, a table with a bold header row, an umlaut, asterisks escaped.
+  character at all, a hyperlink, a table with a bold header row, an umlaut, asterisks escaped,
+  and **the pictures** — a `w:drawing` placed twice (once with alternative text, once inside a
+  sentence) and an older `w:pict`, each written out byte for byte under
+  `JRock/includes/quarterly.docx.<part>.png`, referred to from the Markdown where the document
+  draws them, and included as `@img` tokens of their own; a picture the document only links to on
+  the web, and an EMF a request could not carry, are written nowhere and referred to not at all —
+  the EMF named in the log as passed over.
   The document is written by hand (`FormattedDocx`), zip entries and all. A second test renames
   a text file to `.docx` and checks the log says there is no `word/document.xml` in it and that
   no Markdown is written.
 - **`JRockAutomationDocTest`** drives the two calls the doc inventory's first pass is made of,
-  from a thread of its own as an automation would: `automationInclude(pdf, "pdfhtml")`, answering
-  **Yes** to the create question and checking every page image arrived with its `![...](<path>)`
-  reference, and `automationExportPromptDocx`, checking the DOCX carries the very PNG the
+  from a thread of its own as an automation would: `automationInclude(pdf)` with the folder set to
+  xpdf HTML, pressing nothing at all — the call returning is the assertion that nothing asked —
+  and checking the pages landed under `JRock/includes/`, not beside the PDF, and that every page
+  image arrived with its `![...](<path>)`
+  reference; and `automationExportPromptDocx`, checking the DOCX carries the very PNG the
   reference named — the text put in the prompt first, which is where an automation's own text
   goes now that no call takes Markdown as an argument. Nothing is sent.
 - **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
@@ -4843,7 +4904,10 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   types, related as `rId2`, placed as a `<w:drawing>` — and the `@img` token must have become
   `IMG_4002.png`, with the hash nowhere in the document. The **sizes** are asserted in EMU against
   the arithmetic by hand, 4000 × 2000 px and 500 × 4000 px filling the frame's width and height
-  and 300 × 200 px placed at exactly one inch across. An unplaceable reference — an unknown hash,
+  and 300 × 200 px placed at exactly one inch across. And **the pictures round-trip too**: the
+  same DOCX read back by the importer has the picture written out beside the Markdown, byte for
+  byte, referred to from both places the document placed it and written once for the two. An
+  unplaceable reference — an unknown hash,
   an include that is a `.txt`, an ordinary `![alt](url)` — must leave the text alone, add no media
   part, and warn once for each. The last test feeds it markup that is wrong or isn't
   markup — a lone `*`, `snake_case`, ragged pipes, an unclosed link, an unclosed fence, a NUL —
@@ -5287,7 +5351,7 @@ md5sum jrock.jar
 java -jar jrock.jar
 ```
 
-Current build hashes, 5.0.0, the same from all three runners — **5.1.0's go here once CI has
+Current build hashes, 5.0.0, the same from all three runners — **5.2.0's go here once CI has
 built it**, which is the only place these numbers can honestly come from:
 
 ```

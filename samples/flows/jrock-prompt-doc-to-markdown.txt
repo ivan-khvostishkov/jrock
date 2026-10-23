@@ -4,6 +4,8 @@ WHAT IS ATTACHED DECIDES HOW MUCH THERE IS TO KEEP, and it is one of three thing
 
 PICTURES, ONLY WHERE THEIR REFERENCES ARE ATTACHED. An attached image may come with an IMAGE REFERENCE on the line above it, of the form ![Image: its size](its file name). Where it does, put that reference - copied exactly, though you may replace the text in the square brackets with a short description of the picture - on a line of its own where the image belongs in the document: a logo where the logo is, a photo, a chart, a stamp or a signature where it sits on the page. An image that is a whole scanned page goes after the text you transcribed from that page. Use only the references attached below, each one once; never invent one, and never reference an image that is blank.
 
+A REFERENCE ALREADY IN THE ATTACHED TEXT STAYS WHERE IT IS. An attached document converted to Markdown carries its own pictures as references in the text, of the same form, written where the document draws them. Keep each of them exactly as it stands and exactly where it stands, and do not write it a second time further down.
+
 WHERE NO REFERENCES ARE ATTACHED, WRITE NONE. The pictures are then there for you to read the document from, not to place in it: the Markdown is the document's words and structure with no images in it at all. Read what each picture shows - the text of a page, the numbers in a chart, the words on a stamp - and write that as text. Never write a reference, a file name or a hash of your own; an image nothing attached refers to cannot be placed, and a made-up reference is a document with a hole in it.
 
 Answer with the Markdown alone - no explanation before or after it, and no ``` fence around it.

@@ -235,6 +235,45 @@ class JRockMarkdownExportTest {
     }
 
     @Test
+    @DisplayName("a DOCX exported with a picture is included back with the picture in its place")
+    void readsItsOwnPicturesBackOutOfTheDocx() throws Exception {
+        // The whole of why a document is written as DOCX rather than as text: export it
+        // with its graphics, include it back, and the pictures are still in the text where
+        // they were - so a document can go out to a word processor or an OCR tool and come
+        // back in without the pictures having to be put in again by hand.
+        Path png = png("IMG_4002.png", 400, 200);
+        String markdown = String.join("\n",
+                "# The report",
+                "",
+                "![](" + HASH + ")",
+                "",
+                "Signed: ![](" + HASH + ") at the foot.",
+                "");
+
+        Path file = dir.resolve("exported.docx");
+        Files.write(file, docx(export(markdown, Collections.singletonMap(HASH, png))));
+
+        // The export names each picture after the file it came from, which the import
+        // reads back as the alternative text; the reference itself names the file the
+        // picture was written to beside the Markdown.
+        assertThat(docxAsMarkdown(file)).describedAs("the Markdown read back out")
+                .isEqualTo(String.join("\n",
+                        "# The report",
+                        "",
+                        "![IMG_4002.png](exported.docx.image1.png)",
+                        "",
+                        "Signed: ![IMG_4002.png](exported.docx.image1.png) at the foot.",
+                        ""));
+
+        // One file for the one picture, placed twice, and the same bytes that went in.
+        assertThat(docxPictures(file)).describedAs("the pictures written")
+                .containsExactly(dir.resolve("exported.docx.image1.png"));
+        assertThat(dir.resolve("exported.docx.image1.png")).isRegularFile();
+        assertThat(Files.readAllBytes(dir.resolve("exported.docx.image1.png")))
+                .describedAs("the picture's bytes").isEqualTo(Files.readAllBytes(png));
+    }
+
+    @Test
     @DisplayName("a link is a hyperlink in the DOCX, and its text and address in the RTF")
     void writesLinksAsHyperlinks() throws Exception {
         String markdown = "See the [Main page](https://example.com/main) and "
@@ -685,11 +724,29 @@ class JRockMarkdownExportTest {
         return method.invoke(document);
     }
 
-    /** {@code JRock.DocxMarkdown.of(file)}: the import side, on one .docx. */
-    private static String docxAsMarkdown(Path file) throws Exception {
-        Method of = Class.forName("JRock$DocxMarkdown").getDeclaredMethod("of", Path.class);
+    /** {@code JRock.DocxMarkdown.of(file, outDir)}: the import side, on one .docx. */
+    private Object docxImport(Path file) throws Exception {
+        Method of = Class.forName("JRock$DocxMarkdown")
+                .getDeclaredMethod("of", Path.class, Path.class);
         of.setAccessible(true);
-        return (String) of.invoke(null, file);
+        return of.invoke(null, file, dir);
+    }
+
+    /** The Markdown of that import. */
+    private String docxAsMarkdown(Path file) throws Exception {
+        return (String) fieldOf(docxImport(file), "markdown");
+    }
+
+    /** The picture files of that import, in the order the document places them. */
+    @SuppressWarnings("unchecked")
+    private List<Path> docxPictures(Path file) throws Exception {
+        return (List<Path>) fieldOf(docxImport(file), "pictures");
+    }
+
+    private static Object fieldOf(Object held, String name) throws Exception {
+        java.lang.reflect.Field field = held.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(held);
     }
 
     // ---- reading a package, the way anything else opening it would ----

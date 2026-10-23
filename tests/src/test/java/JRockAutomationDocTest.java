@@ -72,24 +72,23 @@ class JRockAutomationDocTest extends JRockGuiFixture {
         assertThat(JRock.automationBegin("pdfhtml test")).isNull();
         try {
             // NOTHING IS PRESSED HERE, and the call returning is the assertion: the
-            // include's two questions - convert into a new folder, or include a folder
-            // already there - are answered by JRock itself while an automation holds the
-            // window, because an automation that stops for a dialog is not an automation
+            // conversion is JRock's own file under JRock/includes/, so there is nothing to
+            // ask about - and an automation that stops for a dialog is not an automation
             // (the doc inventory flow is usually driven by an agent, with nobody at the
             // keyboard). A modal question would block this call for ever, so a test that
             // presses no button and still gets its answer is a test that nothing asked.
-            // Likewise: a PDF as an xpdf HTML folder, with the references that make each
-            // page image referable - two ticks in Configure, set here as the dialog sets
-            // them.
+            // A PDF as an xpdf HTML folder, with the references that make each page image
+            // referable - two ticks in Configure, set here as the dialog sets them.
             field("pdfIncludeMode").set(null, "html");
             field("includeMarkdownRefs").set(null, true);
             assertThat(JRock.automationInclude(pdf)).isNull();
 
-            assertThat(workingDirectory().resolve("scan.pdf.html").resolve("page1.html"))
-                    .isRegularFile();
-            // And the log says a question was answered on the operator's behalf, which is
-            // the other half of the bargain: nobody was asked, and it is written down.
-            assertThat(logPane().text()).contains("answered by the automation");
+            assertThat(workingDirectory().resolve("JRock").resolve("includes")
+                    .resolve("scan.pdf.html").resolve("page1.html")).isRegularFile();
+            // And the folder the PDF is in is left exactly as it was.
+            assertThat(workingDirectory().resolve("scan.pdf.html"))
+                    .describedAs("a folder beside the PDF, which there should not be")
+                    .doesNotExist();
             String prompt = JRock.automationPromptText();
             // Every page image with its reference above its token. Both pages of this PDF
             // have the same blank background, and an image already included is not

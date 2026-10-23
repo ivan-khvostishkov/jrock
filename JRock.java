@@ -114,7 +114,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "5.1.0";
+    private static final String VERSION = "5.2.0";
 
     // What this program is called, where it says so to a person: the name written after
     // the time on every answer's header line (see dialog), which is the one place in a
@@ -1076,14 +1076,14 @@ public class JRock {
     // false, and absent is false.
     private static final String CONFIG_RECORD_TRANSCRIBE = "record-transcribe";
     // Where the window opens and how big it is: "x,y,width,height" in the virtual desktop
-    // space, as the Window tab's Set button last applied them - or absent, which is
-    // JRock's own size, centred.
+    // space, as it was last left - or absent, which is JRock's own size, centred.
     //
-    // Written by Set and by nothing else: a window dragged about or resized by its corner
-    // is not a decision somebody made about where this folder's window belongs, and a
-    // setting that followed every drag would be impossible to leave alone. Per folder like
-    // every other setting here, which is what makes it useful - an agent's JRock and the
-    // one somebody types in can each have their own corner of the screen.
+    // Written whenever the window is moved or resized, once it has stood still for a
+    // moment (see rememberBoundsAsTheyChange), and by the Window tab's Set button: the
+    // size a window was dragged to is the size it is wanted at, so it opens there next
+    // time without anything having to be pressed. Per folder like every other setting
+    // here, which is what makes it useful - an agent's JRock and the one somebody types in
+    // can each have their own corner of the screen.
     private static final String CONFIG_WINDOW = "window";
     private static volatile String windowBounds = "";
     // Whether the Clock checkbox is ticked: true or false, and absent is true - the
@@ -1114,8 +1114,8 @@ public class JRock {
     // How the include dialog, Include directory and the automations take the file types
     // that have more than one reading, so the dialog offers each type exactly once (see
     // showIncludeDialog). A PDF as "images" (one page image per page, by the PDF
-    // engine), "html" (an xpdf HTML folder beside it) or "text" (an xpdf .txt beside
-    // it); absent is "images", and the browser, which has no xpdf, always reads images.
+    // engine), "html" (an xpdf HTML folder under JRock/includes/) or "text" (an xpdf .txt
+    // there); absent is "images", and the browser, which has no xpdf, always reads images.
     // An RTF as "markdown" (converted) or "text" (its markup, as it is); absent is
     // "markdown".
     private static final String CONFIG_PDF_MODE = "include-pdf-as";
@@ -4057,17 +4057,18 @@ public class JRock {
         // exists (see the Automation API section).
         ui = new Ui(frame, input, log, send, extendMode, clockMode, sendGate);
 
-        // WHERE SET PUT IT LAST TIME, before it is shown rather than after: the settings
+        // WHERE IT WAS LAST TIME, before it is shown rather than after: the settings
         // of this folder have been read by now (initSession, above), and a window that
         // appears in the middle of the screen and then jumps is a window that looks like
         // it is still deciding.
         applyRememberedBounds(frame, log);
+        rememberBoundsAsTheyChange(frame);
         frame.setVisible(true);
     }
 
-    // The window at the size and place the Window tab's Set button last applied in this
-    // folder, if it applied any. Nothing happens when there is no such setting, which is
-    // the ordinary case: JRock's own size, centred, as it always was.
+    // The window at the size and place it was left at in this folder, if there is one.
+    // Nothing happens when there is no such setting, which is the first start in a new
+    // folder: JRock's own size, centred.
     //
     // A SAVED PLACE IS CHECKED AGAINST THE SCREENS THERE ARE NOW. A laptop that was
     // docked when Set was pressed has one screen today instead of three, and the place
@@ -4085,6 +4086,52 @@ public class JRock {
             return;
         }
         frame.setBounds(saved);
+    }
+
+    // How long the window has to stand still before its place is written down. A drag
+    // across the desktop is a few hundred of these events, and the one worth keeping is
+    // the last.
+    private static final int WINDOW_SETTLE_MS = 700;
+
+    // Remembers where the window is, every time it is moved or resized - by its title
+    // bar, by its corner, by a window manager tiling it, or by the browser page it is
+    // running in resizing itself around it.
+    //
+    // So the next start opens the window where this one was left, in this folder. Nothing
+    // has to be set for that: the size somebody dragged the window to IS the size they
+    // want it, and the Window tab's four fields are there for placing it exactly rather
+    // than for being the only way to be remembered at all.
+    //
+    // It also saves the browser a resize at every start. CheerpJ sizes the window to the
+    // page it is in; with the page's size already in the configuration the window is that
+    // size from the first paint, instead of being built at JRock's default size and then
+    // laid out a second time.
+    //
+    // WRITTEN WHEN THE WINDOW SETTLES, not while it is moving: one file write per drag
+    // rather than one per pixel. A maximized window is not written at all - the bounds a
+    // maximized frame reports are the ones its invisible borders need and not a place
+    // anybody chose - so the size it had before it was maximized is what comes back.
+    private static void rememberBoundsAsTheyChange(JFrame frame) {
+        javax.swing.Timer settled = new javax.swing.Timer(WINDOW_SETTLE_MS, null);
+        settled.setRepeats(false);
+        settled.addActionListener(e -> {
+            if (isMaximized(frame)) return;
+            java.awt.Rectangle now = frame.getBounds();
+            if (now.width < WINDOW_MIN_W || now.height < WINDOW_MIN_H) return;
+            String place = now.x + "," + now.y + "," + now.width + "," + now.height;
+            if (place.equals(windowBounds)) return;
+            windowBounds = place;
+            saveConfigQuietly();
+        });
+        frame.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override public void componentResized(java.awt.event.ComponentEvent e) {
+                settled.restart();
+            }
+
+            @Override public void componentMoved(java.awt.event.ComponentEvent e) {
+                settled.restart();
+            }
+        });
     }
 
     /** "x,y,width,height" as a rectangle, or null when it is absent or not that. */
@@ -5300,12 +5347,12 @@ public class JRock {
     //   "txt"    a text file, as it is
     //   "audio"  a recording (wav, mp3), as an input_audio part
     //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
-    //   "pdfhtml" a PDF, converted by xpdf's pdftohtml into a folder beside it, then
-    //            the folder - with the same dialogs as the include dialog's - and
-    //            always with a Markdown reference above each token
-    //   "pdftext" a PDF, converted by xpdf's pdftotext into a .txt beside it
+    //   "pdfhtml" a PDF, converted by xpdf's pdftohtml into a folder under
+    //            JRock/includes/, then that folder - always with a Markdown reference
+    //            above each token
+    //   "pdftext" a PDF, converted by xpdf's pdftotext into a .txt under JRock/includes/
     //   "rtf"    an RTF, converted to Markdown text
-    //   "docx"   a DOCX, converted to Markdown text
+    //   "docx"   a DOCX, converted to Markdown text with its pictures beside it
     //   "xlsx"   an XLSX, converted to one CSV per sheet
     //
     // Markdown references and processed copies follow the Configure dialog, as they do
@@ -6977,7 +7024,8 @@ public class JRock {
         pdfModeF.setFont(pdfModeF.getFont().deriveFont(java.awt.Font.PLAIN));
         pdfModeF.setToolTipText("Page images: one picture per page, by Ghostscript (PDF.js "
                 + "in the browser). HTML folder or Text: xpdf's pdftohtml or pdftotext, "
-                + "written beside the PDF under its name.");
+                + "written under JRock/includes/ under the PDF's whole name - nothing is "
+                + "asked and no document folder is written into.");
         javax.swing.JPanel pdfModeRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         pdfModeRow.add(pdfModeF, BorderLayout.WEST);
         javax.swing.JComboBox<String> rtfModeF = new javax.swing.JComboBox<>(
@@ -7796,7 +7844,8 @@ public class JRock {
             + "copy of each file picked with Ctrl+I, and whatever a conversion made of it, "
             + "beside the file it came from. Each converted file is named for the whole of "
             + "its source - picture.pdf.gs.001.png for a page image, notes.rtf.md and "
-            + "report.docx.md for Markdown, book.xlsx.Sheet1.csv for a sheet, "
+            + "report.docx.md for Markdown, report.docx.image1.png for a picture out of "
+            + "that document, book.xlsx.Sheet1.csv for a sheet, "
             + "paper.pdf.txt and the folder paper.pdf.html for an xpdf reading - so they "
             + "sort together under the name of the file they belong to and no two can "
             + "collide.\n\n"
@@ -8559,8 +8608,9 @@ public class JRock {
         return files;
     }
 
-    // Deletes a directory tree, if it is there at all. Used on the one directory a
-    // restore owns: the JRock folder the archive is about to replace.
+    // Deletes a file or a directory tree, if it is there at all. Used on what JRock owns
+    // and is about to write again: the JRock folder a restore replaces, and the earlier
+    // xpdf conversion of a PDF under JRock/includes/.
     private static void deleteRecursively(Path dir) throws IOException {
         if (!Files.exists(dir)) return;
         Files.walkFileTree(dir, new java.nio.file.SimpleFileVisitor<Path>() {
@@ -11024,7 +11074,8 @@ public class JRock {
     //   an image, a text, a recording  -> itself, as @img / @txt / @audio
     //   a PDF                          -> page images, an HTML folder or a .txt (Configure)
     //   an RTF                         -> Markdown, or its markup as is (Configure)
-    //   a DOCX                         -> Markdown;   an XLSX -> one CSV per sheet
+    //   a DOCX                         -> Markdown and its pictures
+    //   an XLSX                        -> one CSV per sheet
     //
     // With "Include from processed copies in JRock/includes/" on, a file included as itself is
     // copied into JRock/includes/ first - an image downscaled to Images DPI on the way -
@@ -11037,7 +11088,7 @@ public class JRock {
             act.log.gray("Not included: " + file + " - not a type Include file takes.");
             return;
         }
-        boolean toJRock = (kind.equals("pdf") && pdfIncludeMode.equals(PDF_AS_IMAGES))
+        boolean toJRock = kind.equals("pdf")
                 || (kind.equals("rtf") && rtfIncludeMode.equals(RTF_AS_MARKDOWN))
                 || kind.equals("docx") || kind.equals("xlsx");
         if (toJRock && !includeProcessedCopies) {
@@ -11239,10 +11290,19 @@ public class JRock {
     private static Path includeCopyOf(Path file, LogView log, boolean isImage) {
         Path dir = includesDir();
         try {
-            // Already a copy (a re-include of something under JRock/includes/, or a
-            // file the user browsed to there): copying it again would only make
-            // "photo-2.png" out of "photo.png".
+            // Already a copy (a re-include of something under JRock/includes/, a file the
+            // user browsed to there, a page of a conversion's own output): copying it
+            // again would only make "photo-2.png" out of "photo.png".
+            //
+            // An image bigger than the page it is going to be read on is still scaled
+            // down, because that is not a second copy of the same file: it is a smaller
+            // file that costs fewer tokens, and the one already there is left alone.
             if (file.toAbsolutePath().normalize().startsWith(dir.toAbsolutePath().normalize())) {
+                if (isImage) {
+                    Files.createDirectories(dir);
+                    Path smaller = downscaledCopy(dir, file, log);
+                    if (smaller != null) return smaller;
+                }
                 return file;
             }
             Files.createDirectories(dir);
@@ -11712,7 +11772,15 @@ public class JRock {
 
     // The hash a reference target names: the target itself when it is a hash (the
     // "![](<hash>)" form), the include made under that name, or the include of the file
-    // at that path - from the working directory, or absolute. Null when none.
+    // at that path - from the working directory, from JRock/includes/, or absolute. Null
+    // when none.
+    //
+    // JRock/includes/ counts as a place a bare name is looked for because it is where
+    // every processed copy and every conversion lands. A document converted to Markdown
+    // refers to its own pictures by the names they were written under there
+    // ("quarterly.docx.image1.png"), and those names then resolve to the pictures
+    // whatever else is or is not in the log - so a DOCX included and exported again
+    // keeps its graphics with nothing else having had to be set.
     static String refTargetHash(String target) {
         if (target == null) return null;
         String t = target.trim();
@@ -11723,9 +11791,15 @@ public class JRock {
         if (t.contains("://")) return null;
         try {
             Path p = Paths.get(t);
-            Path file = (p.isAbsolute() ? p : workingDir.resolve(p)).toAbsolutePath().normalize();
-            for (java.util.Map.Entry<String, Path> e : INCLUDES.entrySet()) {
-                if (e.getValue().toAbsolutePath().normalize().equals(file)) return e.getKey();
+            for (Path base : java.util.Arrays.asList(workingDir, includesDir())) {
+                Path file = (p.isAbsolute() ? p : base.resolve(p))
+                        .toAbsolutePath().normalize();
+                for (java.util.Map.Entry<String, Path> e : INCLUDES.entrySet()) {
+                    if (e.getValue().toAbsolutePath().normalize().equals(file)) {
+                        return e.getKey();
+                    }
+                }
+                if (p.isAbsolute()) break;   // one place to look, and it has been looked in
             }
         } catch (RuntimeException ignored) {
             // not a path on this file system
@@ -12811,18 +12885,27 @@ public class JRock {
     //                                            its background .png as @img
     //   text  pdftotext -enc UTF-8 <pdf> <txt>   then that one file, as @txt
     //
-    // The output sits beside the PDF and is named after it: "report.pdf" gives the
-    // folder "report" or the file "report.txt". It is written only once the user has
-    // said yes to creating it. When it is there already, the user is asked whether to
-    // include it as it is - so a conversion done once (and perhaps edited since) is
-    // reused, and nothing the user has is ever overwritten.
+    // THE OUTPUT GOES UNDER JRock/includes/, like every other conversion, and nothing is
+    // asked: "report.pdf" gives the folder "report.pdf.html" or the file "report.pdf.txt"
+    // there, and a conversion of the same PDF already in that folder is replaced, so the
+    // pages always say what the PDF says now.
+    //
+    // Working material belongs in JRock's own folder and not in the folder the documents
+    // are kept in. A folder of page HTML left beside a letter is one more thing to tidy
+    // up by hand - and in a synced folder it is one more thing the sync client is holding
+    // open while something tries to delete it. Under JRock/includes/ it is where the
+    // Markdown of every converted document and every processed copy already is, it is
+    // cleaned up by age with the rest of them ("Cleanup JRock files..."), and no document
+    // folder is written into at all. There is also nothing left to ask about: the
+    // conversion is JRock's own file, so creating it needs no permission and replacing it
+    // loses nothing of anybody's.
     //
     // refsOn gives every file included a Markdown reference above its token - for the
     // HTML folder each named by its path (see IncludeAction) - which is what an
     // automation asks for when the answer is to become a DOCX with the pictures in it.
     //
-    // Runs on a background thread (see showIncludeDialog); dialogs and the include
-    // itself go through onEdt().
+    // Runs on a background thread (see showIncludeDialog); the include itself goes
+    // through onEdt().
     private static void includePdfWithXpdf(JFrame frame, JTextArea input, LogView log,
                                            boolean extend, Path pdf, boolean html,
                                            boolean refsOn) {
@@ -12840,58 +12923,63 @@ public class JRock {
         // an include is made from shares one folder, so a conversion must not be able to
         // land on top of something that was put there.
         String name = pdf.getFileName().toString();
-        Path out = pdf.toAbsolutePath().resolveSibling(name + (html ? ".html" : ".txt"));
+        Path outDir = includesDir();
+        Path out = outDir.resolve(name + (html ? ".html" : ".txt"));
         String what = html ? "folder" : "file";
-
-        if (Files.exists(out)) {
-            if (html != Files.isDirectory(out)) {
-                log.gray("Not converting " + name + ": " + out + " is already there, and "
-                        + "is not a " + what + ". Rename or move it, then try again.");
-                return;
-            }
-            if (!confirmOrAutomated(frame, log, "The " + what + " " + out
-                    + " already exists.\n\nInclude it as it is?",
-                    "Include existing " + what)) {
-                log.gray("Not included: " + name + " (" + out + " already exists).");
-                return;
-            }
-            log.gray("Including the existing " + what + " " + out);
-        } else {
-            if (!confirmOrAutomated(frame, log, "Convert " + name + " with " + tool
-                    + " into a new " + what + " beside it?\n\n" + out,
-                    "Create " + what)) {
-                log.gray("Not converted: " + name + " (" + out + " not created).");
-                return;
-            }
-            java.util.List<String> cmd = html
-                    ? java.util.Arrays.asList(exe, "-nofonts", pdf.toAbsolutePath().toString(),
-                            out.toString())
-                    : java.util.Arrays.asList(exe, "-enc", "UTF-8",
-                            pdf.toAbsolutePath().toString(), out.toString());
-            log.gray("Converting PDF with xpdf: " + String.join(" ", cmd));
-            int code;
-            try {
-                Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-                // Drained so the process can't block, and echoed to the log.
-                try (java.io.BufferedReader r = new java.io.BufferedReader(
-                        new java.io.InputStreamReader(p.getInputStream(),
-                                StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = r.readLine()) != null) {
-                        if (!line.isBlank()) log.gray(tool + ": " + line.trim());
-                    }
-                }
-                code = p.waitFor();
-            } catch (IOException | InterruptedException ex) {
-                log.gray(tool + " failed to run: " + ex.getMessage());
-                return;
-            }
-            if (code != 0 || !Files.exists(out)) {
-                log.gray(tool + " exited with code " + code + "; nothing included.");
-                return;
-            }
-            log.gray(tool + " wrote " + out);
+        try {
+            Files.createDirectories(outDir);
+        } catch (IOException ex) {
+            log.gray("Could not create " + outDir + ": " + ex.getMessage());
+            return;
         }
+
+        // An earlier conversion of the same PDF, out of the way: pdftohtml writes nothing
+        // at all into a folder that is already there, and a page of a document as it was
+        // last week is worse than one more second of converting it.
+        if (Files.exists(out)) {
+            try {
+                deleteRecursively(out);
+                log.gray("Replacing the earlier conversion at " + out);
+            } catch (IOException ex) {
+                log.gray("Could not remove the earlier conversion at " + out + ": "
+                        + ex.getMessage() + " - nothing included.");
+                return;
+            }
+        }
+
+        java.util.List<String> cmd = html
+                ? java.util.Arrays.asList(exe, "-nofonts", pdf.toAbsolutePath().toString(),
+                        out.toString())
+                : java.util.Arrays.asList(exe, "-enc", "UTF-8",
+                        pdf.toAbsolutePath().toString(), out.toString());
+        log.gray("Converting PDF with xpdf: " + String.join(" ", cmd));
+        int code;
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            // Drained so the process can't block, and echoed to the log.
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(),
+                            StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (!line.isBlank()) log.gray(tool + ": " + line.trim());
+                }
+            }
+            code = p.waitFor();
+        } catch (IOException | InterruptedException ex) {
+            log.gray(tool + " failed to run: " + ex.getMessage());
+            return;
+        }
+        if (code != 0 || !Files.exists(out)) {
+            log.gray(tool + " exited with code " + code + "; nothing included.");
+            return;
+        }
+        if (html != Files.isDirectory(out)) {
+            log.gray(tool + " wrote " + out + ", which is not a " + what
+                    + "; nothing included.");
+            return;
+        }
+        log.gray(tool + " wrote " + out);
 
         if (html) {
             try {
@@ -12908,41 +12996,6 @@ public class JRock {
         }
     }
 
-    // The same question, answered by the automation that asked for the conversion when
-    // there is one running - for the same reason urlRefused shows no dialog: under an
-    // automation there is nobody to press a button, and a modal question waits for ever.
-    //
-    // It waits for ever and it takes the rest of the machinery with it. A "pdfhtml"
-    // include is what the doc inventory flow starts with, and that flow is often driven
-    // by an agent rather than by a person: the papers agent files the paper post from a
-    // sentence said across a room, and whoever asked is listening for an answer that
-    // cannot come while this dialog is up.
-    //
-    // Yes is the only answer a program that has just asked for this conversion can mean,
-    // and neither question can lose anything by it: a new folder is written BESIDE the
-    // PDF under the PDF's own name, and a folder already there is reused exactly as it
-    // is. The log says which way it went and that nobody was asked, because a question
-    // answered on somebody's behalf should leave a record that it was.
-    private static boolean confirmOrAutomated(JFrame frame, LogView log, String message,
-                                              String title) {
-        if (automating) {
-            log.gray(title + ": yes, answered by the automation - nobody was asked ("
-                    + message.replaceAll("\\s+", " ").trim() + ")");
-            return true;
-        }
-        return confirmOnEdt(frame, message, title);
-    }
-
-    // A Yes/No question, asked on the EDT from whichever thread; true for Yes.
-    private static boolean confirmOnEdt(JFrame frame, String message, String title) {
-        boolean[] yes = new boolean[1];
-        onEdt(() -> yes[0] = javax.swing.JOptionPane.showConfirmDialog(frame, message,
-                title, javax.swing.JOptionPane.YES_NO_OPTION,
-                javax.swing.JOptionPane.QUESTION_MESSAGE)
-                == javax.swing.JOptionPane.YES_OPTION);
-        return yes[0];
-    }
-
     // Says an xpdf tool is missing - in the log, in a dialog, and by opening xpdf's
     // download page - as ghostscriptMissing does for Ghostscript.
     private static void xpdfMissing(JFrame frame, LogView log, String tool) {
@@ -12952,7 +13005,7 @@ public class JRock {
         // Nothing more under an automation: the reason is in the log, the include will
         // report that it added nothing, and a dialog with nobody to close it - plus a
         // browser opening on top of it - would hold the automation and whatever is
-        // waiting for it (see confirmOrAutomated).
+        // waiting for it.
         if (automating) return;
         onEdt(() -> {
             javax.swing.JOptionPane.showMessageDialog(frame,
@@ -13340,7 +13393,7 @@ public class JRock {
         // Nothing more under an automation: the reason is in the log, the include will
         // report that it added nothing, and a dialog with nobody to close it - plus a
         // browser opening on top of it - would hold the automation and whatever is
-        // waiting for it (see confirmOrAutomated).
+        // waiting for it.
         if (automating) return;
         onEdt(() -> {
             javax.swing.JOptionPane.showMessageDialog(frame,
@@ -14409,21 +14462,34 @@ public class JRock {
             final int size;
             /** The address the run links to, or null when it is not part of a link. */
             final String link;
+            /**
+             * Whether the text is Markdown already and goes out as it stands: the
+             * "![alt](file)" a picture in a .docx becomes (see DocxMarkdown). Everything
+             * else is a document's own characters, and is escaped.
+             */
+            final boolean markdown;
 
             Run(String text, boolean bold, boolean italic, int size) {
                 this(text, bold, italic, size, null);
             }
 
             Run(String text, boolean bold, boolean italic, int size, String link) {
+                this(text, bold, italic, size, link, false);
+            }
+
+            Run(String text, boolean bold, boolean italic, int size, String link,
+                boolean markdown) {
                 this.text = text;
                 this.bold = bold;
                 this.italic = italic;
                 this.size = size;
                 this.link = link;
+                this.markdown = markdown;
             }
 
             boolean sameStyleAs(Run other) {
                 return bold == other.bold && italic == other.italic && size == other.size
+                        && markdown == other.markdown
                         && java.util.Objects.equals(link, other.link);
             }
         }
@@ -14661,7 +14727,8 @@ public class JRock {
                     label.setLength(0);
                     link = run.link;
                 }
-                label.append(emphasis ? emphasised(text, run.bold, run.italic) : escape(text));
+                label.append(run.markdown ? text
+                        : emphasis ? emphasised(text, run.bold, run.italic) : escape(text));
             }
             return out.append(linked(label.toString(), link)).toString();
         }
@@ -14761,31 +14828,46 @@ public class JRock {
                                               boolean extend, Path docx, java.util.function.Function<Path, String> refs) {
         log.gray("Converting DOCX to Markdown: " + docx);
 
-        String markdown;
+        // Output goes to JRock/includes/, named "<docxname>.md" - the same naming as every
+        // other conversion, so two documents of the same stem can't collide - and the
+        // document's pictures go beside it under the same prefix.
+        Path outDir = includesDir();
         try {
-            markdown = DocxMarkdown.of(docx);
+            Files.createDirectories(outDir);
+        } catch (IOException ex) {
+            log.gray("Could not create " + outDir + ": " + ex.getMessage());
+            return;
+        }
+
+        DocxMarkdown.Converted converted;
+        try {
+            converted = DocxMarkdown.of(docx, outDir);
         } catch (IOException | RuntimeException ex) {
             log.gray("Could not read DOCX " + docx.getFileName() + ": " + ex.getMessage());
             return;
         }
-        if (markdown.isBlank()) {
+        if (converted.markdown.isBlank()) {
             log.gray("No text found in " + docx.getFileName() + "; nothing included. "
                     + "(An empty document - or a .docx with no body text of its own.)");
             return;
         }
 
-        // Output goes to JRock/includes/, named "<docxname>.md" - the same naming as every
-        // other conversion, so two documents of the same stem can't collide.
-        Path outDir = includesDir();
         Path out = outDir.resolve(docx.getFileName().toString() + ".md");
         try {
-            Files.createDirectories(outDir);
-            Files.write(out, markdown.getBytes(StandardCharsets.UTF_8));
+            Files.write(out, converted.markdown.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             log.gray("Could not write " + out + ": " + ex.getMessage());
             return;
         }
         log.gray("Markdown written to " + out);
+        for (Path picture : converted.pictures) log.gray("Picture written to " + picture);
+        if (!converted.skipped.isEmpty()) {
+            log.gray("Not taken out of " + docx.getFileName() + ": its "
+                    + String.join(", ", converted.skipped) + " picture(s). A request carries "
+                    + "PNG, JPEG, GIF and WEBP, and a reference to a picture nothing can "
+                    + "read would be a hole in the document - so no reference was written "
+                    + "for them. Save the document with those pictures as PNG to keep them.");
+        }
 
         boolean[] added = new boolean[1];
         // Inserts the token into the prompt's document, so: on the EDT.
@@ -14793,6 +14875,28 @@ public class JRock {
                 refs == null ? null : refs.apply(out)));
         log.gray("Inserted " + (added[0] ? 1 : 0) + " new @txt token(s) for "
                 + docx.getFileName() + ".");
+
+        // EVERY PICTURE OF THE DOCUMENT, each as an @img token of its own. The Markdown
+        // says where a picture belongs - "![its alt text](quarterly.docx.image1.png)",
+        // written where the document draws it - and the token is what carries its bytes:
+        // to the model, which sees the pictures of the document it is reading, and to the
+        // DOCX export, which places them again under the names the text refers to them by
+        // (see refTargetHash). So a DOCX exported with its pictures and included back is
+        // the same document, which is what a word-processor format is for - a reading that
+        // keeps only the text is what TXT and RTF are there for.
+        int inserted = 0;
+        for (Path picture : converted.pictures) {
+            final Path p = picture;
+            boolean[] one = new boolean[1];
+            onEdt(() -> one[0] = includeOne(input, log, extend, p, "img", true, null,
+                    refs == null ? null : refs.apply(p)));
+            if (one[0]) inserted++;
+        }
+        if (!converted.pictures.isEmpty()) {
+            log.gray("Inserted " + inserted + " new @img token(s) for the "
+                    + converted.pictures.size() + " picture(s) in " + docx.getFileName()
+                    + ".");
+        }
     }
 
     // DOCX -> Markdown.
@@ -14809,12 +14913,23 @@ public class JRock {
     //   a Quote-like style        -> "> "
     //   a numbered/bulleted list  -> a "-" list item
     //   w:tbl                     -> a Markdown pipe table
+    //   a picture                 -> ![its alt text](the file it was written to)
+    //
+    // THE PICTURES COME OUT TOO, as files beside the Markdown and as references in it,
+    // written where the document draws them. A .docx is the format that carries a
+    // document's graphics without a PDF's page-image reading, so a document included
+    // here keeps them: the model is given the pictures of the text it is reading, and the
+    // DOCX export places them again under the names the text refers to them by. Export a
+    // document and include it back and it is the same document - text, structure and
+    // graphics - which is what the format is for; a reading that keeps only the words is
+    // what TXT and RTF are there for.
     //
     // Deliberately not read: numbering.xml (so an ordered list's real numbers are not
     // recovered - a "-" item says the same structural thing), headers and footers,
-    // footnotes, images, colours, revision marks. Text a document typed itself, like a
-    // literal bullet character, is still cleaned up by the same rules the RTF side
-    // uses, whose escaping and emphasis this shares outright.
+    // footnotes, colours, revision marks, and a picture the document only links to on the
+    // web (there is nothing of it in the package to write out). Text a document typed
+    // itself, like a literal bullet character, is still cleaned up by the same rules the
+    // RTF side uses, whose escaping and emphasis this shares outright.
     //
     // A file that is not a .docx, or one Word wrote in some way not covered here,
     // comes back as an IOException or as empty text - includeDocxAsMarkdown reports
@@ -14829,6 +14944,8 @@ public class JRock {
         /** The namespace of r:id, which names a relationship. */
         private static final String R =
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        /** The relationship type of a picture: what tells one from a hyperlink. */
+        private static final String IMAGE_RELATIONSHIP = R + "/image";
 
         // Style names, matched loosely because they are not standardised: "Heading1"
         // and "heading 1" are the same style, and a monospace paragraph is called
@@ -14842,8 +14959,27 @@ public class JRock {
 
         private DocxMarkdown() { }
 
-        /** The Markdown for one .docx. Never null; empty when it has no body text. */
-        static String of(Path docx) throws IOException {
+        /** One .docx read: its Markdown, and the picture files taken out of it. */
+        static final class Converted {
+            final String markdown;
+            /** The pictures written, in the order the document places them. */
+            final List<Path> pictures;
+            /** The formats of the pictures passed over, if any (see Pictures.file). */
+            final java.util.Set<String> skipped;
+
+            Converted(String markdown, List<Path> pictures, java.util.Set<String> skipped) {
+                this.markdown = markdown;
+                this.pictures = pictures;
+                this.skipped = skipped;
+            }
+        }
+
+        /**
+         * One .docx as Markdown, with every picture in it written into {@code outDir}
+         * under the name the Markdown refers to it by. Never null; the Markdown is empty
+         * when the document has neither body text nor a picture.
+         */
+        static Converted of(Path docx, Path outDir) throws IOException {
             byte[] part = part(docx, DOCUMENT_PART);
             if (part == null) {
                 throw new IOException("no " + DOCUMENT_PART + " inside it"
@@ -14852,25 +14988,147 @@ public class JRock {
             org.w3c.dom.Element body =
                     child(document(part, DOCUMENT_PART).getDocumentElement(), "body");
             if (body == null) throw new IOException("its " + DOCUMENT_PART + " has no body");
-            return markdown(body, relationships(docx));
+            Rels rels = relationships(docx);
+            // The document's whole name as the prefix, as every conversion here does, so
+            // the pictures of two documents cannot land on each other in the one flat
+            // folder: "quarterly.docx" gives "quarterly.docx.image1.png".
+            Pictures pictures =
+                    new Pictures(rels.images, docx.getFileName().toString() + ".");
+            String markdown = markdown(body, rels.targets, pictures);
+            return new Converted(markdown, write(docx, pictures, outDir), pictures.skipped);
         }
 
-        // The addresses the document's relationships part names, by relationship id:
-        // where a w:hyperlink's r:id points. Empty when the part is missing, which is a
-        // document without links.
-        private static java.util.Map<String, String> relationships(Path docx)
-                throws IOException {
-            java.util.Map<String, String> targets = new java.util.HashMap<>();
+        // What the document's relationships part says, in the two forms the body needs:
+        // every relationship's address by id, which is where a w:hyperlink's URL comes
+        // from, and the package part holding the bytes of each relationship that points
+        // at a picture of the document's own.
+        private static final class Rels {
+            final java.util.Map<String, String> targets = new java.util.HashMap<>();
+            final java.util.Map<String, String> images = new java.util.LinkedHashMap<>();
+        }
+
+        // Both maps, read in one pass. Empty when the part is missing, which is a
+        // document with neither a link nor a picture in it.
+        private static Rels relationships(Path docx) throws IOException {
+            Rels rels = new Rels();
             byte[] part = part(docx, RELATIONSHIPS_PART);
-            if (part == null) return targets;
+            if (part == null) return rels;
             org.w3c.dom.NodeList found = document(part, RELATIONSHIPS_PART)
                     .getElementsByTagNameNS("*", "Relationship");
             for (int i = 0; i < found.getLength(); i++) {
                 org.w3c.dom.Element relationship = (org.w3c.dom.Element) found.item(i);
-                targets.put(relationship.getAttribute("Id"),
-                        relationship.getAttribute("Target"));
+                String target = relationship.getAttribute("Target");
+                rels.targets.put(relationship.getAttribute("Id"), target);
+                // A picture stored in the document, as opposed to one it points at on the
+                // web: an external target has no part in the package to read bytes from,
+                // and a picture nobody can be sure of is not one to put in the text.
+                if (!IMAGE_RELATIONSHIP.equals(relationship.getAttribute("Type"))
+                        || "External".equalsIgnoreCase(
+                                relationship.getAttribute("TargetMode"))) {
+                    continue;
+                }
+                String entry = packagePart(target);
+                if (entry != null) rels.images.put(relationship.getAttribute("Id"), entry);
             }
-            return targets;
+            return rels;
+        }
+
+        // The ZIP entry a relationship's target names: relative to word/, where
+        // document.xml and its relationships part live ("media/image1.png"), or absolute
+        // in the package ("/word/media/image1.png"). Null when nothing is left of it.
+        private static String packagePart(String target) {
+            String t = target.replace('\\', '/').trim();
+            if (t.isEmpty()) return null;
+            java.util.Deque<String> parts = new java.util.ArrayDeque<>();
+            for (String step : (t.startsWith("/") ? t.substring(1) : "word/" + t).split("/")) {
+                if (step.isEmpty() || step.equals(".")) continue;
+                if (step.equals("..")) parts.pollLast();
+                else parts.addLast(step);
+            }
+            return parts.isEmpty() ? null : String.join("/", parts);
+        }
+
+        // The pictures the body places, in the order it places them: the file each is
+        // written as, by the relationship id the drawing names. Filled in while the body
+        // is read, so the name in the Markdown and the name on disk are decided once -
+        // and only for the pictures the text actually refers to, a package often carrying
+        // media no part of the document draws.
+        private static final class Pictures {
+            final java.util.Map<String, String> parts;    // relationship id -> ZIP entry
+            private final String prefix;                  // "<docxname>."
+            final java.util.Map<String, String> files =
+                    new java.util.LinkedHashMap<>();      // relationship id -> file name
+            private final java.util.Set<String> taken = new java.util.HashSet<>();
+            /** The formats passed over, each once, for the line that says they were. */
+            final java.util.Set<String> skipped = new java.util.TreeSet<>();
+
+            Pictures(java.util.Map<String, String> parts, String prefix) {
+                this.parts = parts;
+                this.prefix = prefix;
+            }
+
+            // The file name this relationship's picture is written as, or null when there
+            // is no picture to write: a drawing whose blip names nothing, one the document
+            // only links to, or one in a format a request cannot carry.
+            //
+            // A Word document's media is not only PNG and JPEG: a pasted chart or an
+            // equation is often an EMF or a WMF, and a request takes none of those. A
+            // picture written out and referred to that neither the model nor the DOCX
+            // export could then read would be a reference to a hole in the document, so it
+            // is passed over whole - and said in the log, which is the honest answer.
+            String file(String id) {
+                if (id == null || id.trim().isEmpty()) return null;
+                String known = files.get(id);
+                if (known != null) return known;
+                String entry = parts.get(id);
+                if (entry == null) return null;
+                String base = XlsxCsv.fileSafe(entry.substring(entry.lastIndexOf('/') + 1));
+                int dot = base.lastIndexOf('.');
+                String extension = dot < 0 ? ""
+                        : base.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+                if (!java.util.Arrays.asList(IMAGE_EXTENSIONS).contains(extension)) {
+                    skipped.add(extension.isEmpty() ? base : extension);
+                    return null;
+                }
+                // The relationship id in front of a name a second picture already has:
+                // the ids are unique in the document, so one round of it is always enough.
+                String name = prefix + base;
+                if (!taken.add(name.toLowerCase(java.util.Locale.ROOT))) {
+                    name = prefix + XlsxCsv.fileSafe(id) + "-" + base;
+                }
+                files.put(id, name);
+                return name;
+            }
+        }
+
+        // The pictures the Markdown refers to, written into outDir under the names it
+        // refers to them by, in one pass over the package - so a document of fifty scanned
+        // pages is read once and never held in memory whole. Returns the files written, in
+        // the order the document places them.
+        private static List<Path> write(Path docx, Pictures pictures, Path outDir)
+                throws IOException {
+            if (pictures.files.isEmpty()) return new ArrayList<>();
+            java.util.Map<String, Path> wanted = new java.util.HashMap<>();
+            List<Path> written = new ArrayList<>();
+            for (java.util.Map.Entry<String, String> e : pictures.files.entrySet()) {
+                Path file = outDir.resolve(e.getValue());
+                wanted.put(pictures.parts.get(e.getKey()), file);
+                written.add(file);
+            }
+            try (java.io.InputStream in = Files.newInputStream(docx);
+                 java.util.zip.ZipInputStream zin = new java.util.zip.ZipInputStream(in)) {
+                java.util.zip.ZipEntry entry;
+                while ((entry = zin.getNextEntry()) != null) {
+                    Path file = wanted.remove(entry.getName());
+                    if (file == null) continue;
+                    Files.copy(zin, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            // A relationship naming a part the package does not hold: nothing was written
+            // for it, so it is no include either. The reference stays in the text, where
+            // the export says it could place no picture under that name.
+            written.removeAll(wanted.values());
+            return written;
         }
 
         // One named entry of the ZIP, or null when it isn't there.
@@ -14923,7 +15181,8 @@ public class JRock {
         // The body as Markdown: one block per paragraph or table, blank line between
         // them - except between consecutive list items, which are one list.
         private static String markdown(org.w3c.dom.Element body,
-                                       java.util.Map<String, String> links) {
+                                       java.util.Map<String, String> links,
+                                       Pictures pictures) {
             StringBuilder md = new StringBuilder();
             boolean previousWasListItem = false;
             for (org.w3c.dom.Element element : children(body)) {
@@ -14931,11 +15190,11 @@ public class JRock {
                 String block;
                 boolean listItem = false;
                 if ("p".equals(name)) {
-                    block = paragraph(element, links);
+                    block = paragraph(element, links, pictures);
                     listItem = block.startsWith("- ")
                             || RtfMarkdown.NUMBERED.matcher(block).find();
                 } else if ("tbl".equals(name)) {
-                    block = table(element, links);
+                    block = table(element, links, pictures);
                 } else {
                     continue;   // sectPr and anything else structural
                 }
@@ -14947,10 +15206,11 @@ public class JRock {
             return md.toString();
         }
 
-        // One w:p as a Markdown block, or "" when it holds no text.
+        // One w:p as a Markdown block, or "" when it holds neither text nor a picture.
         private static String paragraph(org.w3c.dom.Element p,
-                                        java.util.Map<String, String> links) {
-            List<RtfMarkdown.Run> runs = runs(p, links);
+                                        java.util.Map<String, String> links,
+                                        Pictures pictures) {
+            List<RtfMarkdown.Run> runs = runs(p, links, pictures);
             String plain = RtfMarkdown.plain(runs);
             if (plain.trim().isEmpty()) return "";
             String style = style(p);
@@ -15005,12 +15265,15 @@ public class JRock {
         // Markdown has no other kind - and every row padded to the widest one, since a
         // ragged pipe table is not a table to a reader.
         private static String table(org.w3c.dom.Element tbl,
-                                    java.util.Map<String, String> links) {
+                                    java.util.Map<String, String> links,
+                                    Pictures pictures) {
             List<List<String>> rows = new ArrayList<>();
             int columns = 0;
             for (org.w3c.dom.Element tr : children(tbl, "tr")) {
                 List<String> row = new ArrayList<>();
-                for (org.w3c.dom.Element tc : children(tr, "tc")) row.add(cell(tc, links));
+                for (org.w3c.dom.Element tc : children(tr, "tc")) {
+                    row.add(cell(tc, links, pictures));
+                }
                 if (row.isEmpty()) continue;
                 columns = Math.max(columns, row.size());
                 rows.add(row);
@@ -15043,10 +15306,11 @@ public class JRock {
         // paragraphs is not something a Markdown table row can reproduce, and keeping
         // the words on one line loses less than dropping all but the first.
         private static String cell(org.w3c.dom.Element tc,
-                                   java.util.Map<String, String> links) {
+                                   java.util.Map<String, String> links,
+                                   Pictures pictures) {
             StringBuilder text = new StringBuilder();
             for (org.w3c.dom.Element p : children(tc, "p")) {
-                String part = RtfMarkdown.inline(runs(p, links), 0).trim();
+                String part = RtfMarkdown.inline(runs(p, links, pictures), 0).trim();
                 if (part.isEmpty()) continue;
                 if (text.length() > 0) text.append(' ');
                 text.append(part);
@@ -15068,8 +15332,13 @@ public class JRock {
         // w:fldSimple whose instruction is HYPERLINK, and the same field spelled out
         // over runs - a w:fldChar "begin", the instruction in w:instrText, a
         // "separate", the runs the link shows, and an "end".
+        //
+        // A run that draws a picture adds the Markdown reference to it (see drawn) ahead
+        // of whatever text the run has: a drawing goes in a run of its own, so the
+        // reference lands where the document draws the picture.
         private static List<RtfMarkdown.Run> runs(org.w3c.dom.Element p,
-                                                  java.util.Map<String, String> links) {
+                                                  java.util.Map<String, String> links,
+                                                  Pictures pictures) {
             List<RtfMarkdown.Run> runs = new ArrayList<>();
             // The fields open at this point, innermost first: each one's instruction,
             // and once it is showing its text, the address it links to ("" for none).
@@ -15092,6 +15361,9 @@ public class JRock {
                     } else if ("fldChar".equals(name) && "end".equals(type)) {
                         fields.pop();
                     }
+                }
+                for (String reference : drawn(r, pictures)) {
+                    runs.add(new RtfMarkdown.Run(reference, false, false, 0, null, true));
                 }
                 String text = text(r);
                 if (text.isEmpty()) continue;
@@ -15156,6 +15428,64 @@ public class JRock {
                 } else if ("noBreakHyphen".equals(name)) out.append('-');
             }
             return out.toString();
+        }
+
+        // The pictures one run draws, each as a Markdown reference to the file it was
+        // written to. Empty for a run that draws none, which is most of them.
+        //
+        // Both ways a document holds a picture are read: a w:drawing, where DrawingML
+        // names the picture's bytes with an a:blip, and the older w:pict, where VML names
+        // them with a v:imagedata. Either is looked for as deep as it lies, so a picture
+        // the text wraps around (wp:anchor) is found exactly as one in the text flow
+        // (wp:inline) is - and so is each picture of a group of them.
+        private static List<String> drawn(org.w3c.dom.Element r, Pictures pictures) {
+            List<String> references = new ArrayList<>();
+            for (org.w3c.dom.Element child : children(r)) {
+                String name = child.getLocalName();
+                if (!"drawing".equals(name) && !"pict".equals(name)) continue;
+                List<org.w3c.dom.Element> found = new ArrayList<>();
+                found.addAll(descendants(child, "blip"));
+                found.addAll(descendants(child, "imagedata"));
+                for (org.w3c.dom.Element picture : found) {
+                    String id = "blip".equals(picture.getLocalName())
+                            ? picture.getAttributeNS(R, "embed")
+                            : picture.getAttributeNS(R, "id");
+                    String file = pictures.file(id);
+                    if (file == null) continue;
+                    references.add("![" + alt(child, file) + "]("
+                            + markdownTarget(file) + ")");
+                }
+            }
+            return references;
+        }
+
+        // What the reference calls the picture: the alternative text the document gives
+        // the drawing - wp:docPr's descr, which is what Word's Alt Text box writes and
+        // what the DOCX export puts the picture's own file name in - or the file it was
+        // written to when the document says nothing. A bracket in it becomes a
+        // parenthesis and a line break a space, neither of which a Markdown alt text can
+        // hold, the same rule an include's own reference follows.
+        private static String alt(org.w3c.dom.Element drawing, String file) {
+            String text = "";
+            for (org.w3c.dom.Element pr : descendants(drawing, "docPr")) {
+                text = pr.getAttribute("descr");
+                break;
+            }
+            if (text.trim().isEmpty()) text = file;
+            return text.replace('[', '(').replace(']', ')')
+                    .replace('\n', ' ').replace('\r', ' ').trim();
+        }
+
+        // Every element under parent with that local name, in document order, whatever
+        // namespace prefix the document happens to have declared for it.
+        private static List<org.w3c.dom.Element> descendants(org.w3c.dom.Element parent,
+                                                             String name) {
+            List<org.w3c.dom.Element> found = new ArrayList<>();
+            org.w3c.dom.NodeList nodes = parent.getElementsByTagNameNS("*", name);
+            for (int i = 0; i < nodes.getLength(); i++) {
+                found.add((org.w3c.dom.Element) nodes.item(i));
+            }
+            return found;
         }
 
         /** A w:rPr toggle: present, and not switched off with w:val="0"/"false". */
@@ -17240,7 +17570,9 @@ public class JRock {
     // SET ALSO REMEMBERS, which is why Cancel is enough. The four numbers are written to
     // this folder's configuration (see CONFIG_WINDOW), so the next start opens the window
     // where it was put rather than in the middle of the screen - a window placed on the
-    // second monitor for a reason belongs there tomorrow too.
+    // second monitor for a reason belongs there tomorrow too. Dragging and resizing the
+    // window remember the same way (see rememberBoundsAsTheyChange); this tab is for
+    // placing it exactly, to the pixel, which a mouse cannot do.
     //
     // ENTER IN THIS TAB IS SET, and not the dialog's OK. Every other tab holds settings
     // that OK saves, so Enter closing the dialog is right there; here the button that does
@@ -17315,10 +17647,10 @@ public class JRock {
                 + "anything.\n\n"
                 + "It also REMEMBERS: the four numbers go into this folder's "
                 + "JRock/jrock-config.txt, and the next start opens the window there "
-                + "instead of in the middle of the screen. Only this button writes them - "
-                + "a window dragged about by its title bar changes nothing - and a "
-                + "remembered place that is on no screen any more (a laptop that was "
-                + "docked) is ignored, with a line in the log saying so.\n\n"
+                + "instead of in the middle of the screen. So does dragging the window "
+                + "about or resizing it by a corner - where it is left is where it opens - "
+                + "and a remembered place that is on no screen any more (a laptop that "
+                + "was docked) is ignored, with a line in the log saying so.\n\n"
                 + "Cancel is the way out that leaves the rest of this dialog alone; Set "
                 + "has already done its work.");
         set.addActionListener(e -> {
