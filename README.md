@@ -831,8 +831,10 @@ written atomically, so a crash or a failed write never leaves a truncated file:
   | `report.docx` | `report.docx.md`, and `report.docx.image1.png` … for its pictures |
   | `book.xlsx` | `book.xlsx.Sheet1.csv`, one per sheet |
 
-  There are **no per-conversion subfolders**. The names already guarantee uniqueness, so folders
-  added nothing but paths to remember — and one of the conversions (xpdf) never used them anyway.
+  It is **flat**, with one exception: the names already guarantee uniqueness, so a subfolder per
+  conversion would add nothing but a path to remember. The exception is an xpdf HTML reading,
+  which `pdftohtml` writes as a folder of pages — that folder is one reading, and [**Cleanup JRock
+  files...**](#cleaning-up-the-window-menu) deletes it whole.
 - `JRock/urls/` — what **Fetch URL** (Ctrl+U) downloaded, one file per address (see [**fetching a
   URL**](#fetching-a-url)).
 - `JRock/wav/` — the audio, a file of its own per narration and per recording, each named for
@@ -840,6 +842,10 @@ written atomically, so a crash or a failed write never leaves a truncated file:
   `transcribe-<date>-<time>.wav` where a recording was transcribed into the prompt instead of
   included (see [**Narrate**](#narrate-windows-and-the-browser) and
   [**recording from the microphone**](#recording-from-the-microphone-ctrlspace)).
+
+  These three — `includes/`, `urls/` and `wav/` — are what [**Cleanup JRock
+  files...**](#cleaning-up-the-window-menu) sweeps by age, along with the backup zips. They hold
+  material; everything else in the folder is record, and is never touched.
 - `JRock/jrock-context-menu-install.reg`, `-uninstall.reg`, and
   `JRock/jrock-agent-<name>-install.reg` / `-uninstall.reg` — on Windows, exactly what the
   Explorer menu items applied, kept to be read, run again or undone by hand (see [**Explorer
@@ -994,34 +1000,52 @@ such lock to take.
 ## Cleaning up (the window menu)
 
 **Click the `JRock/` label beside Configure → Cleanup JRock files...** — beside Backup log... and
-Load from backup..., because the backups are half of what it deletes.
+Load from backup..., because the backups are among the things it deletes.
 
-Two things in a JRock folder **grow**: the converted copies under `JRock/includes/` — every page
-of every PDF as a PNG, a CSV per spreadsheet sheet, the Markdown of every DOCX — and the
-`jrock-backup-*.zip` files in the working directory, each one the whole folder zipped again. A
-year of filing letters is a gigabyte of page images nobody will open.
+What grows in a JRock folder is everything JRock has written **for itself**, and it grows per
+action rather than per conversation — so those are the four places this sweeps:
+
+| | what is in it |
+|---|---|
+| `JRock/includes/` | every page of every PDF as a PNG, a CSV per spreadsheet sheet, the Markdown of every DOCX and the pictures out of it, the folder an [xpdf reading](#pdf-as-html-or-text-xpdf) of a PDF becomes, a copy of every file ever attached |
+| `JRock/urls/` | one file per address [Fetch URL](#fetching-a-url) has ever been given |
+| `JRock/wav/` | one file per [narration](#narrate-windows-and-the-browser) and per [recording](#recording-from-the-microphone-ctrlspace) |
+| the working directory | the `jrock-backup-*.zip` files, each one the whole folder zipped again |
+
+A year of filing letters is a gigabyte of page images nobody will open, and a year of talking to
+JRock is a folder of `.wav` nobody will play.
 
 1. **A dialog asks for a number of days**, **10** by default. Everything older than that, in
-   those two places, goes.
-2. **It says what it found before it deletes anything**: how many files, how many bytes, how many
-   of each kind, and that they do **not** go to the Recycle Bin.
-3. The log names the total, and **names any file that would not delete** — a file held open by
-   something is worth knowing about by name rather than by count.
+   those four places, goes.
+2. **It says what it found before it deletes anything**: how many items, how many bytes, how many
+   in each place — and only the places that had something, since a line naming a folder nothing
+   was deleted from reads as though something was — and that they do **not** go to the Recycle Bin.
+3. The log names the total and the places it came from, and **names anything that would not
+   delete** — a file held open by something is worth knowing about by name rather than by count.
+
+**A folder under `includes/` goes whole.** One xpdf reading of a PDF is a folder of page HTML and
+page images, written there by the conversion as a single unit, and it is of no use with half its
+pages deleted — so it is counted and deleted as the one thing it is. That is the only place a
+folder is touched at all.
 
 **`JRock/messages/` is never touched**, and that is the point of doing this by hand rather than on
 a timer: the messages are the transcript's own evidence — every request and every reply, in full,
 as text — and text is nothing. A thousand exchanges is a few megabytes, and what was actually
 said is the one thing anybody asks for a year later. The log, the prompt, the settings and the key
-are left alone too, and so are `urls/` and `wav/`.
+are left alone too.
 
 Judged by the **file system's own modification time**, and nothing else: a converted copy carries
 no date of its own (its name is its source's), and "how long has this been sitting here" is
-exactly what a modification time answers — the same date Explorer shows. Only the files directly
-in those two folders are considered: `includes/` is flat by design, and the working directory
-holds your own documents, which a cleanup has no business walking into.
+exactly what a modification time answers — the same date Explorer shows. Only what is **directly
+in** those folders is considered, one level and no walk: the working directory holds your own
+documents and your own folders, which a cleanup has no business going into — so a folder of yours
+there is never even listed, let alone deleted.
 
-An attachment whose converted copy has been deleted **cannot be sent again** — the log says so if
-one is asked for, and the original file is of course untouched.
+**What is deleted is an attachment's file**, which is the thing to understand before saying yes: a
+converted copy, a fetched page and a recording are all includes, and an include whose file has
+gone **cannot be sent again** — the log says so if one is asked for. The file you attached in the
+first place is of course untouched, and the transcript still holds everything that was said about
+it. That is the bargain: the words kept for ever, the bytes behind them for ten days.
 
 ## Merging PDFs (Ghostscript)
 
@@ -4823,7 +4847,18 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockConfigureTest`** opens the Configure dialog, types an API key, applies it, waits
   for the session report to run again, and reopens the dialog to check the key is **not
   shown back** — the field is write-only, and the failure mode is a credential appearing on
-  screen. It also checks the key never reaches the log.
+  screen. It also checks the key never reaches the log. A second test sets
+  [`request-extra$`](#extra-request-fields-request-extra) and checks its fields reach the
+  request body, that the next save **keeps the line** (no dialog sets it, and a window move
+  now writes the file on its own), that a paste which lost its last brace is reported and
+  ignored, and that a brace inside a string is text rather than structure.
+- **`JRockCleanupTest`** builds a working folder with JRock's own material in all four places
+  *Cleanup JRock files...* sweeps — `includes/`, `urls/`, `wav/` and the backup zips, old and
+  new in each — and checks the selection: the old ones in all four, an xpdf reading counted as
+  **one folder**, the fresh ones kept. The assertion that matters is a negative one: an old
+  document of the operator's beside the backups and an old folder of their scans are **not
+  selected**, since the working directory holds their files and a regression there deletes
+  somebody's work. No window.
 - **`JRockPdfIncludeTest`** sets **Images DPI** to 300 in the Configure dialog, then
   includes a two-page A4 PDF through the real include dialog with the *PDF as page images*
   filter — and checks Ghostscript was asked for `-r300`, that two pages came back, that the

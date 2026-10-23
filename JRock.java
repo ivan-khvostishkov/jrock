@@ -1022,8 +1022,9 @@ public class JRock {
     // together under the name of the file they belong to is worth more than being apart.
     private static Path includesDir()      { return jrockDir().resolve("includes"); }
     private static Path urlsDir()          { return jrockDir().resolve("urls"); }
-    // The last narration and the last recording, one file each, overwritten every time
-    // (see the Narrate and Record sections).
+    // Every narration and every recording, a file of its own named for the moment it was
+    // made (see the Narrate and Record sections) - so this folder grows with the talking,
+    // which is why "Cleanup JRock files..." sweeps it by age like the two above.
     private static Path wavDir()           { return jrockDir().resolve("wav"); }
     // The two settings files (see "Settings files"): the credential on its own, and
     // everything else beside it.
@@ -4084,7 +4085,7 @@ public class JRock {
         addMenuItem(windowMenu, "Backup log...", () -> backupLog(frame, log, sendGate, true));
         addMenuItem(windowMenu, "Load from backup...",
                 () -> showRestoreDialog(frame, input, log, sendGate));
-        // Beside the backups, because the backups are half of what it deletes (see
+        // Beside the backups, because the backups are among the things it deletes (see
         // cleanupJRockFiles) - and because a folder worth backing up is one worth
         // keeping down to a readable size.
         addMenuItem(windowMenu, "Cleanup JRock files...",
@@ -7884,7 +7885,7 @@ public class JRock {
             + "jrock-config.txt - every other setting of this folder: endpoint, model, "
             + "Images DPI, History limit, the speaker and microphone, and the checkboxes "
             + "Configure and the window remember.\n\n"
-            + "includes/ - one flat folder holding everything an include is made from: a "
+            + "includes/ - one folder holding everything an include is made from: a "
             + "copy of each file picked with Ctrl+I, and whatever a conversion made of it, "
             + "beside the file it came from. Each converted file is named for the whole of "
             + "its source - picture.pdf.gs.001.png for a page image, notes.rtf.md and "
@@ -7898,6 +7899,9 @@ public class JRock {
             + "named for the moment it was made: narration-<date>-<time>.wav, "
             + "recording-<date>-<time>.wav, and transcribe-<date>-<time>.wav where a "
             + "recording was transcribed into the prompt rather than included.\n\n"
+            + "Those three folders - includes/, urls/ and wav/ - are what \"Cleanup JRock "
+            + "files...\" sweeps by age, along with the backup zips. They hold material; "
+            + "everything else here is record, and nothing touches it.\n\n"
             + "jrock-context-menus.reg and jrock-context-menus-removed.reg - on "
             + "Windows, exactly what the installer applied to the registry and exactly "
             + "what it took away first, kept so both can be read, run again or undone by "
@@ -13484,19 +13488,38 @@ public class JRock {
     // Runs on the EDT as far as its two dialogs; the counting and the merge, which wait
     // for a subprocess each, go to a worker.
     // ---- Cleanup (the window menu) -----------------------------------------
-    // What a year of JRock leaves behind that nobody will read again, and only that: the
-    // converted copies under JRock/includes/ - every page of every PDF as a PNG, a CSV
-    // per spreadsheet sheet, the Markdown of every DOCX - and the jrock-backup-*.zip
-    // files in the working directory. Those are the two things that GROW: one scanned
-    // letter is a dozen page images, and a backup is the whole folder zipped, again,
-    // every time one is taken.
+    // What a year of JRock leaves behind that nobody will read again, and only that - the
+    // four places whose contents are MATERIAL rather than record:
+    //
+    //   JRock/includes/   every page of every PDF as a PNG, a CSV per spreadsheet sheet,
+    //                     the Markdown of every DOCX and the pictures out of it, the
+    //                     folder an xpdf reading of a PDF becomes, a copy of every file
+    //                     ever attached
+    //   JRock/urls/       one file per address Fetch URL has ever been given
+    //   JRock/wav/        one file per narration and per recording
+    //   the working dir   the jrock-backup-*.zip files
+    //
+    // Those are the things that GROW, and each of them grows per action rather than per
+    // conversation: one scanned letter is a dozen page images, one spoken answer is a wav,
+    // and a backup is the whole folder zipped, again, every time one is taken.
     //
     // THE MESSAGES ARE NEVER TOUCHED. JRock/messages/ is the transcript's own evidence -
     // every request and every reply, in full, as text - and text is nothing: a thousand
     // exchanges is a few megabytes, and the one question anybody asks a year later is
     // what was actually said. The log, the prompt, the settings and the key are left
-    // alone too, and so are urls/ and wav/, which hold one file per fetch and the last
-    // recording.
+    // alone too.
+    //
+    // WHAT IS DELETED IS AN ATTACHMENT'S FILE, which is the one thing to understand
+    // before saying yes: a converted copy, a fetched page and a recording are all
+    // includes, and an include whose file has gone cannot be sent again. The log says so
+    // when one is asked for, and the transcript still holds what was said about it. Which
+    // is the bargain: the words are kept for ever, the bytes behind them for ten days.
+    //
+    // A FOLDER UNDER includes/ GOES WHOLE. One reading of a PDF is a folder of page HTML
+    // and page images, written there by the conversion as one unit, and it is of no use
+    // with half its pages deleted - so it is counted and deleted as the one thing it is.
+    // Only there: the working directory holds the operator's own folders, and nothing
+    // here goes into those (see olderThan).
     //
     // BY THE FILE SYSTEM'S OWN TIMESTAMP, and by nothing else: a converted copy carries
     // no date of its own, the name it has is its source's, and what is being asked here
@@ -13507,13 +13530,14 @@ public class JRock {
 
     private static void cleanupJRockFiles(JFrame frame, LogView log) {
         Object typed = javax.swing.JOptionPane.showInputDialog(frame,
-                "Delete the converted copies in JRock/includes/ and the\n"
-                + "jrock-backup-*.zip files older than this many days:\n\n"
+                "Delete what JRock has written for itself, older than this\n"
+                + "many days: the converted copies in JRock/includes/, the\n"
+                + "fetched pages in JRock/urls/, the audio in JRock/wav/ and\n"
+                + "the jrock-backup-*.zip files.\n\n"
                 + "Nothing else goes. The transcript (JRock/messages/), the log,\n"
-                + "the prompt, the settings and the key are not touched - neither\n"
-                + "are urls/ and wav/.\n\n"
-                + "An attachment whose converted copy is deleted cannot be sent\n"
-                + "again; the log says so if one is asked for.",
+                + "the prompt, the settings and the key are not touched.\n\n"
+                + "An attachment whose file is deleted cannot be sent again;\n"
+                + "the log says so if one is asked for.",
                 "Cleanup JRock files", javax.swing.JOptionPane.QUESTION_MESSAGE, null, null,
                 String.valueOf(CLEANUP_DAYS));
         if (typed == null) return;
@@ -13533,42 +13557,50 @@ public class JRock {
         // Older than the cut, by the file system's clock - which is the clock the dates
         // in Explorer are from, so what this deletes is what the operator sees as old.
         long cut = System.currentTimeMillis() - days * 24L * 60 * 60 * 1000;
+
+        // One sweep per place, in the order the dialog lists them. Each place is named
+        // where it is swept, so the question, the log line and this list cannot drift
+        // apart - and adding a place is one line.
+        java.util.List<Sweep> sweeps = java.util.Arrays.asList(
+                new Sweep("converted copies in JRock/includes/",
+                        olderThan(includesDir(), cut, null, true, log)),
+                new Sweep("fetched pages in JRock/urls/",
+                        olderThan(urlsDir(), cut, null, false, log)),
+                new Sweep("narrations and recordings in JRock/wav/",
+                        olderThan(wavDir(), cut, null, false, log)),
+                new Sweep("backup zip(s) in " + workingDir,
+                        olderThan(workingDir, cut, "jrock-backup-", false, log)));
+
         java.util.List<Path> doomed = new ArrayList<>();
         long bytes = 0;
-        for (Path file : olderThan(includesDir(), cut, null, log)) {
-            doomed.add(file);
-        }
-        int copies = doomed.size();
-        for (Path file : olderThan(workingDir, cut, "jrock-backup-", log)) {
-            doomed.add(file);
-        }
-        for (Path file : doomed) {
-            try {
-                bytes += Files.size(file);
-            } catch (IOException gone) {
-                // Counted as nothing; the delete below will say if it is really gone.
+        StringBuilder breakdown = new StringBuilder();
+        for (Sweep sweep : sweeps) {
+            doomed.addAll(sweep.paths);
+            bytes += sweep.bytes();
+            if (!sweep.paths.isEmpty()) {
+                breakdown.append("    ").append(fmtNum(sweep.paths.size())).append(' ')
+                        .append(sweep.what).append('\n');
             }
         }
-        int zips = doomed.size() - copies;
         if (doomed.isEmpty()) {
             javax.swing.JOptionPane.showMessageDialog(frame,
-                    "Nothing in JRock/includes/ and no backup zip is older than "
+                    "Nothing JRock has written for itself is older than "
                     + days + " day(s). Nothing was deleted.",
                     "Cleanup JRock files", javax.swing.JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         int yes = javax.swing.JOptionPane.showConfirmDialog(frame,
-                "Delete " + fmtNum(doomed.size()) + " file(s), " + fmtNum(bytes)
+                "Delete " + fmtNum(doomed.size()) + " item(s), " + fmtNum(bytes)
                 + " bytes?\n\n"
-                + "    " + fmtNum(copies) + " converted copies in JRock/includes/\n"
-                + "    " + fmtNum(zips) + " backup zip(s) in " + workingDir + "\n\n"
-                + "Older than " + days + " day(s). They do NOT go to the Recycle Bin.",
+                + breakdown
+                + "\nOlder than " + days + " day(s). They do NOT go to the Recycle Bin.",
                 "Cleanup JRock files", javax.swing.JOptionPane.OK_CANCEL_OPTION,
                 javax.swing.JOptionPane.WARNING_MESSAGE);
         if (yes != javax.swing.JOptionPane.OK_OPTION) return;
 
         final java.util.List<Path> going = doomed;
         final int askedDays = days;
+        final String places = placesOf(sweeps);
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
@@ -13576,24 +13608,20 @@ public class JRock {
                 int gone = 0;
                 java.util.List<String> kept = new ArrayList<>();
                 for (Path file : going) {
-                    long size = 0;
+                    long size = sizeOfTree(file);
                     try {
-                        size = Files.size(file);
-                    } catch (IOException notThere) {
-                        // Deleted under us, or unreadable: the delete below decides.
-                    }
-                    try {
-                        Files.delete(file);
+                        // A folder goes with everything in it: one conversion's output is
+                        // one thing (see the comment above). A plain file is the same call.
+                        deleteRecursively(file);
                         freed += size;
                         gone++;
                     } catch (IOException wontGo) {
                         kept.add(file.getFileName() + " (" + wontGo.getMessage() + ")");
                     }
                 }
-                log.gray("Cleanup: deleted " + fmtNum(gone) + " file(s) older than "
-                        + askedDays + " day(s), " + fmtNum(freed) + " bytes - the "
-                        + "converted copies in JRock/includes/ and the backup zips. The "
-                        + "transcript under JRock/messages/ is untouched.");
+                log.gray("Cleanup: deleted " + fmtNum(gone) + " item(s) older than "
+                        + askedDays + " day(s), " + fmtNum(freed) + " bytes - " + places
+                        + ". The transcript under JRock/messages/ is untouched.");
                 // Named rather than counted: a file that will not delete is held open by
                 // something, and which one it is says what.
                 for (String one : kept) log.gray("Cleanup: could not delete " + one);
@@ -13612,32 +13640,96 @@ public class JRock {
         }.execute();
     }
 
-    // The files directly in dir whose last-modified time is before cut - all of them, or
-    // only those whose name starts with prefix. Empty when the folder is not there, which
-    // is the ordinary case for a folder nothing has written to yet.
+    // One place the cleanup sweeps: what the dialog calls it, and what was found there.
+    private static final class Sweep {
+        final String what;
+        final java.util.List<Path> paths;
+
+        Sweep(String what, java.util.List<Path> paths) {
+            this.what = what;
+            this.paths = paths;
+        }
+
+        long bytes() {
+            long total = 0;
+            for (Path p : paths) total += sizeOfTree(p);
+            return total;
+        }
+    }
+
+    // The places that had something in them, for the one line in the log: "the converted
+    // copies in JRock/includes/, the audio in JRock/wav/ and the backup zips". Only the
+    // ones swept, because a line naming a folder nothing was deleted from reads as though
+    // something was.
+    private static String placesOf(java.util.List<Sweep> sweeps) {
+        java.util.List<String> named = new ArrayList<>();
+        for (Sweep sweep : sweeps) {
+            if (!sweep.paths.isEmpty()) named.add("the " + sweep.what);
+        }
+        if (named.isEmpty()) return "nothing";
+        if (named.size() == 1) return named.get(0);
+        String last = named.remove(named.size() - 1);
+        return String.join(", ", named) + " and " + last;
+    }
+
+    // What one path takes up: a file's own size, or everything under a folder. A file
+    // whose size cannot be read counts as nothing, which only makes the figure in the
+    // question conservative.
+    private static long sizeOfTree(Path path) {
+        if (Files.isRegularFile(path)) {
+            try {
+                return Files.size(path);
+            } catch (IOException unreadable) {
+                return 0;
+            }
+        }
+        long[] total = { 0 };
+        try (java.util.stream.Stream<Path> walk = Files.walk(path)) {
+            walk.filter(Files::isRegularFile).forEach(file -> {
+                try {
+                    total[0] += Files.size(file);
+                } catch (IOException unreadable) {
+                    // counted as nothing
+                }
+            });
+        } catch (IOException cannotWalk) {
+            // likewise: the delete says whether it was really there
+        }
+        return total[0];
+    }
+
+    // The entries directly in dir whose last-modified time is before cut - all of them,
+    // or only those whose name starts with prefix. Empty when the folder is not there,
+    // which is the ordinary case for a folder nothing has written to yet.
     //
-    // ONE LEVEL, NOT A WALK. includes/ is deliberately flat (see includesDir), and the
+    // ONE LEVEL, NOT A WALK, and that is the whole of what keeps this feature safe. The
     // working directory holds the operator's own documents: a cleanup that went down into
     // their folders looking for zips to delete would be a different and much worse
-    // feature. A directory found here is left alone and said so.
+    // feature.
+    //
+    // withFolders says whether a directory at this level counts. It is true for
+    // JRock/includes/ alone, where a folder is one conversion's output and belongs to
+    // JRock - and false everywhere else, which is what stops a folder of the operator's
+    // in the working directory from ever being listed, let alone deleted.
     private static java.util.List<Path> olderThan(Path dir, long cut, String prefix,
-                                                  LogView log) {
+                                                  boolean withFolders, LogView log) {
         java.util.List<Path> found = new ArrayList<>();
         if (dir == null || !Files.isDirectory(dir)) return found;
         try (java.util.stream.Stream<Path> listing = Files.list(dir)) {
             java.util.List<Path> all = new ArrayList<>();
             listing.sorted().forEach(all::add);
-            for (Path file : all) {
-                if (!Files.isRegularFile(file)) continue;
-                String name = file.getFileName().toString();
+            for (Path entry : all) {
+                boolean folder = Files.isDirectory(entry, java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                if (folder ? !withFolders : !Files.isRegularFile(entry)) continue;
+                String name = entry.getFileName().toString();
                 if (prefix != null
                         && !(name.startsWith(prefix) && name.endsWith(".zip"))) {
                     continue;
                 }
                 try {
-                    if (Files.getLastModifiedTime(file).toMillis() < cut) found.add(file);
+                    if (Files.getLastModifiedTime(entry).toMillis() < cut) found.add(entry);
                 } catch (IOException noTime) {
-                    // A file whose age cannot be read is not old enough to delete.
+                    // One whose age cannot be read is not old enough to delete.
                 }
             }
         } catch (IOException cannotRead) {
