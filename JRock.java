@@ -1058,6 +1058,11 @@ public class JRock {
     // attachments/ (see samples/agents/JRockThunderbird.java), and they are JRock's
     // folder's own as much as the rest.
     //
+    // AND NOTHING ELSE, the agents included: each of them keeps what it hands a model in
+    // a folder of its own beside this one - PTTFiles/ for push-to-talk, TBFiles/ for the
+    // mail agent - because this folder holds the API key, the settings and the whole
+    // transcript, and somebody's mail has no business among them.
+    //
     // ANYTHING ELSE IN THERE IS A LEFTOVER, and this version makes some: __JRock/gs-pdf/
     // and __JRock/pdfjs-pdf/ held one folder per converted PDF before every conversion
     // moved in beside the file it came from under includes/, and an xpdf reading had
@@ -1066,18 +1071,16 @@ public class JRock {
     // - so they sit there holding page images of documents from months ago, counting
     // against the browser's storage quota and against every backup.
     //
-    // So they are named at startup and offered up. Offered rather than taken, because
+    // So they are named at startup and offered up. OFFERED rather than taken, because
     // what is in them was converted from somebody's documents and this is a folder they
-    // own; and remembered when the answer is no (see CONFIG_KEEP_LEFTOVERS), because the
-    // one thing worse than a folder nobody wants is a question nobody can get rid of.
-    private static final java.util.List<String> AGENT_FOLDERS =
-            java.util.Arrays.asList("mail", "attachments");
-
+    // own - and asked again every start until the folder is gone, by hand or by this,
+    // because the answer that gets remembered is the one nobody looks at again.
+    //
     // Every name JRock itself writes directly inside __JRock/, asked of the methods that
     // resolve them rather than listed again here - so renaming one of those files moves
     // this list with it.
     private static java.util.Set<String> jrockDirOwnNames() {
-        java.util.Set<String> own = new java.util.LinkedHashSet<>(AGENT_FOLDERS);
+        java.util.Set<String> own = new java.util.LinkedHashSet<>();
         for (Path path : java.util.Arrays.asList(promptFile(), logFile(), logsDir(),
                 includesDir(), urlsDir(), wavDir(), keyFile(), configFile())) {
             own.add(path.getFileName().toString());
@@ -1085,10 +1088,10 @@ public class JRock {
         return own;
     }
 
-    // The folders in __JRock/ that are none of the above and that nobody has said to
-    // keep. Folders only: a file in there is a settings file, a log, a .reg the installer
-    // wrote or a save in progress, and a stray one is a few hundred bytes nobody notices
-    // - while a folder is a conversion of a document, by the hundred.
+    // The folders in __JRock/ that are none of the above. Folders only: a file in there
+    // is a settings file, a log, a .reg the installer wrote or a save in progress, and a
+    // stray one is a few hundred bytes nobody notices - while a folder is a conversion of
+    // a document, by the hundred.
     private static java.util.List<Path> leftoverFolders() {
         java.util.List<Path> found = new java.util.ArrayList<>();
         if (!Files.isDirectory(jrockDir())) return found;
@@ -1096,7 +1099,6 @@ public class JRock {
         try (java.util.stream.Stream<Path> entries = Files.list(jrockDir())) {
             entries.filter(Files::isDirectory)
                    .filter(path -> !own.contains(path.getFileName().toString()))
-                   .filter(path -> !keptLeftovers.contains(path.getFileName().toString()))
                    .sorted()
                    .forEach(found::add);
         } catch (IOException unreadable) {
@@ -1127,9 +1129,13 @@ public class JRock {
     // The question itself, asked once the window is up and never under --cli (see the
     // session report, which names them either way).
     //
-    // Three answers, and closing the dialog is the third: remove them, keep them and
-    // stop asking, or neither - which is what a person who wants to go and look in
-    // Explorer first needs, and they are asked again next time.
+    // ASKED EVERY START until the folder is gone - removed here, or moved out of there by
+    // hand, which is the other perfectly good answer and the reason this takes no for an
+    // answer without arguing. Nothing is remembered: a "don't ask again" tick would turn
+    // a folder nobody wants into a folder nobody is ever told about again, which is how
+    // it got to be a hundred megabytes of page images in the first place. One line in the
+    // session report and one dialog a day is the whole of the nagging, and it stops the
+    // moment the folder does.
     private static void askAboutLeftovers(LogView log, java.util.List<Path> leftovers) {
         Ui shown = ui;
         if (shown == null) return;               // no window: nothing to ask in
@@ -1145,11 +1151,13 @@ public class JRock {
         what.append("\nEverything JRock keeps now goes in the folders the Help window "
                 + "lists - messages, includes, urls and wav - so these are left over from "
                 + "an older version (page images used to go in a folder of their own) or "
-                + "were put there by something else.\n\n"
+                + "were put there by something else. The agents keep their own files "
+                + "beside this folder rather than in it.\n\n"
                 + "Remove them, with everything in them? Nothing JRock reads is in there. "
-                + "Keep them and you will not be asked about them again.");
+                + "Keep them and you will be asked again next time - move them out of "
+                + "there yourself and this stops for good.");
 
-        Object[] options = { "Remove them", "Keep them" };
+        Object[] options = { "Remove them", "Keep them for now" };
         int answer = javax.swing.JOptionPane.showOptionDialog(shown.frame, what.toString(),
                 "Leftover folders in " + JROCK_DIR,
                 javax.swing.JOptionPane.YES_NO_OPTION,
@@ -1170,18 +1178,8 @@ public class JRock {
             log.gray("");
             return;
         }
-        if (answer == javax.swing.JOptionPane.NO_OPTION) {
-            for (Path folder : leftovers) {
-                keptLeftovers.add(folder.getFileName().toString());
-            }
-            saveConfigQuietly();
-            log.gray("Keeping " + leftovers.size() + " leftover folder(s); written to "
-                    + "__JRock/jrock-config.txt (" + CONFIG_KEEP_LEFTOVERS
-                    + "$), so this is not asked again");
-            log.gray("");
-            return;
-        }
-        log.gray("Leftover folder(s) left alone for now - asked about again next start");
+        log.gray("Leftover folder(s) left as they are - asked about again next start, "
+                + "until they are gone from " + JROCK_DIR + "/");
         log.gray("");
     }
 
@@ -1329,16 +1327,6 @@ public class JRock {
     private static final String CONFIG_REQUEST_EXTRA = "request-extra";
     private static volatile String requestExtra = "";
 
-    // The folders inside __JRock/ that were looked at, asked about, and KEPT (see
-    // leftovers). Written so the answer sticks: a dialog that asks again every morning
-    // about a folder somebody deliberately keeps is how people learn to dismiss dialogs
-    // without reading them.
-    //
-    // Names rather than paths, comma separated, because they are all in one folder. A
-    // folder removed by hand later simply drops off the list the next time this is
-    // written - nothing goes looking for it.
-    private static final String CONFIG_KEEP_LEFTOVERS = "keep-leftover-folders";
-    private static java.util.Set<String> keptLeftovers = new java.util.LinkedHashSet<>();
 
     // Written above the settings, and the only documentation the format needs. The
     // format itself exists for one reason: a value is a whole line of its own, so it
@@ -1362,9 +1350,6 @@ public class JRock {
     // a folder on.
     private static void adoptSettingsOfWorkingDir() {
         imagesDpiNote = null;   // whatever the PREVIOUS folder's file said is now history
-        // Likewise: "keep this folder" was said about a folder in the LAST working
-        // directory, and says nothing about a folder of the same name in this one.
-        keptLeftovers = new java.util.LinkedHashSet<>();
         String stored = readFileQuietly(configFile());
         if (stored == null) {
             saveConfigQuietly();
@@ -1406,23 +1391,11 @@ public class JRock {
                     !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_MISSING_STOPS_SEND)));
             promptCacheOn = !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROMPT_CACHE)));
             requestExtra = trimmed(settings.get(CONFIG_REQUEST_EXTRA));
-            keptLeftovers = namesOf(settings.get(CONFIG_KEEP_LEFTOVERS));
             settingsSource = "__JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
     }
 
-    // The names in a comma-separated setting, in the order they were written, blanks
-    // dropped. One format for one job (see CONFIG_KEEP_LEFTOVERS), and a name with a
-    // comma in it is not one this can carry - such a folder is simply asked about again.
-    private static java.util.Set<String> namesOf(String setting) {
-        java.util.Set<String> names = new java.util.LinkedHashSet<>();
-        if (setting == null) return names;
-        for (String name : setting.split(",")) {
-            if (!name.trim().isEmpty()) names.add(name.trim());
-        }
-        return names;
-    }
 
     // The same for the key, which is read here but never written: an empty file is
     // created so there is somewhere obvious to put one, and that is all.
@@ -1489,7 +1462,6 @@ public class JRock {
         // one thing that keeps a line nobody here understands from being dropped the next
         // time anything else is saved.
         appendSetting(text, CONFIG_REQUEST_EXTRA, requestExtra);
-        appendSetting(text, CONFIG_KEEP_LEFTOVERS, String.join(",", keptLeftovers));
         atomicWriteQuietly(configFile(), text.toString());
     }
 
@@ -8271,14 +8243,17 @@ public class JRock {
             + "hand. JRock itself writes no registry entries; InstallJRock.java does.\n\n"
             + "A jrock<digits>.tmp or a scaling-<digits> file is a save or a resize in "
             + "progress and goes by itself; neither is ever included or sent.\n\n"
-            + "mail/ and attachments/ belong to the Thunderbird agent, which writes what "
-            + "it hands a model there.\n\n"
-            + "That is the whole list, and JRock checks it: a FOLDER in here that is none "
-            + "of the above is named in the session report at startup and offered up for "
-            + "removal - an older version kept page images in a folder of its own, and "
-            + "those are still sitting there holding documents from months ago. Keep them "
-            + "and the answer is written to jrock-config.txt, so you are not asked "
-            + "again.\n\n"
+            + "That is the whole list, the agents included: each of them keeps what it "
+            + "hands a model in a folder of its own BESIDE this one - PTTFiles for "
+            + "push-to-talk, TBFiles for the mail agent - because this folder holds the "
+            + "key, the settings and the transcript, and somebody's mail has no business "
+            + "among them.\n\n"
+            + "And the list is checked: a FOLDER in here that is none of the above is "
+            + "named in the session report at startup and offered up for removal - an "
+            + "older version kept page images in a folder of its own, and those are still "
+            + "sitting there holding documents from months ago. Keeping them is a "
+            + "perfectly good answer and you will be asked again next start; move them "
+            + "out of there and the question stops for good.\n\n"
             + "Backup log, in the menu behind the status label beside Configure, zips the "
             + "lot into a jrock-backup-<date>.zip in the working directory - beside the "
             + "JRock folder, not inside it - and Load from backup puts it back.";
@@ -15699,8 +15674,16 @@ public class JRock {
                 factory.setFeature(
                         "http://apache.org/xml/features/disallow-doctype-decl", true);
                 factory.setExpandEntityReferences(false);
-                return factory.newDocumentBuilder()
-                        .parse(new java.io.ByteArrayInputStream(xml));
+                javax.xml.parsers.DocumentBuilder builder = factory.newDocumentBuilder();
+                // SILENT, because the exception is the answer. Without a handler of its
+                // own the parser prints "[Fatal Error] :2:41: Element type..." to stderr
+                // and THEN throws - and both callers already say what could not be read,
+                // in the log where the user is looking (see svgKey, which turns this into
+                // "An inline SVG could not be placed"). The default handler's line is a
+                // second report of the same thing, in a place nobody is reading, in the
+                // middle of whatever else a build or a shell was printing.
+                builder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler());
+                return builder.parse(new java.io.ByteArrayInputStream(xml));
             } catch (javax.xml.parsers.ParserConfigurationException
                      | org.xml.sax.SAXException ex) {
                 throw new IOException("its " + name + " is not readable XML: "

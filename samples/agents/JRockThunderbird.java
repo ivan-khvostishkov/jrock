@@ -2511,9 +2511,19 @@ public final class JRockThunderbird {
     // read in that light.
     private static final String MAIL_DB = "global-messages-db.sqlite";
 
-    // JRock's own folder, where this agent writes what it hands to a model - by the name
-    // JRock reads it under (JROCK_DIR in JRock.java), which is __JRock from 5.3.0 on.
-    private static final String PRODUCT = "__JRock";
+    // WHERE WHAT THIS AGENT HANDS A MODEL GOES: one folder of its own, beside the
+    // working folder's own files rather than inside them - mail/ for a message written
+    // out as Markdown, attachments/ for what came with it.
+    //
+    // ITS OWN, and not JRock's __JRock/. That folder is JRock's: the prompt, the log, the
+    // transcript, the API key, the settings and the four folders the window lists under
+    // "What is in the JRock folder...". An agent writing into it puts somebody's mail
+    // among somebody's credentials, is swept by nothing, is backed up with everything,
+    // and shows up in JRock's own startup check as a folder it does not recognise. The
+    // push-to-talk agent settled this first, for the same reason and in the same shape
+    // (see FILES_DIR in JRockPushToTalk.java): one folder per agent, named after the
+    // agent, so it can be found, synchronised, emptied or left out of a backup whole.
+    private static final String FILES_DIR = "TBFiles";
 
     // Gloda attribute ids inside messages.jsonAttributes.
     private static final String FROM = "43";          // the sender's identity id
@@ -3027,7 +3037,7 @@ public final class JRockThunderbird {
                 raw += "\n\n*The message file itself could not be found, so what is in "
                         + "the attachment could not be read - only its name is known.*";
             } else {
-                Path into = Paths.get("").toAbsolutePath().resolve(PRODUCT)
+                Path into = Paths.get("").toAbsolutePath().resolve(FILES_DIR)
                         .resolve("attachments");
                 attachments.addAll(attachmentsIn(file, into));
                 later(() -> say(attachments.size() + " attachment(s) taken out of the "
@@ -3637,7 +3647,7 @@ public final class JRockThunderbird {
                     + "\n\n"));
             // The message itself as a file, not as prompt text: the same reason a letter
             // goes in as a file - the transcript keeps a token and the document beside it.
-            Path mailDir = Paths.get("").toAbsolutePath().resolve(PRODUCT).resolve("mail");
+            Path mailDir = Paths.get("").toAbsolutePath().resolve(FILES_DIR).resolve("mail");
             try {
                 Files.createDirectories(mailDir);
                 Path body = mailDir.resolve("message.md");

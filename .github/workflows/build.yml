@@ -111,6 +111,37 @@ jobs:
             samples/
           if-no-files-found: error
 
+      # The README as a DOCX, written by the program the README is about: JRock's own
+      # Markdown export, driven through its own automation API (see
+      # .github/build/ReadmeDocx.java). Named paragraph styles are the reason that export
+      # is DOCX and not RTF, and the reason this step exists - the document comes out with
+      # Word's own Heading 1..6, Normal, Code, Quote and Hyperlink, in Calibri and
+      # Consolas, which is what a layout application maps onto its own styles. Nothing is
+      # installed: no pandoc, no LaTeX, and no second Markdown dialect to keep in step
+      # with the first.
+      #
+      # Linux only, because one document is enough and the jar is identical on all three
+      # runners - and under xvfb, because the export goes through the window: JRock drives
+      # its real prompt and its real exporter, so this step is a check on both.
+      - name: Build the README as a DOCX
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+          xvfb-run -a --server-args="-screen 0 1600x1200x24" \
+            java -cp jrock.jar .github/build/ReadmeDocx.java README.md README.docx
+          ls -l README.docx
+
+      - name: Upload the README DOCX
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v6
+        with:
+          # One file: place it in a primary text frame and map the five style names.
+          name: readme-docx
+          path: README.docx
+          if-no-files-found: error
+
       # Assemble the CheerpJ web bundle for Amplify: a flat directory with
       # index.html and jrock.jar at the root (no subdirectory). The page fetches
       # ./jrock.jar over HTTP and verifies its SHA-256/MD5 in the browser.

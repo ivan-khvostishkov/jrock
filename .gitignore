@@ -64,3 +64,7 @@ jrock.jar.md5
 # The browser profile the web agent keeps beside its working folder: cookies, and
 # whatever the operator signed in to in that window. Never ours to commit.
 jrock-browser-profile/
+
+# The README as a DOCX, written by .github/build/ReadmeDocx.java. A build output like
+# the jar: the README itself is the source, and CI uploads the document as an artifact.
+README.docx
