@@ -242,21 +242,14 @@ public final class Screenshots {
         }
     }
 
+    /** The height of the title bar this file draws itself. See paint. */
+    private static final int TITLE_HEIGHT = 30;
+
     /** Paints one window into screenshots/&lt;os&gt;-&lt;name&gt;.png. */
     private static void shoot(Window window, String name) {
         try {
             BufferedImage[] shot = new BufferedImage[1];
-            SwingUtilities.invokeAndWait(() -> {
-                int w = Math.max(1, window.getWidth());
-                int h = Math.max(1, window.getHeight());
-                BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-                Graphics2D g = image.createGraphics();
-                // printAll and not paint: paint can be answered with a double-buffered
-                // repaint later, while printAll draws the whole hierarchy now.
-                window.printAll(g);
-                g.dispose();
-                shot[0] = image;
-            });
+            SwingUtilities.invokeAndWait(() -> shot[0] = paint(window));
             Path file = out.resolve(os + "-" + name + ".png");
             ImageIO.write(shot[0], "png", file.toFile());
             taken++;
@@ -264,6 +257,88 @@ public final class Screenshots {
                     + shot[0].getWidth() + "x" + shot[0].getHeight());
         } catch (Exception ex) {
             System.out.println(name + ": not shot (" + ex + ")");
+        }
+    }
+
+    /**
+     * One window as a picture: its contents painted by Swing, under a title bar drawn
+     * here.
+     *
+     * <p>THE CONTENTS ARE THE ROOT PANE, not the window - and that one word is the whole
+     * of a bug that made every runner's pictures wrong in a different way. An image the
+     * size of the WINDOW includes the system's title bar and borders, which Swing does not
+     * paint, and each platform's peer then filled that band with something else: macOS
+     * left it unpainted, so every picture had a black strip across the top; the X11 peer
+     * drew the window manager's own decoration into it, which landed on top of the first
+     * row of buttons and sliced them in half; and the Windows peer drew the real
+     * non-client area, which on a Windows Server runner is the themeless grey of a machine
+     * with no desktop - nothing like the Windows anybody reading the README is using.
+     *
+     * <p>The root pane is exactly the part of a window Swing owns and paints, so painting
+     * that is the whole of the application and none of the operating system - and the
+     * three runners now differ only in what Swing draws differently, which is the one
+     * thing taking three pictures is for.
+     *
+     * <p>WHY A TITLE BAR IS DRAWN BACK ON. The title carries real behaviour worth showing
+     * - the working folder's name, the per-folder icon generated from it (see the README's
+     * "Per-folder window title &amp; icon"), and which window an agent's is - and the
+     * pictures of the agents are of windows with nothing else to identify them. It is
+     * drawn plainly and identically everywhere, to look like what it is: a caption this
+     * file adds, rather than an imitation of somebody's desktop.
+     */
+    private static BufferedImage paint(Window window) {
+        javax.swing.JRootPane root = window instanceof javax.swing.RootPaneContainer
+                ? ((javax.swing.RootPaneContainer) window).getRootPane() : null;
+        int w = Math.max(1, root != null ? root.getWidth() : window.getWidth());
+        int h = Math.max(1, root != null ? root.getHeight() : window.getHeight());
+
+        BufferedImage image = new BufferedImage(w, h + TITLE_HEIGHT,
+                BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        titleBar(g, window, w);
+
+        g.translate(0, TITLE_HEIGHT);
+        // printAll and not paint: paint can be answered with a double-buffered repaint
+        // later, while printAll draws the whole hierarchy now.
+        if (root != null) root.printAll(g); else window.printAll(g);
+        g.dispose();
+        return image;
+    }
+
+    /** The caption above the window: its own icon, and its own title. */
+    private static void titleBar(Graphics2D g, Window window, int w) {
+        g.setColor(new Color(0xEC, 0xEF, 0xF1));
+        g.fillRect(0, 0, w, TITLE_HEIGHT);
+        g.setColor(new Color(0xCF, 0xD8, 0xDC));
+        g.drawLine(0, TITLE_HEIGHT - 1, w, TITLE_HEIGHT - 1);
+
+        int textAt = 10;
+        // The window's own icon, which JRock makes from the name of the folder it works
+        // in - the smallest of the sizes it set, scaled to the bar.
+        java.util.List<java.awt.Image> icons = window.getIconImages();
+        if (icons != null && !icons.isEmpty()) {
+            java.awt.Image icon = icons.get(0);
+            for (java.awt.Image candidate : icons) {
+                if (candidate.getWidth(null) > 0
+                        && candidate.getWidth(null) < icon.getWidth(null)) {
+                    icon = candidate;
+                }
+            }
+            int side = TITLE_HEIGHT - 12;
+            g.drawImage(icon, 8, 6, side, side, null);
+            textAt = 8 + side + 8;
+        }
+
+        String title = window instanceof JFrame ? ((JFrame) window).getTitle() : null;
+        if (title != null && !title.isEmpty()) {
+            g.setColor(new Color(0x37, 0x47, 0x4F));
+            g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+            int baseline = (TITLE_HEIGHT + g.getFontMetrics().getAscent()) / 2 - 1;
+            g.drawString(title, textAt, baseline);
         }
     }
 
