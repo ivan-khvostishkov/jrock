@@ -121,6 +121,20 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
 ## Highlights
 
+One file, and three ways to run it — the same bytecode, the same folder, the same files:
+
+| | **Desktop** | **Browser** ([JRock Web](#jrock-web-in-the-browser)) | **Shell** ([`--cli`](#no-window-at-all---cli)) |
+|---|---|---|---|
+| Started by | `java JRock.java` | opening a page | `java JRock.java --cli` |
+| Needs installing | a JDK | nothing at all | a JDK |
+| The window | Swing, native look | the same Swing, on a canvas | none |
+| Where files live | `__JRock/` in your folder | `/files/.../__JRock/` in the browser's storage | `__JRock/` in your folder |
+| HTTP | `java.net.http` | the page's own `fetch()` | `java.net.http` |
+| Pictures in, audio in | yes | yes (`canvas`, PDF.js, Web Speech) | includes only |
+| Narrate, record | Windows and the browser | yes | no |
+| Ghostscript, xpdf | if installed | not needed: PDF.js renders pages | if installed |
+| [Agents and flows](#prompt-library-and-chaining-samples) | yes | — | the pieces they use |
+
 - **Single file, zero dependencies.** Just `JRock.java`, no build tool, no jars, no AWS SDK.
 - **Runs directly:** `java JRock.java`.
 - **Bedrock API key auth** (Bearer token), no SigV4, no AWS SDK, no `~/.aws` credentials.
@@ -209,6 +223,17 @@ you need it in** — whether that shape is a page out of the printer, a file som
 edit, or copy flowing into a layout. And the loop closes, because a transcript printed to PDF
 with Ctrl+P can be included straight back as page images in the next prompt.
 
+| Paper, as it moves | What JRock does | Measured in |
+|---|---|---|
+| a sheet feeder's two passes | [interleaves](#merging-duplex-scans-ghostscript) fronts and reversed backs into one PDF | pages |
+| that PDF, attached | [page images](#pdf-conversion-ghostscript) at *Images DPI* — the document as it looks | A4 at 150 dpi |
+| the copy JRock keeps | [downscaled](#includes-that-outlive-the-session) to what that page has room for | 1004 × 1420 px |
+| the answer | **A4 portrait or landscape, 2 cm margins** | cm |
+| its pictures | placed at their physical size | cm |
+| the file you hand on | DOCX with [style names](#markdown-export-rtf-and-docx), or RTF | paragraph styles |
+| the finished page | InDesign maps those names onto your template | points |
+| and back again | Ctrl+P to PDF, included as page images in the next prompt | A4 |
+
 **Which tools to keep beside JRock for all this** — and what to do with a scanned PDF too long to
 send at all — is answered in [**Recommended tooling**](#recommended-tooling-faq) below.
 
@@ -218,6 +243,16 @@ send at all — is answered in [**Recommended tooling**](#recommended-tooling-fa
   `java.net.http.HttpClient`. On JDK 8-10 it won't run as a single file.
 - **Maximum: none** — uses only core JDK APIs (`javax.swing`, `java.net.http`). Runs on
   the latest JDK.
+
+| | Needed for | Without it |
+|---|---|---|
+| **JDK 11+** | everything | nothing runs |
+| A **Bedrock API key** | asking a model | the window opens and every local feature works; sends say there is no key |
+| **Ghostscript** | [PDF page images](#pdf-conversion-ghostscript), [merging](#merging-pdfs-ghostscript), [duplex](#merging-duplex-scans-ghostscript) | JRock says so, shows a dialog and opens ghostscript.com |
+| **xpdf** | [a PDF as HTML or text](#pdf-as-html-or-text-xpdf) | that include mode only; page images need nothing but Ghostscript |
+| **sqlite3** | the [Thunderbird agent's](#a-fifth-agent-thunderbird-your-calendar-and-your-mail-jrockthunderbirdjava) calendar and mail | that agent says so when asked for either |
+| A **Chromium** | the [browser agent](#a-sixth-agent-the-web-by-looking-at-it-jrockbrowserjava), and the [web screenshots](#screenshots-taken-by-the-build) | that agent only |
+| **Nothing else, ever** | — | no build tool, no jars, no AWS SDK, no `~/.aws`, no environment variables |
 
 ## Recommended tooling (FAQ)
 
@@ -243,6 +278,15 @@ half.
 
 Two ways, and they are for different things.
 
+| You want | Use | It gives you |
+|---|---|---|
+| a record of the conversation | **Ctrl+P** | the window's transcript, colours and all |
+| one answer on paper | **Ctrl+P** with it selected | that answer alone |
+| a file somebody else edits | **Ctrl+Shift+D** → DOCX | headings, tables, pictures, [named styles](#markdown-export-rtf-and-docx) |
+| a typeset page | the DOCX, placed in InDesign | your template's typography |
+| a PDF in one step | the DOCX, opened in Acrobat or Word | a correct, searchable PDF |
+| something anything can open | **RTF** | text, no style names |
+
 - **Ctrl+P** prints the transcript — or just the selected answer — to a printer or to a PDF
   writer (*Microsoft Print to PDF* on Windows) ([printing](#printing--pdf-ctrlp)). This is the
   quick copy: a record of what was said, in the window's own font.
@@ -265,6 +309,14 @@ export, and uploads it as the `readme-docx` artifact — see [the DOCX of this
 README](#the-docx-of-this-readme).
 
 ### I have no InDesign or Acrobat. What then?
+
+| What you have | What to do with the DOCX | The PDF is |
+|---|---|---|
+| **InDesign** | place it; it maps the style *names* onto your paragraph styles | typeset, and PDF/X-4 if you need it |
+| **Acrobat** | open it, or *Create PDF* | correct and searchable, one step |
+| **Word, Pages, LibreOffice** | open and export | the application's typography, not yours |
+| LibreOffice, no window | `soffice --convert-to pdf` | the same, from a script |
+| none of them | export **RTF** instead — one standard lower, and everything opens it | whatever opened it |
 
 Word, Pages and LibreOffice all open the DOCX and all export PDF; LibreOffice does it from the
 command line too (`soffice --convert-to pdf`). The typography is the application's rather than
@@ -300,6 +352,12 @@ with a tool whose whole job that is:
    transcript of a PDF is work for ABBYY or Acrobat, which do it properly. Let them make the
    DOCX; JRock takes the DOCX whole, pictures included, and gives it back the same way.
 
+| A 60-page scan, sent as | Costs | Keeps |
+|---|---|---|
+| **page images** at 150 dpi | 60 pictures — past any context, and you pay for pictures of words | the page exactly as it looks |
+| **xpdf text** ([`pdftotext`](#pdf-as-html-or-text-xpdf)) | one small text include | nothing of the layout, and nothing at all from a scan with no text layer |
+| **OCR → DOCX → [Markdown](#rtf-and-docx-conversion-no-external-tool)** | one text include and a handful of pictures | headings, bold, tables **and the graphics** |
+
 **And those names are what the [doc inventory flow](#automating-the-chain-jrockdocinventoryjava)
 is built for.** With `file.pdf`, `file_recognized.pdf` and `file.docx` in one folder, run the flow
 on **`file.pdf`** (or on `file.docx`): it offers to **start from the `.docx`** — skipping the
@@ -318,7 +376,20 @@ extractor's guess sits between the model and the page — which is why they are 
 a PDF. The question is only ever size: a letter or a few dozen pages, images; a hundred-page
 contract, OCR it first.
 
+| The document in front of you | Send it as |
+|---|---|
+| a form whose boxes matter | **page images** |
+| a letter with a stamp, a signature, a handwritten note | **page images** |
+| a table whose rules an extractor might misread | **page images** |
+| a born-digital PDF (exported from Word, a statement off a website) | [**xpdf** HTML or text](#pdf-as-html-or-text-xpdf) — in a second, no OCR |
+| a hundred-page scan | [OCR it first](#a-scanned-pdf-is-too-big-for-the-model-what-do-i-do), then the DOCX |
+
 ### The PDF already has a text layer. Do I need OCR at all?
+
+| Try | If it comes back | Then |
+|---|---|---|
+| *Include a PDF as* → **text** | the document's text | nothing else to do: born-digital, read in a second |
+| the same | **blank or gibberish** | it is pictures of words — [OCR it first](#a-scanned-pdf-is-too-big-for-the-model-what-do-i-do) |
 
 No — that is what **xpdf** is there for. A born-digital PDF (one exported from Word, or a bank
 statement off a website) carries its text, and *Include a PDF as* → **HTML with pictures** or
@@ -385,6 +456,13 @@ today's work is. The **prompts directory** separates the two:
 - **Include (Ctrl+I)** and log exports are deliberately *not* affected — those files live
   wherever the source material is, so those choosers do remember where you last browsed.
 
+| Dialog | Opens in | Remembers where you browsed |
+|---|---|---|
+| **Load prompt** (Ctrl+O), **Save prompt** (Ctrl+S) | the prompts directory, every time | no — on purpose |
+| **Include** (Ctrl+I) | where you last included from | yes |
+| **Save log as** (Ctrl+Shift+S), the exports, the backups | where you last saved | yes |
+| the merges, the cleanup | the same | yes |
+
 Set it in the **Configure dialog** (its own row, under the working directory), or on the
 command line with `--prompts-dir <dir>`. The dialog wins: changing it there replaces
 whatever the flag asked for, for the rest of the session.
@@ -424,6 +502,13 @@ else. Reported in the startup log when it was given; a path that isn't a directo
 and ignored. The one exception is the browser, where the flag comes from the page's address
 (see [JRock Web](#jrock-web-in-the-browser)). A missing folder under `/files` is created there,
 as the Configure dialog would create it.
+
+| Started from | Without the flag, JRock works in | With `--working-dir D:\HPScan` |
+|---|---|---|
+| a shell | that shell's directory | `D:\HPScan` |
+| Explorer's **right-click on a folder** | the folder you clicked — which is the point of that entry | `D:\HPScan`, whatever you clicked |
+| an **agent** installed from `D:\Agents\Mail` | wherever Explorer started it | `D:\Agents\Mail`, so its key, model and DPI are its own |
+| the **browser** | `/files` | `/files/HPScan`, from `?HPScan` in the address |
 
 ## JRock Web (in the browser)
 
@@ -540,6 +625,14 @@ the same either way. PDF.js is loaded from jsDelivr the first time a PDF is incl
 that never opens one never downloads it. Pages land in **`__JRock/includes/`**, named
 `<pdfname>.pdfjs.NNN.png`.
 
+| A PDF, in the browser | Runs | Pages named |
+|---|---|---|
+| included as **page images** | PDF.js, loaded from jsDelivr the first time one is included | `<pdfname>.pdfjs.NNN.png` |
+| included as **HTML or text** | — xpdf is a program, and a tab has none | — |
+| **merged**, or **duplex-merged** | — PDF.js only reads PDFs | — |
+| as a **picture of one page** | nothing: an image include reads its own header | whatever your viewer saved |
+| via **RTF or DOCX** | JRock's own reader, which needs nothing | `<name>.docx.md`, pictures beside it |
+
 The [duplex merge](#merging-duplex-scans-ghostscript) is the one PDF feature that stays on the
 desktop: it writes a PDF, and PDF.js only reads them. Other ways to work with a PDF that run
 in-process, in a tab as well as on the desktop:
@@ -582,6 +675,12 @@ it natively, Android having been a Java platform from the start. What is missing
 scrolling that the platform already knows how to do. That is a months-long project in its own right,
 and none of it is specific to JRock.
 
+| | Compiler for Java | Swing on it | So today |
+|---|---|---|---|
+| **iOS** | MobiVM/RoboVM, ahead of time | missing — would need an AWT backend on UIKit | the browser runs it |
+| **Android** | the platform's own, Java to DEX | missing — would need one on Android's views | the browser runs it |
+| **A phone browser** | CheerpJ, already | Swing as it is, on a canvas | **this is the mobile support** |
+
 **The two targets exist in this repository, and they fail on purpose.** [`android/`](android/) is a
 minimal Gradle project that compiles the root `JRock.java` into an APK, and [`ios/`](ios/) is a
 minimal MobiVM project that compiles the same file ahead of time into an iOS binary — one `Copy` task
@@ -619,6 +718,15 @@ the **Sponsor** button at the top of this repository ;)
   backend. All history stays local, unlike a browser client where session data can hide
   non-transparently in cookies / sessionStorage / IndexedDB. Chat Completions is stateless,
   so each request carries its own context.
+
+| | `bedrock-mantle` — what JRock uses | `bedrock-runtime` | Responses API |
+|---|---|---|---|
+| Model families | several frontier ones live **here only** | Nova, Llama and others too | — |
+| API surface | one: **Chat Completions** | per-model operations | one, and *stateful* |
+| Auth | **Bedrock API key**, a Bearer token | SigV4 or a key | — |
+| Where the conversation lives | **in the request**, every time | in the request | on the **backend** |
+| Price before sending | no — `usage` comes back **with the reply** | `CountTokens`, for the models that are on it | — |
+| What JRock stores on anybody's server | **nothing** | — | a conversation id |
 
 ## HTTP transport
 
@@ -886,6 +994,15 @@ The zone is named in full (`Europe/Berlin`), not just offset: a model that knows
 about summer time, holidays and business hours, which an offset alone doesn't say. Without this
 a model has no idea what day it is - the request carries no clock of its own.
 
+| | Clock **on** | Clock **off** |
+|---|---|---|
+| Sent with every request | one extra `system` message | nothing |
+| "What day is it?" | answered | guessed, or refused |
+| In the log | a gray line, and its own `-clock.txt` in `messages/` | — |
+| Part of the conversation | no: not shown as a turn, not resent by [History](#conversation-log) | — |
+| Your name | included when `operator$` is set | — |
+| The [prompt cache](#local-prompt-cache) | unaffected: nothing on disk records what the clock said | unaffected |
+
 **Plain sentences, not markup.** This used to be `<clock><now>…</now></clock>`, and the argument
 for that shape was that tags mark injected context off from the conversation so that nothing in
 it can be read as something you said. But the message is sent with role `system`, which marks it
@@ -1076,6 +1193,27 @@ from inside the running application, and different for every way of launching it
   `request-extra$` is [**extra fields for the request body**](#extra-request-fields-request-extra),
   the one setting with no row in the Configure dialog.
 
+| In `jrock-config.txt` | What it is | Absent means |
+|---|---|---|
+| `endpoint$` | the Chat Completions address | the built-in `bedrock-mantle` one |
+| `model$` | the model id a send names | the built-in default |
+| `images-dpi$` | what a page image is rendered at | 150; a value the dropdown has no item for is reported and ignored |
+| `narrate-device$` / `narrate-voice$` | the one speaker, and the voice | nothing set — [Narrate](#narrate-windows-and-the-browser) says so |
+| `crackle$` | which tone crackles on that speaker while a model thinks | none at all |
+| `record-device$` | the one microphone | nothing set — [Ctrl+Space](#recording-from-the-microphone-ctrlspace) lists them |
+| `record-transcribe$` | transcribe a recording into the prompt | `false`: include it as audio |
+| `record-always-on$` | [Mic always on](#mic-always-on) | `false` |
+| `clock$` | the **Clock** tick | `true` |
+| `operator$` | your name on your header lines, and in the clock | not set, and nothing is sent |
+| `history$` / `history-limit$` | the **History** tick, and how many requests back | `false`, and unlimited |
+| `include-pdf-as$` / `include-rtf-as$` | which [conversion](#multimodal-includes-ctrli) an include uses | page images, and Markdown |
+| `include-processed-copies$` | copy each picked file into `includes/` | `true` |
+| `include-markdown-references$` | write a `![...](name)` above an include | `false` |
+| `include-missing-stops-send$` | refuse a send whose include has gone | `true` |
+| `local-prompt-cache$` | [answer from `messages/`](#local-prompt-cache) | `true` |
+| `request-extra$` | [extra fields in the request body](#extra-request-fields-request-extra) | nothing added |
+| `window$` | where the window was last ([Ctrl+M](#window-size-and-position-configure--window-ctrlm)) | centred, at its preferred size |
+
 Both belong to the working folder, so they are adopted every time JRock takes a folder on:
 startup, a change of working directory in Configure, a restore from a backup. In the browser both
 files are the same files, kept in CheerpJ's persistent `/files/` — the key survives a reload
@@ -1138,6 +1276,16 @@ Setting it here beats waiting for JRock to grow a checkbox for each one.
 - It is **written back as it was read**. No dialog sets it, so nothing in JRock would otherwise
   stop a line it knows nothing about from being dropped the next time any other setting is saved.
 
+| What you put in it | What happens |
+|---|---|
+| `{"temperature":0.2}` | every request carries it; the startup log prints it in full |
+| `{"modalities":["text","image"]}` | what [a picture in the reply](#a-picture-or-a-recording-in-the-reply) needs from some models |
+| a field the endpoint rejects | the endpoint's own error, in the log, with the raw request beside it |
+| `{"model":"something-else"}` | goes out as written — JRock has no opinion, including about fields it also sets |
+| a paste missing its last brace | reported in the startup log and ignored; sends carry on without it |
+| `' {"temperature":0.2}` | commented out, like any line in this file |
+| nothing at all | nothing is added — and the line survives every other setting being saved |
+
 ## Backup and restore
 
 The whole working folder in one file, from the **window's menu** (click the **`__JRock/`** label
@@ -1161,6 +1309,16 @@ inside `__JRock/` either - that is the folder being packed. A target directory t
 `JRock/` folder of its own is refused as well: a restore ends by switching JRock into that
 directory, and [a folder may hold only one of the two
 names](#persistence-crash-recovery--full-local-history).
+
+| | **Backup log...** | **Autobackup log** | **Load from backup...** |
+|---|---|---|---|
+| Started by | the window's menu | five minutes' idle in the prompt | the window's menu |
+| Asks | where, and what to call it | nothing at all | the zip, and the folder to unpack into |
+| Writes | `jrock-backup-yymmddhhmm.zip` | the same, with the dated name | the folder itself |
+| What it covers | the whole `__JRock/` folder | the same | replaces the whole of it |
+| While it runs | **Send** is held | **Send** is held | **Send** is held, then the session reopens there |
+| Says | files, bytes, and any skipped mid-write | the same, in the log | files restored, then the new session report |
+| Once per | click | idle spell — not every five minutes | click |
 
 **Autobackup log** (Configure dialog, on by default) does the same thing by itself: five minutes
 after the cursor last moved in the prompt, it takes a backup with the dated default name and no
@@ -1257,6 +1415,15 @@ came out of the feeder in three goes; the pages somebody sent you one at a time.
 In the **browser** build there is no Ghostscript and PDF.js does not write PDFs, so the item says
 so instead of doing nothing.
 
+| | **Merge PDFs...** | **Merge two-sided (duplex) PDF scans...** |
+|---|---|---|
+| Takes | any number of PDFs | exactly **two** — the two passes of one batch |
+| Order from | the order you picked them, listed back for confirmation | the **names**: the earlier one is the fronts |
+| Produces | `<first>-merged.pdf` | `<front>.Merged.pdf` |
+| Page order | each document's own pages, documents end to end | front 1, back N, front 2, back N−1 … |
+| Counts pages first | no — nothing is asked for one by one | yes, both passes |
+| For | a letter and its appendices | a sheet feeder with no duplex unit |
+
 ## Merging duplex scans (Ghostscript)
 
 **Click the `__JRock/` label beside Configure → Merge two-sided (duplex) PDF scans...** — alone
@@ -1291,6 +1458,13 @@ include already needs — no pdftk, no Python, nothing else to install:
 
    So a pair named `front.pdf` and `back.pdf` merges with **`back.pdf` as the front pass**:
    the names are read, not understood. Rename them if that is not what you meant.
+
+   | Two passes of a 3-sheet batch | Pages, in the file |
+   |---|---|
+   | `scan0166.pdf` — the fronts, in order | 1F, 2F, 3F |
+   | `scan0167.pdf` — the backs, reversed by the feeder | 3B, 2B, 1B |
+   | **merged**: front 1, back N, front 2, back N−1 … | 1F, **1B**, 2F, **2B**, 3F, **3B** |
+
 2. A **save dialog** for the merged file, offering `<front-name>.Merged.pdf` in the folder you
    were just in — the front pass names it, its page 1 being the merged document's page 1.
 3. Both passes are counted, and the merge runs: **front 1, back N, front 2, back N−1, …** — which
@@ -1789,39 +1963,21 @@ Two more PDF filters, desktop only, use the **Xpdf command line tools** by Derek
 https://www.xpdfreader.com/ — `pdftohtml` and `pdftotext` must be on your PATH. They hand a model
 the PDF's text, in reading order, rather than pictures of it.
 
-**Nothing is said aloud that is not written down.** `automationNarrate()` takes no text: it
-reads whatever is selected in the log, exactly as the menu item does. An agent that wants to say
-something therefore has it in the log, selects it (`automationSelectLastNote` for its own words,
-`automationSelectLastAnswer` for the model's), narrates, and lets the selection go
-(`automationClearLogSelection`) — and the reason is the transcript. A spoken answer
-with no record of it is the one kind of output this machine cannot account for afterwards; now the
-log holds everything JRock has ever said out loud, in order, with the conversation around it, and
-the window shows the very words while they are being spoken.
-
-**And the answer is not written down twice.** The model's answer is *already* in the log, as the
-answer, so that is what gets selected and read. It used to be copied into a gray line first and
-the copy was what was narrated, which put every answer in the window twice — once as the answer,
-once as a grey repetition of it underneath. Gray lines are now for what is **not** in the log: an
-agent's own sentences, *"Something went wrong. Should I try again?"*, written with
-`automationNote(agent, line)` — the agent's name in front so the transcript says who spoke, and
-only the words after the name are selected and read out. Reading the answer where it stands also
-made narration work in *Dialog only*, where the window shows no gray lines at all and what is not
-shown cannot be selected.
-
-**The selection may be the prompt's, not only the log's.** Both export items take whichever
-selection there is, and the **prompt's wins** when both have one — which is the whole point of
-it. An answer is almost right: a date wrong, a paragraph too many, a heading to add. The log is
-a transcript and cannot be edited, so what anybody actually does is copy the answer into the
-prompt, fix the line, select it and want a document out of **that** — without sending anything,
-without paying for a second answer, and without a word processor in between. The menu items say
-which source they are about to use (*"…from the prompt"*, *"…from the log"*), and nothing is
-sent or cleared: the prompt is read, not consumed.
-
 - **PDF as HTML folder, with xpdf** runs `pdftohtml -nofonts <pdf> <folder>`, then includes the
   folder as [**Include directory...**](#multimodal-includes-ctrli) does: each `pageN.html` (and
   `index.html`) as `@txt`, each page's background `pageN.png` as `@img`.
 - **PDF as text, with xpdf** runs `pdftotext -enc UTF-8 <pdf> <name>.txt` and includes that file
   as `@txt`, as it is.
+
+| Include a PDF as | Runs | Attaches | Keeps |
+|---|---|---|---|
+| **page images** (the default) | Ghostscript, or PDF.js in the browser | one `@img` per page | the page exactly as it looks |
+| **HTML with pictures** | `pdftohtml -nofonts` | each `pageN.html` as `@txt`, each `pageN.png` as `@img` | the reading order, and the pictures |
+| **text** | `pdftotext -enc UTF-8` | one `@txt` | the text, in reading order |
+
+A scan has no text layer, so both xpdf modes come back empty on one — which is
+[the test](#the-pdf-already-has-a-text-layer-do-i-need-ocr-at-all) for whether a document is
+pictures of words.
 
 The output goes **under `__JRock/includes/`, named after the whole of the PDF's name**: `report.pdf`
 gives the folder `report.pdf.html` or the file `report.pdf.txt` there — extension and all,
@@ -1939,6 +2095,13 @@ without a PDF's page-image reading, so a document included here keeps them:
   Markdown is written.
 
 ### XLSX conversion (no external tool)
+
+| | **XLSX** | **DOCX / RTF** | **PDF** |
+|---|---|---|---|
+| Read with | `java.util.zip` + the JDK's XML parser | the same (RTF: Swing's reader) | Ghostscript, xpdf, or PDF.js |
+| Needs installing | **nothing** | **nothing** | Ghostscript or xpdf on the desktop |
+| Works in the browser | yes | yes | yes, through PDF.js |
+| Becomes | one CSV per sheet, `@txt` each | one Markdown file, `@txt`, plus its pictures as `@img` | page images, or xpdf's HTML/text |
 
 Selecting **XLSX as CSV text, one file per sheet** writes every sheet of the workbook, in tab
 order, as its own CSV and includes each as an `@txt` token, so a workbook of three sheets is
@@ -2103,6 +2266,16 @@ of every document for reading and further automation.
 7. **Ctrl+Enter**. The reply is a base file name.
 8. **Rename both files to it** — `<name>.pdf` and `<name>.txt`.
 
+| Step | By hand | By the [flow](#automating-the-chain-jrockdocinventoryjava) |
+|---|---|---|
+| open the prompt | Ctrl+O | it holds its own |
+| attach the document | Ctrl+I, PDF as page images | `automationInclude` |
+| ask | Ctrl+Enter | `automationSend` |
+| keep the answer | select it, Ctrl+Shift+S | `automationExportSelectionDocx`, and the text beside it |
+| ask for a name | Ctrl+O, Ctrl+I, Ctrl+Enter | pass 3 |
+| rename every file of the document | by hand, one at a time | all together, suffixes kept |
+| per document | about twenty keystrokes | one right-click |
+
 The result is a PDF you can identify from the file listing alone, and a text twin of it that
 `grep` can read. Repeat per document; the prompts don't change.
 
@@ -2114,6 +2287,13 @@ Point JRock's prompts directory at whichever folder holds the prompt you want �
 directory. Installed, that folder is the install folder, which the
 ["JRock here!" entry](#windows-explorer-right-click-integration) carries for you, so the library
 follows you into whichever folder you right-click.
+
+| | Where it lives | What it is |
+|---|---|---|
+| `samples/simple-prompts/` | `SimplePrompts\` once installed | `.txt` prompts to open with Ctrl+O and send yourself |
+| `samples/flows/` | `Flows\` | one `.java` each: runs once, on something you point it at |
+| `samples/agents/` | `Agents\<name>\` | one `.java` each: loops, listens on a port, has a folder of its own |
+| the prompts beside either | the same folder | what that program sends, as editable text |
 
 They are worth reading before they're worth running: the useful part is not the wording but
 the shape — one prompt per step, the step's input left as an include token at the bottom, and
@@ -2348,6 +2528,15 @@ overwritten, and nothing existing is touched at all, so unlike the inventory it 
 to ask and runs straight through). The summary names the language the model says it translated
 from, read back off that first line.
 
+| | **Doc inventory** (two passes, three with the name) | **Translate to…** (one pass) |
+|---|---|---|
+| Asks you anything | yes — it renames your files | no: nothing existing is touched |
+| Writes | the DOCX, the plain text, and renames every file of the document | `<name>-en.txt` beside the original, `-en-2.txt` if that exists |
+| Sends | once per pass | once |
+| Takes | a PDF, a DOCX, an RTF, a TXT, a picture | the same |
+| Right-click entry | on a folder and on any file | on a folder and on any file |
+| There are | one of it | six: Arabic, Chinese, English, French, Russian, Spanish |
+
 **The document can be any kind JRock can include**, and the include kind comes from the
 extension: `.pdf` as page images, `.docx` and `.rtf` converted to Markdown text, `.txt` `.md`
 `.csv` `.json` `.html` `.log` `.java` as they are, and `.png` `.jpg` `.jpeg` `.gif` `.webp` as pictures.
@@ -2390,6 +2579,16 @@ A loop rather than a pass, and no prompt file at all:
 java -cp jrock.jar JRockPushToTalk.java
 java -cp jrock.jar JRockPushToTalk.java --working-dir D:\Voice   # that folder's model and mic
 ```
+
+| One turn, start to finish | Who does it |
+|---|---|
+| hold the button, or hold Ctrl | you |
+| record from the **Record from** microphone | JRock |
+| the recording lands in the prompt — `@audio`, or transcribed | JRock, as Configure says |
+| wait for it to be there, then **Send** | the agent |
+| ask another agent, if the answer says to ([#here, mail, the post…](#multi-agent-collaboration)) | the agent |
+| read the whole answer aloud on **Narrate on** | JRock |
+| press again to stop the voice — so the mic never records the last answer | you |
 
 It starts JRock, clears the prompt, and opens a small window of its own beside JRock's with one
 round button. **Hold the button, or hold Ctrl** while that window has the focus, and JRock
@@ -2797,6 +2996,13 @@ java -cp jrock.jar JRockGeoLocation.java --working-dir D:\Location
 It starts JRock and takes it as an automation, like the timer, and opens a small window.
 **Nothing is kept across runs**, so the location is entered and refreshed at every start.
 
+| Asked on `127.0.0.1:47471` | Answers |
+|---|---|
+| `#here` | `<place>, Lat: <lat>, Lon: <lon>` — one line, rounded as the window says |
+| anything else | an empty line, and the reason in the window |
+
+Nothing is kept across runs, so the location is entered and refreshed at every start.
+
 - **Place**: typed, or **Determine automatically** (then the field is greyed out and shows
   what was found).
 - **Coordinates**: *Enter manually*, *From GPS* (Windows location, through PowerShell's
@@ -2853,6 +3059,15 @@ the weather itself: the agent that asked does that.
 java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
 ```
 
+| | The weather agent | The geo location agent |
+|---|---|---|
+| Port | `127.0.0.1:47472` | `127.0.0.1:47471` |
+| Is asked | a place **with coordinates** | `#here` |
+| Answers | one checked `https://api.open-meteo.com/...` address | `<place>, Lat: …, Lon: …` |
+| Fetches it | **no** — the agent that asked does | — |
+| Where the address comes from | a model, from `jrock-prompt-weather-url.txt` | a model, for the place name |
+| What is checked | `https`, and `open-meteo.com` or a subdomain | `https`, and `openstreetmap.org` |
+
 - **Other agents ask** on `127.0.0.1:47472`. They send a location in the geo location agent's line
   format, **with coordinates**, e.g. `Munich, Bavaria, Lat: 48.13, Lon: 11.59`. They get back
   one line: the address, or an empty line and the reason in the window.
@@ -2878,6 +3093,17 @@ below, because the reason is the interesting part.
 
 Neither half is ever the authority on anything — Thunderbird is. What is here is what
 Thunderbird has already written down, which is why **every answer says how fresh that is**.
+
+| Asked on `127.0.0.1:47473` | Answers with | Needs a model? |
+|---|---|---|
+| `#today` `#week` `#next` `#range <from> <to>` | the events, with how fresh the cache is | no |
+| `#calendars` `#tentative` `#optional` `#busy` `#free` | which calendars, and what is accepted or free | no |
+| `#new <date> <time> <name>` | writes `jrock-event-nnn.ics` and opens a compose window | no |
+| `#move` `#propose` `#rename` | the same, for an event that exists | no |
+| `#mail` `#unanswered` `#with` `#senders` `#mailboxes` | the listings, out of Thunderbird's index | no |
+| `#message <who>` `#read` | one message as Markdown in `TBFiles/mail/`, its attachments in `TBFiles/attachments/` | **yes** — its own JRock reads it first |
+| `#reply <id> <text>` | a compose window, addressed off the message and never from speech | no |
+| `#note` | what it last said, for the asker to read aloud | no |
 
 **Events, and that is the name.** Thunderbird keeps tasks (VTODO) in a table of their own, and a
 calendar served over CalDAV by Google has none — the cached table is empty. If your "tasks for
@@ -3187,6 +3413,14 @@ sequenceDiagram
   window of their own and the briefing got the width back (the agent's smallest size went from
   1140×503 to **740×529**). It is **modeless**: a tick re-asks the last question behind it, and
   seeing that happen is the point.
+| What the window shows | Why it matters |
+|---|---|
+| every line's **calendar**, in brackets | "which calendar is that in?" is answerable, and a noisy feed is recognisable |
+| a **checkbox per calendar**, behind *Include…* | *Holidays in Germany* is 546 entries and would drown a week |
+| that chooser as its **own modeless window** | a tick re-asks the question behind it — and the briefing got 400 px of width back (1140×503 → **740×529**) |
+| **how fresh the cache is**, on every answer | Thunderbird is the authority; this is what it had written down |
+| the **short id** at the end of each line | six hex of the `Message-ID`, so one message can be named out loud |
+
 - **Repeats are expanded**: `FREQ=DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY`, with `INTERVAL`,
   `COUNT`, `UNTIL`, `BYDAY` (weekly), `BYMONTH`, `BYMONTHDAY`, plus `EXDATE`, `RDATE` and the
   modified instances Thunderbird stores as rows of their own (a moved one says so, a cancelled
@@ -3379,6 +3613,13 @@ that tracks this number, and what comes back is checked like any other — **htt
 list** — so a model that answers with somewhere else gets nowhere. The tracking number itself is
 checked to be letters, digits and dashes before it goes into a prompt.
 
+| | An ordinary page (`#page`) | A parcel (`#parcel`) |
+|---|---|---|
+| Settled when | the page is **the same size twice** | the **number is on it**, and the size holds for **eight polls** (~3 s) |
+| Waits up to | the ordinary timeout | **90 seconds** |
+| Why | the page is there when it loads | it arrives `complete` and **empty**, then fills in as each carrier answers |
+| Reported as | settled | settled, still changing when time ran out, or the number never appeared |
+
 **And it waits for the tracking**, which is the part a news page never needs. The page arrives
 `complete` and **empty** and then fills in as each carrier answers, so the ordinary settle — *the
 same size twice* — is satisfied long before there is anything to read. For a parcel the agent
@@ -3404,6 +3645,17 @@ not by searching:
   -> helpx.adobe.com/indesign/desktop/layout-and-grid-tools/grids/use-a-baseline-grid.html
      (2 of 5 page fetches)
 ```
+
+| Asked on `127.0.0.1:47474` | Does |
+|---|---|
+| `#hosts` | lists the addresses it is allowed to open at all |
+| `#page <url>` | opens it, waits for it to settle, reads it as a picture |
+| `#site <name>` | the same, for one of the hosts by name |
+| `#search <words>` | a search on an allowed engine, then the page |
+| `#follow <n>` | follows the nth link it just listed |
+| `#links` | what it can follow from where it is |
+| `#docs <question>` | **walks** a documentation tree by its labels, at most 5 pages |
+| `#parcel` / `#track <number>` | [the parcel page](#where-is-my-parcel-parcel), waited for differently |
 
 - **Why a walk and not a search.** A documentation search box is JavaScript asking a service
   that answers in JSON — no use to an agent that reads pages from pictures and runs no page's
@@ -3920,7 +4172,41 @@ that is there, and every one of them **blocks and must not be called on the even
 thread** — they say so rather than deadlocking if you do. They are also listed, all of them
 together, as [`JRock.Automation`](#the-cheat-sheet-jrockautomation).
 
+| The shape of it | What it means |
+|---|---|
+| `String` in, `String` out | nothing to construct, nothing to serialise |
+| `null` returned | it worked |
+| anything else returned | a sentence saying what went wrong, in the log's own language |
+| `static` | one window, one log, one `__JRock/`, one session per process |
+| blocking | a step is a step; nothing is a callback |
+| not on the EDT | it says so instead of deadlocking |
+| `JRock.Automation` | every call listed in one place, which [a test enforces](#tests) |
+
+**Nothing is said aloud that is not written down.** `automationNarrate()` takes no text: it
+reads whatever is selected in the log, exactly as the menu item does. An agent that wants to say
+something therefore has it in the log, selects it (`automationSelectLastNote` for its own words,
+`automationSelectLastAnswer` for the model's), narrates, and lets the selection go
+(`automationClearLogSelection`) — and the reason is the transcript. A spoken answer
+with no record of it is the one kind of output this machine cannot account for afterwards; now the
+log holds everything JRock has ever said out loud, in order, with the conversation around it, and
+the window shows the very words while they are being spoken.
+
+**And the answer is not written down twice.** The model's answer is *already* in the log, as the
+answer, so that is what gets selected and read. It used to be copied into a gray line first and
+the copy was what was narrated, which put every answer in the window twice — once as the answer,
+once as a grey repetition of it underneath. Gray lines are now for what is **not** in the log: an
+agent's own sentences, *"Something went wrong. Should I try again?"*, written with
+`automationNote(agent, line)` — the agent's name in front so the transcript says who spoke, and
+only the words after the name are selected and read out. Reading the answer where it stands also
+made narration work in *Dialog only*, where the window shows no gray lines at all and what is not
+shown cannot be selected.
+
 #### One breaking change in 5.1.0
+
+| Was | Is now | Pick it when you were selecting |
+|---|---|---|
+| `automationSelectInLog(String text)` | `automationSelectLastAnswer()` | the model's last answer |
+| | `automationSelectLastNote()` | the agent's own last note |
 
 `automationSelectInLog(String text)` is **gone**, replaced by `automationSelectLastNote()`
 beside `automationSelectLastAnswer()` (both below). An agent or flow of your own that calls
@@ -4051,6 +4337,18 @@ the microphone — a tab that is left out where neither can be had, as in the br
 One word per title, because four of them have to fit side by side across the width of a phone: a
 title long enough to be a phrase is a tab strip that scrolls, with the tab nobody can see being
 the one they are looking for.
+
+| Tab | Holds | Kept in |
+|---|---|---|
+| **General** | working directory, prompts directory, API key, endpoint, model, your name, History limit, Clock, History, the prompt cache, the autobackup | `bedrock-key.txt`, and `jrock-config.txt` for the rest |
+| **Files** | Images DPI, how a PDF is included, how an RTF is, processed copies, Markdown references, whether a missing include stops a send | `jrock-config.txt` |
+| **Audio** | the speaker, the voices, the crackle, the microphone, transcribe, [Mic always on](#mic-always-on) | `jrock-config.txt` — **absent in the browser**, which has neither to choose |
+| **Window** | where the window is and how big ([Ctrl+M](#window-size-and-position-configure--window-ctrlm)) | `window$` |
+| **Help** | [one window of prose](#help-the-button-on-the-first-line): the shortcuts, the folder, the notes | — |
+
+Every row has its own note behind **Help**, and every control answers a right-click with what it
+does ([context menus](#context-menus-right-click--long-tap)). Pressing **OK** runs the whole
+session report again, so what changed is visible in the log rather than taken on trust.
 
 **General**
 
@@ -4279,6 +4577,15 @@ every setting does and which file keeps it. All of it in one scrolling window th
 of* Configure and centred on it, so anything already typed into the form is still there when it
 closes.
 
+| The Help window holds | Which is |
+|---|---|
+| Title and version | the same line the About box has |
+| Write about it | `jrock@nosocial.net`, on a line of its own |
+| Source, releases, donate | this repository, likewise |
+| **Shortcuts** | all of [the twenty](#keyboard-shortcuts) |
+| **The JRock folder** | every file and folder it can hold, each with what it is for ([Persistence](#persistence-crash-recovery--full-local-history)) |
+| **Notes** | what every Configure row does, and which file keeps it ([Settings files](#settings-files)) |
+
 It is a window of its own rather than part of the Configure dialog, so someone who opened
 Configure to change the model sees the rows and not three screens of prose around them, and the
 prose is one button away when it is wanted. The window is sized against the screen, like the
@@ -4306,6 +4613,15 @@ still for a moment, and the next start opens it there instead of centred. Nothin
 pressed for that: the size you dragged the window to is the size you want it, and a window put on
 the second monitor for a reason belongs there tomorrow too. Each folder's JRock keeps its own
 corner of the screen.
+
+| What happens to the window | Written to `window$`? |
+|---|---|
+| dragged by the title bar, or resized by a corner | **yes**, once it has stood still |
+| moved by a window manager tiling it | yes |
+| the browser page resizing around it | yes |
+| **Set** in the Window tab | yes — which is why **Cancel** is the way out |
+| **maximized** | no: those bounds are the invisible borders', not a place anybody chose |
+| opened where no screen is any more (a docked laptop) | ignored, with a line in the log, and centred instead |
 
 It is **one write per drag, not one per pixel** — the window has to settle first — and a
 **maximized** window is not written at all: the bounds a maximized frame reports are the ones its
@@ -4365,6 +4681,14 @@ to save the transcript to a PDF, or print to a physical printer. If text is sele
 log pane, only the selection is printed (with its colors), so a single answer can be printed
 without the surrounding transcript.
 
+| | Ctrl+P | Ctrl+Shift+D ([DOCX](#markdown-export-rtf-and-docx)) |
+|---|---|---|
+| What it is | the window's own transcript, printed | the Markdown, typeset |
+| Takes | the log, or just the selection | the selection, or the whole prompt |
+| Keeps | the pane's colours and gray lines | headings, tables, pictures, named styles |
+| Needs | a printer, or *Print to PDF* | nothing |
+| Good for | a record of what was said | a document somebody else lays out |
+
 ## Narrate (Windows, and the browser)
 
 Select text in the log, right-click, **Narrate selected text**: it is read aloud — by
@@ -4372,6 +4696,16 @@ Windows' own voices on the desktop, and by the browser's own in [JRock
 Web](#jrock-web-in-the-browser). While it reads, the same item says **Stop narrating** and
 stops it mid-word. The log says what is happening: how many characters, which voice, and
 when it finishes.
+
+| | **Windows** | **The browser** | **macOS / Linux** |
+|---|---|---|---|
+| Voices | every SAPI voice Windows has | the browser's own, per language | — |
+| Which speaker | the one you set, and no fallback | whatever the page already plays on | — |
+| Rendered by | `System.Speech` into a pipe | Web Speech, in the page | — |
+| Played by | Java Sound, on your device | the browser | — |
+| Saved as | `__JRock/wav/narration-<date>-<time>.wav` | not a file: the page speaks it | — |
+| Stop mid-word | yes | yes | — |
+| If it cannot | says so in the log and reads nothing | the same | the item says it is Windows and the browser only |
 
 - **The speaker is yours to set, and nobody else's.** Windows moves its default output to
   whatever was plugged in last, so JRock does not use that default. A first run has no device set.
@@ -4442,6 +4776,13 @@ dropdown — filled with the browser's voices the moment the dialog opens, since
 costs nothing there (on the desktop the list is what the last narration reported, because
 enumerating them means starting PowerShell).
 
+| Narration | **Desktop (Windows)** | **A browser tab** |
+|---|---|---|
+| Voices | SAPI's, enumerated by PowerShell when one last read | the browser's, listed the moment Configure opens |
+| Output device | **Narrate on**, yours to pick | whatever the page already plays on — no row for it |
+| A file to keep | `__JRock/wav/narration-<date>-<time>.wav` | none: the browser renders the speech itself |
+| Stop mid-word | yes | yes |
+
 Three things are different in a tab, and the window says so rather than pretending otherwise:
 
 - **No output device**, so there is no *Narrate on* row: the page speaks through whatever it
@@ -4483,6 +4824,16 @@ The prompt's right-click menu has the same toggle, **Start recording** / **Stop 
 the log's has Narrate selected text / Stop narrating. The recording is saved as `__JRock/wav/recording-<date>-<time>.wav` and included as `@audio` at the
 prompt cursor, as if you had picked that file with Ctrl+I. It works on any desktop, not just
 Windows, and in the browser (see [**recording in the browser**](#recording-in-the-browser)).
+
+| | **Ctrl+Space** | **[Mic always on](#mic-always-on)** |
+|---|---|---|
+| Starts on | both keys up, in either order | speech — about 0.2 s of voice in the 250–4000 Hz band |
+| Ends on | the same keys again | 1.5 s of quiet |
+| Keeps the run-up | — | the last **2 s**, from a ring buffer, so you can just start talking |
+| Tail kept | 0.3 s after you stop, so the last word is whole | the same |
+| Saved as | `__JRock/wav/recording-<date>-<time>.wav` | the same |
+| Then | included as `@audio` at the cursor | included, or [transcribed](#recording-from-the-microphone-ctrlspace) into the prompt |
+| Format | 16 kHz 16-bit mono where offered, else 44.1/48 kHz | the same |
 
 - **The microphone is set like the speaker.** A first run has none set. Ctrl+Space then records
   nothing, asks you to set up the microphone, and lists the microphones into **Configure → Record
@@ -4529,6 +4880,15 @@ Windows, and in the browser (see [**recording in the browser**](#recording-in-th
 bridge](#http-transport) the HTTP client, the clipboard, the PDF engine and
 [narration](#narrating-in-the-browser) use: Ctrl+Space, again to stop, and the recording lands in
 `__JRock/wav/` and goes into the prompt as `@audio`, exactly as on the desktop.
+
+| Recording | **Desktop** | **A browser tab** |
+|---|---|---|
+| Captured by | Java Sound, from your **Record from** device | an `AudioWorklet`, from the browser's microphone |
+| Format asked for | 16 kHz 16-bit mono PCM | the same, framed as WAV by the page |
+| What the browser gives natively | — | WebM or MP4, which the chat API's `input_audio` enum does not take |
+| A rate of its own (Safari) | — | resampled on the way out |
+| Permission | the OS's | the browser asks, once |
+| Lands in | `__JRock/wav/`, then the prompt as `@audio` | the same |
 
 What the page had to do differently is the audio itself. A browser's `MediaRecorder` hands back
 **WebM or MP4**, and the chat API's `input_audio` format is an enum of **`wav` and `mp3`** and
@@ -4577,6 +4937,15 @@ it is included or transcribed like any other.
   are never looked for as such. A click or a key hit is over long before 0.2 s.
 - The thresholds are starting values, tested against synthetic sounds in `JRockEarsTest`. A
   given microphone and room may need them tuned (`JRock.Ears`).
+
+  | The microphone hears | Taken as speech? | Why |
+  |---|---|---|
+  | a sentence, a voice on the radio | **yes** | loud over the room, in the voice band, spread across frequencies, 0.2 s long |
+  | a doorbell, a phone ringing | no | one or two pure tones — nearly all the energy in a few frequencies |
+  | a key hit, a click | no | over long before 0.2 s |
+  | room tone, a fan | no | not loud enough over the room's own noise |
+  | JRock reading aloud, on speakers | **yes**, which is why headphones | it is a voice, and nothing knows whose |
+  | anything, while an [automation](#the-automation-api) runs | no | muted for the length of it, then back |
 - **A red dot and "Mic" blink to the left of Clock** whenever the microphone is open: listening,
   or recording from Ctrl+Space, the menu, an agent or Mic always on. They are gone when it is
   closed.
@@ -4602,6 +4971,15 @@ write that answer out as a document: **Export selected Markdown as RTF...** and 
 selected Markdown with images as DOCX...**. Both are greyed out without a selection — there is
 nothing to export but a selection — and a save dialog gives the file the right extension whatever
 you type into it.
+
+**The selection may be the prompt's, not only the log's.** Both export items take whichever
+selection there is, and the **prompt's wins** when both have one — which is the whole point of
+it. An answer is almost right: a date wrong, a paragraph too many, a heading to add. The log is
+a transcript and cannot be edited, so what anybody actually does is copy the answer into the
+prompt, fix the line, select it and want a document out of **that** — without sending anything,
+without paying for a second answer, and without a word processor in between. The menu items say
+which source they are about to use (*"…from the prompt"*, *"…from the log"*), and nothing is
+sent or cleared: the prompt is read, not consumed.
 
 **The same two items are in the prompt's own menu**, on the prompt's selection. Each menu acts
 on its own side, and neither has to say which: they used to live in the log's menu alone and take
@@ -4768,9 +5146,27 @@ message file holds the one message, and nothing on disk says what conversation a
 given in. Nor does it say which model gave it, or what [Clock](#clock) told it the time was —
 an answer is reused exactly as it was given.
 
+| Asked again with… | Cache |
+|---|---|
+| the same text, same includes, same bytes | **hit** — the old answer, no call, no charge |
+| one character changed | miss: a different prompt |
+| the same text, but an include's file edited since | miss — every token is re-hashed *before* the cache is asked |
+| [History](#conversation-log) on | not consulted: the request is a conversation, not a prompt |
+| after a send that **failed** | miss: no answer was written after that message |
+| a different model, or [Clock](#clock) now on | **hit** — nothing on disk records either, so an answer comes back exactly as it was given |
+| the setting turned off and on again | rebuilt from `__JRock/messages/`, which is the moment to delete what should not come back |
+
 ## Context menus (right-click / long tap)
 
 Right-clicking (or long-tapping on touch devices) opens a context menu:
+
+| Right-click on | And you get |
+|---|---|
+| the **log** | select the last answer, save or print *the selection*, export it as [RTF or DOCX](#markdown-export-rtf-and-docx), narrate it, open a URL or a local path out of it |
+| the **prompt** | the same two exports for the prompt's own text, start/stop [recording](#recording-from-the-microphone-ctrlspace), [Mic always on](#mic-always-on), paste, select all |
+| any **button or checkbox** | what it is called, and a few plain sentences on what it does — the thing a tooltip cannot do on a phone |
+| the **`__JRock/`** label | what is in the folder, backup and restore, the merges, the cleanup, the window's own items |
+| a **file dialog's** File Name box | copy, paste, select all — how a phone picks two files at once |
 
 - **Log pane** — *Select the last answer*, Save log copy as..., Print... The first
   (**Ctrl+Shift+A**) selects the **body of the most recent answer, whole** — not the teal role
@@ -4934,6 +5330,13 @@ DPI, its Bedrock key, all in that folder's [`__JRock/jrock-config.txt`](#setting
 may be run on a document anywhere on the disk. Its own folder is also where its prompt files
 are, because that is where it looks for them.
 
+| | Comes from | Is |
+|---|---|---|
+| the **process working directory** | Explorer, from the folder you right-clicked | where the document is, and where the chooser opens |
+| `--working-dir <its folder>` | the registry entry the installer wrote | where the agent's key, model, DPI and `__JRock/` live |
+| `--prompts-dir <its folder>` | the same entry | where its prompt files are, so Ctrl+O opens there |
+| the **argument**, when there is one | the file you right-clicked | the document to work on |
+
 Which is why the samples open their chooser in the folder they were **started** in and not in
 the working directory: the settings folder is the one folder the document is certainly not in.
 They read it once at startup, before JRock's `--working-dir` handling moves `user.dir`, and no
@@ -4996,6 +5399,17 @@ actually working in.
 In the browser the plain title `JRock - Bedrock (mantle)` and the plain `JR` icon are used
 while the working directory is CheerpJ's own mount (`/files`) — a folder nobody chose. Open one
 of your own and it is named in the title just as on the desktop.
+
+| Working directory | Title | Icon |
+|---|---|---|
+| `C:\demo\Demo` | `Demo - JRock` | `DEM` |
+| `D:\work\my-cool-project` | `my-cool-project - JRock` | `MCP` |
+| `D:\scans\research` | `research - JRock` | `RES` |
+| `/files` (the browser's own mount) | `JRock - Bedrock (mantle)` | `JR` |
+
+Every screenshot in this README shows it: the caption bar names the folder, which is how one
+picture of an agent is told from another — see [Screenshots, taken by the
+build](#screenshots-taken-by-the-build).
 
 ## Keyboard shortcuts
 
@@ -5291,6 +5705,13 @@ threshold mostly buys tests written to move a number. One startup test currently
 about **22% of lines and 9% of branches** — that is the honest baseline, and it is what a
 single test against a GUI application buys.
 
+| | Where it lands | How to read it |
+|---|---|---|
+| Line-by-line | `tests/target/site/jacoco/index.html` | open it |
+| The artifact | `coverage-report`, every run | download and open the same file |
+| The totals | the run's **job summary** | rendered by `TestSummary.java` |
+| The threshold | — | there isn't one, on purpose |
+
 ### Reporting
 
 Results are published to the **job summary** on the run's own page: how many tests passed,
@@ -5298,7 +5719,19 @@ each test's name, for a failure the assertion text inline, and the coverage tota
 than only in the raw console log or the downloadable report zips. GitHub has no built-in
 JUnit view, so `.github/build/TestSummary.java` renders Surefire's XML and JaCoCo's CSV into
 Markdown. It uses nothing but the JDK and needs no third-party action, the same reasoning as
-`BuildJar.java`; run it locally with:
+`BuildJar.java`.
+
+| What a run leaves behind | Where |
+|---|---|
+| Passed, failed, and each test's name as a sentence | the **job summary** |
+| A failure's assertion text | the same page, inline — not in a log to scroll |
+| Coverage totals | the same page |
+| Surefire XML | the `test-reports` artifact |
+| The HTML coverage report | the `coverage-report` artifact |
+| The screenshots of that build | `screenshots-linux`, `-macos`, `-windows` ([how](#screenshots-taken-by-the-build)) |
+| This README as a document | `readme-docx` ([how](#the-docx-of-this-readme)) |
+
+Run the summary locally with:
 
 ```sh
 java .github/build/TestSummary.java tests/target/surefire-reports
@@ -5318,13 +5751,14 @@ java InstallJRock.java --check    # what it would find, printed; changes nothing
 
 ```
 Documents\JRockAssistant\             jrock.jar + its SHA-256 and MD5
-                                      JRock\ — the window's own files
+                                      __JRock\ — the window's own files
                                       jrock-prompt-*.txt — your own prompts, where
                                         Ctrl+O opens
-    Agents\PushToTalk\                the agent, its prompts, its own JRock\
+    Agents\PushToTalk\                the agent, its prompts, its own __JRock\,
+                                        and PTTFiles\ for what it is handed
     Agents\Timer\                     …one folder each, because they all run at once
     Agents\Weather\
-    Flows\                            every flow, their prompts, one JRock\
+    Flows\                            every flow, their prompts, one __JRock\
     SimplePrompts\                    the prompts of no agent and no flow, to open
                                       by hand
 ```
@@ -5345,6 +5779,17 @@ are one tick on the same page, and they go **together into `SimplePrompts\`**, w
 only copy — a prompt that lives in two folders is a prompt you edit in one of them. Ctrl+O opens
 at the top of the installation, where your own saved prompts are and where that folder is the
 first thing in the chooser.
+
+| What the installer finds | What it does |
+|---|---|
+| `jrock.jar` | **replaced** — that is what installing a release means |
+| `jrock-config.txt`, `bedrock-key.txt` with something in them | **kept**, and the log says so |
+| either of them **empty** | filled in: an empty file is nobody's setting |
+| a prompt file of yours | kept |
+| a `JRock\` folder from 5.2.0 or earlier | **renamed** to `__JRock\`, before anything is written into it |
+| its own Explorer entries | removed first, kept as a `.reg` that puts them all back, then rewritten |
+| its own shortcuts | written, or taken away by unticking one |
+| any folder, document or settings file | **never removed. Not one, ever.** |
 
 **It removes no folder, no document and no settings file. Not one, ever.** A `jrock.jar` in the
 folder is replaced, which is what installing a release means; a `jrock-config.txt`, a
@@ -5651,7 +6096,31 @@ asked to paint itself:
 | `06-the-timer-agent` | `JRockTimer` |
 | `07-the-papers-agent` | `JRockPaperDocs`, with its two folders |
 
-Run it locally the way CI does (the jar first, because the agents compile against it):
+**The browser and the phone have a tool of their own** —
+[`.github/build/WebShots.java`](.github/build/WebShots.java) — because `Screenshots.java` paints
+JRock's Swing window, which is the right picture of the desktop build and no picture at all of
+the browser one: what [JRock Web](#jrock-web-in-the-browser) *is* is the page around the canvas,
+and a phone is not a narrow desktop. It serves `jrock-web/index.html` and the jar from a
+loopback `com.sun.net.httpserver`, starts whichever Chromium is on the machine with
+`--remote-debugging-port`, and drives it over the **DevTools protocol** — navigate, click Run,
+emulate a 390×844 phone with touch events, dispatch a long press, capture — over a WebSocket
+`java.net.http` has had since JDK 11. One more single-file Java tool with nothing to install.
+
+**It does not yet produce pictures, and this is the honest state of it.** Driven locally through
+Edge, CheerpJ loads the page, fetches the jar and initialises — and then the JVM exits before a
+canvas is painted (`JRock exited with code 1` in the page's own footer log). Headless and
+headed, with and without cross-origin isolation headers, and with the **5.2.0** jar as well as
+this one: so it is the arrangement rather than the program, and the pictures in the web and
+mobile sections are still hand-taken. The tool is kept because everything up to that point
+works, the failure is reported with the page's log attached, and the same code run where CheerpJ
+does come up is the rest of the way there.
+
+```sh
+java .github/build/WebShots.java screenshots
+java .github/build/WebShots.java screenshots "C:\Program Files\Google\Chrome\Application\chrome.exe"
+```
+
+Run the Swing one locally the way CI does (the jar first, because the agents compile against it):
 
 ```sh
 javac -encoding UTF-8 --release 11 -d out JRock.java
@@ -5706,6 +6175,17 @@ java JRock.java --cli "what is 2 + 2"       # one answer, then exit
 java JRock.java --include report.pdf        # attach that file and exit
 ```
 
+| | In the window | Under `--cli` / `--include` |
+|---|---|---|
+| The session report | the log pane | printed, indented, to stdout |
+| The log and the transcript | `__JRock/jrock-log.txt`, `messages/` | the same files, the same folder |
+| Includes from earlier runs | reloaded | **reloaded** — the point of going through startup |
+| The model list at startup | fetched | skipped, and the report says so |
+| Narration, recording, file dialogs | yes | no: desktop features that live in the same file |
+| [Leftover folders](#persistence-crash-recovery--full-local-history) | named, and offered up | named only — nothing is asked |
+| The prompt file | autosaved on every keystroke | read, then dropped; written only when something is asked |
+| Exit code | — | `0` answered, `2` bad arguments, `3` the folder needs renaming |
+
 **It goes through the whole startup**, deliberately: the log is restored, the folder's settings
 are adopted, the session report is printed, and — the reason it is worth doing — **the includes
 are reloaded**, so a file attached in an earlier run can still be referred to. The components it
@@ -5747,6 +6227,16 @@ For robustness the build runs on **three operating systems** and publishes three
 - `jrock-macos-latest.zip`
 - `jrock-ubuntu-latest.zip`
 - `jrock-windows-latest.zip`
+
+| What makes the bytes the same everywhere | How |
+|---|---|
+| the compiler | a **pinned** JDK — Temurin 11.0.32+9, not "11" |
+| the class files | `--release 11`, `-encoding UTF-8`, `-g:source,lines,vars` — no platform defaults left to vary |
+| the entry order in the zip | sorted, every time |
+| the timestamps | fixed to 2026-01-01T00:00:00Z, not the build's own clock |
+| the compression and the manifest | fixed, and hand-written |
+| what is left out | `__JRock/`, any stray `.class` or `.jar` under `samples/` |
+| the proof | three runners, three artifacts, **one** SHA-256 |
 
 Each archive contains the **same bit-perfect `jrock.jar`** plus its checksum files
 (`jrock.jar.sha256`, `jrock.jar.md5`), the

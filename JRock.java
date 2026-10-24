@@ -1092,17 +1092,26 @@ public class JRock {
     // is a settings file, a log, a .reg the installer wrote or a save in progress, and a
     // stray one is a few hundred bytes nobody notices - while a folder is a conversion of
     // a document, by the hundred.
+    //
+    // NOTHING HERE MAY STOP A STARTUP. This is a tidiness check, and it runs in the middle
+    // of the session report on every runtime there is - including the browser, where the
+    // filesystem is IndexedDB behind a filesystem's shape and does not answer every
+    // question a real one does. So RuntimeException is caught beside IOException: a folder
+    // that cannot be listed means "no leftovers found", which costs a line of a report,
+    // where letting it out would cost the window.
     private static java.util.List<Path> leftoverFolders() {
         java.util.List<Path> found = new java.util.ArrayList<>();
-        if (!Files.isDirectory(jrockDir())) return found;
-        java.util.Set<String> own = jrockDirOwnNames();
-        try (java.util.stream.Stream<Path> entries = Files.list(jrockDir())) {
-            entries.filter(Files::isDirectory)
-                   .filter(path -> !own.contains(path.getFileName().toString()))
-                   .sorted()
-                   .forEach(found::add);
-        } catch (IOException unreadable) {
-            // A folder that cannot even be listed is not one anything here will delete.
+        try {
+            if (!Files.isDirectory(jrockDir())) return found;
+            java.util.Set<String> own = jrockDirOwnNames();
+            try (java.util.stream.Stream<Path> entries = Files.list(jrockDir())) {
+                entries.filter(Files::isDirectory)
+                       .filter(path -> !own.contains(path.getFileName().toString()))
+                       .sorted()
+                       .forEach(found::add);
+            }
+        } catch (IOException | RuntimeException unreadable) {
+            found.clear();
         }
         return found;
     }
@@ -1120,8 +1129,9 @@ public class JRock {
                     // counted as a file, and as no bytes
                 }
             });
-        } catch (IOException unreadable) {
-            // nothing to add
+        } catch (IOException | RuntimeException unreadable) {
+            // Nothing to add, and nothing to report: a count is what this is for (see
+            // leftoverFolders on why an unchecked one is caught here too).
         }
         return total;
     }
