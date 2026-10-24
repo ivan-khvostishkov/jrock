@@ -6258,8 +6258,9 @@ md5sum jrock.jar
 java -jar jrock.jar
 ```
 
-Current build hashes, 5.3.0, the same from all three runners — straight out of CI, which is the
-only place these numbers can honestly come from:
+Build hashes, the same from all three runners — straight out of CI, which is the only place
+these numbers can honestly come from. These are **5.3.0 as first built**; the commits after it
+changed `JRock.java`, so **the pair for the current build goes here once CI has run on it**:
 
 ```
 2bb3cd80999d1072486f93caa06f4b0256f4487bbc54c84bd6ef397859907918  jrock.jar
