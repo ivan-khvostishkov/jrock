@@ -72,7 +72,7 @@ class JRockAutomationDocTest extends JRockGuiFixture {
         assertThat(JRock.automationBegin("pdfhtml test")).isNull();
         try {
             // NOTHING IS PRESSED HERE, and the call returning is the assertion: the
-            // conversion is JRock's own file under JRock/includes/, so there is nothing to
+            // conversion is JRock's own file under __JRock/includes/, so there is nothing to
             // ask about - and an automation that stops for a dialog is not an automation
             // (the doc inventory flow is usually driven by an agent, with nobody at the
             // keyboard). A modal question would block this call for ever, so a test that
@@ -83,7 +83,7 @@ class JRockAutomationDocTest extends JRockGuiFixture {
             field("includeMarkdownRefs").set(null, true);
             assertThat(JRock.automationInclude(pdf)).isNull();
 
-            assertThat(workingDirectory().resolve("JRock").resolve("includes")
+            assertThat(workingDirectory().resolve("__JRock").resolve("includes")
                     .resolve("scan.pdf.html").resolve("page1.html")).isRegularFile();
             // And the folder the PDF is in is left exactly as it was.
             assertThat(workingDirectory().resolve("scan.pdf.html"))

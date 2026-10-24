@@ -24,10 +24,10 @@ class JRockPromptCacheTest extends JRockGuiFixture {
     private static final long SEND_TIMEOUT_MS = 30_000;
 
     @Test
-    @DisplayName("a prompt answered before, in any file of JRock/messages/, is answered from it")
+    @DisplayName("a prompt answered before, in any file of __JRock/messages/, is answered from it")
     void answersAPromptSentBeforeFromItsFile() throws Exception {
         awaitReadyCount(1);
-        Path messages = Files.createDirectories(workingDirectory().resolve("JRock").resolve("messages"));
+        Path messages = Files.createDirectories(workingDirectory().resolve("__JRock").resolve("messages"));
         write(messages.resolve("20260101-100000-000-operator.txt"), "What is 2+2?");
         write(messages.resolve("20260101-100005-000-assistant.txt"), "4.");
         // Asked, never answered (the send failed), then asked something else.
@@ -44,7 +44,7 @@ class JRockPromptCacheTest extends JRockGuiFixture {
             assertThat(read(JRock.automationMessageFile("assistant", sent.assistant()))).isEqualTo("4.");
             assertThat(logPane().text())
                     .contains("Local prompt cache: this prompt was answered before - reusing "
-                            + "JRock/messages/20260101-100005-000-assistant.txt, with no call "
+                            + "__JRock/messages/20260101-100005-000-assistant.txt, with no call "
                             + "to Bedrock.")
                     .doesNotContain("Calling ");
 
@@ -88,7 +88,7 @@ class JRockPromptCacheTest extends JRockGuiFixture {
     @DisplayName("with the cache off, nothing is answered from it, and the table is gone")
     void sendsEverythingWithTheCacheOff() throws Exception {
         awaitReadyCount(1);
-        Path messages = Files.createDirectories(workingDirectory().resolve("JRock").resolve("messages"));
+        Path messages = Files.createDirectories(workingDirectory().resolve("__JRock").resolve("messages"));
         write(messages.resolve("20260101-100000-000-operator.txt"), "What is 2+2?");
         write(messages.resolve("20260101-100005-000-assistant.txt"), "4.");
         field("promptCacheOn").set(null, false);

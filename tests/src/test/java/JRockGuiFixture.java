@@ -110,7 +110,7 @@ abstract class JRockGuiFixture {
             savedConfig.put(name, field(name).get(null));
         }
 
-        // Give the app an empty directory of its own to keep its JRock/ folder in.
+        // Give the app an empty directory of its own to keep its __JRock/ folder in.
         //
         // This is about isolation, not tidiness: startup RESTORES a previous log from
         // disk, so a run that reused a directory would begin with the last run's
@@ -263,7 +263,7 @@ abstract class JRockGuiFixture {
         });
     }
 
-    /** The throwaway directory the application is keeping its JRock/ folder in. */
+    /** The throwaway directory the application is keeping its __JRock/ folder in. */
     protected Path workingDirectory() {
         return throwawayHome;
     }
@@ -437,8 +437,8 @@ abstract class JRockGuiFixture {
     }
 
     /**
-     * The same, with Configure's <em>Include from processed copies in JRock/includes/</em> set to
-     * {@code copies} first: on, each chosen file is copied into {@code JRock/includes/}
+     * The same, with Configure's <em>Include from processed copies in __JRock/includes/</em> set to
+     * {@code copies} first: on, each chosen file is copied into {@code __JRock/includes/}
      * and included from there; off, it is included where it lies.
      */
     protected void chooseInTheIncludeDialog(String filterDescription, boolean copies,
@@ -501,7 +501,7 @@ abstract class JRockGuiFixture {
     }
 
     /**
-     * Invokes an item of the window's own menu - the one behind the {@code JRock/} label
+     * Invokes an item of the window's own menu - the one behind the {@code __JRock/} label
      * beside the Configure button - by its label.
      * <p>
      * A plain press, not a popup trigger: that label is there to open this menu and
@@ -514,7 +514,7 @@ abstract class JRockGuiFixture {
                 new GenericTypeMatcher<JLabel>(JLabel.class) {
                     @Override
                     protected boolean isMatching(JLabel candidate) {
-                        return "JRock/".equals(candidate.getText());
+                        return "__JRock/".equals(candidate.getText());
                     }
                 });
         GuiActionRunner.execute(new GuiTask() {

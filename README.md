@@ -39,9 +39,9 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Runs directly:** `java JRock.java`.
 - **Bedrock API key auth** (Bearer token), no SigV4, no AWS SDK, no `~/.aws` credentials.
 - **Everything local & transparent.** No server-side session state; all history lives in
-  plain files under a `JRock/` folder you own and can inspect — and the window itself lists
+  plain files under a `__JRock/` folder you own and can inspect — and the window itself lists
   every file and subfolder that folder can hold, under *What is in the JRock folder...* in the
-  menu behind the **`JRock/`** label beside *Configure*, so nothing JRock keeps has to be
+  menu behind the **`__JRock/`** label beside *Configure*, so nothing JRock keeps has to be
   guessed at ([**Persistence**](#persistence-crash-recovery--full-local-history)).
 - **Every control explains itself.** A right-click — or a long press on a touch screen — on any
   button or checkbox gives its name and a few plain sentences on what it does, which is what a
@@ -50,7 +50,7 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 - **Multimodal includes** (text, image and audio files, plus PDF-to-page-images via Ghostscript
   on the desktop and PDF.js in the browser, PDF-to-HTML or -text via xpdf on the desktop, and
   RTF/DOCX-to-Markdown, links and all, and XLSX-to-CSV, one file per sheet, with no external
-  tool at all) referenced by hash; multi-select supported, with optional **copies kept under `JRock/includes/`** — downscaled to the page they will be
+  tool at all) referenced by hash; multi-select supported, with optional **copies kept under `__JRock/includes/`** — downscaled to the page they will be
   read on, so no tokens are spent on pixels nobody sees — and every include **reloaded from the
   log** in one menu item after a restart
   ([**includes that outlive the session**](#includes-that-outlive-the-session)).
@@ -58,7 +58,7 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   order and the backs in reverse, interleaved into one PDF by the same Ghostscript
   ([**merging duplex scans**](#merging-duplex-scans-ghostscript)) — **or merge PDFs plainly**,
   any number of them, in the order you pick them: *a* + *b* + *c* = *d*.
-- **Fetch a URL** (Ctrl+U), not just a file: an address is downloaded into `JRock/urls/` and
+- **Fetch a URL** (Ctrl+U), not just a file: an address is downloaded into `__JRock/urls/` and
   attached as text or as a picture according to the `Content-Type` it answered with, with a
   Markdown link to where it came from above the token ([**fetching a URL**](#fetching-a-url)).
 - **Clock**: the local time and the full time zone (`Europe/Berlin`, not an offset) go with
@@ -242,7 +242,7 @@ or as gibberish, the document is pictures of words and step 1 above is where to 
 1. **Get a Bedrock API key.** A short-term (recommended) key can be generated from the AWS
    console: https://console.aws.amazon.com/bedrock-mantle/api-keys
 2. **Provide the key** by typing it into the in-app **Configure dialog** (top-left button),
-   which writes it to `JRock/bedrock-key.txt` in the working directory — or by putting it
+   which writes it to `__JRock/bedrock-key.txt` in the working directory — or by putting it
    in that file yourself, one line and nothing else. Nothing is read from the environment;
    see [Settings files](#settings-files).
 
@@ -306,7 +306,7 @@ borrow from. See [agents and flows](#windows-agents-and-flows-one-entry-each).
 
 ### `--working-dir`
 
-`--working-dir <dir>` (or `=<dir>`) names the folder JRock works in — its `JRock/` files, its
+`--working-dir <dir>` (or `=<dir>`) names the folder JRock works in — its `__JRock/` files, its
 settings, its key — regardless of the directory the process was started in. A plain launch needs
 it about as often as never: the working directory *is* where you launched from. What needs it is
 an **agent**, because Explorer starts a right-click command in the folder that was clicked, and
@@ -327,12 +327,12 @@ as WebAssembly), so nothing runs on a server.
   runtime and sends its requests through the page's own `fetch()` instead — see
   [HTTP transport](#http-transport).
 - **The key goes where it goes on the desktop:** into JRock's own **Configure** dialog, which
-  writes it to `JRock/bedrock-key.txt` — in the browser, inside CheerpJ's own persistent storage
+  writes it to `__JRock/bedrock-key.txt` — in the browser, inside CheerpJ's own persistent storage
   (`/files/`). So it is **still there after a reload**, it is changed in the one place anybody
   would look for it, and there is no JavaScript credentials dialog interrupting a send to ask
   for it again. The page shows the jar's SHA-256 so you can confirm it matches the reproducible
   build before typing anything, and the key never goes anywhere but the Bedrock endpoint. The
-  endpoint and model live beside it in `JRock/jrock-config.txt`, the same as everywhere else.
+  endpoint and model live beside it in `__JRock/jrock-config.txt`, the same as everywhere else.
 - **A folder in the address starts JRock in it.** `https://jrock.nosocial.net/?fl` starts JRock
   as soon as the jar has loaded, without waiting for **Run JRock**, with `/files/fl` as its working
   directory; `?fl/foo` gives `/files/fl/foo`. That is the same as pressing **Run JRock** and
@@ -350,7 +350,7 @@ as WebAssembly), so nothing runs on a server.
   sits in the main area under the text about the checksum and the Configure dialog, with the note
   that brings them back, and not in the header, where a label that long would be the whole
   header on a phone.
-  To check the checksum again, the window's menu - the `JRock/` label beside *Configure* - has
+  To check the checksum again, the window's menu - the `__JRock/` label beside *Configure* - has
   **Show/hide the page header & footer**: it calls one function in the page, which flips the chrome and reports which way it
   went. The page owns that state, so JRock never has to guess.
 - **Copy and paste reach other apps.** CheerpJ gives the JVM a clipboard of its own that
@@ -385,7 +385,7 @@ unmodified `jrock.jar`, so there is nothing to install and no app store in the w
 *Edge on an iPhone, with the page's own header and footer left showing: the jar's size and SHA-256
 to check before typing a key, and a footer log ending in `GET .../v1/models -> 200` — a real Bedrock
 call from a phone. In the window, the session report (`/files`, the page's `fetch()` as the transport,
-the key read from `/files/JRock/bedrock-key.txt`) and the prompt's context menu, opened with a long
+the key read from `/files/__JRock/bedrock-key.txt`) and the prompt's context menu, opened with a long
 tap because that is how a phone reaches everything the Ctrl shortcuts do.*
 
 The UX is a little clumsy, and worth knowing about before you judge it:
@@ -403,7 +403,7 @@ The UX is a little clumsy, and worth knowing about before you judge it:
 
 For an app like this that is a fair trade: one jar, one build, no per-platform code and no store
 review, and the phone gets the same client as the desktop, with the same plain files under
-`JRock/`.
+`__JRock/`.
 
 ### Working with PDFs
 
@@ -413,7 +413,7 @@ page hands the PDF to [PDF.js](https://mozilla.github.io/pdf.js/) — the render
 PDFs with — and gets each page back as a PNG, drawn at the same **Images DPI**. JRock talks to
 both through one PDF engine interface, so the include, the page files and the `@img` tokens are
 the same either way. PDF.js is loaded from jsDelivr the first time a PDF is included, so a session
-that never opens one never downloads it. Pages land in **`JRock/includes/`**, named
+that never opens one never downloads it. Pages land in **`__JRock/includes/`**, named
 `<pdfname>.pdfjs.NNN.png`.
 
 The [duplex merge](#merging-duplex-scans-ghostscript) is the one PDF feature that stays on the
@@ -505,7 +505,7 @@ reported in the log:
 
 | Runtime | Transport | Credentials |
 |---|---|---|
-| Any normal JVM | `java.net.http.HttpClient` | `JRock/bedrock-key.txt`, written by the Configure dialog |
+| Any normal JVM | `java.net.http.HttpClient` | `__JRock/bedrock-key.txt`, written by the Configure dialog |
 | CheerpJ (browser) | the page's `window.myBrowserHttp` | the same file, in the browser's persistent storage |
 
 In the browser there is no socket layer, so `HttpClient` cannot work at all and the hosting page
@@ -690,7 +690,7 @@ bill, and a guess is not one.
   smaller the amount, the more digits it gets — down to a hundredth of a cent — so a cheap
   request never reads as $0.00.
 - **Past costs at startup.** The session report adds up every cost line already in
-  `JRock/jrock-log.txt` and says so in one line — `Past costs in this log: $1.2345 over 87
+  `__JRock/jrock-log.txt` and says so in one line — `Past costs in this log: $1.2345 over 87
   priced requests` — which is every session since the log was last cleared. **Clear log**
   clears the lines it counts, so the total starts again from $0; requests to a model with no
   card price are not in it.
@@ -728,7 +728,7 @@ bill, and a guess is not one.
   being masked here: a picture or a recording is [saved as an
   include](#a-picture-or-a-recording-in-the-reply) before the dump is built.
 - Both headers **name the file that half of the exchange was written to** under
-  [`JRock/messages/`](#persistence-crash-recovery--full-local-history), with the arrow the
+  [`__JRock/messages/`](#persistence-crash-recovery--full-local-history), with the arrow the
   direction it went:
 
   ```
@@ -780,13 +780,13 @@ of "not set": no sentence is sent, and your header lines end at the time. With n
 unticked there is no `system` message at all.
 
 The checkbox is kept per folder, as `clock$` in
-[`JRock/jrock-config.txt`](#persistence-crash-recovery--full-local-history), so a folder whose
+[`__JRock/jrock-config.txt`](#persistence-crash-recovery--full-local-history), so a folder whose
 model cannot take a `system` message — Voxtral, say — stays unticked from one start to the next.
 
 It is **not** part of the conversation. It is never shown as a turn, never resent by *Extend
 conversation*, and never read back from disk: what goes with the request is always the time
 **now**, not the time some earlier message was sent. It is saved once, for debugging, as
-`JRock/messages/<datetime>-clock.txt` beside the operator's and the assistant's own files, and
+`__JRock/messages/<datetime>-clock.txt` beside the operator's and the assistant's own files, and
 it appears verbatim (unmasked) in the raw request dump - the point of logging a clock being to
 see what time was actually sent.
 
@@ -802,21 +802,45 @@ and it says so itself — untick Clock and the model knows nothing about the tim
 
 ## Persistence (crash recovery + full local history)
 
-Everything lives under a **`JRock/`** subfolder of the working directory — git-ignored, and
-written atomically, so a crash or a failed write never leaves a truncated file:
+Everything lives under a **`__JRock/`** subfolder of the working directory — git-ignored, and
+written atomically, so a crash or a failed write never leaves a truncated file.
 
-- `JRock/jrock-prompt.txt` — the prompt, autosaved on every keystroke (atomic temp-file swap,
+**Why the two underscores.** The working directory is *your* folder — your documents, your
+scans, your project — and a subfolder called `JRock` sat in the middle of it looking like one
+more of your own, sorted in among them and easy to lose. `__JRock` sorts to the top of every
+listing and reads as something the tool put there, the trick `__MACOSX` plays in a zip. It is
+deliberately **not** `.jrock`: a leading dot hides the folder on macOS, on Linux and in most
+file dialogs, and this is a folder you are invited to open, read, copy and back up.
+
+**Up to 5.2.0 the folder was called `JRock/`.** Starting JRock 5.3.0 in such a folder offers
+the rename and does not start until it is done: *Rename it now*, or quit and rename it in
+Explorer yourself — nothing inside the folder is touched either way, only the folder's own
+name. If the rename fails (usually something in there is open — an editor on the log, an
+Explorer window inside the folder, a sync client), JRock says what failed and stops, with
+nothing changed. It stops rather than starting beside the old folder on purpose: the log, the
+transcript, the API key and your settings are all in there, and a session that quietly started
+next to them would look exactly as though they had been lost. The same offer comes up when
+*Configure* is pointed at a folder last used by an older version, and `--cli` / `--include`
+— which nobody is watching — do the rename and report it. A folder holding **both** names is
+refused outright: which of the two logs, configs and keys is yours is not a question a program
+should answer for you, so move what you want to keep into `__JRock/` and delete the rest.
+Backup zips written before 5.3.0, whose entries are all `JRock/...`, still load — their
+contents land in `__JRock/`.
+
+The folder holds:
+
+- `__JRock/jrock-prompt.txt` — the prompt, autosaved on every keystroke (atomic temp-file swap,
   so a crash can't corrupt it).
-- `JRock/jrock-log.txt` — the conversation transcript, restored on startup so a session
+- `__JRock/jrock-log.txt` — the conversation transcript, restored on startup so a session
   survives restarts.
-- `JRock/messages/` — one **append-only** file per human/assistant message
+- `__JRock/messages/` — one **append-only** file per human/assistant message
   (`<datetime>-operator.txt`, `<datetime>-assistant.txt`), plus a `<datetime>-clock.txt` for
   each clock that was sent (see [**Clock**](#clock)). These are never modified or deleted (not
   even by Clear log). `cat`-ing the operator's and the assistant's in order reproduces the
   dialog-only transcript.
-- `JRock/bedrock-key.txt` and `JRock/jrock-config.txt` — the API key, and the endpoint, model and
+- `__JRock/bedrock-key.txt` and `__JRock/jrock-config.txt` — the API key, and the endpoint, model and
   images DPI (see [**Settings files**](#settings-files)).
-- `JRock/includes/` — **one flat folder** holding everything an include is made from: a copy of
+- `__JRock/includes/` — **one flat folder** holding everything an include is made from: a copy of
   each file picked with Ctrl+I (when **Include from processed copies** is on — see [**includes
   that outlive the session**](#includes-that-outlive-the-session)), and whatever a conversion made
   of it, beside the file it came from. Each converted file is named for **the whole of its
@@ -835,9 +859,9 @@ written atomically, so a crash or a failed write never leaves a truncated file:
   conversion would add nothing but a path to remember. The exception is an xpdf HTML reading,
   which `pdftohtml` writes as a folder of pages — that folder is one reading, and [**Cleanup JRock
   files...**](#cleaning-up-the-window-menu) deletes it whole.
-- `JRock/urls/` — what **Fetch URL** (Ctrl+U) downloaded, one file per address (see [**fetching a
+- `__JRock/urls/` — what **Fetch URL** (Ctrl+U) downloaded, one file per address (see [**fetching a
   URL**](#fetching-a-url)).
-- `JRock/wav/` — the audio, a file of its own per narration and per recording, each named for
+- `__JRock/wav/` — the audio, a file of its own per narration and per recording, each named for
   the moment it was made: `narration-<date>-<time>.wav`, `recording-<date>-<time>.wav`, and
   `transcribe-<date>-<time>.wav` where a recording was transcribed into the prompt instead of
   included (see [**Narrate**](#narrate-windows-and-the-browser) and
@@ -846,20 +870,20 @@ written atomically, so a crash or a failed write never leaves a truncated file:
   These three — `includes/`, `urls/` and `wav/` — are what [**Cleanup JRock
   files...**](#cleaning-up-the-window-menu) sweeps by age, along with the backup zips. They hold
   material; everything else in the folder is record, and is never touched.
-- `JRock/jrock-context-menu-install.reg`, `-uninstall.reg`, and
-  `JRock/jrock-agent-<name>-install.reg` / `-uninstall.reg` — on Windows, exactly what the
+- `__JRock/jrock-context-menu-install.reg`, `-uninstall.reg`, and
+  `__JRock/jrock-agent-<name>-install.reg` / `-uninstall.reg` — on Windows, exactly what the
   Explorer menu items applied, kept to be read, run again or undone by hand (see [**Explorer
   right-click integration**](#windows-explorer-right-click-integration)).
 
 A `jrock<digits>.tmp` or a `scaling-<digits>` file is a save or a resize in progress and goes by
 itself; neither is ever included or sent. The whole list is in the window too, under **What is in
-the JRock folder...** in the menu behind the `JRock/` label beside *Configure*, and in the
+the JRock folder...** in the menu behind the `__JRock/` label beside *Configure*, and in the
 **Help** window's *The JRock folder* box — so nothing in there has to be guessed at.
 
 The main log is a bit-perfect copy of the pane, except that each role header is followed by an
-`@<datetime>` include-style reference to the message's own file under `JRock/messages/`.
+`@<datetime>` include-style reference to the message's own file under `__JRock/messages/`.
 
-**Clear log** empties `jrock-log.txt` and the window but never touches `JRock/messages/`, so
+**Clear log** empties `jrock-log.txt` and the window but never touches `__JRock/messages/`, so
 paid-for inputs/outputs are preserved. If the log has changed since it was last exported with
 **Ctrl+Shift+S** (Save log as a copy), Clear log first asks for confirmation and suggests saving.
 
@@ -870,13 +894,13 @@ folder's log and prompt — files you can open, edit, copy, back up and delete. 
 variable is the opposite: set in a shell that's gone by the time anything goes wrong, invisible
 from inside the running application, and different for every way of launching it.
 
-- **`JRock/bedrock-key.txt`** — the Bedrock API key, on one line, and nothing else. Read at
+- **`__JRock/bedrock-key.txt`** — the Bedrock API key, on one line, and nothing else. Read at
   startup (trimmed of surrounding spaces) and written by the **Configure dialog** when you type
   a key into it. A folder that has none gets an **empty** file created, so there's an obvious
   place to put one; a key is never copied into a folder it wasn't typed for. It gets a file of
   its own because it's a credential: it can be locked down, kept out of a copy of the
   configuration, or deleted on its own.
-- **`JRock/jrock-config.txt`** — the **endpoint**, the **model** and the **images DPI**, so the
+- **`__JRock/jrock-config.txt`** — the **endpoint**, the **model** and the **images DPI**, so the
   next start comes up the way you left it. Seeded with the settings in effect when the folder
   has none. Per folder rather than per user on purpose: it is what lets one folder's
   [agent](#windows-agents-and-flows-one-entry-each) run on one model, and another folder's run
@@ -963,23 +987,27 @@ Setting it here beats waiting for JRock to grow a checkbox for each one.
 
 ## Backup and restore
 
-The whole working folder in one file, from the **window's menu** (click the **`JRock/`** label
+The whole working folder in one file, from the **window's menu** (click the **`__JRock/`** label
 beside *Configure*):
 
 - **Backup log...** asks for a `.zip` name - offering `jrock-backup-yymmddhhmm.zip`, in the same
-  folder *Save log as* opens in - and packs the entire `JRock/` directory into it: the log, the
+  folder *Save log as* opens in - and packs the entire `__JRock/` directory into it: the log, the
   prompt, every message file, the includes and everything the conversions wrote. The Send button
   is held while it runs, and the log says how many files and bytes went in.
 - **Load from backup...** takes two paths: the archive (with a *Locate...* button) and the
   working directory to unpack it into (with a *Choose...* button). If that directory isn't
-  empty it asks **Overwrite everything?** first. Then `JRock/` is deleted, the archive is
+  empty it asks **Overwrite everything?** first. Then `__JRock/` is deleted, the archive is
   unpacked in its place, and JRock **switches to that directory** - re-reading its log and its
   prompt exactly as it does when the working directory is changed in Configure.
 
-An archive has to hold a `JRock/` folder or it is refused, which is what keeps *Load from
-backup* from unpacking some unrelated zip over a working folder; nothing in it can be written
-outside the chosen directory whatever the entry names say. A backup can't be saved inside
-`JRock/` either - that is the folder being packed.
+An archive has to hold a `__JRock/` folder — or a `JRock/` one, as every backup written before
+5.3.0 does, whose contents then land in `__JRock/` — or it is refused, which is what keeps *Load
+from backup* from unpacking some unrelated zip over a working folder; nothing in it can be
+written outside the chosen directory whatever the entry names say. A backup can't be saved
+inside `__JRock/` either - that is the folder being packed. A target directory that still has a
+`JRock/` folder of its own is refused as well: a restore ends by switching JRock into that
+directory, and [a folder may hold only one of the two
+names](#persistence-crash-recovery--full-local-history).
 
 **Autobackup log** (Configure dialog, on by default) does the same thing by itself: five minutes
 after the cursor last moved in the prompt, it takes a backup with the dated default name and no
@@ -999,7 +1027,7 @@ such lock to take.
 
 ## Cleaning up (the window menu)
 
-**Click the `JRock/` label beside Configure → Cleanup JRock files...** — beside Backup log... and
+**Click the `__JRock/` label beside Configure → Cleanup JRock files...** — beside Backup log... and
 Load from backup..., because the backups are among the things it deletes.
 
 What grows in a JRock folder is everything JRock has written **for itself**, and it grows per
@@ -1007,9 +1035,9 @@ action rather than per conversation — so those are the four places this sweeps
 
 | | what is in it |
 |---|---|
-| `JRock/includes/` | every page of every PDF as a PNG, a CSV per spreadsheet sheet, the Markdown of every DOCX and the pictures out of it, the folder an [xpdf reading](#pdf-as-html-or-text-xpdf) of a PDF becomes, a copy of every file ever attached |
-| `JRock/urls/` | one file per address [Fetch URL](#fetching-a-url) has ever been given |
-| `JRock/wav/` | one file per [narration](#narrate-windows-and-the-browser) and per [recording](#recording-from-the-microphone-ctrlspace) |
+| `__JRock/includes/` | every page of every PDF as a PNG, a CSV per spreadsheet sheet, the Markdown of every DOCX and the pictures out of it, the folder an [xpdf reading](#pdf-as-html-or-text-xpdf) of a PDF becomes, a copy of every file ever attached |
+| `__JRock/urls/` | one file per address [Fetch URL](#fetching-a-url) has ever been given |
+| `__JRock/wav/` | one file per [narration](#narrate-windows-and-the-browser) and per [recording](#recording-from-the-microphone-ctrlspace) |
 | the working directory | the `jrock-backup-*.zip` files, each one the whole folder zipped again |
 
 A year of filing letters is a gigabyte of page images nobody will open, and a year of talking to
@@ -1028,7 +1056,7 @@ page images, written there by the conversion as a single unit, and it is of no u
 pages deleted — so it is counted and deleted as the one thing it is. That is the only place a
 folder is touched at all.
 
-**`JRock/messages/` is never touched**, and that is the point of doing this by hand rather than on
+**`__JRock/messages/` is never touched**, and that is the point of doing this by hand rather than on
 a timer: the messages are the transcript's own evidence — every request and every reply, in full,
 as text — and text is nothing. A thousand exchanges is a few megabytes, and what was actually
 said is the one thing anybody asks for a year later. The log, the prompt, the settings and the key
@@ -1049,7 +1077,7 @@ it. That is the bargain: the words kept for ever, the bytes behind them for ten 
 
 ## Merging PDFs (Ghostscript)
 
-**Click the `JRock/` label beside Configure → Merge PDFs...** — under *Merge two-sided (duplex)
+**Click the `__JRock/` label beside Configure → Merge PDFs...** — under *Merge two-sided (duplex)
 PDF scans...*, which is the clever version of this one.
 
 *a* + *b* + *c* = *d*: every page of every file you pick, in the order you pick them, each
@@ -1078,7 +1106,7 @@ so instead of doing nothing.
 
 ## Merging duplex scans (Ghostscript)
 
-**Click the `JRock/` label beside Configure → Merge two-sided (duplex) PDF scans...** — alone
+**Click the `__JRock/` label beside Configure → Merge two-sided (duplex) PDF scans...** — alone
 above its separator, under *What is in the JRock folder...*.
 
 A sheet feeder with no duplex unit takes a two-sided batch in two goes: the first pass gives the
@@ -1162,7 +1190,7 @@ Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs*
    - **Audio files** (wav, mp3) — the recording itself, sent as an
      [`input_audio` part](#what-an-audio-include-is-sent-as) for a model that listens
    - **PDF files** — as page images (one PNG per page), as an **HTML folder** (xpdf's
-     `pdftohtml -nofonts` into a folder under `JRock/includes/`, then included as **Include
+     `pdftohtml -nofonts` into a folder under `__JRock/includes/`, then included as **Include
      directory...** would) or as **text** (`pdftotext -enc UTF-8` into a `.txt` there) — whichever
      **Include PDF as** in [Configure](#configure-dialog-top-left-button) says, and the filter
      names it ([details](#pdf-as-html-or-text-xpdf)). The browser has no xpdf and always reads
@@ -1176,19 +1204,19 @@ Attach **text, image or audio** files to a prompt (and convert **PDFs**, **RTFs*
    - **XLSX files, as CSV text, one file per sheet** —
      ([details](#xlsx-conversion-no-external-tool))
 
-   **Include from processed copies in JRock/includes/** (Configure, **on** by default): each picked file
-   is copied under `JRock/includes/` first and included from the copy
+   **Include from processed copies in __JRock/includes/** (Configure, **on** by default): each picked file
+   is copied under `__JRock/includes/` first and included from the copy
    ([why](#includes-that-outlive-the-session)) — and an image bigger than the page it will be
    read on is **downscaled as it is copied**, to the **Images DPI** Configure is set to, so the
    copy is not always byte for byte. The conversions keep their results in its subfolders too.
    Turned **off**, files are included where they lie, and a PDF as page images, an RTF as
-   Markdown, a DOCX or an XLSX — each of which has to write its result under `JRock/includes/` — is
+   Markdown, a DOCX or an XLSX — each of which has to write its result under `__JRock/includes/` — is
    refused, with a line in the log and a dialog naming the setting to turn back on.
 
    **Include directory...** (prompt context menu) picks a folder instead and includes every
    file in it the same way, by its type: first the folder's own files in name order, then each
    folder inside it in name order, the same way down — so the order is the same every time and
-   a folder's files sit together in the prompt. `JRock/` itself is never gone into, nor a link
+   a folder's files sit together in the prompt. `__JRock/` itself is never gone into, nor a link
    to a folder. A file of any other type is skipped, and the log says so for each. The log
    then gives the count of files included and skipped.
 2. Each file is hashed (SHA-256, shortened to 12 hex digits). The hash → path mapping is kept **in memory only**
@@ -1318,7 +1346,7 @@ remembers it.
 An include works the other way round too. A model that answers with an **image** or with
 **speech** cannot put it in the text: what comes back is base64 in the message's one binary
 field, with a media type beside it saying what it really is. JRock saves that payload into
-`JRock/includes/`, named after the moment it arrived, and **makes it an include of the
+`__JRock/includes/`, named after the moment it arrived, and **makes it an include of the
 session** — so the picture is a file you own, in the folder the log names, with a hash of its
 own:
 
@@ -1361,7 +1389,7 @@ is still exportable after a restart.
 ### Fetching a URL
 
 The same include, for something that isn't on this machine. **Ctrl+U**, or **right-click the
-prompt → Fetch URL...**, asks for an address, downloads it into `JRock/urls/`, and includes the saved
+prompt → Fetch URL...**, asks for an address, downloads it into `__JRock/urls/`, and includes the saved
 file exactly as if you had picked it with Ctrl+I — a **web page, plain text, JSON or XML
 as text**, an **image as a picture**. Two lines go into the prompt, the address above the token:
 
@@ -1424,7 +1452,7 @@ Details:
 - **JRock names itself** in the `User-Agent`, as `JRock/<version>
   (+https://github.com/ivan-khvostishkov/jrock)` — a client that says whose it is, which bot
   filters such as Akamai's (in front of `helpx.adobe.com`, among others) let through.
-- Because the file lands in `JRock/urls/`, beside `JRock/includes/`, it is **already in a folder
+- Because the file lands in `__JRock/urls/`, beside `__JRock/includes/`, it is **already in a folder
   you own**, as a copy is — a URL include survives a restart the same way, reloaded from the log at startup.
 - **In the browser it goes through the page**, `window.myBrowserHttp.fetchUrl` — the same
   arrangement as the model calls, one more method on the same object, so both builds run the
@@ -1441,9 +1469,9 @@ the whole transcript *are* restored from disk. So the tokens come back, and two 
 they still stand for their files: the files are kept where JRock can find them again, and the log
 that says where they are is read back at every start.
 
-**Include from processed copies in JRock/includes/** — a checkbox in
+**Include from processed copies in __JRock/includes/** — a checkbox in
 [Configure](#configure-dialog-top-left-button), **on** by default. A chosen file is **copied
-into `JRock/includes/` first and included from the copy**, so the log's line points inside the
+into `__JRock/includes/` first and included from the copy**, so the log's line points inside the
 folder you own:
 
 ```
@@ -1452,15 +1480,15 @@ Included @img 1f3a9c0b7e42 from C:\demo\JRock\includes\IMG_4002.jpg
 ```
 
 Two different files of the same name both survive, the second as `IMG_4002-2.jpg`; the same
-file twice is not copied twice. A file already under `JRock/includes/` is included where it is,
+file twice is not copied twice. A file already under `__JRock/includes/` is included where it is,
 and so is anything the conversions wrote: they write into that same folder themselves, each
 output named after the file it came from — so everything an
-include is made from is in one place, and in one flat list. A fetched URL is saved beside it, in `JRock/urls/`. A copy that
+include is made from is in one place, and in one flat list. A fetched URL is saved beside it, in `__JRock/urls/`. A copy that
 fails is reported and the original included anyway — the setting is there to keep a file within
 reach, not to refuse the include. It matters most in the [browser](#jrock-web-in-the-browser),
 where an uploaded file lands in CheerpJ's `/uploads` and is gone after a reload, taking the only
 path the log recorded with it. Turned off, every file is included where it lies — and a type
-whose conversion has to write under `JRock/includes/` is refused instead (see
+whose conversion has to write under `__JRock/includes/` is refused instead (see
 [Multimodal includes](#multimodal-includes-ctrli)).
 
 **And a copy is JRock's own file, so an oversized image is downscaled into it** — which is why it is a *processed* copy, not always a byte-for-byte one. The page a
@@ -1572,7 +1600,7 @@ different file now, and including it again is the fix.
 Selecting the PDF filter runs **Ghostscript** to convert the PDF, one page image per page, then
 includes each produced page. Ghostscript must be on your PATH: `gswin64` on Windows, `gs` on
 macOS and Linux. In the [browser](#working-with-pdfs) the same filter renders with PDF.js
-instead, into `JRock/includes/`.
+instead, into `__JRock/includes/`.
 
 **Page images, not Ghostscript text.** There is no text filter on Ghostscript's `txtwrite`
 device, because `txtwrite` takes the text operators as they come and hands back something a model
@@ -1587,7 +1615,7 @@ alive. On **Windows** JRock runs the **windowed** build (`gswin64.exe`, preferri
 Everywhere else the console `gs` is run with `-q` omitted, and its progress — `Page 1`,
 `Page 2`, … — is echoed into the log as `gs:` lines while it works.
 
-- Output is written under **`JRock/includes/`**, named `<pdfname>.gs.NNN.png` — page images at
+- Output is written under **`__JRock/includes/`**, named `<pdfname>.gs.NNN.png` — page images at
   the **Images DPI** set in Configure (150 by default), the page's physical size being the
   PDF's own business.
 - The exact Ghostscript command and its output are echoed to the log.
@@ -1641,7 +1669,7 @@ sent or cleared: the prompt is read, not consumed.
 - **PDF as text, with xpdf** runs `pdftotext -enc UTF-8 <pdf> <name>.txt` and includes that file
   as `@txt`, as it is.
 
-The output goes **under `JRock/includes/`, named after the whole of the PDF's name**: `report.pdf`
+The output goes **under `__JRock/includes/`, named after the whole of the PDF's name**: `report.pdf`
 gives the folder `report.pdf.html` or the file `report.pdf.txt` there — extension and all,
 deliberately, because the stem alone would turn `report.pdf` into `report.txt`, and that is a name
 a text file of your own can already have. Everything an include is made from shares that one
@@ -1654,7 +1682,7 @@ up by age with the rest of them (**Cleanup JRock files...**), and a document fol
 document and nothing else. That is also why there is nothing left to answer: the conversion is
 JRock's own file, so creating it needs no permission, and an earlier conversion of the same PDF is
 replaced rather than reused, so the pages always say what the PDF says now. It needs **Include
-from processed copies in `JRock/includes/`** on, like every other conversion. The command and the
+from processed copies in `__JRock/includes/`** on, like every other conversion. The command and the
 tool's own output are echoed to the log. If a tool isn't found on your PATH, JRock logs a note
 and, when a person is there to read it, shows a dialog and opens xpdf's download page.
 
@@ -1673,7 +1701,7 @@ survive as markup a model reads as structure instead of being thrown away.
 
 **From an RTF.**
 
-- Output is written under **`JRock/includes/`**, named `<rtfname>.md` — `notes.rtf` becomes
+- Output is written under **`__JRock/includes/`**, named `<rtfname>.md` — `notes.rtf` becomes
   `notes.rtf.md`, so two RTFs with the same stem can't overwrite each other.
 - What is mapped, and nothing more:
 
@@ -1697,7 +1725,7 @@ survive as markup a model reads as structure instead of being thrown away.
 reference, a table cell — so the conversion reads that structure rather than guessing at it from
 font sizes:
 
-- Output is written under **`JRock/includes/`**, named `<docxname>.md` — `quarterly.docx` becomes
+- Output is written under **`__JRock/includes/`**, named `<docxname>.md` — `quarterly.docx` becomes
   `quarterly.docx.md`, the same rule as for RTF — with the document's pictures beside it under
   the same prefix (see below).
 - Only `word/document.xml` is read, with its relationships part for link addresses and picture
@@ -1763,7 +1791,7 @@ order, as its own CSV and includes each as an `@txt` token, so a workbook of thr
 three tokens. Like a `.docx`, an `.xlsx` is a ZIP of XML, read with `java.util.zip` and the JDK's
 XML parser, so this works with nothing installed and in the browser too.
 
-- Output is written under **`JRock/includes/`**, named `<xlsxname>.<sheet>.csv`, so
+- Output is written under **`__JRock/includes/`**, named `<xlsxname>.<sheet>.csv`, so
   `stock.xlsx` with a sheet *Sales Q1* gives `stock.xlsx.Sales Q1.csv`. A character Windows
   forbids in a file name becomes `_`.
 - What a cell becomes:
@@ -1965,7 +1993,7 @@ It reads three prompts out of its own directory and runs them as a chain, each p
 the one before it wrote beside the document, under the document's own name:
 
 1. **Markdown, then a DOCX.** A PDF is converted to HTML by xpdf's `pdftohtml`, into
-   [`JRock/includes/`](#pdf-as-html-or-text-xpdf) — JRock's own folder, so nothing is written
+   [`__JRock/includes/`](#pdf-as-html-or-text-xpdf) — JRock's own folder, so nothing is written
    beside the document, nothing is asked, and there is nothing to tidy up afterwards — and each
    page image goes in with its `![...](<file name>)` reference. An image is a one-page document and
    goes in as itself, with its reference; it also gets a **PDF copy to print from**,
@@ -2044,7 +2072,7 @@ the answer.
 
 **Nothing of pass one is left to tidy up.** The HTML pages xpdf made of the PDF are working
 material for the model — the DOCX and the TXT are the copies people read — and JRock writes them
-into its own [`JRock/includes/`](#pdf-as-html-or-text-xpdf) folder, cleaned up by age with
+into its own [`__JRock/includes/`](#pdf-as-html-or-text-xpdf) folder, cleaned up by age with
 everything else there. So the document's folder holds the document and the files named after it,
 and there is no folder of page images to be asked about, renamed or deleted: one question fewer
 in the flow, and nothing left beside a filed letter that a sync client can hold open while
@@ -2377,7 +2405,7 @@ the voice, so the microphone doesn't record the last answer as the next question
   numbers (`mail/`, `papers/`) — the messages and the post the other agents hand over.
   One folder, so **one folder can be synchronised** — point a cloud client at it and *"save that
   answer"* said across a room becomes a document on a phone a minute later. Deliberately not the
-  working folder itself and not `JRock/` inside it: those hold the API key, the conversation and
+  working folder itself and not `__JRock/` inside it: those hold the API key, the conversation and
   the log, and a folder destined for somebody's cloud should hold what was asked for and nothing
   else. It is made the first time something is written into it.
 - **Putting something in a file, which is three different things.** The sentence the model says
@@ -3706,7 +3734,7 @@ return nothing but `String`, `String[]`, `long` and `int`, and a `null` return m
 anything else is a sentence saying what went wrong, in the language the log is written in, so a
 script can put it straight into its own dialog without a table of error codes in between.
 
-Static because there is nothing to instantiate: the window, the log, the `JRock/` directory and
+Static because there is nothing to instantiate: the window, the log, the `__JRock/` directory and
 the Bedrock session are one per process, so there is no object that could hold a second set of
 them. `JRock.main(new String[0])` shows the window and returns; the methods below drive the one
 that is there, and every one of them **blocks and must not be called on the event dispatch
@@ -3804,7 +3832,7 @@ nothing more subtle than that. What each one does, in full:
 | `automationLoadPrompt(Path file)` | Ctrl+O, from a path — **absolute**, or **a bare file name** of the folder this is running in, which is where an agent's own prompts are installed. Anything else is refused rather than resolved: what a relative path would be resolved against is the process's working directory, which an agent started from a right-click entry did not choose. |
 | `automationPromptText()` | The prompt's text as it stands, or `null` when there is no automation. What a loaded prompt's bare `@img` / `@txt` placeholders mean is the automation's to decide: read the text, change it, and put it back. |
 | `automationSetPrompt(String text)` | Replaces the prompt's text, the cursor at the end. |
-| `automationInclude(Path file)` | **Ctrl+I, from a path** — and the kind is the file's own business: its extension and this folder's include settings decide, exactly as the include dialog would. What an agent wants nearly always: a PDF as images, as xpdf HTML or as xpdf text according to *Include a PDF as*, an RTF as Markdown or as its markup, a picture with or without its reference line, each from a copy under `JRock/includes/` or where it lies — all of which are settings of the folder, and nothing an agent should repeat in its own source. |
+| `automationInclude(Path file)` | **Ctrl+I, from a path** — and the kind is the file's own business: its extension and this folder's include settings decide, exactly as the include dialog would. What an agent wants nearly always: a PDF as images, as xpdf HTML or as xpdf text according to *Include a PDF as*, an RTF as Markdown or as its markup, a picture with or without its reference line, each from a copy under `__JRock/includes/` or where it lies — all of which are settings of the folder, and nothing an agent should repeat in its own source. |
 | `automationFetchUrl(String url)` | [Fetch URL](#fetching-a-url) (Ctrl+U), for a URL given: the page goes in at the cursor, as a link and an include. A refused URL is a returned reason, not a dialog. Fails when nothing was inserted. |
 | `automationClearPrompt()` | Empties the prompt. A send leaves it as sent, so a new question every turn clears it first. |
 | `automationStartRecording()` | Start recording (Ctrl+Space): records from Configure's **Record from** microphone, and returns once it is listening. No microphone set is a refusal, not a dialog. |
@@ -3818,7 +3846,7 @@ nothing more subtle than that. What each one does, in full:
 | `automationClearLogSelection()` | Lets the selection go and follows the end of the conversation again — the log scrolls nowhere while a selection exists. |
 | `automationStopNarration()` | Stops whatever narration is playing. Returns whether one was. |
 | `automationSend(long millis)` | Ctrl+Enter, and waits for the answer. Returns a **`Sent`**: `ok()`, `failure()`, and the two moments it wrote as `LocalDateTime`s — which is what `automationMessageFile` takes, so nothing has to be parsed on the way. |
-| `automationMessageFile(String role, LocalDateTime stamp)` | The **absolute `Path`** of one `JRock/messages/` file, or `null` when there is none. `role` is `"operator"` or `"assistant"`; the stamp is one of the two `Sent` hands back, so there is no text to parse in either direction. |
+| `automationMessageFile(String role, LocalDateTime stamp)` | The **absolute `Path`** of one `__JRock/messages/` file, or `null` when there is none. `role` is `"operator"` or `"assistant"`; the stamp is one of the two `Sent` hands back, so there is no text to parse in either direction. |
 | `automationExportSelectionDocx(String file)` | **The log's own selection** as a DOCX — `Ctrl+Shift+D` through the API, and the third of the trio narration already uses: `automationSelectLastAnswer`, this, `automationClearLogSelection`. The selection is **left as it was found**, an automation being the one that knows when it has finished with it. Refuses when nothing is selected. |
 | `automationExportPromptDocx(String file)` | **What the prompt holds** — or its selection, when it has one. Where an automation's own text goes: there is no call that takes Markdown as an argument, because an export is of something the window is **showing**, and a document nobody can see on screen is one nobody can check before it is written. No model, no send, nothing cleared: the prompt is a sheet of paper here. It is what `Ctrl+Shift+D` does by hand when the selection is the prompt's, offered to an automation that has written something and wants it as a file. |
 | `automationWindow()` | The `JFrame`, so an automation's own dialogs belong to it. |
@@ -3829,7 +3857,7 @@ nothing more subtle than that. What each one does, in full:
 The "reference" a send returns is a pair of timestamps, because a timestamp already *is* the
 name of the file the message was written to (see
 [Persistence](#persistence-crash-recovery--full-local-history)).
-So an automation reads the answer out of `JRock/messages/<stamp>-assistant.txt` — the same file
+So an automation reads the answer out of `__JRock/messages/<stamp>-assistant.txt` — the same file
 you would open yourself — after checking that the request's own file is there, which is what
 makes the pair trustworthy. No new state, no separate transcript, nothing an automation can see
 that you cannot.
@@ -3856,7 +3884,7 @@ the one they are looking for.
   working directory alone doesn't pin prompts to the folder you just left. A directory that
   doesn't exist yet is created.
 - **Bedrock API key** — write-only: left blank, it keeps the current key; type or paste a value
-  to replace it. What you enter is **trimmed** and written to `JRock/bedrock-key.txt` in the
+  to replace it. What you enter is **trimmed** and written to `__JRock/bedrock-key.txt` in the
   working directory, which is where it's read from at startup — trimmed because a pasted key
   arrives with whatever the page copied around it, and no Bedrock key has a space or a newline
   in it. The key is never displayed. The row is there on every platform, since the key is always
@@ -3869,7 +3897,7 @@ the one they are looking for.
   come back out.
 - **API endpoint** — free text: the **Chat Completions URL every request goes to**, in full
   — `https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions`. Another region is another
-  host, which is no more typing than a region was. Kept in `JRock/jrock-config.txt` as
+  host, which is no more typing than a region was. Kept in `__JRock/jrock-config.txt` as
   `endpoint$`, so it survives a restart. The model list is read from `/models` beside it, and a
   [model card](#models) that states its own path — the `/openai/v1` models — keeps that path on
   this host. Prices come from the card for the **region named in the host**, so a host that
@@ -3882,7 +3910,7 @@ the one they are looking for.
   `JRock`. Kept per folder as `operator$`, because a folder is often an agent's rather than a
   person's. Empty is the whole of "not set": nothing is sent, and nothing is shown.
 - **Model** — free text with a dropdown of recently fetched models. Kept in
-  `JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
+  `__JRock/jrock-config.txt` too — as is the **Images DPI** on the Files tab, which is what makes one
   folder's [agent](#windows-agents-and-flows-one-entry-each) a different agent from the same
   automation installed into another folder.
 
@@ -3894,7 +3922,7 @@ the one they are looking for.
   own); otherwise the report names the list it already has and says it is unchanged. A restart
   always asks.
 - **Autobackup log** — on a line of its own, right under the Model, and **on by default**: after five
-  minutes without the cursor moving in the prompt, the whole `JRock/` folder is zipped into
+  minutes without the cursor moving in the prompt, the whole `__JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
   long as it takes (see [**backup and restore**](#backup-and-restore)). Reported at startup
   only when it is **off**, so nobody counts on a backup that isn't being taken.
@@ -3904,7 +3932,7 @@ the one they are looking for.
   at a request, never between one and its answer. Pick from the list or type any number; a
   value that is no number keeps the limit there was. An `#include` already sent in a request
   the limit leaves out is sent again, since the model does not see that request. Kept in
-  `JRock/jrock-config.txt`, per folder, like the model it usually depends on.
+  `__JRock/jrock-config.txt`, per folder, like the model it usually depends on.
 - **Local prompt cache** — on by default: a prompt identical to one answered before is
   answered from that answer, and Bedrock is not called (see
   [**Local prompt cache**](#local-prompt-cache)).
@@ -3917,9 +3945,9 @@ unrelated switches; a label over them says which three belong to each other.
 - **Markdown reference above each include** — off by default: every include gets a line above
   its token naming the file, with what the log says of it as its text (see
   [Multimodal includes](#multimodal-includes-ctrli)).
-- **Include from processed copies in JRock/includes/** — on by default: each picked file is included
-  from a copy under `JRock/includes/`, an image downscaled to **Images DPI** on the way; off, a
-  conversion that has to write under `JRock/includes/` is refused (see
+- **Include from processed copies in __JRock/includes/** — on by default: each picked file is included
+  from a copy under `__JRock/includes/`, an image downscaled to **Images DPI** on the way; off, a
+  conversion that has to write under `__JRock/includes/` is refused (see
   [Includes that outlive the session](#includes-that-outlive-the-session)).
 - **Stop a send on a missing include** — on by default: an included file that is gone, cannot be
   read or is not recorded in the log stops the send, each one named in the log; off, the send goes
@@ -3945,14 +3973,14 @@ unrelated switches; a label over them says which three belong to each other.
   [Multimodal includes](#multimodal-includes-ctrli)). The browser offers page images only.
 - **Include RTF as** — *Markdown (converted)*, the default, or *Text as is (RTF markup)*.
 
-These two and the four on General above them are kept in `JRock/jrock-config.txt`, per folder,
+These two and the four on General above them are kept in `__JRock/jrock-config.txt`, per folder,
 as `include-pdf-as$`, `include-rtf-as$`, `include-markdown-references$`,
 `include-processed-copies$`, `include-missing-stops-send$` and `local-prompt-cache$`.
 
 The tab is laid out **by file type**, not by setting: the type in bold down the left, how it is
 read on the right. Only the three types with something to choose are rows — Images, PDF and RTF —
 and where any of it is written is said **once**, at the foot: everything goes to
-`JRock/includes/`, named after the file it came from, and a fetched URL to `JRock/urls/`. A line
+`__JRock/includes/`, named after the file it came from, and a fetched URL to `__JRock/urls/`. A line
 per file type repeating the same path was the repetition, not the information.
 
 An asterisk marks a type that **cannot be included without that folder** — PDF, RTF, DOCX and
@@ -4030,8 +4058,8 @@ is no file to name (see [**narrating in the browser**](#narrating-in-the-browser
 microphone rows are desktop-only.
 
 Each row names the file its audio goes to, the way the Files tab names its folders:
-`JRock/wav/narration-<date>-<time>.wav`, `JRock/wav/recording-<date>-<time>.wav`, and
-`JRock/wav/transcribe-<date>-<time>.wav` when a recording was transcribed — one file each, never
+`__JRock/wav/narration-<date>-<time>.wav`, `__JRock/wav/recording-<date>-<time>.wav`, and
+`__JRock/wav/transcribe-<date>-<time>.wav` when a recording was transcribed — one file each, never
 overwritten.
 
 Every row above has a **right-click — or, on a touch screen, a long-press — menu** with Copy,
@@ -4094,7 +4122,7 @@ close the dialog without moving anything.
 
 **Where the window is left is where it opens.** Every move and every resize — the title bar, a
 corner, a window manager tiling it, the browser page resizing itself around it — is written to
-this folder's `JRock/jrock-config.txt` as `window=x,y,width,height` once the window has stood
+this folder's `__JRock/jrock-config.txt` as `window=x,y,width,height` once the window has stood
 still for a moment, and the next start opens it there instead of centred. Nothing has to be
 pressed for that: the size you dragged the window to is the size you want it, and a window put on
 the second monitor for a reason belongs there tomorrow too. Each folder's JRock keeps its own
@@ -4169,7 +4197,7 @@ when it finishes.
 - **The speaker is yours to set, and nobody else's.** Windows moves its default output to
   whatever was plugged in last, so JRock does not use that default. A first run has no device set.
   Open **Configure → Narrate on:** and the dropdown lists what this machine has; pick one,
-  press OK, and it is kept as `narrate-device$` in `JRock/jrock-config.txt`. (Pressing Narrate with nothing set says so and lists
+  press OK, and it is kept as `narrate-device$` in `__JRock/jrock-config.txt`. (Pressing Narrate with nothing set says so and lists
   them too.) That field is free text over a dropdown, like the model, and emptying it is how a
   device is unset.
 - **A device that is not there is a failure, and no fallback.** If the speaker is disconnected
@@ -4179,7 +4207,7 @@ when it finishes.
 - **SAPI renders, Java plays.** `System.Speech` can only play on the Windows default, so it
   renders 22.05 kHz 16-bit mono PCM into a pipe instead, and JRock plays that with Java Sound on
   the chosen device.
-- **Each narration is saved** as `JRock/wav/narration-<date>-<time>.wav` — a file of its own,
+- **Each narration is saved** as `__JRock/wav/narration-<date>-<time>.wav` — a file of its own,
   never overwritten, for when something sounds wrong: the narration worth hearing again is the
   one that sounded wrong, and an overwrite would have thrown it away by the time anybody went
   looking. A stopped narration is saved as far as it played.
@@ -4240,7 +4268,7 @@ Three things are different in a tab, and the window says so rather than pretendi
 - **No output device**, so there is no *Narrate on* row: the page speaks through whatever it
   already plays sound on, and offers nobody a say in it.
 - **No audio file.** The browser renders the speech itself and hands back nothing but the name
-  of the voice that read it, so there is no `JRock/wav/narration-...wav` to keep — and the
+  of the voice that read it, so there is no `__JRock/wav/narration-...wav` to keep — and the
   dialog does not name one.
 - **A browser speaks only for a page it has been used on**, and the tap that reached the menu
   is long over by the time Java calls back. So the page opens the door on the way past: every
@@ -4263,7 +4291,7 @@ Three things are different in a tab, and the window says so rather than pretendi
 
 What is the same: the Markdown is read and not the markup, the language of the text picks the
 voice, *Stop narrating* stops it mid-word, the log names the voice that read it, and
-`narrate-voice$` is kept in `JRock/jrock-config.txt` exactly as on the desktop. The microphone
+`narrate-voice$` is kept in `__JRock/jrock-config.txt` exactly as on the desktop. The microphone
 is **not** in the browser build — recording still wants `wav` or `mp3`, which is not what a
 browser hands back.
 
@@ -4273,7 +4301,7 @@ The other direction. **Press Ctrl+Space** in the JRock window — it counts once
 in either order — and the log says the recording has started. **Press Ctrl+Space again** and the
 log says the recording is done: it is a toggle, so you can talk with your hands off the keyboard.
 The prompt's right-click menu has the same toggle, **Start recording** / **Stop recording**, as
-the log's has Narrate selected text / Stop narrating. The recording is saved as `JRock/wav/recording-<date>-<time>.wav` and included as `@audio` at the
+the log's has Narrate selected text / Stop narrating. The recording is saved as `__JRock/wav/recording-<date>-<time>.wav` and included as `@audio` at the
 prompt cursor, as if you had picked that file with Ctrl+I. It works on any desktop, not just
 Windows, and in the browser (see [**recording in the browser**](#recording-in-the-browser)).
 
@@ -4301,7 +4329,7 @@ Windows, and in the browser (see [**recording in the browser**](#recording-in-th
   as `record-transcribe$`). With it ticked, the recording is not included. Windows speech
   recognition (SAPI dictation, the same `System.Speech` Narrate speaks with) turns it into
   text, and the text is typed at the prompt cursor. The audio is kept as
-  `JRock/wav/transcribe-<date>-<time>.wav` — a file per recording like any other, even though no
+  `__JRock/wav/transcribe-<date>-<time>.wav` — a file per recording like any other, even though no
   token ever names it, because a word the recognizer got wrong is a wav worth playing back. The
   recognizer is always the **en-GB** one, whatever Windows' default is, and the log names it.
   System.Speech sees only the classic *Desktop* recognizers (English and a few others), so
@@ -4321,7 +4349,7 @@ Windows, and in the browser (see [**recording in the browser**](#recording-in-th
 [JRock Web](#jrock-web-in-the-browser) records too, over the same [page
 bridge](#http-transport) the HTTP client, the clipboard, the PDF engine and
 [narration](#narrating-in-the-browser) use: Ctrl+Space, again to stop, and the recording lands in
-`JRock/wav/` and goes into the prompt as `@audio`, exactly as on the desktop.
+`__JRock/wav/` and goes into the prompt as `@audio`, exactly as on the desktop.
 
 What the page had to do differently is the audio itself. A browser's `MediaRecorder` hands back
 **WebM or MP4**, and the chat API's `input_audio` format is an enum of **`wav` and `mp3`** and
@@ -4538,11 +4566,11 @@ With **Local prompt cache** on in Configure — the default — a prompt that wa
 is **answered again from that answer, with no call to Bedrock**:
 
 ```
-Local prompt cache: this prompt was answered before - reusing JRock/messages/20261009-101500-120-assistant.txt, with no call to Bedrock.
+Local prompt cache: this prompt was answered before - reusing __JRock/messages/20261009-101500-120-assistant.txt, with no call to Bedrock.
 ```
 
 in place of the `Calling [xai.grok-4.3] at /openai/v1/chat/completions ...` line, and the reply is logged as a
-reply like any other. "Answered before" means **any** message in `JRock/messages/` — not only
+reply like any other. "Answered before" means **any** message in `__JRock/messages/` — not only
 the ones the log still shows: every `-operator.txt` there, by the SHA-256 of its text, paired
 with the `-assistant.txt` written after it. A request that failed has no answer after it and is
 not in the cache. The same text names the same files: its `@img`/`@txt` tokens are hashes, and
@@ -4553,7 +4581,7 @@ The table is built from the folder **once**, when a session begins with the sett
 session report says how many answered prompts it found), and kept up to date as each message
 is written, so the folder is never read again and a hit reads only the one answer it reuses.
 Turning the setting **off** empties the table; turning it back **on** builds it afresh from
-the folder — which is also the moment to clean `JRock/messages/` up by hand, if old answers
+the folder — which is also the moment to clean `__JRock/messages/` up by hand, if old answers
 should not be reused.
 
 Only for a prompt that goes **without** [History](#conversation-log)'s earlier messages: a
@@ -4611,9 +4639,9 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   the same glance Explorer would ask for. Not in the browser build: there is no disk of yours
   there to open anything on.
 - **Prompt area** — Include text, image, audio, PDF, RTF, DOCX or XLSX file... (multi-select), *Include
-  with copy...* (the same dialog, keeping a copy of each file under `JRock/includes/` — see
+  with copy...* (the same dialog, keeping a copy of each file under `__JRock/includes/` — see
   [**includes that outlive the session**](#includes-that-outlive-the-session)), *Fetch
-  URL...* (which downloads an address into `JRock/urls/` and includes it as text or as a
+  URL...* (which downloads an address into `__JRock/urls/` and includes it as text or as a
   picture, according to what it answered with — see [**fetching a
   URL**](#fetching-a-url)), *Start recording* / *Stop recording* (the
   [**Ctrl+Space**](#recording-from-the-microphone-ctrlspace) toggle; not in the browser),
@@ -4636,7 +4664,7 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
   one thing in particular: the include dialog is multi-select, but a tap selects a single file
   and there is no Shift to hold. Several names typed or pasted into that box, each in quotes —
   `"cat.png" "dog.png"` — is how a phone attaches more than one file at a time.
-- **The `JRock/` label beside Configure** — the window's own menu, and the one that opens on a
+- **The `__JRock/` label beside Configure** — the window's own menu, and the one that opens on a
   plain click or tap rather than a right-click, the label being there for nothing else. *What is
   in the JRock folder...* first, naming every file and subfolder JRock can keep there (see
   [**Persistence**](#persistence-crash-recovery--full-local-history)), then Merge two-sided
@@ -4669,7 +4697,7 @@ counterpart on the other two platforms JRock runs on, and keeping `reg.exe` out 
 Page 8 of the installer writes three kinds of entry:
 
 - **"JRock here!"** — on a folder's empty space or on a folder icon. Launches JRock in that
-  folder, so its `JRock/` files (prompt, log, messages) are created right there. **It carries
+  folder, so its `__JRock/` files (prompt, log, messages) are created right there. **It carries
   no `--working-dir`**, and that is the whole of what it means: Explorer starts a right-click
   command in the folder that was clicked, JRock roots its files in the folder it was started
   in, and so the folder you clicked is the folder it works in. A working folder on that
@@ -4695,9 +4723,9 @@ Details:
   menu full of them. Untick *Install the Explorer right-click entries* and the page does the
   removal and nothing else: **that is how the entries are uninstalled.**
 - **What was removed is written down.** The removal is exported first to
-  `JRock/jrock-context-menus-removed.reg`, and `reg import` on that file puts every one of
+  `__JRock/jrock-context-menus-removed.reg`, and `reg import` on that file puts every one of
   those entries back exactly as it was. What was written is kept beside it as
-  `JRock/jrock-context-menus.reg`.
+  `__JRock/jrock-context-menus.reg`.
 - **The whole command line goes into the log.** Every entry, with its label and the command it
   runs, so which jar runs from where with which arguments is readable without opening
   `regedit`.
@@ -4723,7 +4751,7 @@ Both are `javaw -cp <install folder>\jrock.jar <its own .java> --working-dir <it
 --prompts-dir <its folder>`. The `--working-dir` flag is the trick: Explorer starts a
 right-click command in the folder that was **clicked**, which is the opposite of what an agent
 needs. An agent belongs to the folder it was installed into — that folder's model, its images
-DPI, its Bedrock key, all in that folder's [`JRock/jrock-config.txt`](#settings-files) — and
+DPI, its Bedrock key, all in that folder's [`__JRock/jrock-config.txt`](#settings-files) — and
 may be run on a document anywhere on the disk. Its own folder is also where its prompt files
 are, because that is where it looks for them.
 
@@ -4867,28 +4895,28 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   rounded 595 × 842 pt, which would rasterise one pixel narrower.
 - **`JRockXpdfIncludeTest`** includes the same two-page PDF with *PDF as text, with xpdf* and
   *PDF as HTML folder, with xpdf*, and checks the `.txt` or the folder appeared under
-  `JRock/includes/` with both pages' text in it, that **nothing was written beside the PDF**, and
+  `__JRock/includes/` with both pages' text in it, that **nothing was written beside the PDF**, and
   that the prompt gained the `@txt` tokens. A third test puts an earlier conversion there first
   and checks it was replaced; a fourth turns **Include from processed copies** off and checks the
   reading is refused with the setting named.
 - **`JRockRtfIncludeTest`** includes an RTF through the real include dialog with the *RTF as
-  Markdown text* filter, and compares the file under `JRock/includes/` against the **whole
+  Markdown text* filter, and compares the file under `__JRock/includes/` against the **whole
   expected Markdown** — headings from the font sizes, bold and italic as markup, Word's bullets
   as a list, asterisks escaped, an umlaut intact as UTF-8 — plus the single `@txt` token in the
   prompt. The document is written by hand (`FormattedRtf`), one control word per mapping. A
   second test renames a plain text file to `.rtf` and checks JRock says it found no text and
   includes nothing. A third sets **Include RTF as** to *Text as is* and checks the
-  include is the `.rtf` itself, with nothing converted and no `JRock/includes/` written — the
+  include is the `.rtf` itself, with nothing converted and no `__JRock/includes/` written — the
   setting is the whole difference. No external program: the reader is the JDK's.
 - **`JRockDocxIncludeTest`** is the symmetric twin of that, for `.docx`: it includes a document
   through the real dialog with the *DOCX as Markdown text* filter and compares
-  `JRock/includes/quarterly.docx.md` against the **whole expected Markdown** — headings from the
+  `__JRock/includes/quarterly.docx.md` against the **whole expected Markdown** — headings from the
   styles (spelled both `Heading1` and `heading 2`), runs Word split mid-word joined back into
   words, a toggle switched off with `w:val="false"`, list markup that carries no bullet
   character at all, a hyperlink, a table with a bold header row, an umlaut, asterisks escaped,
   and **the pictures** — a `w:drawing` placed twice (once with alternative text, once inside a
   sentence) and an older `w:pict`, each written out byte for byte under
-  `JRock/includes/quarterly.docx.<part>.png`, referred to from the Markdown where the document
+  `__JRock/includes/quarterly.docx.<part>.png`, referred to from the Markdown where the document
   draws them, and included as `@img` tokens of their own; a picture the document only links to on
   the web, and an EMF a request could not carry, are written nowhere and referred to not at all —
   the EMF named in the log as passed over.
@@ -4898,13 +4926,13 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockAutomationDocTest`** drives the two calls the doc inventory's first pass is made of,
   from a thread of its own as an automation would: `automationInclude(pdf)` with the folder set to
   xpdf HTML, pressing nothing at all — the call returning is the assertion that nothing asked —
-  and checking the pages landed under `JRock/includes/`, not beside the PDF, and that every page
+  and checking the pages landed under `__JRock/includes/`, not beside the PDF, and that every page
   image arrived with its `![...](<path>)`
   reference; and `automationExportPromptDocx`, checking the DOCX carries the very PNG the
   reference named — the text put in the prompt first, which is where an automation's own text
   goes now that no call takes Markdown as an argument. Nothing is sent.
 - **`JRockXlsxIncludeTest`** includes a two-sheet workbook with *XLSX as CSV text, one file per
-  sheet* and compares both CSVs under `JRock/includes/` **whole**: shared, rich and inline
+  sheet* and compares both CSVs under `__JRock/includes/` **whole**: shared, rich and inline
   strings, a comma and quotes quoted, a line break kept inside its field, dates in a built-in and
   a custom format as ISO, a time alone, a number whose format has a `d` only in quoted text left a
   number, a boolean, an error, formula values, and a skipped column and row kept in place. The
@@ -4919,15 +4947,15 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockFetchUrlTest`** starts a **web server of its own** on loopback — a real one, since
   what the feature turns on is the response — and drives **Fetch URL...** from the prompt's
   context menu against five of its paths. A page served as `ISO-8859-1` has to land in
-  `JRock/urls/article.html` **re-encoded as UTF-8**, with `[](<url>)` above an `@txt` token;
+  `__JRock/urls/article.html` **re-encoded as UTF-8**, with `[](<url>)` above an `@txt` token;
   `application/json` has to land as `notes.json` and `text/plain` in `windows-1251` as
   `readme.txt`, both UTF-8 and both `@txt`; a PNG has to land as `cat.png` **byte for byte**,
   with an `@img` token and its 120 × 80 read out of the saved file's header; and
   `application/pdf` has to be **refused by name**, in the log and in a dialog, leaving no
-  `JRock/urls/` at all and the prompt untouched.
-- **`JRockIncludeCopyTest`** includes a file with **Include from processed copies in JRock/includes/** on and checks
+  `__JRock/urls/` at all and the prompt untouched.
+- **`JRockIncludeCopyTest`** includes a file with **Include from processed copies in __JRock/includes/** on and checks
   where the include then points: the copy line comes *before* the include it was made for, the
-  copy under `JRock/includes/` is byte-for-byte the original, and it — not the original — is what
+  copy under `__JRock/includes/` is byte-for-byte the original, and it — not the original — is what
   the hash is registered against. With the setting off it checks the other half: nothing is
   copied and the folder is not created at all.
   A third test includes two *different* files both called `photo.png` and checks that neither is
@@ -4992,7 +5020,7 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
   emoji arrives as a *pair* of them), and mixed. No window.
 - **`JRockDocumentNumberTest`** draws a thousand numbers for *Insert document number* and checks
   each is ten digits with no leading 0, and that they don't repeat. No window.
-- **`JRockPromptCacheTest`** puts answered and unanswered prompts into `JRock/messages/` by
+- **`JRockPromptCacheTest`** puts answered and unanswered prompts into `__JRock/messages/` by
   hand and sends through the real Send button: the answered one comes back from its file with
   the log saying so and no `Calling` line, and the unanswered one goes out (and fails, there
   being no key). An answer written during the session is reused without the folder being read
@@ -5001,7 +5029,7 @@ picks the real filters and sets text in the real fields, then waits on what JRoc
 - **`JRockReplyPayloadTest`** answers a real send from a chat-completions endpoint of its own
   on 127.0.0.1, with a picture where the text would be: the PNG arrives under the message's
   binary field and has to come out as [an include of the
-  session](#a-picture-or-a-recording-in-the-reply) — saved under `JRock/includes/` byte for
+  session](#a-picture-or-a-recording-in-the-reply) — saved under `__JRock/includes/` byte for
   byte, hashed, logged, and named in the answer by the reference the DOCX export resolves.
   Then the same with **Markdown reference above each include** off (the token alone), a WAV
   the reply gives no media type at all (read from its own bytes, `@audio`, its header in the
@@ -5053,7 +5081,7 @@ mvn test
 ```
 
 Nothing is stubbed and no credentials are needed: every test runs in a throwaway working
-directory of its own, so its `JRock/bedrock-key.txt` is the empty one JRock creates and the
+directory of its own, so its `__JRock/bedrock-key.txt` is the empty one JRock creates and the
 startup model-list fetch is skipped for want of a key. Your own key cannot be picked up by a
 test, because nothing is read from the environment. No test contacts AWS: of the two that set
 a key at all, one points the endpoint at a host that doesn't resolve, so the fetch fails at
@@ -5067,7 +5095,7 @@ with that as its message if its program is missing.
 
 `JRock.java` is compiled **in place** from the repository root — the root keeps its single
 Java file, and nothing is copied. Maven writes everything to `tests/target/`, which is
-git-ignored, and that's also where the app's own `JRock/` folder goes during a test run.
+git-ignored, and that's also where the app's own `__JRock/` folder goes during a test run.
 
 CI runs this on every push (`.github/workflows/tests.yml`), under `xvfb` since the Linux
 runners are headless, on JDK 11 — the minimum JRock supports.
@@ -5124,7 +5152,7 @@ Documents\JRockAssistant\             jrock.jar + its SHA-256 and MD5
 
 An **agent** loops: it is started with JRock and stays up — a timer, a push-to-talk listener, a
 calendar reader answering a port. It gets a folder to itself, because JRock writes its log, its
-prompt and its transcript into a `JRock/` inside the folder it works in, and three agents
+prompt and its transcript into a `__JRock/` inside the folder it works in, and three agents
 sharing one folder would write over each other.
 
 A **flow** runs once, on something you point it at, and asks you for it: translate this
@@ -5421,7 +5449,7 @@ md5sum jrock.jar
 java -jar jrock.jar
 ```
 
-Current build hashes, 5.0.0, the same from all three runners — **5.2.0's go here once CI has
+Current build hashes, 5.0.0, the same from all three runners — **5.3.0's go here once CI has
 built it**, which is the only place these numbers can honestly come from:
 
 ```

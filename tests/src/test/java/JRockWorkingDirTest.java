@@ -58,7 +58,7 @@ class JRockWorkingDirTest extends JRockGuiFixture {
         //    startup: a prompt that changes by itself needs explaining.
         assertThat(logPane().text())
                 .describedAs("the log pane's text")
-                .contains("Prompt source: recovered persistent file: JRock/jrock-prompt.txt");
+                .contains("Prompt source: recovered persistent file: __JRock/jrock-prompt.txt");
     }
 
     @Test
@@ -108,7 +108,7 @@ class JRockWorkingDirTest extends JRockGuiFixture {
 
     /** Where JRock autosaves the prompt of a given working directory. */
     private static Path promptFileIn(Path workingDir) {
-        return workingDir.resolve("JRock").resolve("jrock-prompt.txt");
+        return workingDir.resolve("__JRock").resolve("jrock-prompt.txt");
     }
 
     private static void write(Path file, String text) throws Exception {

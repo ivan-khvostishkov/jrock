@@ -110,7 +110,7 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
         // 5. And the files on disk really are that size - measured from the PNGs
         //    themselves, not from what JRock said about them.
         List<Path> pages = producedPages();
-        assertThat(pages).describedAs("PNG pages under JRock/includes/").hasSize(2);
+        assertThat(pages).describedAs("PNG pages under __JRock/includes/").hasSize(2);
         for (Path page : pages) {
             BufferedImage image = ImageIO.read(page.toFile());
             assertThat(image).describedAs("decoded " + page.getFileName()).isNotNull();
@@ -156,7 +156,7 @@ class JRockPdfIncludeTest extends JRockGuiFixture {
 
     /** The PNGs Ghostscript wrote, in page order. They carry its tag in their names. */
     private List<Path> producedPages() throws Exception {
-        Path dir = workingDirectory().resolve("JRock").resolve("includes");
+        Path dir = workingDirectory().resolve("__JRock").resolve("includes");
         List<Path> pages = new ArrayList<>();
         if (!Files.isDirectory(dir)) return pages;
         try (java.util.stream.Stream<Path> found = Files.list(dir)) {

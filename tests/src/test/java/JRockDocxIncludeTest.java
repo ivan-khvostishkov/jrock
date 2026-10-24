@@ -50,7 +50,7 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
 
         // 2. The Markdown landed where the README says it does, named after the document.
         Path markdown = includes().resolve("quarterly.docx.md");
-        assertThat(markdown).describedAs("the Markdown under JRock/includes/").exists();
+        assertThat(markdown).describedAs("the Markdown under __JRock/includes/").exists();
 
         // 3. And it is the Markdown the document means: headings from the styles, bold
         //    and italic as markup, the numbered list as a list, the table as a table,
@@ -117,7 +117,7 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .contains("Could not read DOCX renamed.docx: no word/document.xml inside it");
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
-        assertThat(workingDirectory().resolve("JRock").resolve("includes")
+        assertThat(workingDirectory().resolve("__JRock").resolve("includes")
                 .resolve("renamed.docx.md"))
                 .describedAs("the Markdown, which nothing should have written").doesNotExist();
     }
@@ -128,18 +128,18 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
         awaitReadyCount(1);
         Path docx = FormattedDocx.write(workingDirectory().resolve("quarterly.docx"));
 
-        // Converting means writing the Markdown under JRock/includes/, which is exactly
-        // what "Include from processed copies in JRock/includes/" off rules out.
+        // Converting means writing the Markdown under __JRock/includes/, which is exactly
+        // what "Include from processed copies in __JRock/includes/" off rules out.
         chooseInTheIncludeDialog(DOCX_FILTER, false, docx);
         press(JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot)
                 .okButton());
         awaitLogLine("Not included: " + docx, CONVERSION_TIMEOUT_SECONDS);
 
         assertThat(logPane().text()).describedAs("the log pane's text")
-                .contains("\"Include from processed copies in JRock/includes/\" is off. Turn it on "
+                .contains("\"Include from processed copies in __JRock/includes/\" is off. Turn it on "
                         + "in Configure to include it.");
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
-        assertThat(workingDirectory().resolve("JRock").resolve("includes")
+        assertThat(workingDirectory().resolve("__JRock").resolve("includes")
                 .resolve("quarterly.docx.md")).doesNotExist();
     }
 
@@ -151,7 +151,7 @@ class JRockDocxIncludeTest extends JRockGuiFixture {
 
     /** The folder every include is made from. */
     private Path includes() {
-        return workingDirectory().resolve("JRock").resolve("includes");
+        return workingDirectory().resolve("__JRock").resolve("includes");
     }
 
     /** One named entry of the .docx, read back to compare a picture against. */

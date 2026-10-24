@@ -2511,8 +2511,9 @@ public final class JRockThunderbird {
     // read in that light.
     private static final String MAIL_DB = "global-messages-db.sqlite";
 
-    // JRock's own folder, where this agent writes what it hands to a model.
-    private static final String PRODUCT = "JRock";
+    // JRock's own folder, where this agent writes what it hands to a model - by the name
+    // JRock reads it under (JROCK_DIR in JRock.java), which is __JRock from 5.3.0 on.
+    private static final String PRODUCT = "__JRock";
 
     // Gloda attribute ids inside messages.jsonAttributes.
     private static final String FROM = "43";          // the sender's identity id
@@ -3685,7 +3686,7 @@ public final class JRockThunderbird {
                         + (sent.failure() == null ? "no reason given" : sent.failure()));
             }
             java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
-            if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
+            if (file == null) throw new Stop("the reply was not written to __JRock/messages/.");
             try {
                 String refined = new String(Files.readAllBytes(file),
                         StandardCharsets.UTF_8).trim();

@@ -1150,7 +1150,7 @@ public final class JRockPushToTalk {
         JRock.Sent sent = JRock.automationSend(REPLY_TIMEOUT_MS);
         if (!sent.ok()) throw new Stop(sent.failure());
         String answer = read(JRock.automationMessageFile("assistant", sent.assistant()));
-        if (answer == null) throw new Stop("the reply was not written to JRock/messages/.");
+        if (answer == null) throw new Stop("the reply was not written to __JRock/messages/.");
         return answer;
     }
 

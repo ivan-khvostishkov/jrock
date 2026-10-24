@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
  * Checks that the window says what it keeps and what its controls do.
  * <p>
  * Two promises, and the first is the one that rots. JRock saves everything into a
- * {@code JRock/} folder of the working directory - the prompt, the transcript, every
+ * {@code __JRock/} folder of the working directory - the prompt, the transcript, every
  * message, the API key, the settings, the conversions - and the Help window lists the
  * whole of it, so an operator never has to guess what can be in there. A file added to
  * that folder and left out of the list is a file nobody is told about, which is what the
@@ -50,7 +50,7 @@ class JRockExplainsTest extends JRockGuiFixture {
     private static final String FOLDER_LIST_OPENING = "Everything JRock keeps";
 
     @Test
-    @DisplayName("the Help window names every file and folder JRock/ can hold")
+    @DisplayName("the Help window names every file and folder __JRock/ can hold")
     void namesEveryFileTheJRockFolderCanHold() throws Exception {
         awaitReadyCount(1);
 
@@ -61,7 +61,7 @@ class JRockExplainsTest extends JRockGuiFixture {
 
         for (String name : everythingUnderTheJRockFolder()) {
             assertThat(help)
-                    .describedAs("JRock/" + name + ", named in the Help window")
+                    .describedAs("__JRock/" + name + ", named in the Help window")
                     .contains(name);
         }
 
@@ -93,7 +93,7 @@ class JRockExplainsTest extends JRockGuiFixture {
     }
 
     @Test
-    @DisplayName("the JRock/ label beside Configure opens the window's menu")
+    @DisplayName("the __JRock/ label beside Configure opens the window's menu")
     void theStatusLabelOpensTheWindowMenu() throws Exception {
         awaitReadyCount(1);
 
@@ -110,12 +110,12 @@ class JRockExplainsTest extends JRockGuiFixture {
     }
 
     /**
-     * Every name the application can put inside its {@code JRock/} folder, asked of the
+     * Every name the application can put inside its {@code __JRock/} folder, asked of the
      * application rather than listed here.
      * <p>
      * JRock resolves each of its files and subfolders in a no-argument method of its own
      * ({@code logsDir()}, {@code wavDir()}, and so on), so reflecting over those and
-     * keeping the ones under {@code JRock/} is the folder's contents as the code itself
+     * keeping the ones under {@code __JRock/} is the folder's contents as the code itself
      * defines them. A file added later comes with such a method, and so comes with a
      * failing test until the Help window names it too.
      */
@@ -132,7 +132,7 @@ class JRockExplainsTest extends JRockGuiFixture {
             }
             names.add(resolved.getFileName().toString());
         }
-        assertThat(names).describedAs("what JRock/ can hold").isNotEmpty();
+        assertThat(names).describedAs("what __JRock/ can hold").isNotEmpty();
         return names;
     }
 
@@ -158,7 +158,7 @@ class JRockExplainsTest extends JRockGuiFixture {
                 new GenericTypeMatcher<JLabel>(JLabel.class) {
                     @Override
                     protected boolean isMatching(JLabel label) {
-                        return "JRock/".equals(label.getText());
+                        return "__JRock/".equals(label.getText());
                     }
                 });
     }

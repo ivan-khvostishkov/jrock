@@ -687,7 +687,7 @@ public final class JRockBrowser {
                     + (sent.failure() == null ? "no reason given" : sent.failure()));
         }
         Path file = JRock.automationMessageFile("assistant", sent.assistant());
-        if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
+        if (file == null) throw new Stop("the reply was not written to __JRock/messages/.");
         String reply = textOf(file);
         if (reply == null) throw new Stop("the reply could not be read.");
         java.util.regex.Matcher found =
@@ -2151,7 +2151,7 @@ public final class JRockBrowser {
 
     // ---- The page, as Markdown -------------------------------------------------
     // The picture, through this agent's own JRock: the prompt, the include, the send, and
-    // the reply read out of JRock/messages/ - the same file the window shows, which is
+    // the reply read out of __JRock/messages/ - the same file the window shows, which is
     // what makes the answer checkable afterwards.
     private static String toMarkdown(Page page) {
         Path prompt = ownDirectory().resolve(PROMPT);
@@ -2182,7 +2182,7 @@ public final class JRockBrowser {
                     : sent.failure()));
         }
         java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
-        if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
+        if (file == null) throw new Stop("the reply was not written to __JRock/messages/.");
         try {
             String markdown = new String(Files.readAllBytes(file),
                     StandardCharsets.UTF_8).trim();

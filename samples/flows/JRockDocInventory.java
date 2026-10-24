@@ -38,7 +38,7 @@
 // names the method it is missing.
 //
 // There is nothing to instantiate, either: JRock's automation API is static, and has to
-// be. The window, the log, the JRock/ directory and the Bedrock session are one per
+// be. The window, the log, the __JRock/ directory and the Bedrock session are one per
 // process, so there is no object that could hold a second set of them. main() shows the
 // window; the automation* methods drive the one that is there.
 //
@@ -49,7 +49,7 @@
 //      Markdown with image references, exported as <document name>.docx beside it -
 //      by the same writer as "Export selected Markdown with images as DOCX...", so
 //      the pictures the answer refers to are in the DOCX. A PDF goes in as HTML, by
-//      xpdf's pdftohtml into JRock/includes/ - JRock's own folder, so nothing is
+//      xpdf's pdftohtml into __JRock/includes/ - JRock's own folder, so nothing is
 //      written beside the document and there is nothing to ask about or tidy up
 //      afterwards; an image is a one-page document and goes in as itself.
 //   2. jrock-prompt-doc-to-ascii.txt    + that DOCX, as Markdown -> the document as
@@ -488,7 +488,7 @@ public final class JRockDocInventory {
 
         // NOTHING OF PASS ONE IS LEFT TO TIDY UP. The HTML pages xpdf made of a PDF are
         // working material for the model, not copies for anybody to open, and JRock writes
-        // them into its own JRock/includes/ folder - so the document's folder holds the
+        // them into its own __JRock/includes/ folder - so the document's folder holds the
         // document and the files named after it, and nothing else this flow has to ask
         // about, rename or delete.
         if (!rename) {
@@ -868,7 +868,7 @@ public final class JRockDocInventory {
         check(JRock.automationSetPrompt(kept.toString().replaceAll("\n+$", "\n")));
     }
 
-    // The reply a send produced, read out of its own file under JRock/messages/.
+    // The reply a send produced, read out of its own file under __JRock/messages/.
     //
     // The request's file is checked and not read, which is the point of checking it: if
     // the message JRock says it sent is not on disk, the stamps do not mean what they
@@ -885,10 +885,10 @@ public final class JRockDocInventory {
     private static String reply(JRock.Sent sent) {
         if (!sent.ok()) throw new Stop(sent.failure());
         if (JRock.automationMessageFile("operator", sent.operator()) == null) {
-            throw new Stop("the request was not written to JRock/messages/.");
+            throw new Stop("the request was not written to __JRock/messages/.");
         }
         java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
-        if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
+        if (file == null) throw new Stop("the reply was not written to __JRock/messages/.");
         try {
             return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException ex) {

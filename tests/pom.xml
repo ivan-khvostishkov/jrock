@@ -97,7 +97,7 @@
           </statelessTestsetReporter>
           <!-- No environment variables are set here, and none need to be: JRock
                reads nothing from the environment. Its API key comes from
-               JRock/bedrock-key.txt in the working directory, and every test runs in
+               __JRock/bedrock-key.txt in the working directory, and every test runs in
                a throwaway directory of its own - so the key file is empty, the
                startup model-list fetch reports "(skipped - no Bedrock API key set)",
                and a developer's real key cannot be picked up by a test. -->

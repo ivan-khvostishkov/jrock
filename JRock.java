@@ -13,19 +13,20 @@
 //     rest of the session.
 //
 // Persistence (crash recovery + full local history):
-//   Everything lives under a "JRock" subfolder of the working directory.
-//   - Prompt: autosaved to JRock/jrock-prompt.txt on every keystroke (full rewrite
+//   Everything lives under a "__JRock" subfolder of the working directory (named so it
+//   cannot be mistaken for a folder of the user's own; see JROCK_DIR).
+//   - Prompt: autosaved to __JRock/jrock-prompt.txt on every keystroke (full rewrite
 //     via an atomic temp-file swap, so a crash can't corrupt it).
 //   - Conversation log + dialog: the on-screen transcript is persisted to
-//     JRock/jrock-log.txt, and each human/assistant message is also written to its
-//     own append-only file in JRock/messages/. On startup the log is restored from
+//     __JRock/jrock-log.txt, and each human/assistant message is also written to its
+//     own append-only file in __JRock/messages/. On startup the log is restored from
 //     disk so the whole session survives restarts.
 //   On startup the initial prompt is resolved as:
 //     1. If a file path is passed as a CLI arg, load it READ-ONLY and use its
 //        contents; the original file is never modified. That text is then written
 //        to the persistent file, which continues to receive autosaves. A relative
 //        path resolves against --prompts-dir when that was given.
-//     2. Else if JRock/jrock-prompt.txt exists, recover the prompt from it.
+//     2. Else if __JRock/jrock-prompt.txt exists, recover the prompt from it.
 //     3. Else use the built-in default prompt.
 //
 // Java version requirements:
@@ -59,20 +60,20 @@
 //   backend retains conversation state (stored responses, previous_response_id,
 //   etc.) server-side. We deliberately avoid that. For security and transparency
 //   JRock stores NOTHING on the backend; all history lives ONLY locally, as plain
-//   visible files in the JRock/ folder that the user fully owns and controls. This
+//   visible files in the __JRock/ folder that the user fully owns and controls. This
 //   is the opposite of a browser client, where session data can be squirreled away
 //   non-transparently in cookies, sessionStorage, IndexedDB, etc. Chat Completions
 //   is stateless: each request carries its own context (see "Extend" mode), so
 //   nothing needs to be, or is, kept on the server between calls.
 //
 // Authentication:
-//   Bearer token = your Bedrock API key, kept in JRock/bedrock-key.txt in the
+//   Bearer token = your Bedrock API key, kept in __JRock/bedrock-key.txt in the
 //   working directory - one line, nothing else. A short-term (recommended)
 //   Bedrock API key can be generated from the AWS console at:
 //   https://console.aws.amazon.com/bedrock-mantle/api-keys
 //   Put it in that file, or type it into the Configure dialog (top-left button),
 //   which writes it there. Nothing is read from the environment: the endpoint and
-//   the model live beside the key in JRock/jrock-config.txt (see "Settings
+//   the model live beside the key in __JRock/jrock-config.txt (see "Settings
 //   files"), where they can be read, edited and copied like any other file.
 //   The browser build keeps the key in the same file, in the browser's own
 //   storage, and the page's JavaScript HTTP client sends each request with the
@@ -114,7 +115,7 @@ import java.util.List;
 public class JRock {
 
     // Application version.
-    private static final String VERSION = "5.2.0";
+    private static final String VERSION = "5.3.0";
 
     // What this program is called, where it says so to a person: the name written after
     // the time on every answer's header line (see dialog), which is the one place in a
@@ -138,7 +139,7 @@ public class JRock {
     // is not spelled out cannot be reported in the log the way this one is.
     //
     // Endpoint/model start from the built-in defaults, are replaced by whatever the
-    // working folder's JRock/jrock-config.txt holds (see adoptSettingsOfWorkingDir),
+    // working folder's __JRock/jrock-config.txt holds (see adoptSettingsOfWorkingDir),
     // and can be changed at runtime in the Configure dialog.
     private static String ENDPOINT = DEFAULT_ENDPOINT;
     // Where ENDPOINT came from, phrased for the startup log; null for the built-in
@@ -232,7 +233,7 @@ public class JRock {
     // applied without a request to the network (see initSession).
     private static volatile boolean modelsStale = true;
 
-    // The Bedrock API key in effect: read from JRock/bedrock-key.txt at startup and
+    // The Bedrock API key in effect: read from __JRock/bedrock-key.txt at startup and
     // whenever the working folder changes, or set by the Configure dialog - which
     // writes it to that file as well. Null means there is none, which is normal in
     // the browser, where the key stays in the page.
@@ -1003,8 +1004,27 @@ public class JRock {
         log.gray("Model card: none - using default config (Chat Completions on /v1)");
         return null;
     }
-    // All JRock files live under a "JRock" subfolder of the working directory.
-    private static Path jrockDir()         { return workingDir.resolve("JRock"); }
+    // All JRock files live under a "__JRock" subfolder of the working directory.
+    //
+    // THE TWO UNDERSCORES ARE THE POINT. The working directory is the user's own folder -
+    // their documents, their scans, their project - and a subfolder called "JRock" sat in
+    // the middle of it looking like one more of their own, sorted in among them and easy
+    // to lose. "__JRock" sorts to the top of every listing, reads as something the tool
+    // put there rather than something they made, and cannot be mistaken for their work:
+    // the trick __MACOSX plays in a zip, for the same reason.
+    //
+    // Not ".jrock", deliberately: a leading dot makes the folder hidden on macOS and
+    // Linux and in most file dialogs, and this is a folder the user is invited to open,
+    // read, copy and back up (see folderNotes). Hiding it would be the opposite of what
+    // it is for.
+    static final String JROCK_DIR = "__JRock";
+
+    // What the folder was called up to version 5.2.0, kept for one job only: finding it
+    // at startup and renaming it (see migrateLegacyDir).
+    static final String LEGACY_JROCK_DIR = "JRock";
+
+    private static Path jrockDir()         { return workingDir.resolve(JROCK_DIR); }
+    private static Path legacyJrockDir()   { return workingDir.resolve(LEGACY_JROCK_DIR); }
     private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
@@ -1033,13 +1053,13 @@ public class JRock {
 
     // The API key to sign a request with, or null when there is none. Null means the
     // same thing on every runtime, the browser included: JRock keeps its key in the
-    // working folder's JRock/bedrock-key.txt everywhere, so there is nowhere that a
+    // working folder's __JRock/bedrock-key.txt everywhere, so there is nowhere that a
     // missing key is somebody else's key instead.
     private static String resolveApiKey() {
         return (apiKey != null && !apiKey.isBlank()) ? apiKey : null;
     }
 
-    // ---- Settings files (JRock/bedrock-key.txt, JRock/jrock-config.txt) -----
+    // ---- Settings files (__JRock/bedrock-key.txt, __JRock/jrock-config.txt) -----
     // Nothing is read from the environment. Settings live in the working folder, in
     // files the user can open, edit, copy and back up - the same promise the log and
     // the prompt make. An environment variable is the opposite: set in a shell that is
@@ -1115,7 +1135,7 @@ public class JRock {
     // How the include dialog, Include directory and the automations take the file types
     // that have more than one reading, so the dialog offers each type exactly once (see
     // showIncludeDialog). A PDF as "images" (one page image per page, by the PDF
-    // engine), "html" (an xpdf HTML folder under JRock/includes/) or "text" (an xpdf .txt
+    // engine), "html" (an xpdf HTML folder under __JRock/includes/) or "text" (an xpdf .txt
     // there); absent is "images", and the browser, which has no xpdf, always reads images.
     // An RTF as "markdown" (converted) or "text" (its markup, as it is); absent is
     // "markdown".
@@ -1131,7 +1151,7 @@ public class JRock {
     // it is: true or false, and absent is false (see includeOne).
     private static final String CONFIG_MARKDOWN_REFS = "include-markdown-references";
     private static volatile boolean includeMarkdownRefs = false;
-    // Whether an include is made from a processed copy under JRock/includes/ - a picked
+    // Whether an include is made from a processed copy under __JRock/includes/ - a picked
     // file copied there, an image downscaled to Images DPI on the way - and whether a
     // conversion may keep its result in a subfolder of it at all: true or false, and
     // absent is true (see includeFile).
@@ -1142,7 +1162,7 @@ public class JRock {
     // warning: true or false, and absent is true (see verifyIncludes).
     private static final String CONFIG_MISSING_STOPS_SEND = "include-missing-stops-send";
     private static volatile boolean missingIncludeStopsSend = true;
-    // Whether a prompt answered before is answered again from JRock/messages/ rather
+    // Whether a prompt answered before is answered again from __JRock/messages/ rather
     // than by Bedrock: true or false, and absent is true (see the Local prompt cache).
     private static final String CONFIG_PROMPT_CACHE = "local-prompt-cache";
     private static volatile boolean promptCacheOn = true;
@@ -1200,13 +1220,13 @@ public class JRock {
         String stored = readFileQuietly(configFile());
         if (stored == null) {
             saveConfigQuietly();
-            settingsSource = "JRock/jrock-config.txt (created with the current settings)";
+            settingsSource = "__JRock/jrock-config.txt (created with the current settings)";
         } else {
             java.util.Map<String, String> settings = parseConfig(stored);
             String endpoint = settings.get(CONFIG_ENDPOINT);
             if (endpoint != null && !endpoint.isEmpty()) {
                 ENDPOINT = endpoint;
-                endpointSource = "from JRock/jrock-config.txt";
+                endpointSource = "from __JRock/jrock-config.txt";
                 applyRegionOfEndpoint();
             }
             String model = settings.get(CONFIG_MODEL);
@@ -1238,7 +1258,7 @@ public class JRock {
                     !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_MISSING_STOPS_SEND)));
             promptCacheOn = !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROMPT_CACHE)));
             requestExtra = trimmed(settings.get(CONFIG_REQUEST_EXTRA));
-            settingsSource = "JRock/jrock-config.txt";
+            settingsSource = "__JRock/jrock-config.txt";
         }
         adoptKeyOfWorkingDir();
     }
@@ -1250,15 +1270,15 @@ public class JRock {
         if (stored == null) {
             atomicWriteQuietly(keyFile(), "");
             apiKey = null;
-            apiKeySource = "none yet - put one in JRock/bedrock-key.txt, "
+            apiKeySource = "none yet - put one in __JRock/bedrock-key.txt, "
                     + "or type it into Configure";
             return;
         }
         String key = stored.trim();
         apiKey = key.isEmpty() ? null : key;
         apiKeySource = key.isEmpty()
-                ? "none yet - JRock/bedrock-key.txt is empty, and Configure fills it in"
-                : "loaded from JRock/bedrock-key.txt";
+                ? "none yet - __JRock/bedrock-key.txt is empty, and Configure fills it in"
+                : "loaded from __JRock/bedrock-key.txt";
     }
 
     // Writes the key to the working folder, where the next start reads it from. One
@@ -1442,6 +1462,144 @@ public class JRock {
     private static final String CLI_FLAG = "--cli";
     private static final String INCLUDE_FLAG = "--include";
 
+    // ---- The folder's old name -------------------------------------------------
+    // Up to 5.2.0 the folder was called JRock/; from 5.3.0 it is __JRock/ (see JROCK_DIR).
+    // This is the one place that knows both, and it runs before anything reads or writes a
+    // file: a folder left under the old name holds the log, the transcript, the key and
+    // the settings, and starting beside it under the new name would look to the user like
+    // every one of those had been lost.
+    //
+    // SO NOTHING IS READ UNTIL THE FOLDER HAS ONE NAME. The user is told what has to
+    // happen and offered the rename; if it is declined or it fails, JRock stops rather
+    // than starts empty. Stopping is recoverable - the folder is still there, and a
+    // rename in Explorer is all it takes - while a session started in the wrong folder
+    // writes a new log, a new config and a new key file around the old ones, and now
+    // there are two of everything to sort out by hand.
+    //
+    // Two callers, and `atStartup` is which: the start of a session, where the answer
+    // decides whether there is a session at all, and the Configure dialog taking on
+    // another folder, where it decides whether that folder is taken on. The work is the
+    // same either way; only what is said about the consequence differs.
+    //
+    // Returns true when it is safe to go on: there was no old folder, or there is now
+    // only the new one.
+    private static boolean migrateLegacyDir(boolean atStartup) {
+        Path legacy = legacyJrockDir();
+        if (!Files.isDirectory(legacy)) return true;      // the usual case, and silent
+        Path current = jrockDir();
+
+        // An empty JRock/ is nobody's data - an older version that got as far as creating
+        // the folder, or an Explorer window left open in it. It goes, with a line to say
+        // so, rather than a dialog asking about nothing.
+        if (isEmptyDir(legacy)) {
+            try {
+                Files.delete(legacy);
+                System.out.println("Removed the empty " + legacy + " left by an older "
+                        + "version; this one keeps its files in " + JROCK_DIR + "/.");
+                return true;
+            } catch (IOException ex) {
+                // An empty folder that will not go is untidy, not dangerous, and there is
+                // nothing below it to lose either way: left alone when the new folder is
+                // already there, and otherwise renamed into it like any other, below.
+                if (Files.exists(current)) return true;
+            }
+        }
+
+        // Both folders, both with something in them: this one cannot be guessed at. A
+        // rename would have to merge, and a merge of two logs, two configs and two keys
+        // is a decision about which is yours - so it is handed back to the user whole.
+        if (Files.exists(current)) {
+            String both = "Two JRock folders are in\n" + workingDir + "\n\n"
+                    + LEGACY_JROCK_DIR + "\\ - the name used up to version 5.2.0\n"
+                    + JROCK_DIR + "\\ - the name this version uses\n\n"
+                    + "Only the second one is read, so anything you want to keep from the "
+                    + "first has to be moved into it by hand. Move or delete "
+                    + LEGACY_JROCK_DIR + "\\, then "
+                    + (atStartup ? "start JRock again." : "set this folder again.");
+            refuse("Two JRock folders", both);
+            return false;
+        }
+
+        // One folder, under the old name, and nothing in the way of renaming it.
+        if (!offerRename(legacy, current, atStartup)) return false;
+        try {
+            Files.move(legacy, current);
+            System.out.println("Renamed " + legacy + " to " + current.getFileName()
+                    + " - everything in it is where this version looks for it.");
+            return true;
+        } catch (IOException | RuntimeException ex) {
+            // The usual reason is a file in there being held open - an editor on the log,
+            // an Explorer window inside the folder, a sync client mid-upload - and every
+            // one of those is fixed by the user in a second and nothing like it is fixed
+            // by retrying. So: what failed, what to do, and stop.
+            refuse("Could not rename the folder",
+                    "Renaming\n" + legacy + "\nto\n" + current + "\nfailed:\n"
+                    + ex.getMessage() + "\n\nUsually something in there is open - an "
+                    + "editor on the log, an Explorer window inside the folder, a sync "
+                    + "client. Close it and "
+                    + (atStartup ? "start JRock again" : "set the folder again")
+                    + ", or rename the folder yourself: it only has to be called "
+                    + JROCK_DIR + ".\n\nNothing has been changed, and nothing in the "
+                    + "folder is lost.");
+            return false;
+        }
+    }
+
+    // Asks whether to do the rename, and says plainly what it is for. True to go ahead.
+    //
+    // In a window it is a dialog with the rename as the default button, because that is
+    // what all but a handful of users want and the other answer is one keystroke away.
+    // Without a window (--cli, --include) it is done and reported: those two are run from
+    // a script or a right-click entry, where there is nobody to answer a question and a
+    // prompt on stdin would hang a job that was meant to finish on its own.
+    private static boolean offerRename(Path legacy, Path current, boolean atStartup) {
+        String what = "JRock keeps its files in a folder named " + JROCK_DIR
+                + " from version 5.3.0 on, instead of " + LEGACY_JROCK_DIR
+                + " - a name that cannot be taken for a folder of your own.";
+        if (java.awt.GraphicsEnvironment.isHeadless()) {
+            System.out.println(what);
+            System.out.println("Renaming " + legacy + " to " + JROCK_DIR + " ...");
+            return true;
+        }
+        Object[] options = {
+            "Rename it now",
+            atStartup ? "Quit - I will rename it myself" : "Cancel - I will rename it myself"
+        };
+        int choice = javax.swing.JOptionPane.showOptionDialog(null,
+                what + "\n\nThe folder to rename:\n" + legacy + "\n\nTo:\n" + current
+                + "\n\nJRock can do it now - nothing inside the folder is touched, only "
+                + "the folder's own name - or you can rename it yourself in Explorer. "
+                + "Either way JRock will not "
+                + (atStartup ? "start" : "work in that folder")
+                + " until it is done: the log, the transcript, the API key and your "
+                + "settings are all in there, and working beside them would look as "
+                + "though they had gone.",
+                "Rename the JRock folder",
+                javax.swing.JOptionPane.YES_NO_OPTION,
+                javax.swing.JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+        if (choice == javax.swing.JOptionPane.YES_OPTION) return true;
+        // Closing the dialog is the same answer as the second button: don't touch it.
+        // Said again on the way out, because at startup the window never appears, and an
+        // unexplained nothing looks like a crash.
+        refuse("Rename the JRock folder",
+                (atStartup ? "JRock has not started" : "The folder has not been changed")
+                + ", and nothing has been changed on disk.\n\nRename\n" + legacy
+                + "\nto\n" + JROCK_DIR + "\nand "
+                + (atStartup ? "start JRock again." : "set the folder again."));
+        return false;
+    }
+
+    // How JRock says it will not work in a folder: one message, in a dialog where there is
+    // a screen and on stdout where there is not. At startup there is no log yet - the log
+    // lives in the folder this is about - so this is the whole of what the user gets to
+    // read, and it has to carry the fix as well as the problem.
+    private static void refuse(String title, String message) {
+        System.out.println(message);
+        if (java.awt.GraphicsEnvironment.isHeadless()) return;
+        javax.swing.JOptionPane.showMessageDialog(null, message, title,
+                javax.swing.JOptionPane.WARNING_MESSAGE);
+    }
+
     // ---- No window at all ------------------------------------------------------
     // JRock as a shell command: the same conversation, the same folder, the same log and
     // the same includes - and no Swing window anywhere.
@@ -1463,6 +1621,11 @@ public class JRock {
     private static int cli(String mode, String modeArg, String sourceArg) {
         System.setProperty("java.awt.headless", "true");
         cliEcho = true;
+        // Headless and first, for the same reason the window does it first: the folder has
+        // to answer to one name before a single file in it is read. Headless means the
+        // rename is done rather than offered (see offerRename), and a failure is 3 and a
+        // line on stdout rather than a dialog nobody is there to close.
+        if (!migrateLegacyDir(true)) return 3;
         JTextArea input = new JTextArea();
         JTextPane pane = new JTextPane();
         LogView log = new LogView(pane);
@@ -1486,7 +1649,7 @@ public class JRock {
         if (recovered != null) {
             input.setText(recovered);
             note = sourceArg != null ? "file named on the command line: " + sourceArg
-                                     : "recovered persistent file: JRock/jrock-prompt.txt";
+                                     : "recovered persistent file: __JRock/jrock-prompt.txt";
         }
         initSession(log, input, note);
         input.setText("");
@@ -1775,7 +1938,7 @@ public class JRock {
             + " Region settings > Administrative > Change system locale... > \"Beta: Use"
             + " Unicode UTF-8 for worldwide language support\" and restart Windows";
 
-    // Applies --working-dir, which roots JRock's own files - JRock/, its settings, its
+    // Applies --working-dir, which roots JRock's own files - __JRock/, its settings, its
     // key, its log - in a named folder instead of the one the process happens to have
     // been started in.
     //
@@ -1949,7 +2112,7 @@ public class JRock {
     // The third "role" - and the only one that is never a dialog message. The clock
     // (see clockMessage) is sent with a request but is not part of the conversation:
     // it is not shown, not logged as a turn, and not resent by extend mode. It exists
-    // here solely so its file in JRock/messages/ is named like the other two.
+    // here solely so its file in __JRock/messages/ is named like the other two.
     private static final String ROLE_CLOCK = "CLOCK";
 
     // Filesystem layout for persistence (resolved against workingDir via
@@ -2104,7 +2267,7 @@ public class JRock {
     //                   main log stores only a reference: the header line + "@<stamp>".
     //
     // "Dialog only" mode hides GRAY entries, leaving a clean transcript of just
-    // the headers + dialog, which matches `cat JRock/messages/*.txt`.
+    // the headers + dialog, which matches `cat __JRock/messages/*.txt`.
     private static final class LogView {
         private static final class Entry {
             final boolean dialog;      // true = dialog message, false = gray inline
@@ -2220,7 +2383,7 @@ public class JRock {
 
         // ---- Which file each half of the last exchange went into ------------
         // The dump in the log is masked - the prompt, the reply and every attachment
-        // are hashes in it - and the files under JRock/messages/ are not. So the two
+        // are hashes in it - and the files under __JRock/messages/ are not. So the two
         // headers name them: "--- raw request < 20260924-004543-348-operator.txt ---"
         // is one glance from the log line to the file that holds that request's text
         // in full, instead of a folder to be searched by the timestamp of a send.
@@ -2718,9 +2881,9 @@ public class JRock {
         // App identity + local date/time in the user's locale/format.
         log.gray("JRock version " + VERSION + " - " + humanNow());
         if (hadLog) {
-            log.gray("Loaded previous log from JRock/jrock-log.txt");
+            log.gray("Loaded previous log from __JRock/jrock-log.txt");
         } else {
-            log.gray("New log file created: JRock/jrock-log.txt");
+            log.gray("New log file created: __JRock/jrock-log.txt");
         }
         // The running total of every cost line in the log (see costLine): all the
         // sessions since it was last cleared, at the prices their model cards state.
@@ -2731,7 +2894,7 @@ public class JRock {
                 + (priced == 0 ? "0" : usd(pastCosts[0], shapeFor(pastCosts[0])))
                 + " over " + priced + " priced request" + (priced == 1 ? "" : "s")
                 + " (model-card prices; Clear log starts it again from $0)");
-        log.gray("Messages also stored in JRock/messages/ directory.");
+        log.gray("Messages also stored in __JRock/messages/ directory.");
         syncPromptCache(log);
 
         log.gray("HTTP transport: " + http().describe()
@@ -2810,7 +2973,7 @@ public class JRock {
         if (promptSourceNote != null) {
             log.gray("Prompt source: " + promptSourceNote);
         }
-        log.gray("Autosaving prompt to JRock/jrock-prompt.txt");
+        log.gray("Autosaving prompt to __JRock/jrock-prompt.txt");
         // The includes the log and the prompt refer to, known again, so a conversation
         // goes on after a restart without attaching every file again.
         reloadIncludes(input, log, restored, reloadRequests());
@@ -2932,6 +3095,15 @@ public class JRock {
     }
 
     private static void createAndShowGui(String sourceArg) {
+        // Before the window, because it is about the folder the window is made from: a
+        // JRock/ left over from 5.2.0 is renamed to __JRock/ (see migrateLegacyDir), and
+        // if that cannot be done JRock stops here with the dialog that says why. No
+        // window, no log, nothing written - the folder is untouched and still renameable
+        // by hand.
+        if (!migrateLegacyDir(true)) {
+            System.exit(3);
+            return;
+        }
         JFrame frame = new JFrame();
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         applyWindowIdentity(frame);
@@ -2954,7 +3126,7 @@ public class JRock {
         output.setMargin(new java.awt.Insets(8, 8, 8, 8));
         LogView log = new LogView(output);
 
-        // Top bar: [Configure] [JRock/ v] on the left; [Dialog only] [Clear log] on the
+        // Top bar: [Configure] [__JRock/ v] on the left; [Dialog only] [Clear log] on the
         // right.
         JButton configure = new JButton("Configure");
         configure.setToolTipText("Working directory, API key, endpoint, model");
@@ -2962,7 +3134,7 @@ public class JRock {
                 + "prompts directory, the Bedrock API key, the endpoint and the "
                 + "model, and every setting that applies to a send - on four tabs, with "
                 + "a note on each row behind the Help button in there. What you change is "
-                + "written to JRock/jrock-config.txt in the working directory, so the "
+                + "written to __JRock/jrock-config.txt in the working directory, so the "
                 + "next start comes up the way you left it, and another folder can be set "
                 + "up differently.");
         // (Listener wired below, once `input` exists.)
@@ -2971,7 +3143,7 @@ public class JRock {
         // into, and the caret beside it says it opens a menu - what that folder holds,
         // the backup and the restore, the duplex merge and the window's own items (see
         // windowMenu below).
-        javax.swing.JLabel folderStatus = new javax.swing.JLabel("JRock/");
+        javax.swing.JLabel folderStatus = new javax.swing.JLabel(JROCK_DIR + "/");
         folderStatus.setFont(folderStatus.getFont().deriveFont(java.awt.Font.PLAIN));
         folderStatus.setForeground(java.awt.Color.GRAY);
         folderStatus.setToolTipText("Everything JRock saves is in this folder - click for "
@@ -2990,16 +3162,16 @@ public class JRock {
                 + "nothing else - your messages and the model's answers, under their "
                 + "headers. The gray lines go: what was called, what an include was made "
                 + "from, the tokens and what they cost, every warning. Nothing is lost by "
-                + "hiding them - untick it and they are all back, and JRock/jrock-log.txt "
+                + "hiding them - untick it and they are all back, and __JRock/jrock-log.txt "
                 + "has them either way (Ctrl+D).");
 
         JButton clear = new JButton("Clear log");
         clear.addActionListener(e -> clearLogConfirmed(frame, log));
-        clear.setToolTipText("Empty the log window and JRock/jrock-log.txt; the messages "
+        clear.setToolTipText("Empty the log window and __JRock/jrock-log.txt; the messages "
                 + "themselves are kept");
-        explains(clear, "Clear log", "Empties this window and JRock/jrock-log.txt, to "
+        explains(clear, "Clear log", "Empties this window and __JRock/jrock-log.txt, to "
                 + "start a session with a clean page. It does not touch the per-message "
-                + "files in JRock/messages/: every message you sent and every answer you "
+                + "files in __JRock/messages/: every message you sent and every answer you "
                 + "were charged for is still there, so clearing the log costs you "
                 + "nothing. If the log has changed since you last saved a copy of it "
                 + "(Ctrl+Shift+S), you are asked first.");
@@ -3042,7 +3214,7 @@ public class JRock {
             String fromPersist = readFileQuietly(promptFile());
             if (fromPersist != null) {
                 initialPrompt = fromPersist;
-                promptSource = "recovered persistent file: JRock/jrock-prompt.txt";
+                promptSource = "recovered persistent file: __JRock/jrock-prompt.txt";
             } else {
                 initialPrompt = PROMPT;
                 promptSource = "default";
@@ -3121,7 +3293,7 @@ public class JRock {
                 + "them. Unticked, the model is told nothing about the time.\n\n"
                 + "This is not the date the log prints after a header, which History turns "
                 + "on: that one is written for you to read and is never sent. Each clock "
-                + "that is sent is saved as its own JRock/messages/<date>-<time>-clock.txt, "
+                + "that is sent is saved as its own __JRock/messages/<date>-<time>-clock.txt, "
                 + "so the record shows exactly what the model was told.");
 
         JButton send = new JButton("Send (Ctrl-Enter)");
@@ -3131,7 +3303,7 @@ public class JRock {
                 + "@img, @txt and @audio token in the prompt is checked first and the file "
                 + "behind it sent with the message; one that is missing stops the send, "
                 + "which is a checkbox in Configure. The prompt, the answer and the clock "
-                + "each get their own file in JRock/messages/, and the gray lines that "
+                + "each get their own file in __JRock/messages/, and the gray lines that "
                 + "follow say what was called, what it cost, and where it went. The "
                 + "button is held while a send - or a backup - is running.");
 
@@ -3243,7 +3415,7 @@ public class JRock {
                     ? cachedAnswer(prompt, cachedFrom) : null;
             if (cached != null) {
                 log.gray("Local prompt cache: this prompt was answered before - reusing "
-                        + "JRock/messages/" + cachedFrom[0].getFileName()
+                        + "__JRock/messages/" + cachedFrom[0].getFileName()
                         + ", with no call to Bedrock.");
                 log.gray("");
                 log.assistant(cached, extend);
@@ -3456,7 +3628,7 @@ public class JRock {
                     + "nothing is being heard. The microphone it uses, and whether a "
                     + "recording is included as @audio or typed into the prompt as text, "
                     + "are on Configure's Audio tab; a recording is kept as "
-                    + "JRock/wav/recording-<date>-<time>.wav.");
+                    + "__JRock/wav/recording-<date>-<time>.wav.");
             boolean[] lit = { true };
             mic.setIcon(new javax.swing.Icon() {
                 @Override public void paintIcon(java.awt.Component c, java.awt.Graphics g,
@@ -3961,7 +4133,7 @@ public class JRock {
         addMenuItem(promptMenu, "Include directory...",
                 () -> showIncludeDirectoryDialog(frame, input, log, extendMode.isSelected()));
         // The same include for a file that is not on this machine: the address is
-        // fetched into JRock/urls/ and included from there, as text or as a picture
+        // fetched into __JRock/urls/ and included from there, as text or as a picture
         // according to what it answered with (see fetchUrl).
         addMenuItem(promptMenu, "Fetch URL...",
                 () -> showFetchUrlDialog(frame, input, log, extendMode.isSelected()));
@@ -4054,7 +4226,7 @@ public class JRock {
         // same everywhere there is something to paste into, or it is not a rule.
         pasteThroughJRock(input, log);
 
-        // The window's own menu, which hangs from the JRock/ status label beside
+        // The window's own menu, which hangs from the __JRock/ status label beside
         // Configure: what the JRock folder holds, the duplex merge, then the backup pair;
         // in the browser, also show/hide the page's own header and footer; on Windows,
         // install/uninstall the "Open JRock here" folder context-menu entry and the agent
@@ -4590,7 +4762,7 @@ public class JRock {
     // worse: a second, headless code path that sends requests JRock's own window never
     // sees, or a robot clicking at screen coordinates. These methods go through the
     // very same code the menu items and the Send button go through, so the
-    // conversions, the log lines, the JRock/messages/ files and the token bill are the
+    // conversions, the log lines, the __JRock/messages/ files and the token bill are the
     // ones the application always produces - and the log is the record of the
     // automation as much as of the conversation.
     //
@@ -4600,7 +4772,7 @@ public class JRock {
     // compiles it in memory against that class path, so these are ordinary typed calls
     // the compiler checks, and a jar too old to have one of them is a compile error
     // naming the method rather than a surprise halfway through a document. Static
-    // because there is nothing to instantiate: the window, the log, the JRock/
+    // because there is nothing to instantiate: the window, the log, the __JRock/
     // directory and the session are one per process.
     //
     // Plain also because the results are read by scripts. A reason travels with every
@@ -4618,7 +4790,7 @@ public class JRock {
      *
      * <p>It exists to be READ. The calls themselves are static methods ({@code
      * JRock.automationSetPrompt(...)}), because there is nothing to instantiate - one
-     * window, one log, one {@code JRock/} folder per process - and twenty-six static
+     * window, one log, one {@code __JRock/} folder per process - and twenty-six static
      * methods spread over a thousand lines of this file are a surface nobody can see the
      * shape of. Here they are a list: what there is, in order of use, on one screen. The
      * README's cheat sheet names this interface so that the list and the documentation
@@ -4671,13 +4843,13 @@ public class JRock {
         /** Includes an absolute path as Ctrl+I would - extension and folder settings decide. Null, or why not. */
         String automationInclude(Path file);
 
-        /** Fetches a URL into the prompt, saved under JRock/urls/. Null, or why not. */
+        /** Fetches a URL into the prompt, saved under __JRock/urls/. Null, or why not. */
         String automationFetchUrl(String url);
 
         /** Ctrl+Enter, and waits for the answer. WHAT IT CAME TO: see Sent. */
         Sent automationSend(long timeoutMillis);
 
-        /** THE ABSOLUTE PATH of one JRock/messages/ file, or null when there is no such file. */
+        /** THE ABSOLUTE PATH of one __JRock/messages/ file, or null when there is no such file. */
         Path automationMessageFile(String role, LocalDateTime stamp);
 
         /** The log's selection as a DOCX, left selected. Null, or why not. */
@@ -5296,7 +5468,7 @@ public class JRock {
             }
         }
         if (resolveApiKey() == null) {
-            return "no Bedrock API key is set. Put one in JRock/bedrock-key.txt, or "
+            return "no Bedrock API key is set. Put one in __JRock/bedrock-key.txt, or "
                     + "type it into the Configure dialog, and run this again.";
         }
         return null;
@@ -5393,15 +5565,15 @@ public class JRock {
     //   "audio"  a recording (wav, mp3), as an input_audio part
     //   "pdf"    a PDF, rasterised by Ghostscript into one page image per page
     //   "pdfhtml" a PDF, converted by xpdf's pdftohtml into a folder under
-    //            JRock/includes/, then that folder - always with a Markdown reference
+    //            __JRock/includes/, then that folder - always with a Markdown reference
     //            above each token
-    //   "pdftext" a PDF, converted by xpdf's pdftotext into a .txt under JRock/includes/
+    //   "pdftext" a PDF, converted by xpdf's pdftotext into a .txt under __JRock/includes/
     //   "rtf"    an RTF, converted to Markdown text
     //   "docx"   a DOCX, converted to Markdown text with its pictures beside it
     //   "xlsx"   an XLSX, converted to one CSV per sheet
     //
     // Markdown references and processed copies follow the Configure dialog, as they do
-    // for an include by hand: with copies off, a conversion into JRock/includes/ is refused.
+    // for an include by hand: with copies off, a conversion into __JRock/includes/ is refused.
     //
     // Blocks for as long as the conversion takes, which for a long PDF is minutes.
     //
@@ -5416,7 +5588,7 @@ public class JRock {
      * <p>This is what a caller wants nearly always. A PDF goes in as images, as an xpdf
      * HTML folder or as xpdf text according to <em>Include a PDF as</em> in Configure; an
      * RTF as Markdown or as its markup; a picture with or without the Markdown reference
-     * line; each of them from a copy under {@code JRock/includes/} or where it lies. Those
+     * line; each of them from a copy under {@code __JRock/includes/} or where it lies. Those
      * are settings of the folder, and an agent working in a folder should not have to
      * repeat them in its own source.
      *
@@ -5471,7 +5643,7 @@ public class JRock {
 
     // Fetches one address and inserts it at the end of the prompt, exactly as Fetch URL
     // (Ctrl+U) does: the "[](url)" link, and under it the @txt or @img token of what came
-    // back, saved under JRock/urls/. Returns null, or why nothing was inserted - the
+    // back, saved under __JRock/urls/. Returns null, or why nothing was inserted - the
     // reason the dialog would have shown by hand. Blocks for as long as the server takes.
     //
     // Any http or https address is fetched, as by hand; which addresses an agent should
@@ -5508,7 +5680,7 @@ public class JRock {
     //   [2] the stamp of the reply's message file, or null
     //   [3] why it failed, or null
     //
-    // A stamp is what automationMessageFile turns into a path under JRock/messages/.
+    // A stamp is what automationMessageFile turns into a path under __JRock/messages/.
     // Both are compared with what was there before the send, so a step that logged no
     // message of a kind reports null for it rather than the previous turn's file.
     //
@@ -5630,7 +5802,7 @@ public class JRock {
         }
     }
 
-    // The file one of a send's stamps names, under JRock/messages/, as an absolute path
+    // The file one of a send's stamps names, under __JRock/messages/, as an absolute path
     // - or null when the stamp is not a stamp, the role is not a role, or the file is
     // not there. role is "operator" for the request and "assistant" for the reply,
     // which is what those files are called.
@@ -7069,7 +7241,7 @@ public class JRock {
         pdfModeF.setFont(pdfModeF.getFont().deriveFont(java.awt.Font.PLAIN));
         pdfModeF.setToolTipText("Page images: one picture per page, by Ghostscript (PDF.js "
                 + "in the browser). HTML folder or Text: xpdf's pdftohtml or pdftotext, "
-                + "written under JRock/includes/ under the PDF's whole name - nothing is "
+                + "written under __JRock/includes/ under the PDF's whole name - nothing is "
                 + "asked and no document folder is written into.");
         javax.swing.JPanel pdfModeRow = new javax.swing.JPanel(new BorderLayout(12, 0));
         pdfModeRow.add(pdfModeF, BorderLayout.WEST);
@@ -7089,13 +7261,13 @@ public class JRock {
                 + "[Text: ...](notes.txt) for anything else. A model reads it as the "
                 + "file's place in the text, and the DOCX export places a picture there.");
         javax.swing.JCheckBox cacheF = new javax.swing.JCheckBox(
-                "Local prompt cache: answer a prompt sent before from JRock/messages/",
+                "Local prompt cache: answer a prompt sent before from __JRock/messages/",
                 promptCacheOn);
         cacheF.setName("promptCacheOn");
         cacheF.setFont(cacheF.getFont().deriveFont(java.awt.Font.PLAIN));
         cacheF.setToolTipText("A prompt identical to one answered before - same text, same "
                 + "included files - gets that answer again, with no call to Bedrock. Every "
-                + "file in JRock/messages/ counts: delete the ones whose answers should not "
+                + "file in __JRock/messages/ counts: delete the ones whose answers should not "
                 + "be reused. Not for a prompt that goes with History's earlier messages.");
         javax.swing.JCheckBox missingF = new javax.swing.JCheckBox(
                 MISSING_STOPS_SEND_LABEL, missingIncludeStopsSend);
@@ -7106,14 +7278,14 @@ public class JRock {
                 + "Off: the send goes, with a warning, and that file's token is sent as "
                 + "text.");
         javax.swing.JCheckBox copiesF = new javax.swing.JCheckBox(
-                "Include from processed copies in JRock/includes/", includeProcessedCopies);
+                "Include from processed copies in __JRock/includes/", includeProcessedCopies);
         copiesF.setName("includeProcessedCopies");
         copiesF.setFont(copiesF.getFont().deriveFont(java.awt.Font.PLAIN));
-        copiesF.setToolTipText("Each picked file is copied into JRock/includes/ and "
+        copiesF.setToolTipText("Each picked file is copied into __JRock/includes/ and "
                 + "included from there - an image downscaled to Images DPI on the way, so "
                 + "not always byte for byte - and conversions keep their results in its "
                 + "subfolders. Off: files are included where they are, and a PDF, RTF, DOCX "
-                + "or XLSX that needs converting into JRock/includes/ is refused.");
+                + "or XLSX that needs converting into __JRock/includes/ is refused.");
         // Autobackup, on a line of its own. The checkbox says what it is in its own
         // label, so the left column of its row stays empty rather than repeating it.
         javax.swing.JCheckBox autoBackupF =
@@ -7220,13 +7392,13 @@ public class JRock {
         // own to go, so they have stopped being rows at all.
         addRow(fileTypes, c, row++, "", narrow(fileNote("Every include - the copy of the "
                 + "file picked, and whatever a conversion made of it - is written to "
-                + "JRock/includes/, named after the file it came from. A fetched URL is "
-                + "saved in JRock/urls/ and included from there.", noteW)));
+                + "__JRock/includes/, named after the file it came from. A fetched URL is "
+                + "saved in __JRock/urls/ and included from there.", noteW)));
         // In a wrapper, so the layout's horizontal fill cannot stretch the note past the
         // width it was wrapped to and off the edge of the dialog.
         addRow(fileTypes, c, row++, "", narrow(
                 fileNote("* A PDF, RTF, DOCX or XLSX has to be converted, and needs "
-                + "\"Include from processed copies in JRock/includes/\" on the General tab "
+                + "\"Include from processed copies in __JRock/includes/\" on the General tab "
                 + "to have somewhere to write the result. With it off those four are "
                 + "refused, and everything else is included where it already is.",
                 noteW)));
@@ -7256,16 +7428,16 @@ public class JRock {
             // Only the desktop path has the audio to save: in the browser the voice is
             // the page's own and nothing of it comes back to be written down.
             if (!isCheerpJ()) {
-                addRow(audio, c, row++, "", where("JRock/wav/narration-<date>-<time>.wav"));
+                addRow(audio, c, row++, "", where("__JRock/wav/narration-<date>-<time>.wav"));
             }
         }
         if (micF != null) {
             addRow(audio, c, row++, "Record from:", micF);
-            addRow(audio, c, row++, "", where("JRock/wav/recording-<date>-<time>.wav"));
+            addRow(audio, c, row++, "", where("__JRock/wav/recording-<date>-<time>.wav"));
         }
         if (transcribeF != null) {
             addRow(audio, c, row++, "", transcribeF);
-            addRow(audio, c, row++, "", where("JRock/wav/transcribe-<date>-<time>.wav"));
+            addRow(audio, c, row++, "", where("__JRock/wav/transcribe-<date>-<time>.wav"));
         }
         if (alwaysOnF != null) addRow(audio, c, row++, "", alwaysOnF);
 
@@ -7352,8 +7524,17 @@ public class JRock {
             try {
                 Files.createDirectories(newDir);
                 workingDir = newDir;
-                // Best-effort: also update user.dir so relative paths elsewhere align.
-                System.setProperty("user.dir", newDir.toString());
+                // A folder last used by 5.2.0 or earlier keeps its files in JRock/, and
+                // this is the moment to rename it - before the lines below adopt that
+                // folder's settings and its log. Declined or failed, the move does not
+                // happen at all: better to stay where we were than to work in a folder
+                // whose settings and key are sitting in a folder we are not reading.
+                if (!migrateLegacyDir(false)) {
+                    workingDir = dirAtOpen;
+                } else {
+                    // Best-effort: also update user.dir so relative paths elsewhere align.
+                    System.setProperty("user.dir", newDir.toString());
+                }
             } catch (IOException ex) {
                 javax.swing.JOptionPane.showMessageDialog(frame,
                         "Could not use working directory " + newDir + ":\n" + ex.getMessage(),
@@ -7561,7 +7742,7 @@ public class JRock {
     //
     // A one-cell table rather than a styled body, because a table cell's width is the
     // width and a CSS one is a suggestion: a note holding something long and unbreakable
-    // - "JRock/includes/", a quoted setting name, an address - is laid out as wide as
+    // - "__JRock/includes/", a quoted setting name, an address - is laid out as wide as
     // that run needs on a styled body, which is a line running off the edge of the
     // dialog. A cell wraps inside its own width whatever is in it.
     private static String noteHtml(String text, int width) {
@@ -7857,7 +8038,7 @@ public class JRock {
                 : javax.swing.BorderFactory.createCompoundBorder(c.getBorder(), room));
     }
 
-    // Every file and folder JRock can put inside its JRock/ folder, each with the one
+    // Every file and folder JRock can put inside its __JRock/ folder, each with the one
     // line that says what it holds - the complete list, so nothing in there has to be
     // guessed at and nothing JRock keeps is a surprise found later.
     //
@@ -7868,10 +8049,13 @@ public class JRock {
     // up. A list of what is in it is what makes that an invitation rather than a dig.
     private static String folderNotes() {
         return
-              "Everything JRock keeps is in the JRock folder of the working directory, "
-            + "and nothing is kept anywhere else. It is all plain files in a folder of "
-            + "yours, to open, read, edit, copy and back up. The whole of what can be "
-            + "in it:\n\n"
+              "Everything JRock keeps is in the " + JROCK_DIR + " folder of the working "
+            + "directory, and nothing is kept anywhere else. The two underscores are so "
+            + "it sorts to the top of the folder and can never be taken for one of your "
+            + "own; up to version 5.2.0 it was called " + LEGACY_JROCK_DIR + ", and a "
+            + "folder under that name is renamed - with your word for it - the next time "
+            + "JRock starts there. It is all plain files in a folder of yours, to open, "
+            + "read, edit, copy and back up. The whole of what can be in it:\n\n"
             + "jrock-prompt.txt - the prompt, written again on every keystroke, so a "
             + "restart comes back to what was being typed.\n\n"
             + "jrock-log.txt - the transcript in the window, loaded again at the next "
@@ -7920,7 +8104,7 @@ public class JRock {
         String keyNote =
               "The API key field is intentionally blank and write-only: leave it empty "
             + "to keep the current key; type or paste a value to replace it. What you "
-            + "enter is written to JRock/bedrock-key.txt in the working directory, which "
+            + "enter is written to __JRock/bedrock-key.txt in the working directory, which "
             + "is where it is read from at startup. The stored key is never shown here, "
             + "and what you enter is trimmed - a pasted key brings the page's spaces "
             + "and newlines with it.\n\n"
@@ -7934,7 +8118,7 @@ public class JRock {
                + "it in at all.\n\n"
                : "\n\n")
             + "The endpoint, the model and the images DPI are kept in "
-            + "JRock/jrock-config.txt beside it, so they survive a restart. Both files "
+            + "__JRock/jrock-config.txt beside it, so they survive a restart. Both files "
             + "belong to the working directory and are plain text you can edit "
             + "yourself - which is what lets one folder's agent run on a different "
             + "model, or at a different DPI, than another's.\n\n"
@@ -7944,7 +8128,7 @@ public class JRock {
                + "pick from. A device that is disconnected makes Narrate fail and say so - "
                + "JRock never falls back to the Windows default. Empty the field and press "
                + "Narrate again to list the devices anew. Each narration is also saved as "
-               + "JRock/wav/narration-<date>-<time>.wav, a file of its own.\n\n"
+               + "__JRock/wav/narration-<date>-<time>.wav, a file of its own.\n\n"
                : "")
             + (isCheerpJ()
                ? "Narrate reads the selection out in the browser's own voice: the page "
@@ -7977,7 +8161,7 @@ public class JRock {
                + "to pick here, the browser choosing it and its own site settings being "
                + "where that is changed, and no \"mic always on\": the page hands over a "
                + "finished recording rather than a line to listen on. The recording is "
-               + "saved as JRock/wav/recording-<date>-<time>.wav, 16 kHz mono, and "
+               + "saved as __JRock/wav/recording-<date>-<time>.wav, 16 kHz mono, and "
                + "included as @audio, exactly as it is on the desktop.\n\n"
                : "")
             + (recordDeviceChoosable()
@@ -7985,7 +8169,7 @@ public class JRock {
                + "too and set the same way: it starts empty, Ctrl+Space lists the "
                + "microphones here, and a disconnected one fails rather than falling back. "
                + "Press Ctrl+Space to start recording, and again to stop; the recording is "
-               + "saved as JRock/wav/recording-<date>-<time>.wav, a new file each time, and "
+               + "saved as __JRock/wav/recording-<date>-<time>.wav, a new file each time, and "
                + "included as @audio, as Ctrl+I would. The log says when the microphone "
                + "is connected and disconnected.\n\n"
                + "With Mic always on ticked (here, or in the prompt's menu), the microphone "
@@ -7996,14 +8180,14 @@ public class JRock {
                + (transcribeAvailable()
                   ? "With Transcribe recordings ticked, Windows speech recognition turns the "
                   + "recording into text typed into the prompt instead. The audio is kept "
-                  + "as JRock/wav/transcribe-<date>-<time>.wav, a file per recording like "
+                  + "as __JRock/wav/transcribe-<date>-<time>.wav, a file per recording like "
                   + "any other, so a word the recognizer got wrong can be played back.\n\n"
                   : "")
                : "");
 
         return keyNote
             + "Clearing the log only clears jrock-log.txt (and the window); the "
-            + "per-message files in JRock/messages/ are never deleted, so your inputs "
+            + "per-message files in __JRock/messages/ are never deleted, so your inputs "
             + "and outputs are preserved.\n\n"
             + "Clock and the date in the log are two different things. Clock sends the "
             + "model the local time and zone with each message; the date printed after a "
@@ -8023,7 +8207,7 @@ public class JRock {
             + "Set it to the working directory to have them simply follow that. It "
             + "overrides " + PROMPTS_DIR_FLAG + " for this session.\n\n"
             + "Note: a true OS process chdir isn't possible from Java, so changing the "
-            + "working directory reroutes JRock's own files (a JRock/ subfolder holding "
+            + "working directory reroutes JRock's own files (a __JRock/ subfolder holding "
             + "the prompt, log and messages/) to the new directory rather than changing "
             + "the OS-level CWD of the process.";
     }
@@ -8163,12 +8347,12 @@ public class JRock {
     }
 
     // ---- Backup & restore (window menu) ------------------------------------
-    // Everything JRock keeps lives under JRock/ in the working directory: the log, every
+    // Everything JRock keeps lives under __JRock/ in the working directory: the log, every
     // message as its own file, the prompt, the includes and the copies converted from
     // them. So a backup is that one folder in a zip and a restore is that zip back over
     // it - there is no format to define and no state kept anywhere else to be missed.
     //
-    // The archive holds the folder itself ("JRock/..." entries), not its contents loose.
+    // The archive holds the folder itself ("__JRock/..." entries), not its contents loose.
     // That makes it unambiguous what a restore unpacks, and lets one be told apart from
     // any other zip somebody might pick in the dialog (see unpackBackup).
 
@@ -8179,7 +8363,7 @@ public class JRock {
             DateTimeFormatter.ofPattern("yyMMddHHmm");
 
     // The top-level folder inside a backup zip, which is also the folder it restores.
-    private static final String BACKUP_ROOT = "JRock";
+    private static final String BACKUP_ROOT = JROCK_DIR;
 
     // The name the Backup dialog offers, and the one an automatic backup takes.
     private static String backupFileName() {
@@ -8237,7 +8421,7 @@ public class JRock {
 
         // A backup written inside the folder it packs would be packing itself, half
         // finished. Worth one check: the chooser opens in the working directory, which
-        // is one double-click away from JRock/.
+        // is one double-click away from __JRock/.
         if (zip.startsWith(jrockDir().toAbsolutePath().normalize())) {
             backupNote(frame, log, ask,
                     "A backup cannot be written inside the folder it packs.\nChoose a "
@@ -8315,7 +8499,7 @@ public class JRock {
         }
     }
 
-    // Writes the JRock folder into a zip, every entry named "JRock/..." with the folder
+    // Writes the JRock folder into a zip, every entry named "__JRock/..." with the folder
     // itself as the root. Returns {files, bytes, skipped} for the log line.
     //
     // Directories get entries of their own, so one that happens to be empty survives the
@@ -8325,7 +8509,7 @@ public class JRock {
     // autosaves on every keystroke and every autosave writes a jrock<digits>.tmp beside
     // the file and moves it into place (atomicWriteQuietly), which is a name that exists
     // for a matter of milliseconds. A backup that listed one of those and then read it
-    // would fail outright with "NoSuchFileException: .../JRock/jrock1234....tmp" - the
+    // would fail outright with "NoSuchFileException: .../__JRock/jrock1234....tmp" - the
     // whole zip lost to a file that was never worth having in it. Three things keep that
     // from happening:
     //
@@ -8540,6 +8724,21 @@ public class JRock {
             return;
         }
 
+        // A folder that still has a JRock/ in it from 5.2.0 or earlier is refused rather
+        // than restored into: a restore ends by switching JRock into this folder, and
+        // that folder may hold only one of them (see migrateLegacyDir). Refused here
+        // instead of renamed, because unlike a startup there is already a session, a log
+        // and settings in hand - and a restore is nobody's idea of the moment to also
+        // adopt the contents of an older folder.
+        Path legacyThere = target.resolve(LEGACY_JROCK_DIR);
+        if (Files.isDirectory(legacyThere)) {
+            restoreRefused(frame, legacyThere + " is the folder name JRock used up to "
+                    + "version 5.2.0, and this version keeps its files in " + BACKUP_ROOT
+                    + ".\n\nMove or delete it - or rename it to " + BACKUP_ROOT
+                    + " if what is in it is worth keeping - and load the backup again.");
+            return;
+        }
+
         // Not empty means there is work in there, whether or not it is JRock's. Said
         // plainly, because "overwrite everything?" is what is actually being asked.
         if (!isEmptyDir(target)) {
@@ -8610,17 +8809,22 @@ public class JRock {
                 "Load from backup", javax.swing.JOptionPane.WARNING_MESSAGE);
     }
 
-    // Unpacks a backup, recreating target/JRock from the archive. Returns the number of
+    // Unpacks a backup, recreating target/__JRock from the archive. Returns the number of
     // files written.
     //
-    // Only "JRock/..." entries are taken, and an archive with none of them is refused
+    // Only "__JRock/..." entries are taken, and an archive with none of them is refused
     // rather than scattered - that is what tells a JRock backup from any other zip that
     // could be picked in the dialog. Each entry is then resolved and checked to land
-    // inside target/JRock, so an archive carrying ".." in its names cannot write outside
+    // inside target/__JRock, so an archive carrying ".." in its names cannot write outside
     // it (zip slip).
+    //
+    // A ZIP WRITTEN BEFORE 5.3.0 HAS "JRock/..." ENTRIES, and is taken too - its contents
+    // land in __JRock/ under the new name. A backup is kept precisely so it can be loaded
+    // one day; the day the folder was renamed is no day to start refusing the old ones.
     private static long unpackBackup(Path zip, Path target) throws IOException {
         Path root = target.resolve(BACKUP_ROOT).toAbsolutePath().normalize();
         String prefix = BACKUP_ROOT + "/";
+        String legacyPrefix = LEGACY_JROCK_DIR + "/";
         long files = 0;
         try (java.util.zip.ZipInputStream in = new java.util.zip.ZipInputStream(
                 Files.newInputStream(zip))) {
@@ -8629,8 +8833,10 @@ public class JRock {
                 // Zips are written with forward slashes; a backslash in a name is some
                 // other tool's idea of a separator, and means the same thing here.
                 String name = entry.getName().replace('\\', '/');
-                if (!name.startsWith(prefix)) continue;
-                Path out = root.resolve(name.substring(prefix.length()))
+                String held = name.startsWith(prefix) ? prefix
+                            : name.startsWith(legacyPrefix) ? legacyPrefix : null;
+                if (held == null) continue;
+                Path out = root.resolve(name.substring(held.length()))
                         .toAbsolutePath().normalize();
                 if (!out.startsWith(root)) {
                     throw new IOException("the archive holds an entry outside "
@@ -8650,15 +8856,16 @@ public class JRock {
         }
         // Nothing written AND no folder made: not one entry of this archive was ours.
         if (files == 0 && !Files.isDirectory(root)) {
-            throw new IOException("there is no " + prefix + " folder in the archive, so "
-                    + "this is not a JRock backup");
+            throw new IOException("there is no " + prefix + " folder in the archive (nor a "
+                    + legacyPrefix + " one from before version 5.3.0), so this is not a "
+                    + "JRock backup");
         }
         return files;
     }
 
     // Deletes a file or a directory tree, if it is there at all. Used on what JRock owns
     // and is about to write again: the JRock folder a restore replaces, and the earlier
-    // xpdf conversion of a PDF under JRock/includes/.
+    // xpdf conversion of a PDF under __JRock/includes/.
     private static void deleteRecursively(Path dir) throws IOException {
         if (!Files.exists(dir)) return;
         Files.walkFileTree(dir, new java.nio.file.SimpleFileVisitor<Path>() {
@@ -9425,7 +9632,7 @@ public class JRock {
         // long as the reading does.
         Thread t = new Thread(() -> {
             Path file = null;
-            // What was played, kept for JRock/wav/narration-<date>-<time>.wav - played,
+            // What was played, kept for __JRock/wav/narration-<date>-<time>.wav - played,
             // stopped halfway is saved as far as it was heard.
             java.io.ByteArrayOutputStream heard = new java.io.ByteArrayOutputStream();
             try {
@@ -9776,7 +9983,7 @@ public class JRock {
     // Narrate's other half: speech in rather than out. Ctrl+Space pressed and let go of
     // (or Start recording in the prompt menu) starts a recording from the one microphone
     // named in Configure (record-device$), the same again ends it, and the recording is
-    // saved as JRock/wav/recording-<time>.wav and included as @audio exactly as Ctrl+I
+    // saved as __JRock/wav/recording-<time>.wav and included as @audio exactly as Ctrl+I
     // would include that file.
     //
     // The microphone is set the way the speaker is, for the same reason: Windows moves
@@ -9819,7 +10026,7 @@ public class JRock {
         return !isCheerpJ();
     }
 
-    // A wav named for the moment it was made: JRock/wav/<what>-<date>-<time>.wav, with
+    // A wav named for the moment it was made: __JRock/wav/<what>-<date>-<time>.wav, with
     // the milliseconds added when two land in the same second. Every recording keeps a
     // file of its own, transcribed or included, so the audio behind anything odd is
     // still there to play back afterwards.
@@ -10599,7 +10806,7 @@ public class JRock {
     // RECORD_FORMATS, no level to watch, no device to have been unplugged mid-read - the
     // page records, and this thread has nothing to do but wait to be told to stop and
     // then ask for what was heard. What IS the same is everything after the audio: the
-    // file goes to JRock/wav/recording-<date>-<time>.wav, under its own stamped name,
+    // file goes to __JRock/wav/recording-<date>-<time>.wav, under its own stamped name,
     // and is included as an @audio like any other recording (see includeOne), so a
     // spoken question is sent in a tab exactly as it is on the desktop.
     //
@@ -10976,7 +11183,7 @@ public class JRock {
     // Lets the user pick files to include, and includes each the way includeFile says:
     // by its type, read the way the Configure dialog says for the two types with more
     // than one reading (a PDF as page images, an HTML folder or text; an RTF as Markdown
-    // or as is), from a processed copy under JRock/includes/ or where it lies, with or without a
+    // or as is), from a processed copy under __JRock/includes/ or where it lies, with or without a
     // Markdown reference above its token.
     //
     // The first filter, and the one the dialog opens on, takes every type there is; the
@@ -11125,10 +11332,10 @@ public class JRock {
     //   a DOCX                         -> Markdown and its pictures
     //   an XLSX                        -> one CSV per sheet
     //
-    // With "Include from processed copies in JRock/includes/" on, a file included as itself is
-    // copied into JRock/includes/ first - an image downscaled to Images DPI on the way -
+    // With "Include from processed copies in __JRock/includes/" on, a file included as itself is
+    // copied into __JRock/includes/ first - an image downscaled to Images DPI on the way -
     // and included from the copy (see includeCopyOf). Off, it is included where it lies,
-    // and a type whose conversion keeps its result under JRock/includes/ is refused, with a line
+    // and a type whose conversion keeps its result under __JRock/includes/ is refused, with a line
     // and a dialog saying which setting to turn on. Off the EDT.
     private static void includeFile(IncludeAction act, Path file) {
         String kind = includeKindOf(file);
@@ -11142,13 +11349,13 @@ public class JRock {
         if (toJRock && !includeProcessedCopies) {
             String what = kind.toUpperCase(java.util.Locale.ROOT);
             act.log.gray("Not included: " + file + " - a " + what + " is converted into a "
-                    + "file under JRock/includes/, and \"Include from processed copies in JRock/includes/\" "
+                    + "file under __JRock/includes/, and \"Include from processed copies in __JRock/includes/\" "
                     + "is off. Turn it on in Configure to include it.");
             if (!act.copiesWarned[0]) {
                 act.copiesWarned[0] = true;
                 onEdt(() -> javax.swing.JOptionPane.showMessageDialog(act.frame,
                         "A " + what + " is included by converting it into a file under "
-                                + "JRock/includes/, and \"Include from processed copies in JRock/includes/\" "
+                                + "__JRock/includes/, and \"Include from processed copies in __JRock/includes/\" "
                                 + "is off.\n\nTurn it on in Configure to include it.",
                         "Processed copies are off", javax.swing.JOptionPane.WARNING_MESSAGE));
             }
@@ -11316,14 +11523,14 @@ public class JRock {
         }
     }
 
-    // Copies the file into JRock/includes/ and returns the copy, which is then what
+    // Copies the file into __JRock/includes/ and returns the copy, which is then what
     // gets included; a file that already lives there is returned as it stands.
     //
     // Why anyone would want that: the file JRock remembers is not always a file that
     // stays. In the browser build an uploaded file lands in CheerpJ's /uploads, and
     // that is gone after a reload - taking the path INCLUDES remembers with it, so
     // the includes reloaded at the next start would name a file that no longer exists.
-    // A copy under JRock/includes/ is in the folder the user owns, next to the log that
+    // A copy under __JRock/includes/ is in the folder the user owns, next to the log that
     // names it.
     //
     // A failed copy is reported and the original included anyway: the point of
@@ -11338,7 +11545,7 @@ public class JRock {
     private static Path includeCopyOf(Path file, LogView log, boolean isImage) {
         Path dir = includesDir();
         try {
-            // Already a copy (a re-include of something under JRock/includes/, a file the
+            // Already a copy (a re-include of something under __JRock/includes/, a file the
             // user browsed to there, a page of a conversion's own output): copying it
             // again would only make "photo-2.png" out of "photo.png".
             //
@@ -11412,9 +11619,9 @@ public class JRock {
     // that was already as fine as it was going to get, and the extra pixels are paid for
     // twice, once in tokens and once in the time spent sending them.
     //
-    // Only for a processed copy ("Include from processed copies in JRock/includes/"), deliberately. A plain include is a pointer at a
+    // Only for a processed copy ("Include from processed copies in __JRock/includes/"), deliberately. A plain include is a pointer at a
     // file JRock does not own, and rewriting somebody's photograph is not what "include
-    // this file" asks for; a copy under JRock/includes/ is JRock's own file, made for
+    // this file" asks for; a copy under __JRock/includes/ is JRock's own file, made for
     // this purpose - and it says in its name what it is: "IMG_4002-1004x753.png".
     //
     // The export's own 300 dpi ceiling (MarkdownExport.Image) is a separate matter:
@@ -11820,10 +12027,10 @@ public class JRock {
 
     // The hash a reference target names: the target itself when it is a hash (the
     // "![](<hash>)" form), the include made under that name, or the include of the file
-    // at that path - from the working directory, from JRock/includes/, or absolute. Null
+    // at that path - from the working directory, from __JRock/includes/, or absolute. Null
     // when none.
     //
-    // JRock/includes/ counts as a place a bare name is looked for because it is where
+    // __JRock/includes/ counts as a place a bare name is looked for because it is where
     // every processed copy and every conversion lands. A document converted to Markdown
     // refers to its own pictures by the names they were written under there
     // ("quarterly.docx.image1.png"), and those names then resolve to the pictures
@@ -11918,7 +12125,7 @@ public class JRock {
 
     // ---- Fetch URL (prompt menu, Ctrl+U) -----------------------------------
     // The same include as Ctrl+I, for something that is not on this machine: a URL is
-    // asked for, downloaded into JRock/urls/, and then included from there like any
+    // asked for, downloaded into __JRock/urls/, and then included from there like any
     // other file - a web page as "@txt", a picture as "@img". Two lines go into the
     // prompt, the address above the token:
     //
@@ -12096,7 +12303,7 @@ public class JRock {
                 + "A web page comes in as text (@txt), a picture as a picture (@img) - "
                 + "whichever the address itself answers with. HTML, plain text, JSON, "
                 + "XML, PNG, JPEG, GIF and WEBP are accepted, and the file is saved under "
-                + "JRock/urls/." + cors
+                + "__JRock/urls/." + cors
                 + "</body></html>");
         addTextSlack(what, wrapAt);
 
@@ -12873,7 +13080,7 @@ public class JRock {
     }
 
     // Renders a PDF to one PNG per page with the PDF engine (see pdf()), then includes
-    // each page. On the desktop that is Ghostscript, writing into JRock/includes/ as
+    // each page. On the desktop that is Ghostscript, writing into __JRock/includes/ as
     // "<pdfname>.gs.NNN.png"; in the browser it is PDF.js, writing under
     // the same folder as "<pdfname>.pdfjs.NNN.png". When the engine can't run - no
     // Ghostscript on PATH - it says why and what to do, and nothing else happens.
@@ -12933,7 +13140,7 @@ public class JRock {
     //                                            its background .png as @img
     //   text  pdftotext -enc UTF-8 <pdf> <txt>   then that one file, as @txt
     //
-    // THE OUTPUT GOES UNDER JRock/includes/, like every other conversion, and nothing is
+    // THE OUTPUT GOES UNDER __JRock/includes/, like every other conversion, and nothing is
     // asked: "report.pdf" gives the folder "report.pdf.html" or the file "report.pdf.txt"
     // there, and a conversion of the same PDF already in that folder is replaced, so the
     // pages always say what the PDF says now.
@@ -12941,7 +13148,7 @@ public class JRock {
     // Working material belongs in JRock's own folder and not in the folder the documents
     // are kept in. A folder of page HTML left beside a letter is one more thing to tidy
     // up by hand - and in a synced folder it is one more thing the sync client is holding
-    // open while something tries to delete it. Under JRock/includes/ it is where the
+    // open while something tries to delete it. Under __JRock/includes/ it is where the
     // Markdown of every converted document and every processed copy already is, it is
     // cleaned up by age with the rest of them ("Cleanup JRock files..."), and no document
     // folder is written into at all. There is also nothing left to ask about: the
@@ -13083,7 +13290,7 @@ public class JRock {
         /** What the log and the dialogs call it: "Ghostscript", "PDF.js". */
         String name();
 
-        /** Names its output: JRock/<tag>-pdf/<pdfname>.<tag>.NNN.png. */
+        /** Names its output: __JRock/<tag>-pdf/<pdfname>.<tag>.NNN.png. */
         String tag();
 
         /**
@@ -13251,7 +13458,7 @@ public class JRock {
                 return null;
             }
 
-            // The produced page files (in JRock/includes/) in order, matching this
+            // The produced page files (in __JRock/includes/) in order, matching this
             // PDF's prefix; the caller includes them.
             java.util.List<Path> pages = new java.util.ArrayList<>();
             try (java.util.stream.Stream<Path> s = Files.list(outDir)) {
@@ -13491,19 +13698,19 @@ public class JRock {
     // What a year of JRock leaves behind that nobody will read again, and only that - the
     // four places whose contents are MATERIAL rather than record:
     //
-    //   JRock/includes/   every page of every PDF as a PNG, a CSV per spreadsheet sheet,
+    //   __JRock/includes/   every page of every PDF as a PNG, a CSV per spreadsheet sheet,
     //                     the Markdown of every DOCX and the pictures out of it, the
     //                     folder an xpdf reading of a PDF becomes, a copy of every file
     //                     ever attached
-    //   JRock/urls/       one file per address Fetch URL has ever been given
-    //   JRock/wav/        one file per narration and per recording
+    //   __JRock/urls/       one file per address Fetch URL has ever been given
+    //   __JRock/wav/        one file per narration and per recording
     //   the working dir   the jrock-backup-*.zip files
     //
     // Those are the things that GROW, and each of them grows per action rather than per
     // conversation: one scanned letter is a dozen page images, one spoken answer is a wav,
     // and a backup is the whole folder zipped, again, every time one is taken.
     //
-    // THE MESSAGES ARE NEVER TOUCHED. JRock/messages/ is the transcript's own evidence -
+    // THE MESSAGES ARE NEVER TOUCHED. __JRock/messages/ is the transcript's own evidence -
     // every request and every reply, in full, as text - and text is nothing: a thousand
     // exchanges is a few megabytes, and the one question anybody asks a year later is
     // what was actually said. The log, the prompt, the settings and the key are left
@@ -13531,10 +13738,10 @@ public class JRock {
     private static void cleanupJRockFiles(JFrame frame, LogView log) {
         Object typed = javax.swing.JOptionPane.showInputDialog(frame,
                 "Delete what JRock has written for itself, older than this\n"
-                + "many days: the converted copies in JRock/includes/, the\n"
-                + "fetched pages in JRock/urls/, the audio in JRock/wav/ and\n"
+                + "many days: the converted copies in __JRock/includes/, the\n"
+                + "fetched pages in __JRock/urls/, the audio in __JRock/wav/ and\n"
                 + "the jrock-backup-*.zip files.\n\n"
-                + "Nothing else goes. The transcript (JRock/messages/), the log,\n"
+                + "Nothing else goes. The transcript (__JRock/messages/), the log,\n"
                 + "the prompt, the settings and the key are not touched.\n\n"
                 + "An attachment whose file is deleted cannot be sent again;\n"
                 + "the log says so if one is asked for.",
@@ -13562,11 +13769,11 @@ public class JRock {
         // where it is swept, so the question, the log line and this list cannot drift
         // apart - and adding a place is one line.
         java.util.List<Sweep> sweeps = java.util.Arrays.asList(
-                new Sweep("converted copies in JRock/includes/",
+                new Sweep("converted copies in __JRock/includes/",
                         olderThan(includesDir(), cut, null, true, log)),
-                new Sweep("fetched pages in JRock/urls/",
+                new Sweep("fetched pages in __JRock/urls/",
                         olderThan(urlsDir(), cut, null, false, log)),
-                new Sweep("narrations and recordings in JRock/wav/",
+                new Sweep("narrations and recordings in __JRock/wav/",
                         olderThan(wavDir(), cut, null, false, log)),
                 new Sweep("backup zip(s) in " + workingDir,
                         olderThan(workingDir, cut, "jrock-backup-", false, log)));
@@ -13621,7 +13828,7 @@ public class JRock {
                 }
                 log.gray("Cleanup: deleted " + fmtNum(gone) + " item(s) older than "
                         + askedDays + " day(s), " + fmtNum(freed) + " bytes - " + places
-                        + ". The transcript under JRock/messages/ is untouched.");
+                        + ". The transcript under __JRock/messages/ is untouched.");
                 // Named rather than counted: a file that will not delete is held open by
                 // something, and which one it is says what.
                 for (String one : kept) log.gray("Cleanup: could not delete " + one);
@@ -13658,7 +13865,7 @@ public class JRock {
     }
 
     // The places that had something in them, for the one line in the log: "the converted
-    // copies in JRock/includes/, the audio in JRock/wav/ and the backup zips". Only the
+    // copies in __JRock/includes/, the audio in __JRock/wav/ and the backup zips". Only the
     // ones swept, because a line naming a folder nothing was deleted from reads as though
     // something was.
     private static String placesOf(java.util.List<Sweep> sweeps) {
@@ -13708,7 +13915,7 @@ public class JRock {
     // feature.
     //
     // withFolders says whether a directory at this level counts. It is true for
-    // JRock/includes/ alone, where a folder is one conversion's output and belongs to
+    // __JRock/includes/ alone, where a folder is one conversion's output and belongs to
     // JRock - and false everywhere else, which is what stops a folder of the operator's
     // in the working directory from ever being listed, let alone deleted.
     private static java.util.List<Path> olderThan(Path dir, long cut, String prefix,
@@ -14333,7 +14540,7 @@ public class JRock {
     }
 
     // ---- RTF as Markdown ---------------------------------------------------
-    // Converts an RTF file to Markdown, writes it under JRock/includes/ as
+    // Converts an RTF file to Markdown, writes it under __JRock/includes/ as
     // "<rtfname>.md", and includes that file as an ordinary @txt token - so from the
     // prompt's point of view the model is simply reading a text file.
     //
@@ -14366,7 +14573,7 @@ public class JRock {
             return;
         }
 
-        // Output goes to JRock/includes/, named "<rtfname>.md" - the RTF's full name kept
+        // Output goes to __JRock/includes/, named "<rtfname>.md" - the RTF's full name kept
         // as the prefix (as every conversion does), so "notes.rtf" becomes "notes.rtf.md"
         // and two RTFs of the same stem can't overwrite each other's Markdown.
         Path outDir = includesDir();
@@ -14950,7 +15157,7 @@ public class JRock {
     // ---- DOCX as Markdown --------------------------------------------------
     // The same thing as includeRtfAsMarkdown for the other format a word processor
     // saves: unzips the .docx, reads word/document.xml, writes Markdown under
-    // JRock/includes/ as "<docxname>.md", and includes that as an ordinary @txt token.
+    // __JRock/includes/ as "<docxname>.md", and includes that as an ordinary @txt token.
     //
     // Also with nothing installed - a .docx is a ZIP of XML, so java.util.zip and the
     // JDK's XML parser are the whole toolchain, and this works in the browser too.
@@ -14964,7 +15171,7 @@ public class JRock {
                                               boolean extend, Path docx, java.util.function.Function<Path, String> refs) {
         log.gray("Converting DOCX to Markdown: " + docx);
 
-        // Output goes to JRock/includes/, named "<docxname>.md" - the same naming as every
+        // Output goes to __JRock/includes/, named "<docxname>.md" - the same naming as every
         // other conversion, so two documents of the same stem can't collide - and the
         // document's pictures go beside it under the same prefix.
         Path outDir = includesDir();
@@ -15681,7 +15888,7 @@ public class JRock {
 
     // ---- XLSX as CSV -------------------------------------------------------
     // A spreadsheet, the way includeDocxAsMarkdown takes a document: unzips the .xlsx,
-    // writes each sheet under JRock/includes/ as "<xlsxname>.<sheet>.csv", and
+    // writes each sheet under __JRock/includes/ as "<xlsxname>.<sheet>.csv", and
     // includes every one of them as an ordinary @txt token - a sheet per file, because
     // a CSV has no way to say where one table ends and the next begins.
     //
@@ -17782,7 +17989,7 @@ public class JRock {
                 + "tab, is this button: the dialog's OK would close it without moving "
                 + "anything.\n\n"
                 + "It also REMEMBERS: the four numbers go into this folder's "
-                + "JRock/jrock-config.txt, and the next start opens the window there "
+                + "__JRock/jrock-config.txt, and the next start opens the window there "
                 + "instead of in the middle of the screen. So does dragging the window "
                 + "about or resizing it by a corner - where it is left is where it opens - "
                 + "and a remembered place that is on no screen any more (a laptop that "
@@ -18410,7 +18617,7 @@ public class JRock {
     //                        completed and the body is the reason, ready to show.
     // Request headers travel in the other direction as a flat JSON object, the
     // Authorization header among them - JRock holds the key in the browser exactly as
-    // it does on the desktop, in the working folder's JRock/bedrock-key.txt, which is
+    // it does on the desktop, in the working folder's __JRock/bedrock-key.txt, which is
     // what makes it outlive a reload.
     //
     // The page configures nothing. It says what its client is called, so the startup
@@ -18699,7 +18906,7 @@ public class JRock {
         if (!haveKey) {
             return new String[] {
                 "0",
-                "No Bedrock API key set. Put one in JRock/bedrock-key.txt, or open "
+                "No Bedrock API key set. Put one in __JRock/bedrock-key.txt, or open "
                     + "the Configure dialog (top-left button) and enter a key - which "
                     + "writes it there.",
                 null
@@ -18728,7 +18935,7 @@ public class JRock {
         // The context message - the clock when the checkbox is on, the operator's name
         // when one is set, or nothing at all when neither (see contextMessage). Read once
         // here, so the request, the masked copy in the log and the file on disk all carry
-        // the same instant. Its own file in JRock/messages/ is written at the same time,
+        // the same instant. Its own file in __JRock/messages/ is written at the same time,
         // for the record - nothing ever reads it back (see writeMessageFile), and it is
         // still filed under the CLOCK role, which is the name every log written so far
         // uses for this message.
@@ -18808,7 +19015,7 @@ public class JRock {
         }
         int outputSymbols = reply.length();
 
-        // A picture or a recording in the reply: saved under JRock/includes/, with the
+        // A picture or a recording in the reply: saved under __JRock/includes/, with the
         // reference and the token for it appended to the answer (see saveReplyPayload).
         // After the counts above, which measure the model's own text - these two lines
         // are JRock's, and a picture is not text symbols in any case.
@@ -19186,7 +19393,7 @@ public class JRock {
     // ---- A picture or a recording in the reply ------------------------------
     // A model that answers with an image or with speech cannot put it in the text: what
     // comes back is base64 in the message's one binary field, with a media type beside
-    // it saying what it really is. This saves that payload into JRock/includes/ - where
+    // it saying what it really is. This saves that payload into __JRock/includes/ - where
     // an include's own processed copy goes - and returns the two lines that make it an
     // include of this session:
     //
@@ -19551,7 +19758,7 @@ public class JRock {
         }
         input.setText(stored);        // autosave rewrites the same file with the same text
         input.setCaretPosition(0);
-        return "recovered persistent file: JRock/jrock-prompt.txt";
+        return "recovered persistent file: __JRock/jrock-prompt.txt";
     }
 
     // Atomically rewrites `target` with `text`: write to a temp file, then move it
@@ -19631,7 +19838,7 @@ public class JRock {
         }
     }
 
-    // ---- Message-file persistence (append-only JRock/messages/ directory) ---
+    // ---- Message-file persistence (append-only __JRock/messages/ directory) ---
     // Maps a role to a filename-safe slug. Kept explicit (no user text in the
     // name) so filenames are always predictable and injection-free.
     private static String roleSlug(String role) {
@@ -19667,10 +19874,10 @@ public class JRock {
     }
 
     // ---- Local prompt cache ------------------------------------------------
-    // A prompt sent before is answered again from JRock/messages/, with no call to
+    // A prompt sent before is answered again from __JRock/messages/, with no call to
     // Bedrock: the same question, the same files, the same answer, for nothing.
     //
-    // The table is every -operator.txt in JRock/messages/ - all of them, not only the
+    // The table is every -operator.txt in __JRock/messages/ - all of them, not only the
     // ones the log still shows - by the SHA-256 of its text, each pointing at the
     // -assistant.txt that came after it, which is its answer. A request that failed has
     // no answer after it, and is not in the table. Built from the folder once, when the
@@ -19687,7 +19894,7 @@ public class JRock {
     // message, so nothing on disk says what conversation an answer was given in.
     // Neither does it say which model gave it, or what Clock told it the time was - an
     // answer is reused as it was given. A folder whose old answers should not be reused
-    // is cleaned up by deleting files from JRock/messages/, or the setting turned off.
+    // is cleaned up by deleting files from __JRock/messages/, or the setting turned off.
     private static final Object PROMPT_CACHE_LOCK = new Object();
     private static java.util.Map<String, Path> promptCache = null;   // null: not built
     private static Path promptCacheDir = null;                        // the folder it was built from
@@ -19697,7 +19904,7 @@ public class JRock {
     private static final java.util.regex.Pattern MESSAGE_FILE_NAME = java.util.regex.Pattern
             .compile("\\d{8}-\\d{6}-\\d{3}-(operator|assistant)\\.txt");
 
-    // Builds the table from the working folder's JRock/messages/ when the setting is on
+    // Builds the table from the working folder's __JRock/messages/ when the setting is on
     // and it was not built from that folder yet, or empties it when the setting is off;
     // then says in the session report which of the two it is.
     private static void syncPromptCache(LogView log) {
@@ -19716,7 +19923,7 @@ public class JRock {
                 promptCachePending = null;
             }
             log.gray("Local prompt cache: " + fmtNum(promptCache.size())
-                    + " answered prompt(s) in JRock/messages/");
+                    + " answered prompt(s) in __JRock/messages/");
         }
     }
 

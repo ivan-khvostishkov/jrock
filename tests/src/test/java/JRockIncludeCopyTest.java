@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
  * The second menu item exists because the file JRock remembers is not always a file that
  * stays: in the browser an uploaded one lives in CheerpJ's {@code /uploads} and is gone after
  * a reload, which leaves {@link JRockReloadIncludesTest} with a path it cannot open. A copy
- * under {@code JRock/includes/} is in the folder the user owns - so what is checked here
+ * under {@code __JRock/includes/} is in the folder the user owns - so what is checked here
  * is that the include is registered against the copy, not against the original.
  * <p>
  * A copy is also JRock's own file, which is where an oversized image gets downscaled to
@@ -38,7 +38,7 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
     private static final long INCLUDE_TIMEOUT_SECONDS = 30;
 
     @Test
-    @DisplayName("through Include with copy, the copy under JRock/includes/ is what is included")
+    @DisplayName("through Include with copy, the copy under __JRock/includes/ is what is included")
     void copiesTheFileIntoJRockAndIncludesTheCopy() throws Exception {
         awaitReadyCount(1);
 
@@ -56,9 +56,9 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
 
         // 2. The copy is where the README says it is, under the name it had, and it is
         //    the same file.
-        Path copy = workingDirectory().resolve("JRock").resolve("includes")
+        Path copy = workingDirectory().resolve("__JRock").resolve("includes")
                 .resolve("IMG_4002.png");
-        assertThat(copy).describedAs("the copy under JRock/includes/").exists();
+        assertThat(copy).describedAs("the copy under __JRock/includes/").exists();
         assertThat(Files.readAllBytes(copy)).describedAs("the copied bytes")
                 .isEqualTo(Files.readAllBytes(original));
 
@@ -79,8 +79,8 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
 
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .doesNotContain("Copied for the include: ");
-        assertThat(workingDirectory().resolve("JRock").resolve("includes"))
-                .describedAs("JRock/includes/, which nothing should have created").doesNotExist();
+        assertThat(workingDirectory().resolve("__JRock").resolve("includes"))
+                .describedAs("__JRock/includes/, which nothing should have created").doesNotExist();
         assertThat(includes().values()).describedAs("the files registered as includes")
                 .containsExactly(original);
     }
@@ -98,7 +98,7 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
         includeWithCopies(true, first, "Image: 120 x 80");
         includeWithCopies(true, second, "Image: 60 x 40");
 
-        Path copies = workingDirectory().resolve("JRock").resolve("includes");
+        Path copies = workingDirectory().resolve("__JRock").resolve("includes");
         assertThat(Files.readAllBytes(copies.resolve("photo.png")))
                 .describedAs("the first copy").isEqualTo(Files.readAllBytes(first));
         assertThat(Files.readAllBytes(copies.resolve("photo-2.png")))
@@ -112,7 +112,7 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
         assertThat(logPane().text()).describedAs("the log pane's text")
                 .contains("Include copy already saved: " + copies.resolve("photo.png"));
         try (java.util.stream.Stream<Path> saved = Files.list(copies)) {
-            assertThat(saved).describedAs("what is under JRock/includes/").hasSize(2);
+            assertThat(saved).describedAs("what is under __JRock/includes/").hasSize(2);
         }
     }
 
@@ -130,7 +130,7 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
                 .contains("Downscaled for the include: 3000 x 2000 -> 1004 x 669");
 
         // 1. The copy says its new size in its name, and really is that size.
-        Path copy = workingDirectory().resolve("JRock").resolve("includes")
+        Path copy = workingDirectory().resolve("__JRock").resolve("includes")
                 .resolve("big-1004x669.png");
         assertThat(copy).describedAs("the downscaled copy, named after its size").exists();
         BufferedImage scaled = ImageIO.read(copy.toFile());
@@ -168,7 +168,7 @@ class JRockIncludeCopyTest extends JRockGuiFixture {
         return (Map<String, Path>) field("INCLUDES").get(null);
     }
 
-    /** A real PNG in a subfolder of the working directory, outside JRock/. */
+    /** A real PNG in a subfolder of the working directory, outside __JRock/. */
     private Path png(String folder, String name, int width, int height) throws Exception {
         Path dir = Files.createDirectories(workingDirectory().resolve(folder));
         Path file = dir.resolve(name);

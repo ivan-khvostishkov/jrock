@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Includes a two-page PDF as text and as an HTML folder, with xpdf's pdftotext and
- * pdftohtml, and checks what was written under {@code JRock/includes/} and what the
+ * pdftohtml, and checks what was written under {@code __JRock/includes/} and what the
  * prompt got.
  * <p>
  * The folder the PDF is in is not written into and nothing is asked: the pages are
@@ -31,7 +31,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
     private static final long CONVERSION_TIMEOUT_SECONDS = 60;
 
     @Test
-    @DisplayName("a PDF included as text is written to JRock/includes/ as <name>.txt and tagged @txt")
+    @DisplayName("a PDF included as text is written to __JRock/includes/ as <name>.txt and tagged @txt")
     void convertsAPdfToTextUnderJRockAndIncludesIt() throws Exception {
         awaitReadyCount(1);
         assertThat(onPath("pdftotext")).describedAs("pdftotext on PATH").isNotNull();
@@ -59,7 +59,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
     }
 
     @Test
-    @DisplayName("a PDF included as HTML is written to a folder under JRock/includes/, then included as one")
+    @DisplayName("a PDF included as HTML is written to a folder under __JRock/includes/, then included as one")
     void convertsAPdfToAnHtmlFolderUnderJRockAndIncludesTheFolder() throws Exception {
         awaitReadyCount(1);
         assertThat(onPath("pdftohtml")).describedAs("pdftohtml on PATH").isNotNull();
@@ -100,7 +100,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
         awaitLogLine("token(s) for " + pdf.getFileName(), CONVERSION_TIMEOUT_SECONDS);
 
         assertThat(new String(Files.readAllBytes(txt), StandardCharsets.UTF_8))
-                .describedAs("the text under JRock/includes/")
+                .describedAs("the text under __JRock/includes/")
                 .doesNotContain("an earlier conversion")
                 .contains("JRock PDF test - page 1");
         assertThat(logPane().text())
@@ -115,15 +115,15 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
 
         Path pdf = A4Pdf.writeTwoPages(workingDirectory().resolve("two-page-a4.pdf"));
         field("pdfIncludeMode").set(null, "text");
-        // The conversion writes under JRock/includes/, which is exactly what "Include
-        // from processed copies in JRock/includes/" off rules out.
+        // The conversion writes under __JRock/includes/, which is exactly what "Include
+        // from processed copies in __JRock/includes/" off rules out.
         chooseInTheIncludeDialog(PDF_TEXT_FILTER, false, pdf);
         press(JOptionPaneFinder.findOptionPane().withTimeout(DIALOG_TIMEOUT_MS).using(robot)
                 .okButton());
         awaitLogLine("Not included: " + pdf, CONVERSION_TIMEOUT_SECONDS);
 
         assertThat(logPane().text()).describedAs("the log pane's text")
-                .contains("\"Include from processed copies in JRock/includes/\" is off. Turn it on "
+                .contains("\"Include from processed copies in __JRock/includes/\" is off. Turn it on "
                         + "in Configure to include it.");
         assertThat(promptArea().text()).describedAs("the prompt").doesNotContain("@txt ");
         assertThat(includes().resolve("two-page-a4.pdf.txt")).doesNotExist();
@@ -131,7 +131,7 @@ class JRockXpdfIncludeTest extends JRockGuiFixture {
 
     /** The folder every include is made from. */
     private Path includes() {
-        return workingDirectory().resolve("JRock").resolve("includes");
+        return workingDirectory().resolve("__JRock").resolve("includes");
     }
 
     /** The tool JRock itself would run, or null if it found none. */

@@ -20,7 +20,7 @@
 //
 // An AGENT loops: it is started with JRock and stays up - a timer, a push-to-talk
 // listener, a calendar reader answering a port - so it gets a folder to itself, because
-// JRock writes its log, its prompt and its transcript into a JRock/ inside the folder it
+// JRock writes its log, its prompt and its transcript into a __JRock/ inside the folder it
 // works in, and three agents sharing one folder would write over each other.
 //
 // A FLOW runs once, on something you point it at, and asks you for it: translate this
@@ -97,6 +97,16 @@ public final class InstallJRock {
     // and not a path.
     private static final String ASSISTANT = "JRockAssistant";
     private static final String PRODUCT = "JRock";
+
+    // The subfolder JRock keeps its own files in, by the name JRock looks for it under
+    // (JROCK_DIR in JRock.java): the two underscores keep it out of the user's own
+    // folders, the way __MACOSX does in a zip. Up to 5.2.0 it was PRODUCT itself, and a
+    // folder left under that name is renamed by migrateLegacyDir below - because this
+    // installer writes the settings and the key in there, and JRock will not start in a
+    // folder that has both.
+    private static final String DATA_DIR = "__JRock";
+    private static final String LEGACY_DATA_DIR = "JRock";
+
     // The two files page 6 writes, by the names JRock reads them under.
     private static final String CONFIG_FILE = "jrock-config.txt";
     private static final String KEY_FILE = "bedrock-key.txt";
@@ -226,7 +236,7 @@ public final class InstallJRock {
         }
 
         // The one folder this sample lives and works in: its .java file, the prompt files
-        // it reads, and the JRock/ its own JRock writes.
+        // it reads, and the __JRock/ its own JRock writes.
         //
         // One folder for all three because an agent looks for its prompts BESIDE ITS OWN
         // FILE (ownDirectory() in any of them) and nowhere else - not in the working
@@ -774,7 +784,7 @@ public final class InstallJRock {
             // still needs somewhere to paste it, so that tick stays on until there is a
             // key in the file. Which is the question the page is actually for.
             reviewConfig = false;
-            reviewKey = isBlank(home.resolve(PRODUCT).resolve(KEY_FILE), true);
+            reviewKey = isBlank(home.resolve(DATA_DIR).resolve(KEY_FILE), true);
         }
     }
 
@@ -971,7 +981,7 @@ public final class InstallJRock {
             }
             panel.add(note("An AGENT loops - it is started with JRock and stays up - so it "
                     + "gets a folder of its own under " + AGENTS_DIR + "\\, because JRock "
-                    + "writes its log, its prompt and its transcript into a JRock/ inside "
+                    + "writes its log, its prompt and its transcript into a __JRock/ inside "
                     + "the folder it works in. A FLOW runs once on something you point it "
                     + "at, so all of them share " + FLOWS_DIR + "\\. Each one is installed "
                     + "with the prompt files its own source names, beside its .java, which "
@@ -1048,7 +1058,7 @@ public final class InstallJRock {
 
         // 6. The settings, and the key.
         steps.add(new Step("Settings and the key", panel -> {
-            panel.add(text("Two files in " + home.resolve(PRODUCT) + ":"));
+            panel.add(text("Two files in " + home.resolve(DATA_DIR) + ":"));
             panel.add(value("jrock-config.txt - the endpoint, the model, the DPI, the "
                     + "checkboxes"));
             panel.add(value("bedrock-key.txt - the Bedrock API key, and nothing else"));
@@ -1078,7 +1088,9 @@ public final class InstallJRock {
                     + "installer never overwrites your settings."));
         }, () -> {
             try {
-                Path jrock = home.resolve(PRODUCT);
+                String stale = migrateLegacyDir(home);
+                if (stale != null) return stale;
+                Path jrock = home.resolve(DATA_DIR);
                 Files.createDirectories(jrock);
                 Path config = starterConfig(jrock);
                 Path key = starterKey(jrock);
@@ -1151,7 +1163,7 @@ public final class InstallJRock {
                         copyKey = v;
                         redraw();
                     }));
-            Path from = home.resolve(PRODUCT);
+            Path from = home.resolve(DATA_DIR);
             for (Path dir : dirs) {
                 panel.add(value(dir.toString()));
                 panel.add(fate(dir, from, CONFIG_FILE, copySettings));
@@ -1165,12 +1177,14 @@ public final class InstallJRock {
                     + "before the key was typed leaves behind."));
         }, () -> {
             for (Path dir : sampleFolders()) {
-                Path jrock = dir.resolve(PRODUCT);
+                String stale = migrateLegacyDir(dir);
+                if (stale != null) return stale;
+                Path jrock = dir.resolve(DATA_DIR);
                 try {
                     Files.createDirectories(jrock);
-                    if (copySettings) copyIfUnset(home.resolve(PRODUCT)
+                    if (copySettings) copyIfUnset(home.resolve(DATA_DIR)
                             .resolve(CONFIG_FILE), jrock.resolve(CONFIG_FILE));
-                    if (copyKey) copyIfUnset(home.resolve(PRODUCT)
+                    if (copyKey) copyIfUnset(home.resolve(DATA_DIR)
                             .resolve(KEY_FILE), jrock.resolve(KEY_FILE));
                 } catch (IOException ex) {
                     return "Could not write into " + jrock + ": " + ex.getMessage();
@@ -1226,7 +1240,7 @@ public final class InstallJRock {
                         + "installer again to put them back."));
             }
             panel.add(note("Both .reg files - what was applied, and what was taken away - "
-                    + "are kept in " + home.resolve(PRODUCT) + " so you can read exactly "
+                    + "are kept in " + home.resolve(DATA_DIR) + " so you can read exactly "
                     + "what was done. The command line of every entry goes into the log "
                     + "below: which jar runs from where, with which arguments."));
         }, () -> {
@@ -1396,7 +1410,7 @@ public final class InstallJRock {
     private static javax.swing.JComponent fate(Path dir, Path from, String name,
                                                boolean ticked) {
         Path source = from.resolve(name);
-        Path target = dir.resolve(PRODUCT).resolve(name);
+        Path target = dir.resolve(DATA_DIR).resolve(name);
         String what = "   " + name + " - ";
         if (!ticked) {
             return found(true, what + "not touched (the tick is off)");
@@ -1411,6 +1425,39 @@ public final class InstallJRock {
         return found(true, what + (Files.exists(target)
                 ? "filled in, because the file there is empty"
                 : "copied, because there is none yet"));
+    }
+
+    // Renames a folder's JRock\ to __JRock\, which is where JRock 5.3.0 and later keep
+    // everything (see DATA_DIR). Returns null when the folder is ready to be written
+    // into, or the line to show when it is not.
+    //
+    // Run before anything is written into one of these folders, on every install and
+    // update. An update is the case that needs it: the key and the settings are in the
+    // folder the last install made, and JRock refuses to start in a folder that holds
+    // both names - so leaving the old one here would strand the key and stop the window
+    // the installer has just finished setting up.
+    private static String migrateLegacyDir(Path base) {
+        Path legacy = base.resolve(LEGACY_DATA_DIR);
+        Path current = base.resolve(DATA_DIR);
+        if (!Files.isDirectory(legacy)) return null;
+        // Both there, and which one holds the settings that matter is the user's to say -
+        // an installer that guessed would overwrite the answer instead of asking for it.
+        if (Files.exists(current)) {
+            return legacy + " is the folder name JRock used up to version 5.2.0, and "
+                    + current + " is the one this version uses. Move what you want to keep "
+                    + "out of the first into the second, delete the first, and run this "
+                    + "installer again.";
+        }
+        try {
+            Files.move(legacy, current);
+            say("Renamed " + legacy + " to " + DATA_DIR
+                    + " - the name this version reads its settings and key from.");
+            return null;
+        } catch (IOException ex) {
+            return "Could not rename " + legacy + " to " + DATA_DIR + ": "
+                    + ex.getMessage() + ". Close anything open in that folder, or rename "
+                    + "it yourself, and run this installer again.";
+        }
     }
 
     private static void copyIfUnset(Path from, Path to) throws IOException {
@@ -1963,10 +2010,10 @@ public final class InstallJRock {
         }
     }
 
-    // A .reg file in the install folder's JRock/, in the encoding reg.exe insists on:
+    // A .reg file in the install folder's __JRock/, in the encoding reg.exe insists on:
     // UTF-16LE with a byte order mark, or it reads the file as one line of nonsense.
     private static Path writeReg(String name, String content) throws IOException {
-        Path jrock = home.resolve(PRODUCT);
+        Path jrock = home.resolve(DATA_DIR);
         Files.createDirectories(jrock);
         Path file = jrock.resolve(name);
         byte[] text = content.getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
@@ -2641,12 +2688,12 @@ public final class InstallJRock {
         String name = String.valueOf(home.getFileName());
         javax.swing.JTextArea area = new javax.swing.JTextArea(String.join("\n",
                 name + "\\                       " + JAR + ", its SHA-256 and MD5",
-                "    " + PRODUCT + "\\                 the window's own files",
+                "    " + DATA_DIR + "\\               the window's own files",
                 "    jrock-prompt-*.txt      your own prompts - Ctrl+O opens here",
                 "    " + AGENTS_DIR + "\\<name>\\         one agent, its prompts, its own "
-                        + PRODUCT + "\\",
+                        + DATA_DIR + "\\",
                 "    " + FLOWS_DIR + "\\                 every flow, their prompts, one "
-                        + PRODUCT + "\\",
+                        + DATA_DIR + "\\",
                 "    " + SIMPLE_PROMPTS_DIR + "\\          the prompts of no agent and no "
                         + "flow, to open by hand"));
         area.setEditable(false);

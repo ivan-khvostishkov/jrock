@@ -296,7 +296,7 @@ class JRockFetchUrlTest extends JRockGuiFixture {
         press(refusal.okButton());
 
         // Nothing was written: no file, and the directory is not even created for one.
-        assertThat(urlsDirectory()).describedAs("JRock/urls/").doesNotExist();
+        assertThat(urlsDirectory()).describedAs("__JRock/urls/").doesNotExist();
         // And nothing was inserted, the prompt being what it was before.
         assertThat(promptArea().text()).describedAs("the prompt").isEqualTo(promptBefore);
         assertThat(logPane().text()).describedAs("the log pane's text")
@@ -324,7 +324,7 @@ class JRockFetchUrlTest extends JRockGuiFixture {
 
     /** Where JRock keeps what it downloads. */
     private Path urlsDirectory() {
-        return workingDirectory().resolve("JRock").resolve("urls");
+        return workingDirectory().resolve("__JRock").resolve("urls");
     }
 
     /** The hash JRock gave the include, read back out of the token it inserted. */

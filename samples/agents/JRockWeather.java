@@ -252,7 +252,7 @@ public final class JRockWeather {
         JRock.Sent sent = JRock.automationSend(REPLY_TIMEOUT_MS);
         if (!sent.ok()) throw new Stop("the model did not answer: " + sent.failure());
         String reply = read(JRock.automationMessageFile("assistant", sent.assistant()));
-        if (reply == null) throw new Stop("the reply was not written to JRock/messages/.");
+        if (reply == null) throw new Stop("the reply was not written to __JRock/messages/.");
         return reply.trim();
     }
 

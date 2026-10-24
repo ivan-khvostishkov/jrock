@@ -42,7 +42,7 @@ class JRockCleanupTest {
         long old = now - 30 * DAY;
         long cut = now - 10 * DAY;
 
-        Path jrock = Files.createDirectories(root.resolve("JRock"));
+        Path jrock = Files.createDirectories(root.resolve("__JRock"));
         Path includes = Files.createDirectories(jrock.resolve("includes"));
         Path urls = Files.createDirectories(jrock.resolve("urls"));
         Path wav = Files.createDirectories(jrock.resolve("wav"));
@@ -71,18 +71,18 @@ class JRockCleanupTest {
         Path inOwnFolder = aged(ownFolder.resolve("scan0167.pdf"), old, 999);
         Files.setLastModifiedTime(ownFolder, FileTime.fromMillis(old));
 
-        // 1. JRock/includes/ is the one place a FOLDER counts, because a folder there is
+        // 1. __JRock/includes/ is the one place a FOLDER counts, because a folder there is
         //    one conversion's output.
         assertThat(names(includes, cut, null, true))
-                .describedAs("swept from JRock/includes/")
+                .describedAs("swept from __JRock/includes/")
                 .containsExactlyInAnyOrder("quarterly.docx.image1.png",
                         "report.pdf.html", "scan.pdf.gs.001.png");
 
         // 2. The other two folders of JRock's own: by age, files only.
         assertThat(names(urls, cut, null, false))
-                .describedAs("swept from JRock/urls/").containsExactly("article.html");
+                .describedAs("swept from __JRock/urls/").containsExactly("article.html");
         assertThat(names(wav, cut, null, false))
-                .describedAs("swept from JRock/wav/").containsExactly("narration-2609-0101.wav");
+                .describedAs("swept from __JRock/wav/").containsExactly("narration-2609-0101.wav");
 
         // 3. THE WORKING DIRECTORY, which is the one that matters: the old backup zip and
         //    nothing else. Not the operator's PDF - it is old, and it is not a backup -
@@ -110,7 +110,7 @@ class JRockCleanupTest {
     @DisplayName("a folder JRock has not written to yet sweeps as empty rather than failing")
     void sweepsAFolderThatIsNotThereAsEmpty() throws Exception {
         long cut = System.currentTimeMillis();
-        assertThat(names(root.resolve("JRock").resolve("wav"), cut, null, false))
+        assertThat(names(root.resolve("__JRock").resolve("wav"), cut, null, false))
                 .describedAs("a wav/ nothing has written to").isEmpty();
     }
 

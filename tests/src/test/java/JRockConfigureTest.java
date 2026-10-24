@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Drives the Configure dialog: gives it an API key, applies it, and reopens the
  * dialog to check the key is not shown back - and that the key reached
- * {@code JRock/bedrock-key.txt}, which is where the next start reads it from.
+ * {@code __JRock/bedrock-key.txt}, which is where the next start reads it from.
  * <p>
  * The API key field is write-only by design - blank every time the dialog opens,
  * whatever key is in effect. That is a property worth a test, because the failure
@@ -136,14 +136,14 @@ class JRockConfigureTest extends JRockGuiFixture {
 
         // And it was written where the next start reads it from, which is what makes
         // the dialog worth using at all: one line, the key, in the working folder.
-        Path keyFile = workingDirectory().resolve("JRock").resolve("bedrock-key.txt");
-        assertThat(keyFile).describedAs("JRock/bedrock-key.txt").exists();
+        Path keyFile = workingDirectory().resolve("__JRock").resolve("bedrock-key.txt");
+        assertThat(keyFile).describedAs("__JRock/bedrock-key.txt").exists();
         assertThat(new String(Files.readAllBytes(keyFile), StandardCharsets.UTF_8).trim())
                 .describedAs("the key file's contents")
                 .isEqualTo(FAKE_API_KEY);
 
         // And it never reached the transcript. The log is written to disk, so a key in
-        // the pane would be a key in JRock/jrock-log.txt.
+        // the pane would be a key in __JRock/jrock-log.txt.
         assertThat(logPane().text())
                 .describedAs("the log pane's text")
                 .doesNotContain(FAKE_API_KEY);
@@ -179,9 +179,9 @@ class JRockConfigureTest extends JRockGuiFixture {
         java.lang.reflect.Method save = JRock.class.getDeclaredMethod("saveConfigQuietly");
         save.setAccessible(true);
         save.invoke(null);
-        Path config = workingDirectory().resolve("JRock").resolve("jrock-config.txt");
+        Path config = workingDirectory().resolve("__JRock").resolve("jrock-config.txt");
         assertThat(new String(Files.readAllBytes(config), StandardCharsets.UTF_8))
-                .describedAs("JRock/jrock-config.txt after a save")
+                .describedAs("__JRock/jrock-config.txt after a save")
                 .contains("request-extra$\n" + extra);
 
         // 3. A value that is not one balanced JSON object - a paste that lost its last

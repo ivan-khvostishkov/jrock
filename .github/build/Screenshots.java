@@ -52,7 +52,7 @@ import com.sun.net.httpserver.HttpServer;
  * real endpoint once, from a folder with a real key, with the same question and the same
  * page attached - and the reply text and its usage block were copied here verbatim (see
  * RECORDED). This runs a Chat Completions endpoint of its own on the loopback address that
- * replays them, and points the throwaway folder's {@code JRock/jrock-config.txt} at it.
+ * replays them, and points the throwaway folder's {@code __JRock/jrock-config.txt} at it.
  *
  * <p>So the pictures show what the model really answered, while CI needs no credential,
  * reaches no network and cannot cost anything - and what is exercised is JRock's own send,
@@ -95,7 +95,7 @@ public final class Screenshots {
                 : Paths.get(System.getProperty("java.io.tmpdir"));
         Path work = under.resolve("jrock-demo").resolve("Demo");
         deleteTree(work.getParent());
-        Path jrockDir = work.resolve("JRock");
+        Path jrockDir = work.resolve("__JRock");
         Files.createDirectories(jrockDir);
 
         HttpServer stub = startStub();
@@ -338,7 +338,7 @@ public final class Screenshots {
      * What {@code openai.gpt-5.4} answered, on 12 October 2026, asked these two questions
      * with this page attached through {@code bedrock-mantle.us-east-1}.
      *
-     * <p>Copied from {@code JRock/messages/*-assistant.txt}, which holds a reply verbatim,
+     * <p>Copied from {@code __JRock/messages/*-assistant.txt}, which holds a reply verbatim,
      * with the token counts from the usage block of the same response - so the answer in
      * the picture and the stats under it are one real turn rather than two guesses.
      *

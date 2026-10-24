@@ -25,7 +25,7 @@ import com.sun.net.httpserver.HttpServer;
 /**
  * Sends a prompt to a chat-completions endpoint of this test's own, which answers with a
  * picture instead of text - and checks that the picture becomes an include of the
- * session: saved under {@code JRock/includes/}, hashed, logged, and named in the reply
+ * session: saved under {@code __JRock/includes/}, hashed, logged, and named in the reply
  * itself, which is what the DOCX and Markdown exports place it from.
  * <p>
  * A real server on 127.0.0.1 rather than a stubbed transport, for the reason
@@ -109,7 +109,7 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
         // picture in it. Read from the file JRock wrote the reply to, which holds it
         // verbatim; the pane's own text comes back through an editor kit, with this
         // platform's line endings put on it.
-        assertThat(theReply()).describedAs("the reply, as written to JRock/messages/")
+        assertThat(theReply()).describedAs("the reply, as written to __JRock/messages/")
                 .startsWith("![Image: " + IMAGE_WIDTH + " x " + IMAGE_HEIGHT + ", ")
                 .endsWith("](" + name + ")\n@img " + hash);
 
@@ -172,7 +172,7 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
         // A recording is not a picture: the reference has no "!" on it, and the line
         // about the file is the one a WAV header can be read into.
         String hash = hashOf(theReply(), "audio");
-        assertThat(theReply()).describedAs("the reply, as written to JRock/messages/")
+        assertThat(theReply()).describedAs("the reply, as written to __JRock/messages/")
                 .startsWith("[Audio: ")
                 .endsWith("](" + saved.getFileName() + ")\n@audio " + hash);
         assertThat(theLog()).describedAs("the log pane's text")
@@ -192,9 +192,9 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
         send("Anything?");
         awaitTheWholeExchange();
 
-        assertThat(theReply()).describedAs("the reply, as written to JRock/messages/")
+        assertThat(theReply()).describedAs("the reply, as written to __JRock/messages/")
                 .isEqualTo("(no text in the reply; see the raw response below)");
-        assertThat(includesDirectory()).describedAs("JRock/includes/").doesNotExist();
+        assertThat(includesDirectory()).describedAs("__JRock/includes/").doesNotExist();
     }
 
     /**
@@ -249,18 +249,18 @@ class JRockReplyPayloadTest extends JRockGuiFixture {
     }
 
     private Path includesDirectory() {
-        return workingDirectory().resolve("JRock").resolve("includes");
+        return workingDirectory().resolve("__JRock").resolve("includes");
     }
 
     /**
-     * The reply as JRock wrote it, read from its own file under {@code JRock/messages/}.
+     * The reply as JRock wrote it, read from its own file under {@code __JRock/messages/}.
      * <p>
      * That file holds the answer verbatim - the same string the log pane was given, in
      * UTF-8, with nothing normalized - which is what makes it the thing to assert two
      * adjacent lines against.
      */
     private String theReply() throws IOException {
-        Path messages = workingDirectory().resolve("JRock").resolve("messages");
+        Path messages = workingDirectory().resolve("__JRock").resolve("messages");
         try (java.util.stream.Stream<Path> files = Files.list(messages)) {
             Path assistant = files
                     .filter(p -> p.getFileName().toString().endsWith("-assistant.txt"))

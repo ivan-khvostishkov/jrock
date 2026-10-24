@@ -46,7 +46,10 @@ public class BuildJar {
 
     // The folder JRock keeps its own files in, under whichever directory it runs in -
     // which can be the samples directory itself. Never packed; see the walk below.
-    private static final String RUNTIME_DIR = "JRock";
+    // Both names, because a working copy that has not been started with 5.3.0 yet still
+    // has the folder under the name JRock used up to 5.2.0.
+    private static final String RUNTIME_DIR = "__JRock";
+    private static final String LEGACY_RUNTIME_DIR = "JRock";
 
     // Fixed timestamp so output never depends on build time or machine.
     // 2026-01-01T00:00:00Z. (Reproducible-builds convention: SOURCE_DATE_EPOCH.)
@@ -113,7 +116,8 @@ public class BuildJar {
         //   - build output: enabling automations means copying jrock.jar in by hand
         //     (see JRockDocInventory.java), and a local copy of the jar - or a stray
         //     .class from compiling a script in place - would change the checksum.
-        //   - a JRock/ folder, which an automation run in that directory creates. It
+        //   - a __JRock/ folder (or a JRock/ one, from before 5.3.0), which an
+        //     automation run in that directory creates. It
         //     holds the conversation log, the message files, and bedrock-key.txt. That
         //     is somebody's API key and somebody's documents; they are not source, and
         //     an artifact is the last place they should turn up.
@@ -126,7 +130,10 @@ public class BuildJar {
             try (var stream = Files.walk(samplesDir)) {
                 stream.filter(Files::isRegularFile).filter(p -> {
                     for (Path part : samplesDir.relativize(p)) {
-                        if (part.toString().equals(RUNTIME_DIR)) return false;
+                        String name = part.toString();
+                        if (name.equals(RUNTIME_DIR) || name.equals(LEGACY_RUNTIME_DIR)) {
+                            return false;
+                        }
                     }
                     String n = p.getFileName().toString().toLowerCase(Locale.ROOT);
                     return !n.endsWith(".jar") && !n.endsWith(".class");

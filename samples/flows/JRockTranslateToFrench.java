@@ -461,7 +461,7 @@ public final class JRockTranslateToFrench {
         check(JRock.automationSetPrompt(kept.toString().replaceAll("\n+$", "\n")));
     }
 
-    // The reply a send produced, read out of its own file under JRock/messages/.
+    // The reply a send produced, read out of its own file under __JRock/messages/.
     //
     // The request's file is checked and not read, which is the point of checking it: if
     // the message JRock says it sent is not on disk, the stamps do not mean what they
@@ -469,10 +469,10 @@ public final class JRockTranslateToFrench {
     private static String reply(JRock.Sent sent) {
         if (!sent.ok()) throw new Stop(sent.failure());
         if (JRock.automationMessageFile("operator", sent.operator()) == null) {
-            throw new Stop("the request was not written to JRock/messages/.");
+            throw new Stop("the request was not written to __JRock/messages/.");
         }
         java.nio.file.Path file = JRock.automationMessageFile("assistant", sent.assistant());
-        if (file == null) throw new Stop("the reply was not written to JRock/messages/.");
+        if (file == null) throw new Stop("the reply was not written to __JRock/messages/.");
         try {
             return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException ex) {
