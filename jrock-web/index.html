@@ -96,6 +96,50 @@
       word-break: break-all; user-select: all;
     }
 
+    /* The /files browser (see the script's "/files browser" section): a light card on
+       the dark panel, in the place the placeholder text occupies - it is only ever open
+       before JRock starts, so the two never have to share the space. */
+    #filesPanel {
+      background: var(--panel); color: var(--text); font-size: 13px;
+      border: 1px solid var(--border); border-radius: 8px;
+      width: min(760px, calc(100% - 24px)); max-height: calc(100% - 24px);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    #filesPanel[hidden] { display: none; }
+    #filesPanel .bar, #filesPanel .foot {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 8px 10px; background: var(--bg); flex: 0 0 auto;
+    }
+    #filesPanel .bar { border-bottom: 1px solid var(--border); }
+    #filesPanel .foot { border-top: 1px solid var(--border); }
+    #filesPanel .bar .spacer { flex: 1; }
+    #filesPanel .path, #filesPanel .name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-all;
+    }
+    #filesPanel .path {
+      padding: 6px 10px; color: var(--muted); flex: 0 0 auto;
+      border-bottom: 1px solid var(--border);
+    }
+    #filesPanel .list { flex: 1 1 auto; overflow-y: auto; min-height: 90px; }
+    #filesPanel .row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 10px; border-bottom: 1px solid #eef1f2;
+    }
+    #filesPanel .row:last-child { border-bottom: none; }
+    /* A folder's name is the way into it, so it is a button; a file's is just text. */
+    #filesPanel .name { flex: 1 1 auto; min-width: 0; text-align: left; }
+    #filesPanel button.name {
+      background: none; border: none; padding: 0; font-size: 13px; cursor: pointer;
+      color: var(--brand); text-decoration: underline;
+    }
+    #filesPanel .meta, #filesPanel .kept, #filesPanel .note {
+      color: var(--muted); font-size: 12px; flex: 0 0 auto;
+    }
+    #filesPanel .note { flex: 1 1 100%; }
+    button.secondary { background: var(--panel); color: var(--text); }
+    button.danger { background: #b3261e; color: #fff; }
+
     /* Bottom bar: shows descriptive help on load, then the running log. */
     footer {
       font-size: 11px; color: var(--muted);
@@ -115,6 +159,7 @@
   <header>
     <h1><a class="brand" href="https://github.com/ivan-khvostishkov/jrock" target="_blank" rel="noopener">JRock</a> in the browser</h1>
     <span class="spacer"></span>
+    <button id="filesBtn" class="secondary">Files...</button>
     <button id="runBtn" disabled>Run JRock</button>
   </header>
 
@@ -151,6 +196,31 @@
         under that. A folder that is new is created. The address is written out in full here
         so it can be copied or bookmarked as readily as clicked.
       </p>
+      <p class="hint">
+        <b>Files...</b> opens what this browser has stored under <code>/files</code> - every
+        folder JRock has written in, with a <b>Delete</b> beside each entry and one button
+        that sweeps every name ending in <code>~</code> out of the whole tree. Only before
+        JRock starts: nothing should be deleted under a running session.
+      </p>
+    </div>
+
+    <!-- The /files browser, filled in by the script's "/files browser" section. -->
+    <div id="filesPanel" hidden>
+      <div class="bar">
+        <b>Stored in this browser</b>
+        <span class="spacer"></span>
+        <button id="filesUp" class="secondary">Up</button>
+        <button id="filesRefresh" class="secondary">Refresh</button>
+        <button id="filesClose" class="secondary">Close</button>
+      </div>
+      <div class="path" id="filesPath">/files</div>
+      <div class="list" id="filesList"></div>
+      <div class="foot">
+        <button id="filesSweep" class="danger">Delete every name ending in ~</button>
+        <span class="meta" id="filesStatus"></span>
+        <span class="note">Deleting a folder deletes everything in it. <code>uploads/</code>
+        and <code>downloads/</code> are CheerpJ's own and are left alone.</span>
+      </div>
     </div>
   </div>
 
@@ -171,6 +241,8 @@
       var shaEl    = document.getElementById("sha");
       var sizeEl   = document.getElementById("jarSize");
       var placeholder = document.getElementById("placeholder");
+      var filesBtn   = document.getElementById("filesBtn");
+      var filesPanel = document.getElementById("filesPanel");
 
       var jarBytes = null;          // Uint8Array of jrock.jar
       var started  = false;
@@ -1156,6 +1228,357 @@
         return bytes;
       }
 
+      // --- The runtime, started once and shared ---------------------------------
+      //
+      // Two things want CheerpJ: the app, and the /files browser below. Both go through
+      // here, so whichever is asked for first pays for the download and the other finds
+      // it ready - and there is one list of natives, not two that could drift apart.
+      var NATIVES = {
+        Java_JRock_browserHttpInfo: Java_JRock_browserHttpInfo,
+        Java_JRock_browserHttpSend: Java_JRock_browserHttpSend,
+        Java_JRock_browserHttpFetch: Java_JRock_browserHttpFetch,
+        Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
+        Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
+        Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome,
+        Java_JRock_browserOpenTab: Java_JRock_browserOpenTab,
+        Java_JRock_browserScaleImage: Java_JRock_browserScaleImage,
+        Java_JRock_browserPdfOpen: Java_JRock_browserPdfOpen,
+        Java_JRock_browserPdfRenderPage: Java_JRock_browserPdfRenderPage,
+        Java_JRock_browserPdfClose: Java_JRock_browserPdfClose,
+        Java_JRock_browserNarrateVoices: Java_JRock_browserNarrateVoices,
+        Java_JRock_browserNarrate: Java_JRock_browserNarrate,
+        Java_JRock_browserNarrateStop: Java_JRock_browserNarrateStop,
+        Java_JRock_browserMicStart: Java_JRock_browserMicStart,
+        Java_JRock_browserMicStop: Java_JRock_browserMicStop
+      };
+
+      var runtimePromise = null;
+
+      function runtimeReady() {
+        if (!runtimePromise) {
+          log("Initialising CheerpJ (Java 11) with the browser HTTP bridge ...");
+          // No javaProperties: there is nothing for the page to pass in. JRock reads
+          // its own settings from /files/__JRock/, which this browser keeps.
+          runtimePromise = cheerpjInit({
+            version: 11,
+            status: "splash",
+            natives: NATIVES
+          });
+        }
+        return runtimePromise;
+      }
+
+      // --- The /files browser: see what is stored here, and delete it ------------
+      //
+      // CheerpJ keeps /files in this browser's own storage, where nothing else can reach
+      // it: no Explorer, no Finder, no shell. So a folder holding four thousand message
+      // files and a hundred converted PDF pages is invisible from outside, slows down
+      // every file dialog JRock opens, and cannot be thrown away - JRock's file chooser
+      // can rename a folder (hence the trick of calling the dead ones "junk~") but a
+      // chooser does not delete, and the browser's own storage controls are all or
+      // nothing: clear the site's data and the API key, the settings and the whole
+      // transcript go with it.
+      //
+      // Hence this: one folder listed at a time, a Delete beside each entry, and one
+      // button that sweeps every name ending in "~" out of the tree - which is what
+      // turns that renaming trick into a cleanup rather than a hoard.
+      //
+      // It works through LIBRARY MODE (cheerpjRunLibrary), the documented way for
+      // JavaScript to call Java, and it calls java.io.File - the same class JRock
+      // itself uses, so a listing here is the listing the app sees and a delete here is
+      // the delete it would do. The alternatives do not reach: cjFileBlob reads one file
+      // whose name is already known, and cheerpOSRemoveStringFile is for /str/. Neither
+      // can walk a folder, and neither can remove one.
+      //
+      // BEFORE THE APP, NOT BESIDE IT. The button is disabled the moment JRock starts:
+      // deleting the log, the prompt or the key out from under a running session would
+      // produce a crash report rather than a cleanup.
+      var FILES_ROOT = "/files";
+
+      // CheerpJ's own two: uploads/ holds what the Java title bar's upload button put
+      // there (and the browser empties it anyway), downloads/ is the drop box whatever
+      // is written into gets downloaded from. They can be looked into - knowing what is
+      // in them is half the point of a browser - and nothing in them is deleted here.
+      var PROTECTED = ["/files/uploads", "/files/downloads"];
+
+      var filesList     = document.getElementById("filesList");
+      var filesPathEl   = document.getElementById("filesPath");
+      var filesStatus   = document.getElementById("filesStatus");
+      var filesUpBtn    = document.getElementById("filesUp");
+      var filesSweepBtn = document.getElementById("filesSweep");
+
+      var filesCwd = FILES_ROOT;
+      var libPromise = null;
+      var filesBusy = false;         // one operation at a time, and no click during it
+
+      function javaLib() {
+        if (!libPromise) {
+          libPromise = runtimeReady().then(function () {
+            return cheerpjRunLibrary("");      // "" is the Java standard library alone
+          });
+        }
+        return libPromise;
+      }
+
+      async function javaFileClass() {
+        var lib = await javaLib();
+        return await lib.java.io.File;
+      }
+
+      // A Java String comes back as a JS string or as something to ask for one; both
+      // end up as text here, so the rest of this section never has to care which.
+      async function asText(value) {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "string") return value;
+        try { return String(await value.toString()); } catch (e) { return String(value); }
+      }
+
+      function childOf(dir, name) { return dir === "/" ? "/" + name : dir + "/" + name; }
+
+      function isProtected(path) {
+        for (var i = 0; i < PROTECTED.length; i++) {
+          if (path === PROTECTED[i] || path.indexOf(PROTECTED[i] + "/") === 0) return true;
+        }
+        return false;
+      }
+
+      function human(bytes) {
+        if (!isFinite(bytes) || bytes < 0) return "";
+        var units = ["B", "KB", "MB", "GB"], unit = 0, size = bytes;
+        while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+        return (unit === 0 ? size : size.toFixed(size < 10 ? 1 : 0)) + " " + units[unit];
+      }
+
+      // One folder, shallow: its entries, each with what it is and how big - a file's
+      // bytes, a folder's number of entries. Shallow on purpose, because the folders
+      // this exists for hold thousands of files and adding up a tree to draw one row
+      // would be the slowness it is meant to cure.
+      async function entriesOf(path) {
+        var JFile = await javaFileClass();
+        var names = await (await new JFile(path)).list();
+        var out = [];
+        if (!names) return out;
+        for (var i = 0; i < names.length; i++) {
+          var name = await asText(names[i]);
+          if (!name) continue;
+          var entry = { name: name, path: childOf(path, name), dir: false, size: NaN,
+                        items: 0 };
+          var file = await new JFile(entry.path);
+          entry.dir = !!(await file.isDirectory());
+          if (entry.dir) {
+            var inside = await file.list();
+            entry.items = inside ? inside.length : 0;
+          } else {
+            entry.size = Number(await file.length());
+          }
+          out.push(entry);
+        }
+        out.sort(function (a, b) {
+          if (a.dir !== b.dir) return a.dir ? -1 : 1;     // folders first, then by name
+          return a.name.localeCompare(b.name);
+        });
+        return out;
+      }
+
+      // Depth first, because java.io.File.delete refuses a folder with anything left in
+      // it. Counted rather than thrown: one file the browser will not let go of should
+      // not abandon the nine hundred behind it.
+      async function deleteTree(path, tally) {
+        if (isProtected(path)) { tally.kept++; return; }
+        var JFile = await javaFileClass();
+        var file = await new JFile(path);
+        if (await file.isDirectory()) {
+          var names = await file.list();
+          if (names) {
+            for (var i = 0; i < names.length; i++) {
+              await deleteTree(childOf(path, await asText(names[i])), tally);
+            }
+          }
+        }
+        // Quoted because `delete` is a JS keyword, and this is Java's method.
+        if (await file["delete"]()) tally.deleted++; else tally.failed++;
+      }
+
+      // Every name ending in "~" under a folder, found before anything is deleted so
+      // the question can be asked with the list in hand. A folder whose own name ends
+      // in "~" is not gone into: the whole of it is what goes.
+      async function tildeUnder(path, found) {
+        if (isProtected(path)) return found;
+        var JFile = await javaFileClass();
+        var names = await (await new JFile(path)).list();
+        if (!names) return found;
+        for (var i = 0; i < names.length; i++) {
+          var name = await asText(names[i]);
+          if (!name) continue;
+          var full = childOf(path, name);
+          if (isProtected(full)) continue;
+          if (name.charAt(name.length - 1) === "~") { found.push(full); continue; }
+          if (await (await new JFile(full)).isDirectory()) await tildeUnder(full, found);
+        }
+        return found;
+      }
+
+      function filesSay(message) { filesStatus.textContent = message; }
+
+      function filesRow(entry) {
+        var row = document.createElement("div");
+        row.className = "row";
+
+        var name = document.createElement(entry.dir ? "button" : "span");
+        name.className = "name";
+        name.textContent = entry.dir ? entry.name + "/" : entry.name;
+        if (entry.dir) {
+          name.addEventListener("click", function () { filesGo(entry.path); });
+        }
+        row.appendChild(name);
+
+        var meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = entry.dir
+            ? entry.items + (entry.items === 1 ? " item" : " items")
+            : human(entry.size);
+        row.appendChild(meta);
+
+        // The last cell is either the Delete button or the reason there isn't one.
+        var action;
+        if (isProtected(entry.path)) {
+          action = document.createElement("span");
+          action.className = "kept";
+          action.textContent = "CheerpJ's own";
+        } else {
+          action = document.createElement("button");
+          action.className = "danger";
+          action.textContent = "Delete";
+          action.addEventListener("click", function () { filesDelete(entry); });
+        }
+        row.appendChild(action);
+        return row;
+      }
+
+      function filesRender(entries) {
+        filesPathEl.textContent = filesCwd;
+        filesUpBtn.disabled = filesCwd === FILES_ROOT;
+        // Standing in one of CheerpJ's own folders there is nothing to sweep, and a
+        // button that only ever answers "nothing found" is worse than one greyed out.
+        filesSweepBtn.disabled = isProtected(filesCwd);
+        filesList.textContent = "";
+        if (!entries.length) {
+          var empty = document.createElement("div");
+          empty.className = "row";
+          var word = document.createElement("span");
+          word.className = "meta";
+          word.textContent = "(nothing in here)";
+          empty.appendChild(word);
+          filesList.appendChild(empty);
+          return;
+        }
+        for (var i = 0; i < entries.length; i++) {
+          filesList.appendChild(filesRow(entries[i]));
+        }
+      }
+
+      async function filesGo(path) {
+        if (filesBusy) return;
+        filesBusy = true;
+        filesSay("Reading " + path + " ...");
+        try {
+          filesCwd = path;
+          filesRender(await entriesOf(path));
+          filesSay("");
+        } catch (e) {
+          filesSay("Could not read " + path + ": " + e);
+        } finally {
+          filesBusy = false;
+        }
+      }
+
+      async function filesDelete(entry) {
+        if (filesBusy) return;
+        if (!window.confirm(entry.dir
+                ? "Delete the folder " + entry.path + " and everything in it?"
+                : "Delete " + entry.path + "?")) {
+          return;
+        }
+        filesBusy = true;
+        filesSay("Deleting " + entry.path + " ...");
+        var tally = { deleted: 0, failed: 0, kept: 0 };
+        try {
+          await deleteTree(entry.path, tally);
+          filesRender(await entriesOf(filesCwd));
+          filesSay(filesReport(tally));
+        } catch (e) {
+          filesSay("Could not delete " + entry.path + ": " + e);
+        } finally {
+          filesBusy = false;
+        }
+      }
+
+      function filesReport(tally) {
+        return "Deleted " + tally.deleted + (tally.deleted === 1 ? " item" : " items")
+            + (tally.failed ? ", " + tally.failed + " could not be deleted" : "")
+            + (tally.kept ? ", " + tally.kept + " left alone" : "") + ".";
+      }
+
+      async function filesSweep() {
+        if (filesBusy) return;
+        filesBusy = true;
+        filesSay("Looking for names ending in ~ under " + filesCwd + " ...");
+        try {
+          var found = await tildeUnder(filesCwd, []);
+          if (!found.length) {
+            filesSay("Nothing under " + filesCwd + " is named with a trailing ~.");
+            return;
+          }
+          var shown = found.slice(0, 12).join("\n")
+              + (found.length > 12 ? "\n... and " + (found.length - 12) + " more" : "");
+          if (!window.confirm(found.length + (found.length === 1 ? " name" : " names")
+                  + " under " + filesCwd + " end in ~:\n\n" + shown
+                  + "\n\nDelete them, and everything inside them?")) {
+            filesSay("Nothing deleted.");
+            return;
+          }
+          var tally = { deleted: 0, failed: 0, kept: 0 };
+          for (var i = 0; i < found.length; i++) {
+            filesSay("Deleting " + found[i] + " ... (" + (i + 1) + " of "
+                    + found.length + ")");
+            await deleteTree(found[i], tally);
+          }
+          filesRender(await entriesOf(filesCwd));
+          filesSay(filesReport(tally));
+        } catch (e) {
+          filesSay("Could not finish the sweep: " + e);
+        } finally {
+          filesBusy = false;
+        }
+      }
+
+      filesBtn.addEventListener("click", function () {
+        if (started) return;
+        filesPanel.hidden = false;
+        if (placeholder) placeholder.style.display = "none";
+        filesBtn.disabled = true;              // the Close button brings it back
+        filesGo(filesCwd);
+      });
+
+      document.getElementById("filesClose").addEventListener("click", function () {
+        filesPanel.hidden = true;
+        if (placeholder) placeholder.style.display = "";
+        filesBtn.disabled = started;
+        filesSay("");
+      });
+
+      document.getElementById("filesRefresh").addEventListener("click", function () {
+        filesGo(filesCwd);
+      });
+
+      filesUpBtn.addEventListener("click", function () {
+        var cut = filesCwd.lastIndexOf("/");
+        var up = cut > 0 ? filesCwd.slice(0, cut) : FILES_ROOT;
+        filesGo(up.length < FILES_ROOT.length ? FILES_ROOT : up);
+      });
+
+      filesSweepBtn.addEventListener("click", filesSweep);
+
       // --- Run: init CheerpJ (with the HTTP bridge), then run the jar. ---
       // From the button, or on its own once the jar is loaded when the address names
       // a folder (see autostartDir).
@@ -1165,6 +1588,9 @@
         if (started || !jarBytes) return;
         started = true;
         runBtn.disabled = true;
+        // The /files browser is a before-JRock-starts thing (see its section above).
+        filesBtn.disabled = true;
+        filesPanel.hidden = true;
         // The checkbox lives in the placeholder, which is about to go, so the answer is
         // read while it is still on the page rather than off a detached element.
         var hideChrome = hideChromeBox.checked;
@@ -1172,31 +1598,7 @@
         if (placeholder) placeholder.remove();
 
         try {
-          log("Initialising CheerpJ (Java 11) with the browser HTTP bridge ...");
-          // No javaProperties: there is nothing for the page to pass in. JRock reads
-          // its own settings from /files/__JRock/, which this browser keeps.
-          await cheerpjInit({
-            version: 11,
-            status: "splash",
-            natives: {
-              Java_JRock_browserHttpInfo: Java_JRock_browserHttpInfo,
-              Java_JRock_browserHttpSend: Java_JRock_browserHttpSend,
-              Java_JRock_browserHttpFetch: Java_JRock_browserHttpFetch,
-              Java_JRock_browserClipboardRead: Java_JRock_browserClipboardRead,
-              Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
-              Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome,
-              Java_JRock_browserOpenTab: Java_JRock_browserOpenTab,
-              Java_JRock_browserScaleImage: Java_JRock_browserScaleImage,
-              Java_JRock_browserPdfOpen: Java_JRock_browserPdfOpen,
-              Java_JRock_browserPdfRenderPage: Java_JRock_browserPdfRenderPage,
-              Java_JRock_browserPdfClose: Java_JRock_browserPdfClose,
-              Java_JRock_browserNarrateVoices: Java_JRock_browserNarrateVoices,
-              Java_JRock_browserNarrate: Java_JRock_browserNarrate,
-              Java_JRock_browserNarrateStop: Java_JRock_browserNarrateStop,
-              Java_JRock_browserMicStart: Java_JRock_browserMicStart,
-              Java_JRock_browserMicStop: Java_JRock_browserMicStop
-            }
-          });
+          await runtimeReady();      // already done if the /files browser asked first
 
           var displayWrap = document.getElementById("display-wrap");
           cheerpjCreateDisplay(-1, -1, displayWrap);
@@ -1220,7 +1622,14 @@
               : await cheerpjRunJar(JAR_PATH);
           log("JRock exited with code " + code + ".");
         } catch (e) {
-          log("Error running JRock: " + e);
+          // The hint is there because the /files browser loads the Java standard library
+          // into this page as a library-mode session (see its section above), and CheerpJ
+          // does not document running a jar after one. If that is what went wrong, a
+          // reload is the whole fix - and the files deleted stay deleted.
+          log("Error running JRock: " + e + (libPromise
+              ? "\n(The /files browser was used in this session; reload the page and press"
+                + " Run JRock.)"
+              : ""));
         }
       }
     })();

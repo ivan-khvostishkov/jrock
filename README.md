@@ -342,6 +342,21 @@ as WebAssembly), so nothing runs on a server.
   `..` segment. The page says so itself, under the Run button, with the whole address written
   out — `https://jrock.nosocial.net/?home` — as a link that is equally there to be clicked, or
   copied and bookmarked.
+- **`Files...` browses CheerpJ's storage, and deletes from it.** `/files` lives in the browser's
+  own storage, where no Explorer, Finder or shell can reach it: a folder of four thousand message
+  files and a hundred converted PDF pages is invisible from outside, slows down every file dialog
+  JRock opens, and used to be impossible to throw away — JRock's file chooser can *rename* a dead
+  folder (hence the trick of calling it `junk~`) but a chooser does not delete, and the browser's
+  own storage controls are all or nothing: clear the site's data and the key, the settings and the
+  whole transcript go with it. So the page lists `/files` itself: one folder at a time with its
+  entries' sizes, a folder's name being the way into it, **Delete** beside each entry — a folder
+  with everything in it — and one button that sweeps **every name ending in `~`** out of the whole
+  tree below where you are standing, after showing you the list and asking. It works through
+  CheerpJ's [library mode](https://cheerpj.com/docs/guides/library-mode), calling the same
+  `java.io.File` JRock itself uses, so a listing there is the listing the app sees. `uploads/` and
+  `downloads/` are CheerpJ's own: you can look in them, and nothing in them is deleted from here.
+  The button is **only there before JRock starts** — deleting the log, the prompt or the key out
+  from under a running session would be a crash report rather than a cleanup.
 - **Right-click is a long tap.** On touch devices, press and hold to open the context menus.
 - **The page gets out of the way — and comes back.** A few seconds after launch the page hides
   its own header and footer, giving the Swing display the whole tab. That is what the **Hide
