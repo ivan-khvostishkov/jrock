@@ -5464,12 +5464,12 @@ md5sum jrock.jar
 java -jar jrock.jar
 ```
 
-Current build hashes, 5.0.0, the same from all three runners — **5.3.0's go here once CI has
-built it**, which is the only place these numbers can honestly come from:
+Current build hashes, 5.3.0, the same from all three runners — straight out of CI, which is the
+only place these numbers can honestly come from:
 
 ```
-05f4a427a1a749f50d79f24d09d5a59700fda82218c8c91eafb293dc7860480f  jrock.jar
-c1c11b333b4b54352f00bc899672b603  jrock.jar
+2bb3cd80999d1072486f93caa06f4b0256f4487bbc54c84bd6ef397859907918  jrock.jar
+246c39fe1261ec2f826f7dc521fb1059  jrock.jar
 ```
 
 Or, if you want to modify the source and run it in place (no build step):
