@@ -5849,19 +5849,59 @@ just built, on **Ubuntu, macOS and Windows**, and uploads `screenshots-linux`,
 `screenshots-macos` and `screenshots-windows` as build artifacts. Swing takes its look from the
 platform, so one window is three pictures and a section can show whichever suits it.
 
-Each scene is reached by driving the program through its own
-[automation API](#the-automation-api) §27 — the same calls a flow uses — and the window is then
-asked to paint itself:
+Each scene is reached by driving the program itself — the
+[automation API](#the-automation-api) §27 for the conversation, and for the dialogs and menus
+the real button pressed and a real popup trigger dispatched, so these are pictures of the
+program and not of panels built for the occasion.
 
-| | |
+**Each picture carries two or three things no other picture carries**, which is the whole rule
+of the set: a window at startup and the same window with a sentence typed into it differ by
+that sentence, and that is not a picture.
+
+| | What it is the only picture of |
 |---|---|
-| `01-window-at-startup` | The session report |
-| `02-a-question-in-the-prompt` | `automationSetPrompt` |
-| `03-a-page-included-as-an-image` | `automationInclude`: the token, the Markdown reference above it, and the log line |
-| `04-a-question-and-its-answer` | `automationSend`: the turn, the raw request and response, the stats |
-| `05-two-turns-with-history-and-dialog-only` | The conversation without the machinery around it |
-| `06-the-timer-agent` | `JRockTimer` |
-| `07-the-papers-agent` | `JRockPaperDocs`, with its two folders |
+| `01-window-at-startup` | the session report, the ticks, the `__JRock/` label, Send |
+| `02-a-question-and-a-page-attached` | the `@img` token, the Markdown reference above it, the log lines saying what was copied and what it was downscaled to |
+| `03-the-answer-in-the-log` | the teal role header, the answer as it arrived, the usage and cost of the send |
+| `04-two-turns-history-and-dialog-only` | a conversation resent, and the machinery hidden |
+| `05-configure-general` | the directories, the write-only key, the endpoint, the model, the cache, the autobackup |
+| `06-configure-files` | Images DPI, the PDF and RTF include modes, processed copies, the missing-include stop |
+| `07-configure-audio` | the speaker, the voices and **Add**, the crackle, the microphone, transcribe, [Mic always on](#mic-always-on) §30 |
+| `08-the-jrock-folder-menu` | the folder's own menu: its contents, both merges, backup, restore, cleanup |
+| `09-what-is-in-the-jrock-folder` | every file that folder can hold, and what each one is for |
+| `10-the-log-menu` | the log's menu over a **selected** answer, so the exports and Narrate are live |
+| `11-the-timer-agent` | `JRockTimer`: an agent's own window, and the port it answers on |
+| `12-the-papers-agent` | `JRockPaperDocs`, with the two folders it watches and its commands |
+
+**And four more on Windows, from an installer that really installs** —
+[`.github/build/InstallerShots.java`](.github/build/InstallerShots.java). The wizard is Swing,
+so it is driven the same way: its real **Next**, its real radio button, its real ticks. It
+installs into a folder of its own, which is what makes the last two pictures possible at all —
+Explorer's menu has JRock's entries in it only on a machine where JRock is installed — and
+`--clean` removes the entries it wrote afterwards, naming that installation and no other.
+
+| | What it is the only picture of |
+|---|---|
+| `13-the-installer-agents-and-flows` | the catalogue with its ticks: every agent, and the translation flows cut to two, because six languages in one menu is a menu nobody reads |
+| `14-the-installer-finished` | what it did: every folder, every entry, every file, named |
+| `15-explorer-the-folder-menu` | **JRock here!** and an entry per agent, on a folder's own background |
+| `16-explorer-the-file-menu` | the flow entries, on the file that was right-clicked |
+
+The two Explorer menus are the **shell's own**, opened with **Shift+F10** rather than a mouse
+click at a guessed pixel — the selection is what decides which menu opens, and nothing (the
+folder's) or the first item (a file's) is a selection this tool can be sure of. They are
+captured as the whole screen, which on a runner holds one window and an empty desktop.
+
+**The pictures are read back off the screen, not painted into an image.** A Swing text area
+breaks its lines using the metrics of the screen and draws them with the metrics of whatever
+`Graphics` it is handed, and an offscreen image's are not the screen's — so a line that fitted
+when it was measured did not fit when it was drawn, and the last word of every long line in the
+Help window and the folder dialog was cut off at the component's edge. In the picture only: on
+screen those dialogs are perfect, which a `Robot` capture beside a painted copy is what proved.
+So `Robot` is asked for exactly the rectangle the **root pane** occupies on screen, which keeps
+what painting the root pane was for — no title bar, no borders, no shadow, none of the three
+platforms' decoration — while being, to the pixel, what somebody in front of the machine sees.
+Painting stays as the fallback for a JVM with no screen to read.
 
 **The browser and the phone have a tool of their own** —
 [`.github/build/WebShots.java`](.github/build/WebShots.java) — because `Screenshots.java` paints

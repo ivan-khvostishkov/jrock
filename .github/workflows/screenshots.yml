@@ -94,18 +94,36 @@ jobs:
           java -cp "jrock.jar;out-automation" .github/build/Screenshots.java \
                screenshots ${{ matrix.name }}
 
-      # The five JRock scenes are the point of the step, and a missing one is a bug rather
-      # than a runner's bad day - so they are counted. The two agent windows are not: each
-      # is started in the same JVM and skipped with a reason if it cannot come up, which
-      # should not cost the pictures that did.
+      # THE INSTALLER, AND THE MENUS IT WRITES, on the one runner where either means
+      # anything. The wizard is Swing, so it is driven the way JRock is - its real Next
+      # button, its real radio button, its real ticks - and it really installs, because
+      # Explorer's menu only has JRock's entries in it on a machine where JRock is
+      # installed. --clean takes those entries out again afterwards; the runner is thrown
+      # away either way, but the same command at a desk should leave nothing behind.
+      #
+      # The two Explorer pictures are the shell's own menus, opened with Shift+F10 rather
+      # than a mouse click at a guessed pixel, and captured as the whole screen - which on
+      # a runner holds one window and an empty desktop.
+      - name: The installer and the Explorer menus (Windows)
+        if: matrix.runner == 'windows-latest'
+        shell: bash
+        run: |
+          javac -encoding UTF-8 --release 11 -d out-installer installer/InstallJRock.java
+          java -cp "jrock.jar;out-installer" .github/build/InstallerShots.java \
+               screenshots ${{ matrix.name }} "$RUNNER_TEMP/JRockShots" --clean
+
+      # The twelve JRock scenes are the point of the step, and a missing one is a bug
+      # rather than a runner's bad day - so they are counted. The agent windows and the
+      # installer's pictures are not: each is started in the same JVM and skipped with a
+      # reason if it cannot come up, which should not cost the pictures that did.
       - name: What was taken
         shell: bash
         run: |
           ls -la screenshots/
           taken=$(ls screenshots/*.png | wc -l)
           echo "$taken picture(s)"
-          if [ "$taken" -lt 5 ]; then
-            echo "::error::fewer than the five JRock scenes were taken"
+          if [ "$taken" -lt 10 ]; then
+            echo "::error::fewer than ten of the twelve JRock scenes were taken"
             exit 1
           fi
 
