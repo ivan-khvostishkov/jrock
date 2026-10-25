@@ -613,20 +613,7 @@ and none of it is specific to JRock.
 | **Android** | the platform's own, Java to DEX | missing — would need one on Android's views | the browser runs it |
 | **A phone browser** | CheerpJ, already | Swing as it is, on a canvas | **this is the mobile support** |
 
-**The two targets exist in this repository, and they fail on purpose.** [`android/`](android/) is a
-minimal Gradle project that compiles the root `JRock.java` into an APK, and [`ios/`](ios/) is a
-minimal MobiVM project that compiles the same file ahead of time into an iOS binary — one `Copy` task
-each, pulling the single source file out of the repository root, which keeps its no-build-descriptor
-rule intact. Neither one works: Android stops at `javac` on the first `javax.swing` import, and
-MobiVM stops in the AOT compiler while linking. The
-[Mobile builds (experimental)](.github/workflows/mobile.yml) workflow builds both — on
-`ubuntu-latest` and on a `macos-latest` runner with Xcode — and is left red rather than hidden behind
-`continue-on-error`, so the missing piece is a line in a log anybody can read instead of a claim in a
-README. It is **manual**, run from the Actions tab: a job that is expected to fail would otherwise put
-a red X on every commit and teach you to read past the two workflows whose colour means something.
-The two directories' own READMEs list, in order of size, what replacing it would mean.
-
-Which is also why it would be worth more than JRock. A Swing backend on native mobile primitives
+It would also be worth more than JRock. A Swing backend on native mobile primitives
 would make plain Java a cross-platform UI target again — desktop, iOS and Android from one source —
 and put Java and Swing back in the same row as Kotlin and Unity/C#. If that interests you, vote with
 the **Sponsor** button at the top of this repository ;)
