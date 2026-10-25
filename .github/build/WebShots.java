@@ -59,6 +59,17 @@ public final class WebShots {
     /** How long CheerpJ gets to fetch its runtime and start the JVM. Cold cache, CI. */
     private static final long START_TIMEOUT_MS = 240_000;
 
+    /**
+     * How long a page SERVED BY THIS TOOL gets before it is given up on.
+     *
+     * <p>Short on purpose. A loopback page has never come up on a build runner - CheerpJ
+     * initialises, says "Running JRock ...", and no canvas ever appears, in library mode
+     * and as a jar alike - while the deployed page comes up in the same browser on the
+     * same machine every time. The attempt is kept, because it is the one that would
+     * photograph THIS build and it costs little; the four minutes of waiting are not.
+     */
+    private static final long OWN_PAGE_MS = 60_000;
+
     /** How long one DevTools command may take. A screenshot of a big canvas is slow. */
     private static final long COMMAND_TIMEOUT_MS = 180_000;
 
@@ -605,9 +616,13 @@ public final class WebShots {
 
         /** Waits for the Swing canvas, which is CheerpJ having started the JVM. */
         void awaitCanvas() throws Exception {
+            awaitCanvas(START_TIMEOUT_MS);
+        }
+
+        void awaitCanvas(long millis) throws Exception {
             await("(function(){var c=document.querySelector('#display-wrap canvas');"
                     + "return !!c && c.width > 200 && c.height > 200;})()",
-                    START_TIMEOUT_MS, "CheerpJ to put JRock's window on the page");
+                    millis, "CheerpJ to put JRock's window on the page");
             // The canvas exists as soon as the display is made; what goes in it is a
             // window painting itself, a model list being fetched and a log being read.
             Thread.sleep(20_000);
