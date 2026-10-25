@@ -118,12 +118,25 @@ jobs:
       - name: Open JRock and photograph it
         run: |
           mkdir -p screenshots
+          # The time Apple puts in its own pictures, and a full battery: a status bar
+          # saying 9:41 is a screenshot, one saying 09:57 is a runner.
+          xcrun simctl status_bar "$UDID" override --time "9:41" \
+                --batteryState charged --batteryLevel 100 --cellularBars 4 || true
           open -a Simulator            # the device screen has to be a window to press on
           xcrun simctl openurl "$UDID" "$URL"
+
+          # SAFARI'S FIRST-RUN TIP, OUT OF THE WAY. A fresh simulator shows a popover
+          # about bookmarks and the share menu, and it sits in the middle of the page -
+          # over JRock, in every picture taken afterwards. A tap anywhere outside closes
+          # it, and the same tap takes the focus off the prompt, so the keyboard that had
+          # covered half the window goes down with it. LongPress held for 60ms is a tap.
+          sleep 12
+          java .github/build/LongPress.java 0.5 0.22 60 || true
+          sleep 3
+
           # The first picture is taken early on purpose: the page's own log, which says
           # what it is doing while the runtime comes down, is the one thing a reader
           # waiting on a slow connection will see.
-          sleep 25
           xcrun simctl io "$UDID" screenshot screenshots/ios-01-starting.png
           sleep $WAIT
           xcrun simctl io "$UDID" screenshot screenshots/ios-02-the-window.png
@@ -133,7 +146,11 @@ jobs:
           # cannot show. The press is the host's mouse held over the Simulator's window
           # (see LongPress.java); the picture is still the device's own screen, so the
           # menu is in it and the Simulator's chrome is not.
-          java .github/build/LongPress.java 0.5 0.55 900 || true
+          #
+          # A second and a half, because 900ms opened nothing: what arrived at the page
+          # was a tap, and a tap in the prompt only raises the keyboard. Aimed at the log
+          # rather than the prompt, which is the menu with more in it.
+          java .github/build/LongPress.java 0.5 0.32 1500 || true
           sleep 2
           xcrun simctl io "$UDID" screenshot screenshots/ios-03-the-touch-menu.png
           ls -la screenshots/

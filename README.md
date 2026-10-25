@@ -23,7 +23,7 @@ place. It asks something of you in return, as Vim does: the keys are worth learn
 ([there are twenty](#keyboard-shortcuts) §34), the files are yours to keep, and nothing is hidden
 behind a service that could change its mind.
 
-![A fresh JRock session: the startup report, one prompt, and one reply from openai.gpt-5.4](images/macos-04-a-question-and-its-answer.png)
+![A fresh JRock session: the startup report, a question, and the answer with what the send cost](images/windows-03-the-answer-in-the-log.png)
 
 *One turn, in a folder called `Demo` — which is also where the window title and its `DEM` icon
 come from. The question and the attached page are still in the prompt; the answer is above it,
@@ -353,7 +353,7 @@ or as gibberish, the document is pictures of words and step 1 above is where to 
 
 4. Type a prompt and press **Ctrl+Enter** (or the **Send** button).
 
-![JRock at startup: the session report, and an empty prompt](images/macos-01-window-at-startup.png)
+![JRock at startup: the session report line by line, the ticks, and the prompt](images/windows-01-window-at-startup.png)
 
 *What step 3 gets you. Everything above the prompt is JRock saying what it configured and where
 it put your files — the folder it works in, the version and the local time, which log it loaded
@@ -507,7 +507,9 @@ as WebAssembly), so nothing runs on a server.
   (see [fetching a URL](#fetching-a-url) §14). The browser's own rule applies: a site that does not
   allow cross-origin reads (**CORS**) cannot be fetched from a page, and is reported as refusing.
 
-![JRock running in a browser tab, saving just the selected reply to the downloads folder](images/web-save-selection.png)
+![JRock running in a browser tab: the page's own header and footer around the Swing window](images/web-01-jrock-in-a-browser-tab.png)
+
+![The page's own /files browser, listing what JRock wrote into the browser's storage](images/web-02-the-files-browser.png)
 
 *The same jar in a browser tab — a Swing window, its own file chooser and all. Only the reply is
 selected, so the context menu offers **Save selected text as...**; saving into `downloads` hands the
@@ -518,8 +520,8 @@ file to the browser as a download.*
 Both work today, through [JRock Web](#jrock-web-in-the-browser) §05: the phone's browser runs the same
 unmodified `jrock.jar`, so there is nothing to install and no app store in the way.
 
-<img src="images/mobile-touch-menu.png" width="340"
-     alt="JRock in Edge on an iPhone, with the prompt's long-tap context menu open">
+<img src="images/mobile-01-jrock-on-a-phone.png" width="340"
+     alt="JRock on a phone-sized screen: the Swing window, the session report, and the prompt">
 
 *Edge on an iPhone, with the page's own header and footer left showing: the jar's size and SHA-256
 to check before typing a key, and a footer log ending in `GET .../v1/models -> 200` — a real Bedrock
@@ -906,7 +908,7 @@ bill, and a guess is not one.
   to the text it stands for, rather than a folder to be searched by the timestamp of a send. A
   send that failed wrote no reply file, and its response header stays bare.
 
-![Two timestamped turns with History and Dialog only both on](images/macos-05-two-turns-with-history-and-dialog-only.png)
+![Two timestamped turns with History and Dialog only both on](images/windows-04-two-turns-history-and-dialog-only.png)
 
 *History (Ctrl+E) with Dialog only (Ctrl+D): the second question — "Answer from the page only" —
 is answered against the page attached to the first, because the whole prior dialog was resent.
@@ -1010,6 +1012,11 @@ and it says so itself — untick Clock and the model knows nothing about the tim
 Everything lives under a **`__JRock/`** subfolder of the working directory — git-ignored, and
 written atomically, so a crash or a failed write never leaves a truncated file.
 
+![What is in the JRock folder: every file and subfolder it can hold, each with what it is for](images/windows-09-what-is-in-the-jrock-folder.png)
+
+*The same list the window will show you, from the first item of the folder's own menu: nothing
+JRock keeps has to be guessed at.*
+
 **Why the two underscores.** The working directory is *your* folder — your documents, your
 scans, your project — and a subfolder called `JRock` sat in the middle of it looking like one
 more of your own, sorted in among them and easy to lose. `__JRock` sorts to the top of every
@@ -1106,8 +1113,6 @@ wants into a folder nobody is ever told about again — which is how it became a
 in the first place. Move them out of there, by hand or with **Remove them**, and the question
 stops for good. `--cli` names them and asks nothing. Files are left alone either way — a stray
 one is a few hundred bytes, while a folder is a document's worth of page images.
-
-![A question typed into the prompt, with the startup report above it](images/macos-02-a-question-in-the-prompt.png)
 
 *The prompt is written to `__JRock/jrock-prompt.txt` on every keystroke, through a temp file that
 is then moved into place — so what is in the box survives a crash, a power cut and the close
@@ -1251,6 +1256,10 @@ Setting it here beats waiting for JRock to grow a checkbox for each one.
 | nothing at all | nothing is added — and the line survives every other setting being saved |
 
 ## Keeping the folder: backup, restore, cleaning up
+
+![The folder's own menu, open: what is in the JRock folder, both merges, backup, restore and the cleanup](images/windows-08-the-jrock-folder-menu.png)
+
+*The label beside Configure names the folder, and every item in its menu acts on that folder.*
 
 ### Backup and restore
 
@@ -1871,11 +1880,18 @@ Warning: @img 4d0c1a77e6b3 is not known - no include of it is recorded in the lo
 A file that is there but has **changed** since it was included still stops the send: it is a
 different file now, and including it again is the fix.
 
+![A question and the page it is about: the hash token, the Markdown reference above it, and the log lines saying what was copied and what it was downscaled to](images/windows-02-a-question-and-a-page-attached.png)
+
+*A question, and the page it is about: one include is a token in the prompt, a Markdown
+reference above it, and two lines in the log saying what was copied and what it was
+downscaled to.*
+
 ## Converting what you include: PDF, RTF, DOCX, XLSX
 
-Four of the include kinds are conversions, and they are what makes a document a model can
-read out of a file it cannot. Two shell out to a tool that has to be there, and two are done
-in-process on the bare JDK — which is why a phone's browser does them too.
+![Configure's Files tab: Images DPI, how a PDF and an RTF are included, processed copies, Markdown references, and whether a missing include stops a send](images/windows-06-configure-files.png)
+
+*Which conversion each kind of file gets is a setting, and this is where they are: the DPI a page
+is rendered at, the two include modes, and what JRock keeps beside the original.*
 
 ### PDF conversion (Ghostscript)
 
@@ -1904,7 +1920,6 @@ Everywhere else the console `gs` is run with `-q` omitted, and its progress — 
 - If Ghostscript isn't found on your PATH, JRock logs a note, shows a dialog, and opens
   https://ghostscript.com/ so you can install it.
 
-![A page attached as an image: the Markdown reference, the hash token, and the log line that says what was copied](images/macos-03-a-page-included-as-an-image.png)
 
 *A page attached with Ctrl+I, before anything is sent. In the prompt: the `!​[Image: ...](a-page.png)`
 reference with the pixel size, the centimetres it will print at, the DPI and the byte count, and
@@ -2867,7 +2882,7 @@ treat every agent alike.
 It opens a small window: a time and **Set**, the speaker, and the alarms set since it opened
 listed underneath, each counting down. Nothing is kept across runs but the speaker.
 
-![The timer agent's window: a time, Set, a speaker list and an empty alarm list](images/macos-06-the-timer-agent.png)
+![The timer agent's window: a time, Set, a speaker list and an empty alarm list](images/windows-11-the-timer-agent.png)
 
 *The whole agent. The time field is filled in with the clock when it opens, so setting an alarm
 is editing two digits; the speaker list fills itself the moment it is opened, because what is
@@ -3786,7 +3801,7 @@ own. The flow opens a JRock, does the work, prints one line saying what it did, 
 its window. So the part that runs all day holds no key, and the part that uses a model lives for
 one document.
 
-![The paper docs agent: two folder rows, six question buttons, and what an agent is told](images/macos-07-the-papers-agent.png)
+![The paper docs agent: two folder rows, six question buttons, and what an agent is told](images/windows-12-the-papers-agent.png)
 
 *Both folders on top, each with **Browse...** and **Use**, then the questions as buttons — the
 same ones the push-to-talk agent asks it over the socket, so anything an agent can ask, a person
@@ -4387,6 +4402,11 @@ that you cannot.
 
 ## Configure dialog (top-left button)
 
+![Configure's General tab: the working and prompts directories, the write-only key, the endpoint, the model, your name, the History limit, the prompt cache and the autobackup](images/windows-05-configure-general.png)
+
+*Every send depends on this tab, and nothing here is guessed at: the key is write-only, the model
+is a free line over a dropdown of what the key can reach, and each row says which file keeps it.*
+
 Four tabs, so no one of them is a wall of rows: **General** for what every send depends on,
 **Files** for the settings that matter to one kind of file only, **Audio** for the speaker and
 the microphone — a tab that is left out where neither can be had, as in the browser — and
@@ -4896,6 +4916,11 @@ RTF, not for typesetting.
 
 ## Narrate (Windows, and the browser)
 
+![Configure's Audio tab: the speaker, the crackle and its Preview, the voices with Add, the microphone, transcribe, and Mic always on](images/windows-07-configure-audio.png)
+
+*The speaker and the microphone are yours to pick and nobody else's — there is no fallback to
+whatever the system moved its default to — and the file each recording lands in is named here too.*
+
 Select text in the log, right-click, **Narrate selected text**: it is read aloud — by
 Windows' own voices on the desktop, and by the browser's own in [JRock
 Web](#jrock-web-in-the-browser). While it reads, the same item says **Stop narrating** and
@@ -5154,6 +5179,17 @@ it is included or transcribed like any other.
 ## Context menus (right-click / long tap)
 
 Right-clicking (or long-tapping on touch devices) opens a context menu:
+
+![The log's menu over a selected answer: select the last answer, save or print the selection, the two Markdown exports, narrate it, and open a URL or a local path out of it](images/windows-10-the-log-menu.png)
+
+*Half of this menu acts on a selection, so the last answer is selected here: without one, five of
+the items are greyed out. The same menu opens on a phone from a long press —*
+
+<img src="images/mobile-02-the-long-tap-menu.png" width="330"
+     alt="The prompt's own menu, opened by a long press on a phone-sized screen">
+
+*— which is the prompt's own menu, and the only gesture a touch screen has for everything the
+Ctrl shortcuts do.*
 
 - **Log pane** — *Select the last answer*, Save log copy as..., Print... The first
   (**Ctrl+Shift+A**) selects the **body of the most recent answer, whole** — not the teal role
@@ -5458,6 +5494,11 @@ CI runs this on every push (`.github/workflows/tests.yml`), under `xvfb` since t
 runners are headless, on JDK 11 — the minimum JRock supports.
 
 ## The installer (`installer/InstallJRock.java`)
+
+![The installer's fourth page: every agent ticked, the doc inventory flow, and the translations cut to English and Spanish](images/macos-18-the-installer-agents-and-flows.png)
+
+*Page four is the catalogue: an agent gets a folder of its own, the flows share one, and each is
+installed with the prompt files its own source names.*
 
 One Swing wizard, one Java source file, no build step — shipped **at the root of every
 release artifact**, beside `jrock.jar`. Unpack a release, and from that folder:

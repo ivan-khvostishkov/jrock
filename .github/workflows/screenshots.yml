@@ -48,7 +48,9 @@ jobs:
             under: /tmp
           - runner: windows-latest
             name: windows
-            under: ''
+            # Not the account's temp folder: Windows writes it as C:\Users\RUNNER~1\...,
+            # and an eight-dot-three short name in a session report is in the picture.
+            under: 'C:/'
 
     runs-on: ${{ matrix.runner }}
 
@@ -131,8 +133,12 @@ jobs:
           # JRock, and it then offers to stop the very JVM driving it.
           run java -cp "$HERE/out-installer" \
                .github/build/InstallerShots.java screenshots ${{ matrix.name }} \
-               "$INSTALL" --clean || true
-          echo "--- what was installed"
+               "$INSTALL" --clean 2>&1 | tee installer.log || true
+          # Where it really installed, which it prints rather than being told: the wizard
+          # has a default of its own and a person would take it.
+          INSTALLED=$(sed -n 's/^INSTALLED=//p' installer.log | tail -1)
+          [ -n "$INSTALLED" ] && INSTALL="$INSTALLED"
+          echo "--- what was installed, in $INSTALL"
           ls -la "$INSTALL" || true
           ls -la "$INSTALL/Agents" || true
 

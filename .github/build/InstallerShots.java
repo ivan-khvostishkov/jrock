@@ -63,10 +63,15 @@ public final class InstallerShots {
     private static String os;
     private static int taken;
 
+    /** Where the wizard says it is installing, printed for the step that follows. */
+    private static String installedInto;
+
     public static void main(String[] args) throws Exception {
         out = Paths.get(args.length > 0 ? args[0] : "screenshots").toAbsolutePath();
         os = args.length > 1 ? args[1] : System.getProperty("os.name")
                 .toLowerCase().replaceAll("[^a-z0-9]+", "");
+        // Only the folder to right-click in hangs off this now; the installation goes
+        // wherever the wizard's own page says, which is what a person would get.
         Path home = args.length > 2 ? Paths.get(args[2]).toAbsolutePath()
                 : Paths.get(System.getProperty("java.io.tmpdir")).resolve("JRockShots");
         boolean clean = java.util.Arrays.asList(args).contains("--clean");
@@ -153,12 +158,19 @@ public final class InstallerShots {
             if (!wizard.isShowing()) break;
             settle();
 
+            // WHERE IT INSTALLS IS THE WIZARD'S BUSINESS, and this only reports it.
+            // Setting that field looked like it worked - the log said "installing into
+            // ..." - and the wizard installed into its own default anyway, so everything
+            // afterwards looked in a folder that was never made: no installed jar, and no
+            // agents to photograph. A tool that tells a wizard what to do and does not
+            // check is a tool that lies in its log.
+            //
+            // So the path is READ, and printed in a form both bash and the JVM can use
+            // (forward slashes, drive letter and all), for the step to pick up.
             javax.swing.JTextField folder = field(wizard, "JRockAssistant");
-            if (folder != null) {
-                String path = home.toString();
-                SwingUtilities.invokeLater(() -> folder.setText(path));
-                pause(300);
-                System.out.println("  page " + (page + 1) + ": installing into " + path);
+            if (folder != null && installedInto == null) {
+                installedInto = folder.getText().trim().replace('\\', '/');
+                System.out.println("INSTALLED=" + installedInto);
                 settle();
             }
 
