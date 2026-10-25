@@ -2590,7 +2590,7 @@ whichever is closer to yours.
 
 A loop rather than a pass, and no prompt file at all:
 
-![The push-to-talk agent: one round microphone button, the Hands-free lever, and the area the answer is read from](images/windows-13-the-push-to-talk-agent.png)
+![The push-to-talk agent: one round microphone button, the Hands-free lever, and the area the answer is read from](images/macos-13-the-push-to-talk-agent.png)
 
 *One button, and what it says under it. Hold it, or hold Ctrl while this window has the focus; the answer appears here and is read aloud on the speaker JRock was told to use.*
 
@@ -2886,7 +2886,7 @@ treat every agent alike.
 It opens a small window: a time and **Set**, the speaker, and the alarms set since it opened
 listed underneath, each counting down. Nothing is kept across runs but the speaker.
 
-![The timer agent's window: a time, Set, a speaker list and an empty alarm list](images/windows-11-the-timer-agent.png)
+![The timer agent's window: a time, Set, a speaker list and an empty alarm list](images/macos-11-the-timer-agent.png)
 
 *The whole agent. The time field is filled in with the clock when it opens, so setting an alarm
 is editing two digits; the speaker list fills itself the moment it is opened, because what is
@@ -2997,7 +2997,7 @@ sequenceDiagram
 
 It knows where the operator is and tells other agents.
 
-![The geo location agent: the place, how the coordinates were found, and how much of them is passed on](images/windows-14-the-geo-location-agent.png)
+![The geo location agent: the place, how the coordinates were found, and how much of them is passed on](images/macos-14-the-geo-location-agent.png)
 
 *Nothing is kept across runs, so the place is entered or found at every start - and Round to decides how much of it other agents are told.*
 
@@ -3087,7 +3087,7 @@ It starts JRock and takes it as an automation, like the timer, and opens a small
 It turns a location into a checked address for the weather on open-meteo.com. It does not fetch
 the weather itself: the agent that asked does that.
 
-![The weather agent: the lines it was asked for, the addresses it answered with, and a field to try one by hand](images/windows-15-the-weather-agent.png)
+![The weather agent: the lines it was asked for, the addresses it answered with, and a field to try one by hand](images/macos-15-the-weather-agent.png)
 
 *It answers with an address and fetches nothing: the agent that asked does that.*
 
@@ -3142,9 +3142,9 @@ What **Thunderbird already knows**, read out of its own files — your **calenda
 **mail** — for the push-to-talk agent to ask about and for you to read. And two things it puts
 back: a calendar event, posted to you by yourself, and a drafted reply in a compose window.
 
-![The Thunderbird agent: the question buttons, the briefing, and how fresh the cache behind it is](images/windows-16-the-thunderbird-agent.png)
+![The Thunderbird agent: the profile row, every question it answers about a calendar and a mailbox, and what it says when no profile is set](images/macos-16-the-thunderbird-agent.png)
 
-*Thunderbird is the authority and this says so: every answer carries the age of the cache it was read from.*
+*Thunderbird is the authority, and this agent only reads what it has already written down - so every answer carries the age of the cache behind it, and with no profile set it says that instead of guessing.*
 
 ```mermaid
 sequenceDiagram
@@ -3525,9 +3525,9 @@ browser of its own through the **Chrome DevTools Protocol**, photographs the who
 asks **its own JRock** to turn that photograph into Markdown — which is what the push-to-talk
 agent gets back.
 
-![The browser agent: the command field, the hosts it may open, and what it did with the last page](images/windows-17-the-browser-agent.png)
+![The browser agent: the address field, the questions it answers, and the browser it started with a profile of its own](images/macos-17-the-browser-agent.png)
 
-*The host list and the rules are behind the button rather than in front of every answer, which is what keeps this window small enough to sit beside JRock's.*
+*The host list and the rules are behind their buttons rather than in front of every answer, which is what keeps this window small enough to sit beside JRock's. The browser it drives is its own, with a profile of its own, named in the line under the buttons.*
 
 ```mermaid
 sequenceDiagram
@@ -3821,7 +3821,7 @@ own. The flow opens a JRock, does the work, prints one line saying what it did, 
 its window. So the part that runs all day holds no key, and the part that uses a model lives for
 one document.
 
-![The paper docs agent: two folder rows, six question buttons, and what an agent is told](images/windows-12-the-papers-agent.png)
+![The paper docs agent: two folder rows, six question buttons, and what an agent is told](images/macos-12-the-papers-agent.png)
 
 *Both folders on top, each with **Browse...** and **Use**, then the questions as buttons — the
 same ones the push-to-talk agent asks it over the socket, so anything an agent can ask, a person
