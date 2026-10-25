@@ -5520,11 +5520,6 @@ runners are headless, on JDK 11 — the minimum JRock supports.
 *Page four is the catalogue: an agent gets a folder of its own, the flows share one, and each is
 installed with the prompt files its own source names.*
 
-![The installer's last page: every folder, every Explorer entry and every file it wrote, named](images/windows-19-the-installer-finished.png)
-
-*And the last page says what it did - which is the page to read before pressing Close, because
-it is the only account of where everything went.*
-
 One Swing wizard, one Java source file, no build step — shipped **at the root of every
 release artifact**, beside `jrock.jar`. Unpack a release, and from that folder:
 
