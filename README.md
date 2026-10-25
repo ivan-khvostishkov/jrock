@@ -38,8 +38,6 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 <!-- toc:start -->
 ## Contents
 
-*The number beside each chapter is the section mark used throughout the text: **§14** in a sentence means chapter 14 here, and `14-....docx` in [the book](#the-docx-of-this-readme).*
-
 - **§01** [Highlights](#highlights)
 - **§02** [Paper in, paper out](#paper-in-paper-out)
 - **§03** [Requirements and recommended tooling](#requirements-and-recommended-tooling)
