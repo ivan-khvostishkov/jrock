@@ -110,13 +110,26 @@ jobs:
             fi
           }
 
-          HERE="$PWD"
-          INSTALL="${RUNNER_TEMP:-/tmp}/JRockShots"
+          # ONE PATH FORM FOR BOTH READERS, which cost a whole Windows run. RUNNER_TEMP
+          # there is "D:\a\_temp" - backslashes - so "$RUNNER_TEMP/JRockShots" is a path
+          # Java reads and bash cannot stat, and every [ -f ] against it answered no. The
+          # fallback was then $PWD, which in Git bash is "/d/a/jrock/jrock" - a path bash
+          # reads and the JVM cannot, so -cp found no JRock at all.
+          #
+          # pwd -W gives "D:/a/jrock/jrock": a drive letter and forward slashes, which
+          # bash stats and the JVM loads. Everything below is built from it, and the
+          # installation goes under it rather than in the runner's temp.
+          HERE="$(pwd -W 2>/dev/null || pwd)"
+          INSTALL="$HERE/install-shots"
+          rm -rf "$INSTALL"
           mkdir -p screenshots
 
           # 1. The installer, which leaves the installation behind for the rest of this.
           javac -encoding UTF-8 --release 11 -d out-installer installer/InstallJRock.java
-          run java -cp "jrock.jar${SEP}out-installer" \
+          # Without jrock.jar on the class path, which this tool does not use: a
+          # command line with the jar in it is one the installer reads as a running
+          # JRock, and it then offers to stop the very JVM driving it.
+          run java -cp "$HERE/out-installer" \
                .github/build/InstallerShots.java screenshots ${{ matrix.name }} \
                "$INSTALL" --clean || true
           echo "--- what was installed"
@@ -126,8 +139,13 @@ jobs:
           # The jar to photograph is the installed one from here on. If the wizard did not
           # get that far, the built one stands in - a picture of this build either way.
           JAR="$INSTALL/jrock.jar"
-          [ -f "$JAR" ] || JAR="$HERE/jrock.jar"
-          echo "--- using $JAR"
+          if [ -f "$JAR" ]; then
+            echo "--- the installed jar: $JAR"
+          else
+            JAR="$HERE/jrock.jar"
+            echo "::warning::the wizard left no jar in $INSTALL; using the built one"
+            echo "--- the built jar: $JAR"
+          fi
 
           # The tool is COMPILED rather than source-launched, because the source launcher
           # sets jdk.launcher.sourcefile to the tool's own path - and that property is the
@@ -136,8 +154,9 @@ jobs:
                 .github/build/Screenshots.java
 
           # 2. The program itself: twelve scenes, against the installed jar.
-          run java -cp "$JAR${SEP}out-automation${SEP}out-build" Screenshots \
+          run java -cp "$JAR${SEP}$HERE/out-automation${SEP}$HERE/out-build" Screenshots \
                screenshots ${{ matrix.name }} ${{ matrix.under }} || true
+          echo "--- $(ls screenshots/*.png 2>/dev/null | wc -l) picture(s) after the program"
 
           # 3. Each agent, out of its own installed folder. The class is compiled from the
           # installed source, the working directory IS that folder (so PTTFiles/ and the
@@ -151,7 +170,7 @@ jobs:
             echo "--- $name, from $dir"
             # The classes go to the runner's temp: an installation is what the installer
             # left behind, and this adds no folders of its own to it.
-            CLASSES="${RUNNER_TEMP:-/tmp}/agent-classes/$name"
+            CLASSES="$HERE/agent-classes/$name"
             mkdir -p "$CLASSES"
             javac -encoding UTF-8 --release 11 -cp "$JAR" -d "$CLASSES" "$src" || continue
             ( cd "$dir" && run java -Djdk.launcher.sourcefile="$src" \
@@ -159,6 +178,7 @@ jobs:
                 "$HERE/screenshots" ${{ matrix.name }} ${{ matrix.under }} \
                 --agent "$name" ) || true
           done
+          echo "--- $(ls screenshots/*.png 2>/dev/null | wc -l) picture(s) in all"
           ls -la screenshots/
 
       # The twelve JRock scenes are the point of the step, and a missing one is a bug

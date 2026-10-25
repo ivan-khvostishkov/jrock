@@ -2126,6 +2126,16 @@ public final class InstallJRock {
             } catch (NumberFormatException ex) {
                 continue;        // not a process this can do anything about
             }
+            // AND NEVER THIS PROCESS. The line above excludes an installer by its command
+            // line, which works for "java InstallJRock.java" and fails for anything that
+            // drives the wizard from a program of its own: the screenshot tool runs it
+            // with jrock.jar on the class path, so this counted that JVM as a session to
+            // stop, offered to stop it, and was told by Windows that the destroy of the
+            // current process is not allowed. Then it refused to install, because a JRock
+            // it could not stop was still running - itself.
+            //
+            // A pid is what "me" really is, so that is what is compared.
+            if (number == ProcessHandle.current().pid()) continue;
             running.add(new Running(number, name, which(command), work));
         }
         return running;

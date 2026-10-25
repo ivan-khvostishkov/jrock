@@ -219,9 +219,12 @@ public final class InstallerShots {
                 }
             }
             if (!moved) {
+                // Named for what it is: a page that would not go on. Calling this "the
+                // installer finished" put a picture of page two in the README's place for
+                // the last page, which is a lie a file name should not be able to tell.
                 System.out.println("  page " + (page + 1) + " did not move on; stopping "
                         + "here with what there is");
-                shoot(wizard, "19-the-installer-finished");
+                shoot(wizard, "19-the-installer-stopped-here");
                 break;
             }
         }

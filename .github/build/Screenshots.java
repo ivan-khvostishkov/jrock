@@ -106,6 +106,22 @@ public final class Screenshots {
     private static int answered;
 
     public static void main(String[] args) throws Exception {
+        // ANY FAILURE ENDS THE PROCESS, and that is not belt and braces either. The stub
+        // endpoint below is a com.sun.net.httpserver, whose dispatcher thread is not a
+        // daemon - so when main threw (a class path the JVM could not read), the JVM
+        // stayed up with nothing to do and the watchdog closed it six minutes later. A
+        // step that has already failed should say so and stop.
+        try {
+            take(args);
+        } catch (Throwable failed) {
+            System.out.println("not taken: " + failed);
+            failed.printStackTrace(System.out);
+            System.out.flush();
+            Runtime.getRuntime().halt(1);
+        }
+    }
+
+    private static void take(String[] args) throws Exception {
         // The flags come out of the list before anything is read by position: a
         // "--agent geo" sitting where the demo folder's parent is read from would make
         // the demo folder "--agent/jrock-demo/Demo" - and the session report prints that
