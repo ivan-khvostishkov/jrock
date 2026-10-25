@@ -208,18 +208,33 @@ jobs:
       # and adb. One system image, one device, nothing from the marketplace.
       - name: An emulator, booted
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
-              "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64"
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
-              -n jrock -k "system-images;android-34;google_apis;x86_64" --device pixel_6 --force
+          SDK="$ANDROID_HOME/cmdline-tools/latest/bin"
+          IMAGE="system-images;android-34;google_apis;x86_64"
+
+          # "yes" INTO THE INSTALL AS WELL, which is what this was missing. --licenses
+          # takes the acceptances and exits, breaking the pipe - that is the "yes: standard
+          # output: Broken pipe" line in the log, and it is harmless - but the install
+          # that follows asks for them AGAIN, on stdin, from a terminal nobody is sitting
+          # at, and waits there until the job is cancelled. Every step also has a clock on
+          # it now, so a question nobody answers costs a few minutes and not the build.
+          echo "--- licences"
+          yes | timeout 300 "$SDK/sdkmanager" --licenses > /dev/null 2>&1 || true
+          echo "--- packages"
+          yes | timeout 900 "$SDK/sdkmanager" --install "platform-tools" "emulator" "$IMAGE" \
+            || { echo "::error::the SDK packages would not install"; exit 1; }
+          echo "--- a device"
+          echo no | timeout 120 "$SDK/avdmanager" create avd \
+              -n jrock -k "$IMAGE" --device pixel_6 --force
+          echo "--- booting"
           nohup "$ANDROID_HOME/emulator/emulator" -avd jrock -no-window -no-audio \
               -no-boot-anim -no-snapshot -gpu swiftshader_indirect > emulator.log 2>&1 &
-          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+          timeout 180 "$ANDROID_HOME/platform-tools/adb" wait-for-device \
+            || { echo "::error::adb never saw the device"; tail -40 emulator.log; exit 1; }
           # Booted means sys.boot_completed, not "adb answered": Chrome cannot be started
           # before the framework is up.
           timeout 420 bash -c 'until [ "$('"$ANDROID_HOME"'/platform-tools/adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
           "$ANDROID_HOME/platform-tools/adb" shell wm size
+          tail -5 emulator.log || true
 
       - name: Open JRock, then ask the phone's own Chrome whether it is running
         run: |
