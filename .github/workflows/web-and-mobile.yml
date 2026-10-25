@@ -1,4 +1,4 @@
-# JRock on a phone, photographed on a phone.
+# JRock in a browser, photographed in one: a desktop tab, and two phones.
 #
 # WHY A DEPLOYED ADDRESS AND NOT THE BUNDLE JUST BUILT. The page runs JRock through
 # CheerpJ, which fetches its own runtime over the network and wants a page served the way
@@ -15,7 +15,7 @@
 #
 # Manual, because an emulator and a simulator are minutes each and nothing in the program
 # changes what they show. Run it when the browser pictures need refreshing.
-name: Mobile screenshots
+name: Web and mobile screenshots
 
 on:
   workflow_dispatch:
@@ -28,6 +28,45 @@ on:
         default: '150'
 
 jobs:
+  web:
+    name: A desktop browser tab
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The same tool that serves the page locally, pointed at the deployed one instead
+      # (--url). Under Xvfb because it drives a real browser rather than a headless one:
+      # headless Chromium runs the page, fetches the jar, initialises CheerpJ and then the
+      # JVM exits before anything is painted - which is the whole reason these pictures
+      # come from a deployed address.
+      #
+      # Three scenes: the window in a tab, the /files browser with a real __JRock in it,
+      # and the page on a phone-sized screen with a long press - the last two are the same
+      # tool's mobile scenes, which the iOS and Android jobs below then show on real ones.
+      - name: Drive the deployed page
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+          mkdir -p screenshots
+          # WITHOUT THE QUERY, deliberately. A folder in the address starts JRock the
+          # moment the jar has loaded, and the first scene wants the page's own chrome
+          # box unticked BEFORE that happens - the page reads it once, as the run begins.
+          # So the tool presses Run itself here, and the phones below keep the ?home that
+          # starts it for them.
+          BASE='${{ inputs.url }}'
+          BASE="${BASE%%\?*}"
+          echo "driving $BASE"
+          xvfb-run -a --server-args="-screen 0 1600x1200x24" \
+            java .github/build/WebShots.java screenshots --url "$BASE" || true
+          ls -la screenshots/
+
+      - name: Upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: web-desktop
+          path: screenshots/
+          if-no-files-found: error
+
   ios:
     name: iOS Safari, in the Simulator
     runs-on: macos-latest

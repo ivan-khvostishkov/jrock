@@ -69,25 +69,49 @@ public final class WebShots {
     private static int taken;
 
     public static void main(String[] args) throws Exception {
-        out = Paths.get(args.length > 0 ? args[0] : "screenshots").toAbsolutePath();
-        Files.createDirectories(out);
-        Path page = Paths.get("jrock-web/index.html").toAbsolutePath();
-        Path jar = Paths.get("jrock.jar").toAbsolutePath();
-        if (!Files.isRegularFile(page) || !Files.isRegularFile(jar)) {
-            System.out.println("run this from the repository root, after the jar is built: "
-                    + page + " and " + jar + " are what the browser is given");
-            System.exit(1);
+        List<String> plain = new ArrayList<>();
+        String deployed = null;
+        for (int i = 0; i < args.length; i++) {
+            if ("--url".equals(args[i]) && i + 1 < args.length) deployed = args[++i];
+            else plain.add(args[i]);
         }
-        String browser = args.length > 1 ? args[1] : findBrowser();
+        out = Paths.get(plain.size() > 0 ? plain.get(0) : "screenshots").toAbsolutePath();
+        Files.createDirectories(out);
+        String browser = plain.size() > 1 ? plain.get(1) : findBrowser();
         if (browser == null) {
             System.out.println("no Chromium-based browser found: name one as the second "
                     + "argument (Edge and Chrome both work)");
             System.exit(1);
         }
 
-        HttpServer site = serve(page, jar);
-        String address = "http://127.0.0.1:" + site.getAddress().getPort() + "/";
-        System.out.println("serving " + page.getParent() + " at " + address);
+        // --url: A PAGE SOMEBODY ELSE IS SERVING, which is how this tool takes pictures
+        // at all. Served from here, over loopback and plain HTTP, CheerpJ initialises and
+        // then the JVM exits before a canvas is painted - with this jar and with 5.2.0,
+        // headless and headed, with and without cross-origin isolation. The deployed site
+        // does work, so pointed at that this does the rest: navigate, press Run, wait for
+        // the canvas, emulate a phone, hold a finger down.
+        //
+        // What it costs is that the pictures are of what is deployed and not of the jar
+        // just built. That is the trade, and it is the right way round: a true picture of
+        // an older build beats no picture of this one.
+        HttpServer site = null;
+        String address;
+        if (deployed != null) {
+            address = deployed;
+            System.out.println("driving " + address + " - a deployed page, not this build");
+        } else {
+            Path page = Paths.get("jrock-web/index.html").toAbsolutePath();
+            Path jar = Paths.get("jrock.jar").toAbsolutePath();
+            if (!Files.isRegularFile(page) || !Files.isRegularFile(jar)) {
+                System.out.println("run this from the repository root, after the jar is "
+                        + "built: " + page + " and " + jar + " are what the browser is "
+                        + "given - or name a deployed page with --url");
+                System.exit(1);
+            }
+            site = serve(page, jar);
+            address = "http://127.0.0.1:" + site.getAddress().getPort() + "/";
+            System.out.println("serving " + page.getParent() + " at " + address);
+        }
 
         int port = freePort();
         Path profile = Files.createTempDirectory("jrock-webshots-profile");
@@ -104,7 +128,7 @@ public final class WebShots {
         } finally {
             chromium.destroy();
             chromium.waitFor(10, TimeUnit.SECONDS);
-            site.stop(0);
+            if (site != null) site.stop(0);
             // THE PROFILE GOES. It is a browser profile with CheerpJ's whole runtime
             // cached in it - 150 MB and more - and a tool that left one behind per run
             // would fill a disk in an afternoon, on a runner or on a desk.
