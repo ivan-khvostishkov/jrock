@@ -332,8 +332,12 @@ public final class InstallerShots {
             java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
             run("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
                     "(New-Object -ComObject Shell.Application).Windows() | ForEach-Object "
-                    + "{ $_.Left = 0; $_.Top = 0; $_.Width = " + screen.width
-                    + "; $_.Height = " + screen.height + " }");
+                    // A little wider and taller than the screen on purpose: sized to
+                    // exactly the screen, Explorer left a ten-pixel strip of whatever was
+                    // behind it showing down the right-hand edge, because what it sets is
+                    // the window and what shows is the window's shadow and border.
+                    + "{ $_.Left = 0; $_.Top = 0; $_.Width = " + (screen.width + 24)
+                    + "; $_.Height = " + (screen.height + 24) + " }");
             pause(1_500);
             robot.mouseMove(screen.width / 2, screen.height / 2);
             robot.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);

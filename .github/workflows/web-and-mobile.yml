@@ -241,13 +241,47 @@ jobs:
           # Where it went, in the log, so the next thing that cannot find it says so here.
           "$SDK/avdmanager" list avd || true
           ls -la "$ANDROID_AVD_HOME" || true
+          # THE KEY BEFORE THE DEVICE. adb authenticates with a key it generates on first
+          # use in $HOME/.android, and a device that boots before that key exists has
+          # nothing to trust when it is first asked - "device unauthorized". So the server
+          # is started here, while there is no device to confuse it.
+          mkdir -p "$HOME/.android"
+          "$ANDROID_HOME/platform-tools/adb" start-server
+
           echo "--- booting"
           nohup "$ANDROID_HOME/emulator/emulator" -avd jrock -no-window -no-audio \
               -no-boot-anim -no-snapshot -gpu swiftshader_indirect > emulator.log 2>&1 &
-          timeout 180 "$ANDROID_HOME/platform-tools/adb" wait-for-device \
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          timeout 180 "$ADB" wait-for-device \
             || { echo "::error::adb never saw the device"
                  "$ANDROID_HOME/emulator/emulator" -list-avds || true
                  tail -40 emulator.log; exit 1; }
+
+          # AUTHORISED, AND NOT MERELY THERE. "wait-for-device" is satisfied by a device
+          # in any state, including the one this fails in: adb connects before the
+          # device's own daemon will trust the key and answers everything afterwards with
+          # "device unauthorized. This adb server's $ADB_VENDOR_KEYS is not set" - whose
+          # own advice is to try kill-server, which is what this does. Two runs before
+          # this one won that race by luck; this waits for it instead.
+          echo "--- waiting for a device adb may talk to"
+          authorised=no
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            state=$("$ADB" devices | awk '/^emulator-/ {print $2; exit}')
+            echo "   adb says: ${state:-nothing yet}"
+            if [ "$state" = "device" ]; then authorised=yes; break; fi
+            if [ "$state" = "unauthorized" ] || [ "$state" = "offline" ]; then
+              "$ADB" kill-server > /dev/null 2>&1 || true
+              sleep 3
+              "$ADB" start-server > /dev/null 2>&1 || true
+            fi
+            sleep 10
+          done
+          if [ "$authorised" != "yes" ]; then
+            echo "::error::the device never became authorised for adb"
+            "$ADB" devices || true
+            tail -40 emulator.log || true
+            exit 1
+          fi
           # Booted means sys.boot_completed, not "adb answered": Chrome cannot be started
           # before the framework is up.
           timeout 420 bash -c 'until [ "$('"$ANDROID_HOME"'/platform-tools/adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
