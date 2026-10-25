@@ -34,6 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
       # The same tool that serves the page locally, pointed at the deployed one instead
       # (--url). Under Xvfb because it drives a real browser rather than a headless one:
       # headless Chromium runs the page, fetches the jar, initialises CheerpJ and then the
@@ -71,6 +77,16 @@ jobs:
     name: iOS Safari, in the Simulator
     runs-on: macos-latest
     steps:
+      # Checked out for one file: LongPress.java, which is how the finger is held down on
+      # a device screen that is a window on this runner's desktop.
+      - uses: actions/checkout@v5
+
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
       # Apple's own tooling, which is on this runner already: no account, no signing, no
       # third-party action. simctl boots a simulator, opens a URL in its Safari and reads
       # the screen back - the three things this needs and nothing else.
