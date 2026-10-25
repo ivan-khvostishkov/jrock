@@ -266,7 +266,12 @@ jobs:
           FLAGS="chrome --disable-fre --no-default-browser-check --no-first-run"
           $ADB shell "echo '$FLAGS' > /data/local/tmp/chrome-command-line"
           $ADB shell cat /data/local/tmp/chrome-command-line || true
-          $ADB shell am set-debug-app --persistent com.android.chrome || true
+          # NOT set-debug-app. The run before this one had no such line and Chrome
+          # opened its DevTools socket as it always does; this run set Chrome as the
+          # debug app and the socket never appeared - "could not connect to localabstract
+          # address", with Chrome running and its window in front. Telling Android to
+          # treat a release build as a debug app is not free, and the flag file above is
+          # read on its own where it is read at all.
 
           # By name, rather than by asking the system who wants a URL: on a device with one
           # browser the answer is the same, and on one with none it is silence.

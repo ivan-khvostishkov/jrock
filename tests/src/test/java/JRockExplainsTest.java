@@ -15,7 +15,6 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
-import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.text.JTextComponent;
 
@@ -56,7 +55,7 @@ class JRockExplainsTest extends JRockGuiFixture {
 
         JOptionPaneFixture configure = openConfigure();
         press(helpButton());
-        JTextArea folderList = awaitShowing(FOLDER_LIST_OPENING);
+        JTextComponent folderList = awaitShowing(FOLDER_LIST_OPENING);
         String help = allTextIn(windowOf(folderList));
 
         for (String name : everythingUnderTheJRockFolder()) {
@@ -80,7 +79,7 @@ class JRockExplainsTest extends JRockGuiFixture {
 
         // The one thing about Clock worth a sentence of its own: the time it sends is
         // the model's, and the date the log prints is not.
-        JTextArea explanation = awaitShowing("A model has no clock");
+        JTextComponent explanation = awaitShowing("A model has no clock");
         assertThat(explanation.getText())
                 .describedAs("what the Clock checkbox says about itself")
                 .contains("time zone go to the model")
@@ -163,18 +162,27 @@ class JRockExplainsTest extends JRockGuiFixture {
                 });
     }
 
-    /** Waits for a showing text area whose text starts with the given words. */
-    private JTextArea awaitShowing(final String opening) {
-        final JTextArea[] found = new JTextArea[1];
+    /**
+     * Waits for showing text whose words start with the given ones.
+     *
+     * <p>ANY TEXT COMPONENT, not a JTextArea. What this looks for is a box of words the
+     * window is showing, and which Swing class holds them is the window's business: the
+     * folder listing is a JTextPane now, because every item in it begins with the NAME of
+     * a file in bold and a text area has one font for everything in it. A test that names
+     * the class instead of the behaviour fails when a list is made easier to read, which
+     * is the opposite of what it is for.
+     */
+    private JTextComponent awaitShowing(final String opening) {
+        final JTextComponent[] found = new JTextComponent[1];
         pause(new Condition("a showing text saying \"" + opening + "...\"") {
             @Override
             public boolean test() {
-                found[0] = GuiActionRunner.execute(new GuiQuery<JTextArea>() {
+                found[0] = GuiActionRunner.execute(new GuiQuery<JTextComponent>() {
                     @Override
-                    protected JTextArea executeInEDT() {
+                    protected JTextComponent executeInEDT() {
                         for (Window w : Window.getWindows()) {
                             if (!w.isShowing()) continue;
-                            JTextArea hit = textStartingWith(w, opening);
+                            JTextComponent hit = textStartingWith(w, opening);
                             if (hit != null) return hit;
                         }
                         return null;
@@ -186,13 +194,14 @@ class JRockExplainsTest extends JRockGuiFixture {
         return found[0];
     }
 
-    private static JTextArea textStartingWith(Container root, String opening) {
+    private static JTextComponent textStartingWith(Container root, String opening) {
         for (Component c : root.getComponents()) {
-            if (c instanceof JTextArea && ((JTextArea) c).getText().startsWith(opening)) {
-                return (JTextArea) c;
+            if (c instanceof JTextComponent
+                    && ((JTextComponent) c).getText().startsWith(opening)) {
+                return (JTextComponent) c;
             }
             if (c instanceof Container) {
-                JTextArea hit = textStartingWith((Container) c, opening);
+                JTextComponent hit = textStartingWith((Container) c, opening);
                 if (hit != null) return hit;
             }
         }
