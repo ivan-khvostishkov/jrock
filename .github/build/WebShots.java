@@ -311,15 +311,21 @@ public final class WebShots {
             String type = file == jar ? "application/java-archive" : "text/html";
             byte[] body = Files.readAllBytes(file);
             exchange.getResponseHeaders().set("Content-Type", type);
-            // CROSS-ORIGIN ISOLATION, which is what SharedArrayBuffer needs and what
-            // CheerpJ needs to start a JVM at all. Without these two headers the page
-            // loads, the jar loads, CheerpJ initialises - and the JVM exits with code 1
-            // before anything is painted, which is a long way from the real reason.
-            exchange.getResponseHeaders().set("Cross-Origin-Opener-Policy", "same-origin");
-            exchange.getResponseHeaders().set("Cross-Origin-Embedder-Policy",
-                    "credentialless");
-            exchange.getResponseHeaders().set("Cross-Origin-Resource-Policy",
-                    "cross-origin");
+            // NO CROSS-ORIGIN ISOLATION HEADERS, and that is the experiment this
+            // version is. They were added on the theory that CheerpJ needs
+            // SharedArrayBuffer and SharedArrayBuffer needs the page isolated - and the
+            // page still never started a JVM, in library mode or as a jar.
+            //
+            // What they did do was make this server differ from the one page that WORKS.
+            // The deployed site comes up in the same browser on the same runner every
+            // time, and it sends none of these; a page with COEP set loads cross-origin
+            // subresources under different rules, and CheerpJ's runtime comes from a CDN.
+            // So the headers go, which leaves the two servers differing only in the
+            // scheme and the host - and if the page comes up now, that was the whole of
+            // it.
+            //
+            // If it does not, the next difference to try is HTTPS: a self-signed
+            // certificate and --ignore-certificate-errors on the browser.
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream to = exchange.getResponseBody()) {
                 to.write(body);
