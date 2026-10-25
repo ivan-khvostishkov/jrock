@@ -277,9 +277,57 @@ jobs:
           # browser the answer is the same, and on one with none it is silence.
           $ADB shell am start -n com.android.chrome/com.google.android.apps.chrome.Main \
                -a android.intent.action.VIEW -d "$URL" > /dev/null
-          sleep 25
+          sleep 20
           echo "--- is Chrome running?"
           $ADB shell pidof com.android.chrome || echo "(no Chrome process)"
+          $ADB shell dumpsys window | grep -i mCurrentFocus || true
+
+          # TAPPED THROUGH CHROME'S FIRST RUN, because the flag file above does not reach
+          # it. A Play-image Chrome is a RELEASE build on a "user" device, and a release
+          # Chrome reads /data/local/tmp/chrome-command-line only when it is the debug app
+          # - and marking it the debug app is what stopped it opening its DevTools socket
+          # in an earlier run. So the welcome screen is dismissed the way a person
+          # dismisses it: by pressing what it offers.
+          #
+          # By the TEXT on the control rather than by a pixel, out of uiautomator's own
+          # dump of the screen, so a Chrome that moves its buttons does not take this with
+          # it. The labels are in order of preference: everything here declines rather
+          # than accepts anything about an account.
+          tap_text() {
+            local label="$1" node bounds nums
+            $ADB shell uiautomator dump /sdcard/jrock-ui.xml > /dev/null 2>&1 || return 1
+            node=$($ADB shell cat /sdcard/jrock-ui.xml 2>/dev/null \
+                   | tr '<' '\n' | grep -F "text=\"$label\"" | head -1)
+            [ -n "$node" ] || return 1
+            bounds=$(printf '%s' "$node" \
+                     | grep -o 'bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' | head -1)
+            [ -n "$bounds" ] || return 1
+            nums=$(printf '%s' "$bounds" | grep -o '[0-9][0-9]*' | tr '\n' ' ')
+            set -- $nums
+            echo "   tapping \"$label\" at $(( ($1 + $3) / 2 )),$(( ($2 + $4) / 2 ))"
+            $ADB shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+            sleep 3
+          }
+
+          echo "--- past the first run"
+          for round in 1 2 3 4 5 6; do
+            focus=$($ADB shell dumpsys window | grep -i mCurrentFocus || true)
+            echo "   $focus"
+            case "$focus" in
+              *FirstRun*|*Promo*|*SigninActivity*) ;;
+              *) break ;;
+            esac
+            for label in "Accept & continue" "Accept and continue" "Use without an account" \
+                         "No thanks" "Not now" "Skip" "Got it" "Continue" "Next"; do
+              tap_text "$label" && break
+            done
+          done
+
+          # The address again, because the first run may have swallowed the intent that
+          # carried it.
+          $ADB shell am start -n com.android.chrome/com.google.android.apps.chrome.Main \
+               -a android.intent.action.VIEW -d "$URL" > /dev/null
+          sleep 10
           $ADB shell dumpsys window | grep -i mCurrentFocus || true
           $ADB exec-out screencap -p > screenshots/android-01-starting.png
           sleep "$WAIT"
