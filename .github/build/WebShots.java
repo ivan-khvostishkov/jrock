@@ -196,6 +196,16 @@ public final class WebShots {
             dev.drive("automationAwaitReady(120000)");
             dev.drive("automationSetPrompt('Read this invoice and tell me what is due,"
                     + " and when.\\n')");
+        } else if (driven) {
+            // LOADED AGAIN WITHOUT THE HASH, because a page that could not hand the class
+            // over cannot run the jar either: CheerpJ gives a page one library thread,
+            // and a jar started after that thread in the same load never paints. A reload
+            // is a page with neither, which is the page that runs JRock the ordinary way.
+            System.out.println("  reloading without #shots, to run the jar instead");
+            dev.navigate(address);
+            dev.untick("hideChrome");
+            dev.click("runBtn");
+            dev.awaitCanvas();
         } else {
             dev.awaitCanvas();
         }
@@ -230,6 +240,12 @@ public final class WebShots {
         if (driven && dev.driven(180_000)) {
             dev.drive("automationAwaitReady(120000)");
         } else {
+            if (driven) {
+                System.out.println("  reloading without #shots, to run the jar instead");
+                dev.navigate(address);
+                dev.untick("hideChrome");
+                dev.click("runBtn");
+            }
             dev.awaitCanvas();
         }
         shoot(dev, "mobile-01-jrock-on-a-phone");

@@ -1326,9 +1326,19 @@
       var libPromise = null;
       var filesBusy = false;         // one operation at a time, and no click during it
 
+      // ONE LIBRARY SESSION FOR THE WHOLE PAGE, and that is not a preference: CheerpJ
+      // answers a second cheerpjRunLibrary with "Only one library thread supported". Two
+      // things here want one - this /files browser, which needs java.io.File, and the
+      // "#shots" driving, which needs the JRock class - so the single session is created
+      // with the JAR on its class path whenever the jar has been fetched. java.io.File is
+      // in every session regardless, so the browser loses nothing by sharing.
       function javaLib() {
         if (!libPromise) {
           libPromise = runtimeReady().then(function () {
+            if (jarBytes) {
+              cheerpOSAddStringFile(JAR_PATH, jarBytes);   // overwrites if present
+              return cheerpjRunLibrary(JAR_PATH);
+            }
             return cheerpjRunLibrary("");      // "" is the Java standard library alone
           });
         }
@@ -1650,40 +1660,28 @@
             // /app/ being the mount of the page's own origin. The string path is still
             // tried, because a page served from a subdirectory may need it, and whichever
             // one answers is said in the log.
-            // EACH ATTEMPT ON A CLOCK, because the first one did not fail - it never
-            // answered. /str/ is where the jar is added for cheerpjRunJar, and
-            // cheerpjRunLibrary wants a class path CheerpJ can fetch (/app/ is the mount
-            // of this page's own origin), and asked for the wrong one it sat there: the
-            // page log stopped after "Running JRock ..." and a build runner waited four
-            // minutes for a class that was never coming.
-            var lib = null;
-            for (var where of ["/app/jrock.jar", JAR_PATH]) {
-              try {
-                lib = await raceTimeout(cheerpjRunLibrary(where), 60000,
-                                        "cheerpjRunLibrary(" + where + ")");
-                log("Library mode: loaded the jar from " + where);
-                break;
-              } catch (e) {
-                log("Library mode: " + where + " did not load (" + e + ")");
-              }
-            }
-            if (lib) {
+            // THE PAGE'S ONE SESSION (see javaLib), on a clock. Asking for a second one
+            // is answered with "Only one library thread supported", and asking for the
+            // wrong class path does not fail - it never answers, which is what held a
+            // build runner for four minutes before this had a timeout in it.
+            try {
+              var lib = await raceTimeout(javaLib(), 90000, "the library session");
               var JRockClass = await lib.JRock;
+              if (!JRockClass) throw new Error("no JRock class in this session's class path");
               window.jrock = JRockClass;
               log("Library mode: window.jrock is the JRock class. Starting it ...");
               await (autostartDir
                   ? JRockClass.main(["--working-dir", autostartDir])
                   : JRockClass.main([]));
               log("JRock is up, and window.jrock takes its automation calls.");
-            } else {
-              // AND IF IT WILL NOT, THE JAR STILL RUNS. A page that cannot hand the class
-              // to JavaScript is still a page JRock runs in, and a picture of it is worth
-              // more than a diagnosis of why it could not be driven.
-              log("Library mode would not load the jar; running it as a jar instead.");
-              var fallback = autostartDir
-                  ? await cheerpjRunJar(JAR_PATH, "--working-dir", autostartDir)
-                  : await cheerpjRunJar(JAR_PATH);
-              log("JRock exited with code " + fallback + ".");
+            } catch (e) {
+              // AND NO RUNNING THE JAR AFTER IT, which is the thing this page has always
+              // known about itself (see the hint in the catch below): a jar started after
+              // a library session in the same page load never paints. So this says what
+              // happened and stops - and whoever is driving the page reloads it WITHOUT
+              // "#shots", which is a page that runs the jar and nothing else.
+              log("Library mode did not start JRock (" + e + "). Reload this page without"
+                  + " \"#shots\" to run it as a jar.");
             }
           } else {
             var code = autostartDir
