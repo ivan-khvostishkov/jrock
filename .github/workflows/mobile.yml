@@ -1,107 +1,117 @@
-name: Mobile builds (experimental)
-
-# Tries to build JRock.java for Android (an APK) and for iOS (a MobiVM/RoboVM
-# ahead-of-time binary). Both are EXPECTED TO FAIL, and the failure is the output:
-# JRock is a Swing application, Android has no AWT or Swing at all, and MobiVM ships
-# none either, so Android stops at javac on the first javax.swing import and iOS
-# stops in the AOT compiler while linking.
+# JRock on a phone, photographed on a phone.
 #
-# Deliberately NOT continue-on-error and NOT allowed to pass quietly: a red job with
-# a readable "package javax.swing does not exist" in it is a standing, checkable
-# statement of what a native port would have to replace. See android/README.md and
-# ios/README.md for the list.
+# WHY A DEPLOYED ADDRESS AND NOT THE BUNDLE JUST BUILT. The page runs JRock through
+# CheerpJ, which fetches its own runtime over the network and wants a page served the way
+# a page is served; driven against a loopback server on a desktop it initialises and then
+# the JVM exits before anything is painted (see WebShots.java). The deployed site does
+# work - it is what the browser section of the README is about - so that is what these
+# pictures are of. They show what is deployed rather than the jar built by this run, and
+# that is the honest trade: a real picture of a real phone against a slightly older jar.
 #
-# MANUAL ONLY - workflow_dispatch and nothing else. A job that is expected to fail
-# has no business failing on every push: it marks each commit with a red X, and the
-# two workflows whose colour actually means something ("Reproducible build" and
-# "Tests") get read past. The statement above is worth keeping, but it is worth
-# re-checking when the mobile projects or the Swing surface change, not sixty times
-# a week. Run it from the Actions tab.
+# The address ends in "?home": the page reads its query string as the folder to work in
+# and STARTS BY ITSELF when there is one (see autostartDir in jrock-web/index.html), so
+# nothing here has to find a button and press it. A phone screenshot of a page that
+# started on its own is also a fair picture of what a reader will get from the same link.
 #
-# No Gradle wrapper anywhere in the repository, because the repository carries no
-# jars, so both jobs install Gradle themselves.
+# Manual, because an emulator and a simulator are minutes each and nothing in the program
+# changes what they show. Run it when the browser pictures need refreshing.
+name: Mobile screenshots
 
 on:
   workflow_dispatch:
+    inputs:
+      url:
+        description: The address to open (its query string is the working folder)
+        default: https://jrock.nosocial.net/?home
+      wait:
+        description: Seconds to let CheerpJ download its runtime and paint the window
+        default: '150'
 
 jobs:
-  android:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v5
-
-      # The Android Gradle Plugin 8.x requires JDK 17 to RUN, which is unrelated to
-      # the Java 11 bytecode it is configured to produce (android/app/build.gradle).
-      - name: Set up OpenJDK 17 (Temurin)
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.10.2'
-
-      # The Android SDK is already on the runner image, with its licences accepted,
-      # and ANDROID_HOME is already exported - so there is nothing to install. Printed
-      # because "SDK location not found" is the one setup failure that would otherwise
-      # look like the Swing failure this job is here to show.
-      - name: Show the Android SDK location
-        run: echo "ANDROID_HOME=$ANDROID_HOME"
-
-      - name: Assemble the debug APK (expected to fail on Swing)
-        working-directory: android
-        run: gradle --no-daemon --stacktrace assembleDebug
-
-      # Only reached if the build somehow succeeds - in which case the artifact is
-      # very much worth looking at, and this file needs rewriting.
-      - name: Upload the APK
-        if: success()
-        uses: actions/upload-artifact@v6
-        with:
-          name: jrock-android-debug
-          path: android/app/build/outputs/apk/debug/
-          if-no-files-found: warn
-
   ios:
-    # MobiVM needs Xcode's linker and codesign, so this cannot run anywhere else.
+    name: iOS Safari, in the Simulator
     runs-on: macos-latest
-
     steps:
-      - name: Check out source
-        uses: actions/checkout@v5
+      # Apple's own tooling, which is on this runner already: no account, no signing, no
+      # third-party action. simctl boots a simulator, opens a URL in its Safari and reads
+      # the screen back - the three things this needs and nothing else.
+      - name: Boot the newest iPhone the runner has
+        run: |
+          xcrun simctl list devices available | sed -n '1,40p'
+          UDID=$(xcrun simctl list devices available \
+                 | grep -oE 'iPhone[^(]*\(([0-9A-F-]{36})\)' \
+                 | tail -1 | grep -oE '[0-9A-F-]{36}')
+          if [ -z "$UDID" ]; then echo "::error::no iPhone simulator on this runner"; exit 1; fi
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
 
-      # MobiVM 2.3.x compiles Java 11 bytecode and runs on a JDK 11, so unlike the
-      # Android job there is only one Java version in play here.
-      - name: Set up OpenJDK 11 (Temurin)
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '11'
+      - name: Open JRock and photograph it
+        run: |
+          mkdir -p screenshots
+          xcrun simctl openurl "$UDID" "${{ inputs.url }}"
+          # The first picture is taken early on purpose: the page's own log, which says
+          # what it is doing while the runtime comes down, is the one thing a reader
+          # waiting on a slow connection will see.
+          sleep 25
+          xcrun simctl io "$UDID" screenshot screenshots/ios-01-starting.png
+          sleep ${{ inputs.wait }}
+          xcrun simctl io "$UDID" screenshot screenshots/ios-02-the-window.png
+          ls -la screenshots/
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.10.2'
-
-      - name: Show the Xcode version
-        run: xcodebuild -version
-
-      # createIPA would also need a signing identity and a provisioning profile,
-      # neither of which is in this repository - but the AOT compiler fails on Swing
-      # long before it gets that far, which is the point.
-      - name: Compile ahead of time (expected to fail on Swing)
-        working-directory: ios
-        run: gradle --no-daemon --stacktrace build createIPA
-
-      # Only reached if the build somehow succeeds - see the note in the Android job.
-      - name: Upload the IPA
-        if: success()
+      - name: Upload
         uses: actions/upload-artifact@v6
         with:
-          name: jrock-ios
-          path: ios/build/robovm/
-          if-no-files-found: warn
+          name: mobile-ios
+          path: screenshots/
+          if-no-files-found: error
+
+  android:
+    name: Android Chrome, in the emulator
+    runs-on: ubuntu-latest
+    steps:
+      # KVM, which the Linux runners have but do not open to the job's own user. Without
+      # it the emulator falls back to software and takes long enough to be useless.
+      - name: Let this job use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm-for-this-job.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      # Google's own tooling, also already on the runner: sdkmanager, avdmanager, the
+      # emulator and adb. One system image, one device, no action from the marketplace.
+      - name: An emulator, booted
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+              "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+              -n jrock -k "system-images;android-34;google_apis;x86_64" --device pixel_6 --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd jrock -no-window -no-audio \
+              -no-boot-anim -no-snapshot -gpu swiftshader_indirect > emulator.log 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+          # Booted means sys.boot_completed, not "adb answered": Chrome cannot be started
+          # before the framework is up.
+          timeout 420 bash -c 'until [ "$('"$ANDROID_HOME"'/platform-tools/adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
+          "$ANDROID_HOME/platform-tools/adb" shell wm size
+          "$ANDROID_HOME/platform-tools/adb" shell settings put system font_scale 1.0
+
+      - name: Open JRock and photograph it
+        run: |
+          mkdir -p screenshots
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          $ADB shell am start -a android.intent.action.VIEW -d '${{ inputs.url }}' > /dev/null
+          sleep 25
+          $ADB exec-out screencap -p > screenshots/android-01-starting.png
+          sleep ${{ inputs.wait }}
+          $ADB exec-out screencap -p > screenshots/android-02-the-window.png
+          ls -la screenshots/
+
+      - name: Upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: mobile-android
+          path: screenshots/
+          if-no-files-found: error
