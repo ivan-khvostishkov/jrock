@@ -2590,6 +2590,10 @@ whichever is closer to yours.
 
 A loop rather than a pass, and no prompt file at all:
 
+![The push-to-talk agent: one round microphone button, the Hands-free lever, and the area the answer is read from](images/windows-13-the-push-to-talk-agent.png)
+
+*One button, and what it says under it. Hold it, or hold Ctrl while this window has the focus; the answer appears here and is read aloud on the speaker JRock was told to use.*
+
 ```
 java -cp jrock.jar JRockPushToTalk.java
 java -cp jrock.jar JRockPushToTalk.java --working-dir D:\Voice   # that folder's model and mic
@@ -2993,6 +2997,10 @@ sequenceDiagram
 
 It knows where the operator is and tells other agents.
 
+![The geo location agent: the place, how the coordinates were found, and how much of them is passed on](images/windows-14-the-geo-location-agent.png)
+
+*Nothing is kept across runs, so the place is entered or found at every start - and Round to decides how much of it other agents are told.*
+
 ```mermaid
 sequenceDiagram
     participant A as Another agent
@@ -3079,6 +3087,10 @@ It starts JRock and takes it as an automation, like the timer, and opens a small
 It turns a location into a checked address for the weather on open-meteo.com. It does not fetch
 the weather itself: the agent that asked does that.
 
+![The weather agent: the lines it was asked for, the addresses it answered with, and a field to try one by hand](images/windows-15-the-weather-agent.png)
+
+*It answers with an address and fetches nothing: the agent that asked does that.*
+
 ```mermaid
 sequenceDiagram
     participant P as JRockPushToTalk
@@ -3129,6 +3141,10 @@ java -cp jrock.jar JRockWeather.java --working-dir D:\Weather
 What **Thunderbird already knows**, read out of its own files — your **calendar** and your
 **mail** — for the push-to-talk agent to ask about and for you to read. And two things it puts
 back: a calendar event, posted to you by yourself, and a drafted reply in a compose window.
+
+![The Thunderbird agent: the question buttons, the briefing, and how fresh the cache behind it is](images/windows-16-the-thunderbird-agent.png)
+
+*Thunderbird is the authority and this says so: every answer carries the age of the cache it was read from.*
 
 ```mermaid
 sequenceDiagram
@@ -3508,6 +3524,10 @@ A page off the web, read the way a person reads one: by **looking at it**. The a
 browser of its own through the **Chrome DevTools Protocol**, photographs the whole page, and
 asks **its own JRock** to turn that photograph into Markdown — which is what the push-to-talk
 agent gets back.
+
+![The browser agent: the command field, the hosts it may open, and what it did with the last page](images/windows-17-the-browser-agent.png)
+
+*The host list and the rules are behind the button rather than in front of every answer, which is what keeps this window small enough to sit beside JRock's.*
 
 ```mermaid
 sequenceDiagram
@@ -5495,10 +5515,15 @@ runners are headless, on JDK 11 — the minimum JRock supports.
 
 ## The installer (`installer/InstallJRock.java`)
 
-![The installer's fourth page: every agent ticked, the doc inventory flow, and the translations cut to English and Spanish](images/macos-18-the-installer-agents-and-flows.png)
+![The installer's fourth page: every agent ticked, the doc inventory flow, and the translations cut to English and Spanish](images/windows-18-the-installer-agents-and-flows.png)
 
 *Page four is the catalogue: an agent gets a folder of its own, the flows share one, and each is
 installed with the prompt files its own source names.*
+
+![The installer's last page: every folder, every Explorer entry and every file it wrote, named](images/windows-19-the-installer-finished.png)
+
+*And the last page says what it did - which is the page to read before pressing Close, because
+it is the only account of where everything went.*
 
 One Swing wizard, one Java source file, no build step — shipped **at the root of every
 release artifact**, beside `jrock.jar`. Unpack a release, and from that folder:

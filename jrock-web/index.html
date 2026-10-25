@@ -1634,7 +1634,23 @@
             // arrives as a JavaScript one, with its message: cheerpjRunJar only ever
             // gives back an exit code, and "exited with code 1" is the least useful true
             // thing a program can say about itself.
-            var lib = await cheerpjRunLibrary(JAR_PATH);
+            // /app/ AND NOT /str/, which is where this failed the first time it ran on
+            // a build runner: the jar is added to the string filesystem for
+            // cheerpjRunJar, and library mode wants a class path CheerpJ can fetch -
+            // /app/ being the mount of the page's own origin. The string path is still
+            // tried, because a page served from a subdirectory may need it, and whichever
+            // one answers is said in the log.
+            var lib = null;
+            for (var where of ["/app/jrock.jar", JAR_PATH]) {
+              try {
+                lib = await cheerpjRunLibrary(where);
+                log("Library mode: loaded the jar from " + where);
+                break;
+              } catch (e) {
+                log("Library mode: " + where + " did not load (" + e + ")");
+              }
+            }
+            if (!lib) throw new Error("no class path CheerpJ would load the jar from");
             var JRockClass = await lib.JRock;
             window.jrock = JRockClass;
             log("Library mode: window.jrock is the JRock class. Starting it ...");

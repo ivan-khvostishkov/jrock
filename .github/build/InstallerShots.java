@@ -258,10 +258,29 @@ public final class InstallerShots {
      */
     private static void explorerMenus(Path folder) {
         try {
+            // THE WHOLE MENU, NOT WINDOWS 11'S SHORT ONE. Eleven shows seven items and
+            // puts everything an application added behind "Show more options" - so the
+            // first picture of this was a menu with no JRock in it at all. The classic
+            // menu is one registry value away (an empty default under that CLSID), which
+            // is the documented switch, and it is taken out again by --clean.
+            run("reg", "add", LEGACY_MENU_KEY, "/f", "/ve");
+            // Explorer reads it once, at start.
+            run("taskkill", "/f", "/im", "explorer.exe");
+            pause(2_000);
             new ProcessBuilder("explorer.exe", folder.toString()).start();
             java.awt.Robot robot = new java.awt.Robot();
             robot.setAutoDelay(60);
-            pause(6_000);                       // the shell takes its time to paint
+            pause(9_000);                       // the shell takes its time to paint
+
+            // MAXIMIZED, because the picture is the whole screen and a runner's desktop
+            // has the rest of this build on it: consoles, a Notepad the installer opened,
+            // JRock's own window. A maximized Explorer covers all of it, and the crop
+            // below takes the taskbar off the bottom.
+            robot.keyPress(java.awt.event.KeyEvent.VK_WINDOWS);
+            robot.keyPress(java.awt.event.KeyEvent.VK_UP);
+            robot.keyRelease(java.awt.event.KeyEvent.VK_UP);
+            robot.keyRelease(java.awt.event.KeyEvent.VK_WINDOWS);
+            pause(1_500);
 
             // Nothing selected: the folder's own menu, which is where "JRock here!" is.
             robot.keyPress(java.awt.event.KeyEvent.VK_ESCAPE);
@@ -284,6 +303,11 @@ public final class InstallerShots {
         }
     }
 
+    /** Windows 11's switch back to the classic context menu: an empty default value. */
+    private static final String LEGACY_MENU_KEY =
+            "HKCU\\Software\\Classes\\CLSID\\"
+            + "{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32";
+
     private static void contextMenu(java.awt.Robot robot) {
         robot.keyPress(java.awt.event.KeyEvent.VK_SHIFT);
         robot.keyPress(java.awt.event.KeyEvent.VK_F10);
@@ -298,10 +322,17 @@ public final class InstallerShots {
         pause(400);
     }
 
-    /** The whole screen, which on a build runner holds one window and nothing else. */
+    /**
+     * The screen with its taskbar cropped off - which is the Explorer window and the menu
+     * standing open on it, and none of the clock, the tray or the "Test Mode" watermark a
+     * build runner wears in its bottom corner.
+     */
     private static void screen(java.awt.Robot robot, String name) {
         java.awt.Dimension size = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
-        write(robot.createScreenCapture(new java.awt.Rectangle(size)), name);
+        int taskbar = 56;
+        java.awt.Rectangle area = new java.awt.Rectangle(
+                0, 0, size.width, Math.max(100, size.height - taskbar));
+        write(robot.createScreenCapture(area), name);
     }
 
     /** One window, read back off the screen: see captured() in Screenshots.java. */
@@ -460,8 +491,9 @@ public final class InstallerShots {
                 run("reg", "delete", root + "\\" + key, "/f");
             }
         }
-        System.out.println("the entries naming " + mark + " are gone again; "
-                + home + " is left where it is");
+        run("reg", "delete", LEGACY_MENU_KEY, "/f");
+        System.out.println("the entries naming " + mark + " are gone again, and so is the "
+                + "classic-menu switch; " + home + " is left where it is");
     }
 
     private static List<String> keys(String root) {

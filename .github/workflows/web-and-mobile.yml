@@ -123,7 +123,27 @@ jobs:
           xcrun simctl status_bar "$UDID" override --time "9:41" \
                 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
           open -a Simulator            # the device screen has to be a window to press on
-          xcrun simctl openurl "$UDID" "$URL"
+
+          # SAFARI FIRST, THEN THE ADDRESS, AND MORE THAN ONCE. "simctl openurl" asks the
+          # device to hand a URL to whatever opens it, and on a simulator that has just
+          # booted there is nothing there yet to take it: the call sat for a minute and
+          # came back "Operation timed out" (NSPOSIXErrorDomain 60), which is not a
+          # network error - the device shares this machine's network - but a race with
+          # Safari's own start. So Safari is launched, given a moment, and the open is
+          # tried five times before the job gives up on it.
+          xcrun simctl launch "$UDID" com.apple.mobilesafari || true
+          sleep 8
+          opened=no
+          for attempt in 1 2 3 4 5; do
+            if xcrun simctl openurl "$UDID" "$URL"; then opened=yes; break; fi
+            echo "openurl did not take (attempt $attempt); waiting"
+            sleep 10
+          done
+          if [ "$opened" != "yes" ]; then
+            echo "::error::the simulator would not open $URL"
+            xcrun simctl io "$UDID" screenshot screenshots/ios-00-would-not-open.png || true
+            exit 1
+          fi
 
           # SAFARI'S FIRST-RUN TIP, OUT OF THE WAY. A fresh simulator shows a popover
           # about bookmarks and the share menu, and it sits in the middle of the page -
@@ -168,11 +188,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up OpenJDK 11 (Temurin)
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '11'
+      # NO setup-java HERE, deliberately. Google's sdkmanager and avdmanager are compiled
+      # for Java 17 (class file 61), so a job pinned to Temurin 11 cannot even ask them
+      # for their licences: "has been compiled by a more recent version of the Java
+      # Runtime". Nothing in this job needs 11 - the attach check is one source file on
+      # java.net.http - so the image's own Java is left where it is.
 
       # KVM, which the Linux runners have but do not open to the job's own user. Without
       # it the emulator falls back to software and takes long enough to be useless.
