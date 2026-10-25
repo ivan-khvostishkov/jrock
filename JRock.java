@@ -16740,6 +16740,19 @@ public class JRock {
         // Every link address in the document, numbered in the order first met: the DOCX
         // gives each one an external relationship, "rLink<n>", that its w:hyperlink names.
         private final java.util.Map<String, Integer> links = new java.util.LinkedHashMap<>();
+        // A LINK INTO THE DOCUMENT ITSELF is not an address, and written as one it is a
+        // dead link: "#settings-files" as an external relationship is a file Word cannot
+        // find, which is what every cross-reference in a document of any size would be.
+        // So each heading is bookmarked, under the anchor GitHub's own Markdown would
+        // give it, and a "#..." link becomes a w:hyperlink naming that bookmark - which
+        // is a cross-reference a word processor follows, and InCopy and InDesign import.
+        //
+        // Anchor -> bookmark name, filled from the headings the first time it is wanted;
+        // a "#..." that names no heading in THIS document gets no link at all rather than
+        // one that goes nowhere (see docxRuns), which is what makes a chapter exported on
+        // its own honest about what it can reach.
+        private java.util.Map<String, String> anchors;
+        private int bookmarkIds;
         private int drawings;              // one id per placement, which a .docx wants unique
         private int svgs;                  // inline SVGs found, which number their keys
 
@@ -17619,8 +17632,11 @@ public class JRock {
             for (Run run : runs) {
                 boolean bold = run.bold || allBold;
                 boolean italic = run.italic || allItalic;
-                // A link is its text and then where it points, unless the two are the same.
-                String text = run.link == null || run.link.equals(run.text) ? run.text
+                // A link is its text and then where it points, unless the two are the
+                // same - or unless it points into the document, which in an RTF is
+                // nothing a reader can follow and in print is not an address at all.
+                String text = run.link == null || run.link.equals(run.text)
+                        || run.link.startsWith("#") ? run.text
                         : run.text + " (" + run.link + ")";
                 if (!bold && !italic && !run.mono) {
                     rtf.append(rtfText(text));
@@ -17791,6 +17807,10 @@ public class JRock {
                    .append("\"/>");
             }
             for (java.util.Map.Entry<String, Integer> link : links.entrySet()) {
+                // A "#..." is a bookmark in this document and has no relationship of its
+                // own: written as an external one it would be a file Word looks for and
+                // never finds (see docxRuns).
+                if (link.getKey().startsWith("#")) continue;
                 xml.append("<Relationship Id=\"rLink").append(link.getValue())
                    .append("\" Type=\"").append(R_NS).append("/hyperlink\" Target=\"")
                    .append(attr(link.getKey())).append("\" TargetMode=\"External\"/>");
@@ -17915,6 +17935,18 @@ public class JRock {
                     xml.append("<w:p><w:pPr><w:pStyle w:val=\"Heading")
                        .append(Math.min(block.level, HEADING_SIZE.length))
                        .append("\"/></w:pPr>");
+                    // The bookmark every "#..." link in the document points at, around
+                    // the heading's own text so that a reader jumping to it lands on the
+                    // heading rather than in the paragraph above it.
+                    String bookmark = anchors().get(anchor(runsText(block.runs)));
+                    if (bookmark != null) {
+                        int id = ++bookmarkIds;
+                        xml.append("<w:bookmarkStart w:id=\"").append(id)
+                           .append("\" w:name=\"").append(bookmark).append("\"/>");
+                        docxRuns(xml, block.runs, false, false);
+                        xml.append("<w:bookmarkEnd w:id=\"").append(id).append("\"/>");
+                        break;
+                    }
                     docxRuns(xml, block.runs, false, false);
                     break;
                 case CODE:
@@ -17984,6 +18016,50 @@ public class JRock {
             xml.append("</w:tbl>");
         }
 
+        /**
+         * Every heading's anchor in this document, to the bookmark name it is given.
+         * Worked out once, from the headings as parsed, so that a link can be written
+         * before the heading it points at has been reached.
+         */
+        private java.util.Map<String, String> anchors() {
+            if (anchors != null) return anchors;
+            anchors = new java.util.LinkedHashMap<>();
+            for (Block block : blocks) {
+                if (block.kind != HEADING) continue;
+                String anchor = anchor(runsText(block.runs));
+                if (anchor.isEmpty()) continue;
+                // The same heading text twice is numbered the second time, which is what
+                // GitHub does and therefore what the Markdown's own links expect.
+                String unique = anchor;
+                for (int n = 1; anchors.containsKey(unique); n++) unique = anchor + "-" + n;
+                anchors.put(unique, "_Ref" + (anchors.size() + 1));
+            }
+            return anchors;
+        }
+
+        /** A paragraph's words with nothing of its formatting: a heading as text. */
+        private static String runsText(List<Run> runs) {
+            StringBuilder out = new StringBuilder();
+            for (Run run : runs) if (run.text != null) out.append(run.text);
+            return out.toString();
+        }
+
+        /**
+         * A heading's anchor, the way GitHub's Markdown makes one: lower case, anything
+         * that is not a letter, a digit, a space, a hyphen or an underscore dropped, and
+         * the spaces turned into hyphens. The same rule the README's own links are
+         * written against, so "#settings-files" finds "Settings files".
+         */
+        private static String anchor(String heading) {
+            StringBuilder out = new StringBuilder(heading.length());
+            for (int i = 0; i < heading.length(); i++) {
+                char c = Character.toLowerCase(heading.charAt(i));
+                if (c == ' ') out.append('-');
+                else if (Character.isLetterOrDigit(c) || c == '-' || c == '_') out.append(c);
+            }
+            return out.toString();
+        }
+
         private void docxRuns(StringBuilder xml, List<Run> runs,
                               boolean allBold, boolean allItalic) {
             for (Run run : runs) {
@@ -17993,14 +18069,25 @@ public class JRock {
                 }
                 boolean bold = run.bold || allBold;
                 boolean italic = run.italic || allItalic;
-                if (run.link != null) {
-                    xml.append("<w:hyperlink r:id=\"rLink").append(links.get(run.link))
-                       .append("\">");
+                // Three kinds of link, and the third is not one: an address, a bookmark
+                // in this document, and a "#..." naming a heading that is not in this
+                // document - which is written as plain text, because a link the reader
+                // can click and nothing happens is worse than no link at all. What tells
+                // them where to look instead is in the text itself (see the README's own
+                // section marks).
+                String bookmark = run.link != null && run.link.startsWith("#")
+                        ? anchors().get(run.link.substring(1).toLowerCase()) : null;
+                boolean linked = run.link != null
+                        && (bookmark != null || !run.link.startsWith("#"));
+                if (linked) {
+                    xml.append(bookmark != null
+                            ? "<w:hyperlink w:anchor=\"" + bookmark + "\">"
+                            : "<w:hyperlink r:id=\"rLink" + links.get(run.link) + "\">");
                 }
                 xml.append("<w:r>");
-                if (bold || italic || run.mono || run.link != null) {
+                if (bold || italic || run.mono || linked) {
                     xml.append("<w:rPr>");
-                    if (run.link != null) xml.append("<w:rStyle w:val=\"Hyperlink\"/>");
+                    if (linked) xml.append("<w:rStyle w:val=\"Hyperlink\"/>");
                     if (run.mono) {
                         xml.append("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>");
                     }
@@ -18012,7 +18099,7 @@ public class JRock {
                 // two differently formatted words.
                 xml.append("<w:t xml:space=\"preserve\">").append(xml(run.text))
                    .append("</w:t></w:r>");
-                if (run.link != null) xml.append("</w:hyperlink>");
+                if (linked) xml.append("</w:hyperlink>");
             }
         }
 

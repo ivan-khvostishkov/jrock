@@ -65,6 +65,8 @@ jrock.jar.md5
 # whatever the operator signed in to in that window. Never ours to commit.
 jrock-browser-profile/
 
-# The README as a DOCX, written by .github/build/ReadmeDocx.java. A build output like
-# the jar: the README itself is the source, and CI uploads the document as an artifact.
+# The README as a DOCX, written by .github/build/ReadmeDocx.java, and the same thing
+# again as one document per chapter under book/. Build outputs like the jar: the README
+# itself is the source, and CI uploads both as artifacts.
 README.docx
+book/

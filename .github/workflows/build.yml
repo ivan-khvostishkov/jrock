@@ -120,6 +120,13 @@ jobs:
       # installed: no pandoc, no LaTeX, and no second Markdown dialect to keep in step
       # with the first.
       #
+      # The seven mermaid diagrams are rendered to PNGs on the way in, by mermaid-cli
+      # through npx - GitHub draws them itself in the README and a word processor cannot,
+      # so without this they would arrive as source in a monospaced font. It is the one
+      # outside tool in this build: Node and Chrome are both on this runner already, the
+      # tool is asked for rather than installed, and a step that cannot reach it leaves
+      # the blocks as they are and still writes the document.
+      #
       # Linux only, because one document is enough and the jar is identical on all three
       # runners - and under xvfb, because the export goes through the window: JRock drives
       # its real prompt and its real exporter, so this step is a check on both.
@@ -130,8 +137,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb
           xvfb-run -a --server-args="-screen 0 1600x1200x24" \
-            java -cp jrock.jar .github/build/ReadmeDocx.java README.md README.docx
+            java -cp jrock.jar .github/build/ReadmeDocx.java README.md README.docx book
           ls -l README.docx
+          ls -l book/ | head -5
 
       - name: Upload the README DOCX
         if: matrix.os == 'ubuntu-latest'
@@ -140,6 +148,20 @@ jobs:
           # One file: place it in a primary text frame and map the five style names.
           name: readme-docx
           path: README.docx
+          if-no-files-found: error
+
+      # The same document as a BOOK: one DOCX per chapter - 00-front-matter.docx, then
+      # 01- to 37-, each named for the section mark the text itself uses, so "§14" in a
+      # sentence is 14-settings-files.docx in this folder. That is what InDesign's Book
+      # panel takes: one document per chapter, numbered by the panel, with one table of
+      # contents and one index built across the lot - and what lets InCopy have an
+      # editor in one chapter while another is being typeset.
+      - name: Upload the README as a book of chapters
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v6
+        with:
+          name: readme-book
+          path: book/
           if-no-files-found: error
 
       # Assemble the CheerpJ web bundle for Amplify: a flat directory with
