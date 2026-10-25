@@ -88,11 +88,10 @@ public final class InstallerShots {
         watchdog.setDaemon(true);
         watchdog.start();
 
-        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
-            System.out.println("not Windows: the installer's pictures are of Windows, and "
-                    + "Explorer has no menus anywhere else");
-            System.exit(0);
-        }
+        // The wizard is Swing and installs on any desktop, so it is driven on all of
+        // them: what comes out is a real installation, which is what everything
+        // photographed after this runs out of. Only Explorer is Windows'.
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
 
         // A folder with something in it to right-click, which is what the file menu is a
         // picture of. The name is the kind of thing that is actually in such a folder.
@@ -107,8 +106,9 @@ public final class InstallerShots {
         if (wizard == null) System.exit(0);
 
         drive(wizard, home);
-        explorerMenus(documents);
-        if (clean) clean(home);
+        if (windows) explorerMenus(documents);
+        else System.out.println("no Explorer here, so no menus of its to photograph");
+        if (clean && windows) clean(home);
 
         System.out.println("wrote " + taken + " screenshot(s) to " + out);
         System.exit(0);

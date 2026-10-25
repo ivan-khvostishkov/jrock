@@ -106,8 +106,18 @@ public final class Screenshots {
     private static int answered;
 
     public static void main(String[] args) throws Exception {
-        out = Paths.get(args.length > 0 ? args[0] : "screenshots").toAbsolutePath();
-        os = args.length > 1 ? args[1] : System.getProperty("os.name")
+        // The flags come out of the list before anything is read by position: a
+        // "--agent geo" sitting where the demo folder's parent is read from would make
+        // the demo folder "--agent/jrock-demo/Demo" - and the session report prints that
+        // path INTO the picture.
+        java.util.List<String> plain = new java.util.ArrayList<>();
+        String asked = null;
+        for (int i = 0; i < args.length; i++) {
+            if ("--agent".equals(args[i]) && i + 1 < args.length) asked = args[++i];
+            else plain.add(args[i]);
+        }
+        out = Paths.get(plain.size() > 0 ? plain.get(0) : "screenshots").toAbsolutePath();
+        os = plain.size() > 1 ? plain.get(1) : System.getProperty("os.name")
                 .toLowerCase().replaceAll("[^a-z0-9]+", "");
         Files.createDirectories(out);
 
@@ -118,7 +128,7 @@ public final class Screenshots {
         // can ask for a clean one. /tmp/jrock-demo/Demo reads like a demo; macOS's own
         // temp folder (/var/folders/zz/.../T) reads like a crash dump, and Windows puts
         // the account name in its own, which is nobody's business in a README.
-        Path under = args.length > 2 ? Paths.get(args[2])
+        Path under = plain.size() > 2 ? Paths.get(plain.get(2))
                 : Paths.get(System.getProperty("java.io.tmpdir"));
         Path work = under.resolve("jrock-demo").resolve("Demo");
         deleteTree(work.getParent());
@@ -161,7 +171,6 @@ public final class Screenshots {
 
         // ONE AGENT, IN A PROCESS OF ITS OWN (see AGENTS), and then nothing else: the
         // agent starts the JRock here, so this tool must not.
-        String asked = argument(args, "--agent");
         if (asked != null) {
             oneAgent(asked, work);
             System.out.println("wrote " + taken + " screenshot(s) to " + out);
@@ -539,14 +548,6 @@ public final class Screenshots {
         return null;
     }
 
-    /** The value after a flag, or null: "--agent geo" gives "geo". */
-    private static String argument(String[] args, String flag) {
-        for (int i = 0; i < args.length - 1; i++) {
-            if (flag.equals(args[i])) return args[i + 1];
-        }
-        return null;
-    }
-
     /**
      * One agent, started on a thread of its own because an agent's main does not return -
      * it is a loop - and photographed once its window is up beside the JRock it started.
@@ -554,7 +555,9 @@ public final class Screenshots {
     private static void oneAgent(String key, Path work) {
         String[] found = null;
         for (String[] candidate : AGENTS) {
-            if (candidate[0].equals(key)) found = candidate;
+            // By its key ("geo") or by its class ("JRockGeoLocation"): the workflow walks
+            // the installed Agents/ folders, where what it has is the file name.
+            if (candidate[0].equals(key) || candidate[1].equals(key)) found = candidate;
         }
         final String[] row = found;
         if (row == null) {

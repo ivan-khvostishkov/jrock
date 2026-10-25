@@ -35,12 +35,20 @@ jobs:
       fail-fast: false        # one desktop failing should not cost the other two
       matrix:
         include:
+          # "under" is where the throwaway demo folder goes, and it is in the picture:
+          # the session report prints the whole path, so /tmp/jrock-demo/Demo reads like
+          # a demo where macOS's own temp folder reads like a crash dump. Windows takes
+          # its default, the account's temp folder, since its pictures are for showing
+          # that the window looks the same rather than for pasting paths into a README.
           - runner: ubuntu-latest
             name: linux
+            under: /tmp
           - runner: macos-latest
             name: macos
+            under: /tmp
           - runner: windows-latest
             name: windows
+            under: ''
 
     runs-on: ${{ matrix.runner }}
 
@@ -65,95 +73,93 @@ jobs:
           java .github/build/BuildJar.java
           javac -encoding UTF-8 --release 11 -cp jrock.jar -d out-automation \
                 samples/agents/*.java samples/flows/*.java
-          # AND THE PROMPT FILES BESIDE THEM. An agent reads the prompts its own source
-          # names from the folder it is running out of - which is how an installed agent
-          # finds them beside its .java, and here that folder is out-automation. Without
-          # them each agent stops with "there is no jrock-prompt-...txt" and puts the
-          # message in a modal dialog, which on a runner nobody answers.
-          cp samples/agents/*.txt samples/flows/*.txt out-automation/
 
-      # A display, on the one runner that has none. Xvfb is also what the GUI tests use.
-      # The third argument is where the demo folder goes, and it is given here because the
-      # session report prints that path INTO the picture: /tmp/jrock-demo/Demo rather than
-      # macOS's own /var/folders/zz/.../T, which reads like a crash dump. Windows is left
-      # with its default (the account's temp folder), since what its pictures are for is
-      # showing that the window looks the same, not for pasting paths into a README.
-      - name: Take the screenshots (Linux, under Xvfb)
-        if: matrix.runner == 'ubuntu-latest'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb
-          xvfb-run -a --server-args="-screen 0 1600x1200x24" \
-            java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
-                 screenshots ${{ matrix.name }} /tmp
-
-      - name: Take the screenshots (macOS)
-        if: matrix.runner == 'macos-latest'
-        run: |
-          java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
-               screenshots ${{ matrix.name }} /tmp
-
-      - name: Take the screenshots (Windows)
-        if: matrix.runner == 'windows-latest'
-        shell: bash
-        run: |
-          java -cp "jrock.jar;out-automation" .github/build/Screenshots.java \
-               screenshots ${{ matrix.name }}
-
-      # THE OTHER FIVE AGENTS, one process each. Five of the seven start a JRock of
-      # their own and then take it as an automation, and a process has one of each - so
-      # they cannot be photographed beside the conversation above, or beside each other.
-      # The timer and the paper docs agent drive nothing and are in the run above.
+      # INSTALLED FIRST, AND THEN PHOTOGRAPHED - which is the whole arrangement here,
+      # and the reason it is one step. A user does not run JRock out of a build tree: they
+      # run the installer, and then they run what it put in a folder. So that is what this
+      # does, and every picture after the first two is of a real installation.
       #
-      # One invocation per agent, and a missing picture is a line in the log: an agent
-      # that wants a microphone, a Thunderbird profile or a Chromium says so and stops,
-      # which is worth knowing and is not worth failing a build for.
-      - name: The agents that need a process of their own (Linux, under Xvfb)
-        if: matrix.runner == 'ubuntu-latest'
-        run: |
-          for agent in push-to-talk geo weather thunderbird browser; do
-            echo "--- $agent"
-            xvfb-run -a --server-args="-screen 0 1600x1200x24" \
-              java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
-                   screenshots ${{ matrix.name }} /tmp --agent "$agent" || true
-          done
-
-      - name: The agents that need a process of their own (macOS)
-        if: matrix.runner == 'macos-latest'
-        run: |
-          for agent in push-to-talk geo weather thunderbird browser; do
-            echo "--- $agent"
-            java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
-                 screenshots ${{ matrix.name }} /tmp --agent "$agent" || true
-          done
-
-      - name: The agents that need a process of their own (Windows)
-        if: matrix.runner == 'windows-latest'
-        shell: bash
-        run: |
-          for agent in push-to-talk geo weather thunderbird browser; do
-            echo "--- $agent"
-            java -cp "jrock.jar;out-automation" .github/build/Screenshots.java \
-                 screenshots ${{ matrix.name }} --agent "$agent" || true
-          done
-
-      # THE INSTALLER, AND THE MENUS IT WRITES, on the one runner where either means
-      # anything. The wizard is Swing, so it is driven the way JRock is - its real Next
-      # button, its real radio button, its real ticks - and it really installs, because
-      # Explorer's menu only has JRock's entries in it on a machine where JRock is
-      # installed. --clean takes those entries out again afterwards; the runner is thrown
-      # away either way, but the same command at a desk should leave nothing behind.
+      # It also fixes something no amount of copying could: an agent reads the prompt files
+      # its own source names out of the folder it is running from, which for an installed
+      # agent is its own folder under Agents/, with its prompts beside its .java. Run out
+      # of a build tree it finds none of them and stops with a modal dialog nobody answers.
       #
-      # The two Explorer pictures are the shell's own menus, opened with Shift+F10 rather
-      # than a mouse click at a guessed pixel, and captured as the whole screen - which on
-      # a runner holds one window and an empty desktop.
-      - name: The installer and the Explorer menus (Windows)
-        if: matrix.runner == 'windows-latest'
+      # Three passes, in this order:
+      #   1. the installer, driven through its own wizard (and on Windows, Explorer's two
+      #      menus with the entries it just wrote)
+      #   2. the twelve program scenes, against the INSTALLED jar
+      #   3. the five agents that need a process each, every one started from its own
+      #      installed folder with its own .java named - which is what its shortcut does
+      - name: Install JRock, then photograph the installation
         shell: bash
         run: |
+          set -u
+          if [ "${{ matrix.name }}" = "linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          fi
+          # One place where the three differ, and then they do not differ again.
+          case "${{ matrix.name }}" in
+            windows) SEP=';' ;;
+            *)       SEP=':' ;;
+          esac
+          run() {
+            if [ "${{ matrix.name }}" = "linux" ]; then
+              xvfb-run -a --server-args="-screen 0 1600x1200x24" "$@"
+            else
+              "$@"
+            fi
+          }
+
+          HERE="$PWD"
+          INSTALL="${RUNNER_TEMP:-/tmp}/JRockShots"
+          mkdir -p screenshots
+
+          # 1. The installer, which leaves the installation behind for the rest of this.
           javac -encoding UTF-8 --release 11 -d out-installer installer/InstallJRock.java
-          java -cp "jrock.jar;out-installer" .github/build/InstallerShots.java \
-               screenshots ${{ matrix.name }} "$RUNNER_TEMP/JRockShots" --clean
+          run java -cp "jrock.jar${SEP}out-installer" \
+               .github/build/InstallerShots.java screenshots ${{ matrix.name }} \
+               "$INSTALL" --clean || true
+          echo "--- what was installed"
+          ls -la "$INSTALL" || true
+          ls -la "$INSTALL/Agents" || true
+
+          # The jar to photograph is the installed one from here on. If the wizard did not
+          # get that far, the built one stands in - a picture of this build either way.
+          JAR="$INSTALL/jrock.jar"
+          [ -f "$JAR" ] || JAR="$HERE/jrock.jar"
+          echo "--- using $JAR"
+
+          # The tool is COMPILED rather than source-launched, because the source launcher
+          # sets jdk.launcher.sourcefile to the tool's own path - and that property is the
+          # first thing an agent asks where its prompt files are.
+          javac -encoding UTF-8 --release 11 -cp "$JAR" -d out-build \
+                .github/build/Screenshots.java
+
+          # 2. The program itself: twelve scenes, against the installed jar.
+          run java -cp "$JAR${SEP}out-automation${SEP}out-build" Screenshots \
+               screenshots ${{ matrix.name }} ${{ matrix.under }} || true
+
+          # 3. Each agent, out of its own installed folder. The class is compiled from the
+          # installed source, the working directory IS that folder (so PTTFiles/ and the
+          # rest land where they would), and jdk.launcher.sourcefile names the installed
+          # .java, which is what the single-file launcher would have set.
+          for dir in "$INSTALL"/Agents/*/; do
+            [ -d "$dir" ] || continue
+            src=$(ls "$dir"*.java 2>/dev/null | head -1)
+            [ -n "$src" ] || continue
+            name=$(basename "$src" .java)
+            echo "--- $name, from $dir"
+            # The classes go to the runner's temp: an installation is what the installer
+            # left behind, and this adds no folders of its own to it.
+            CLASSES="${RUNNER_TEMP:-/tmp}/agent-classes/$name"
+            mkdir -p "$CLASSES"
+            javac -encoding UTF-8 --release 11 -cp "$JAR" -d "$CLASSES" "$src" || continue
+            ( cd "$dir" && run java -Djdk.launcher.sourcefile="$src" \
+                -cp "$JAR${SEP}$CLASSES${SEP}$HERE/out-build" Screenshots \
+                "$HERE/screenshots" ${{ matrix.name }} ${{ matrix.under }} \
+                --agent "$name" ) || true
+          done
+          ls -la screenshots/
 
       # The twelve JRock scenes are the point of the step, and a missing one is a bug
       # rather than a runner's bad day - so they are counted. The agent windows and the
