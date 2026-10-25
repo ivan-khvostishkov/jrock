@@ -16781,7 +16781,16 @@ public class JRock {
                 java.util.regex.Pattern.compile("(?:" + IMAGE_REF.pattern() + "\\s*)+");
 
         private final List<Block> blocks = new ArrayList<>();
-        private List<Run> pending;         // body text being gathered across lines
+        // The block whose text is still coming in, and that text with its source lines
+        // joined by a space. A paragraph, a list item and a quote each run across as many
+        // lines as whoever wrote them felt like wrapping over, and their inline markup
+        // runs with them: "**" opened on one line and closed on the next is one bold
+        // phrase, which it only becomes if the lines are joined BEFORE the markup is read
+        // (see parse). Joining afterwards reads each half on its own, where neither half
+        // holds a pair - and the reader is left with a plain sentence, or with asterisks
+        // in it.
+        private Block gathering;
+        private StringBuilder gathered;
         private boolean simplified;
 
         // Whether what came in was wrapped in a ``` fence that was taken off again. Worth
@@ -16882,7 +16891,8 @@ public class JRock {
                 // A bug here is not a reason to lose someone's text. Keep the text,
                 // drop the structure, and let the caller say so in the log.
                 document.blocks.clear();
-                document.pending = null;
+                document.gathering = null;
+                document.gathered = null;
                 document.media.clear();    // nothing is placed any more, so nothing is packed
                 document.links.clear();    // and nothing links anywhere
                 document.simplified = true;
@@ -17288,18 +17298,24 @@ public class JRock {
                     Block item = block(ITEM, 1 + Math.min(m.group(1).length() / 2, MAX_DEPTH - 1));
                     String marker = m.group(2);
                     item.marker = Character.isDigit(marker.charAt(0)) ? marker : BULLET;
-                    item.runs.addAll(inline(m.group(3).trim()));
+                    gather(item, m.group(3).trim());
                     i++;
                 } else if ((m = QUOTE_LINE.matcher(text)).matches()) {
-                    block(QUOTE, 1).runs.addAll(inline(m.group(1).trim()));
+                    String quoted = m.group(1).trim();
+                    // A ">" with nothing after it ends the quoted paragraph and starts
+                    // the next one, inside the same quote.
+                    if (quoted.isEmpty()) endParagraph();
+                    else if (gathering != null && gathering.kind == QUOTE) more(quoted);
+                    else gather(block(QUOTE, 1), quoted);
                     i++;
                 } else {
                     // Anything else is body text, and consecutive lines of it are one
                     // paragraph - which is what Markdown says, and what keeps a wrapped
-                    // answer from coming out as a column of short lines.
-                    if (pending == null) pending = new ArrayList<>();
-                    else pending.add(plain(" "));
-                    pending.addAll(inline(text));
+                    // answer from coming out as a column of short lines. A line under a
+                    // list item belongs to THAT item for the same reason: it is the rest
+                    // of a sentence, and it keeps the item's bullet and indent.
+                    if (gathered == null) gather(block(BODY, 0), text);
+                    else more(text);
                     i++;
                 }
             }
@@ -17346,12 +17362,25 @@ public class JRock {
             return block;
         }
 
+        /** Starts gathering `text` into `block`, which the lines under it continue. */
+        private void gather(Block block, String text) {
+            gathering = block;
+            gathered = new StringBuilder(text);
+        }
+
+        /** One more source line of the block being gathered. */
+        private void more(String text) {
+            gathered.append(' ').append(text);
+        }
+
+        /** Reads the gathered Markdown as the block's runs: no more lines are coming. */
         private void endParagraph() {
-            if (pending == null) return;
-            Block block = new Block();
-            block.runs.addAll(pending);
-            blocks.add(block);
-            pending = null;
+            if (gathered == null) return;
+            String text = gathered.toString();
+            Block block = gathering;
+            gathering = null;
+            gathered = null;
+            block.runs.addAll(inline(text));
         }
 
         // "|---|:--:|" and the like: the row of dashes under a table's header, which is
@@ -17531,7 +17560,13 @@ public class JRock {
             }
             flush(runs, current, bold, italic, false);
             links.putIfAbsent(url, links.size() + 1);
-            runs.add(new Run(label, bold, italic, false, null, url));
+            // THE LABEL IS MARKDOWN TOO. "[**Recommended tooling**](#...)" is a bold link,
+            // not a link whose text is four asterisks, so the label is read the same way
+            // as the prose around it and every run it comes out as carries the address.
+            for (Run part : inline(label)) {
+                runs.add(new Run(part.text, part.bold || bold, part.italic || italic,
+                        part.mono, part.image, url));
+            }
             return end + 1;
         }
 
@@ -17690,13 +17725,18 @@ public class JRock {
 
         private static void rtfRuns(StringBuilder rtf, List<Run> runs,
                                     boolean allBold, boolean allItalic) {
-            for (Run run : runs) {
+            for (int i = 0; i < runs.size(); i++) {
+                Run run = runs.get(i);
                 boolean bold = run.bold || allBold;
                 boolean italic = run.italic || allItalic;
                 // A link is its text and then where it points, unless the two are the
                 // same - or unless it points into the document, which in an RTF is
                 // nothing a reader can follow and in print is not an address at all.
-                String text = run.link == null || run.link.equals(run.text)
+                // The address goes after the LAST run of the label, because a label whose
+                // own markup splits it into several is still one link.
+                boolean lastOfLink = run.link != null && (i + 1 == runs.size()
+                        || !run.link.equals(runs.get(i + 1).link));
+                String text = !lastOfLink || run.link.equals(run.text)
                         || run.link.startsWith("#") ? run.text
                         : run.text + " (" + run.link + ")";
                 if (!bold && !italic && !run.mono) {
@@ -18123,11 +18163,8 @@ public class JRock {
 
         private void docxRuns(StringBuilder xml, List<Run> runs,
                               boolean allBold, boolean allItalic) {
+            String open = null;                  // the hyperlink element still to be closed
             for (Run run : runs) {
-                if (run.image != null) {
-                    docxDrawing(xml, run.image);
-                    continue;
-                }
                 boolean bold = run.bold || allBold;
                 boolean italic = run.italic || allItalic;
                 // Three kinds of link, and the third is not one: an address, a bookmark
@@ -18138,12 +18175,25 @@ public class JRock {
                 // section marks).
                 String bookmark = run.link != null && run.link.startsWith("#")
                         ? anchors().get(run.link.substring(1).toLowerCase()) : null;
-                boolean linked = run.link != null
+                boolean linked = run.link != null && run.image == null
                         && (bookmark != null || !run.link.startsWith("#"));
-                if (linked) {
-                    xml.append(bookmark != null
-                            ? "<w:hyperlink w:anchor=\"" + bookmark + "\">"
-                            : "<w:hyperlink r:id=\"rLink" + links.get(run.link) + "\">");
+                // ONE ELEMENT FOR THE WHOLE LABEL, however many runs its own markup
+                // splits it into: "[**a** b](url)" is a single link in the document, and
+                // a reader clicks any part of it to the same place.
+                String element = !linked ? null : bookmark != null
+                        ? "<w:hyperlink w:anchor=\"" + bookmark + "\">"
+                        : "<w:hyperlink r:id=\"rLink" + links.get(run.link) + "\">";
+                if (open != null && !open.equals(element)) {
+                    xml.append("</w:hyperlink>");
+                    open = null;
+                }
+                if (element != null && open == null) {
+                    xml.append(element);
+                    open = element;
+                }
+                if (run.image != null) {
+                    docxDrawing(xml, run.image);
+                    continue;
                 }
                 xml.append("<w:r>");
                 if (bold || italic || run.mono || linked) {
@@ -18160,8 +18210,8 @@ public class JRock {
                 // two differently formatted words.
                 xml.append("<w:t xml:space=\"preserve\">").append(xml(run.text))
                    .append("</w:t></w:r>");
-                if (linked) xml.append("</w:hyperlink>");
             }
+            if (open != null) xml.append("</w:hyperlink>");
         }
 
         // A picture in the text flow: wp:inline, as opposed to the floating wp:anchor a
