@@ -134,24 +134,25 @@ public final class Screenshots {
         settle();
         shoot(window, "01-window-at-startup");
 
-        // A prompt with a question in it, which is what anybody's first look is.
+        // A QUESTION AND THE PAGE IT IS ABOUT, in one picture rather than two. A prompt
+        // with a question in it and the same prompt with an include token added differ by
+        // one line, which is not worth a second picture of the same window; what is worth
+        // showing is the token, the Markdown reference written above it, and the log lines
+        // saying what was attached and what it was downscaled to. The page is made here
+        // rather than shipped, so the picture is of this build's own behaviour.
         JRock.automationSetPrompt("Read this invoice and tell me what is due, and when.\n");
-        settle();
-        shoot(window, "02-a-question-in-the-prompt");
-
-        // An include: the token in the prompt and the Markdown reference above it, with
-        // the log line that says what was attached. The page is made here rather than
-        // shipped, so the picture is of this build's own behaviour.
         Path png = work.resolve("a-page.png");
         ImageIO.write(invoicePage(), "png", png.toFile());
         String included = JRock.automationInclude(png);
         if (included != null) System.out.println("include: " + included);
         settle();
-        shoot(window, "03-a-page-included-as-an-image");
+        shoot(window, "02-a-question-and-a-page-attached");
 
         // The turn itself: the question and the page sent, and the answer in the log
-        // under its own timestamped header, rendered as the Markdown it arrives as.
-        send("04-a-question-and-its-answer", window);
+        // under its own teal header with the time on it, the words exactly as they
+        // arrived - the log colours the roles and renders nothing, which is why a model's
+        // own ** shows in it - and the usage and cost of the send on the line below.
+        send("03-the-answer-in-the-log", window);
 
         // A second turn with History on, so the log shows a conversation rather than one
         // exchange, and Dialog only on, which hides the gray machinery around it.
@@ -160,13 +161,47 @@ public final class Screenshots {
         send(null, window);
         tick(window, "Dialog only");
         settle();
-        shoot(window, "05-two-turns-with-history-and-dialog-only");
+        shoot(window, "04-two-turns-history-and-dialog-only");
+
+        // And off again. A tick is part of the window's state, so leaving it on would
+        // put every later scene behind a log with its machinery hidden - which is one
+        // scene's subject, not a setting for the rest of them.
+        untick(window, "Dialog only");
+
+        // THE SETTINGS, one picture per tab. The ticks, the two include modes, the DPI,
+        // the speaker and the microphone live in this dialog and nowhere else, so a
+        // reader who has seen only the window has seen none of them. Opened by pressing
+        // the real button, which is what makes these pictures of the dialog rather than
+        // of a panel built for the occasion.
+        shootTab(window, 0, "05-configure-general");
+        shootTab(window, 1, "06-configure-files");
+        shootTab(window, 2, "07-configure-audio");
+
+        // THE FOLDER'S OWN MENU, standing open: what is in the folder, both merges,
+        // backup and restore, the cleanup. The label it hangs from names the folder, and
+        // every item in it acts on that folder.
+        shootPopup(window, folderLabel(window), "08-the-jrock-folder-menu");
+
+        // And its first item, which lists every file and subfolder that folder can hold
+        // with what each one is for - the whole of what JRock keeps, in one dialog.
+        shootFolderDialog(window, "09-what-is-in-the-jrock-folder");
+
+        // THE LOG'S MENU, over the answer it acts on: select the last answer, save or
+        // print the selection, the two Markdown exports, narrate it, open an address or a
+        // path out of it.
+        // The last answer selected first - by the call Ctrl+Shift+A makes - because
+        // half of this menu acts on a selection, and a menu photographed without one is
+        // a picture of five greyed-out items.
+        String noAnswer = JRock.automationSelectLastAnswer();
+        if (noAnswer != null) System.out.println("select: " + noAnswer);
+        shootPopup(window, logPane(window), "10-the-log-menu");
+        JRock.automationClearLogSelection();
 
         // The agents, each in its own window. The timer needs no JRock and no key at all;
         // the paper docs agent shows the two folders it reads.
-        shootAgent("JRockTimer", new String[0], "06-the-timer-agent");
+        shootAgent("JRockTimer", new String[0], "11-the-timer-agent");
         shootAgent("JRockPaperDocs", new String[] { "--folder", work.toString(),
-                "--incoming", work.toString() }, "07-the-papers-agent");
+                "--incoming", work.toString() }, "12-the-papers-agent");
 
         System.out.println("wrote " + taken + " screenshot(s) to " + out);
         System.exit(0);
@@ -202,6 +237,18 @@ public final class Screenshots {
         });
     }
 
+    /** The same, the other way: a tick left on belongs to one scene, not to the rest. */
+    private static void untick(Container root, String label) {
+        JCheckBox box = checkBox(root, label);
+        if (box == null) {
+            System.out.println("no '" + label + "' tick in the window");
+            return;
+        }
+        onEdt(() -> {
+            if (box.isSelected()) box.doClick();
+        });
+    }
+
     private static JCheckBox checkBox(Container root, String label) {
         for (java.awt.Component child : root.getComponents()) {
             if (child instanceof JCheckBox && label.equals(((JCheckBox) child).getText())) {
@@ -209,6 +256,233 @@ public final class Screenshots {
             }
             if (child instanceof Container) {
                 JCheckBox found = checkBox((Container) child, label);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The Configure dialog on one of its tabs, opened by pressing the real button.
+     *
+     * <p>The press is POSTED rather than waited for: the dialog is modal, so the click
+     * does not return until it is closed again, and a tool that waited for it would be
+     * waiting for itself. Everything after the press therefore polls - for the dialog to
+     * be showing, and then for it to be gone - and all of it runs inside the modal loop's
+     * own event pumping, which answers invokeAndWait exactly as the outer loop does.
+     */
+    private static void shootTab(JFrame window, int tab, String name) {
+        javax.swing.JButton configure = button(window, "Configure");
+        if (configure == null) {
+            System.out.println(name + ": no Configure button in the window");
+            return;
+        }
+        SwingUtilities.invokeLater(configure::doClick);
+        javax.swing.JDialog dialog = awaitDialog(20_000);
+        if (dialog == null) {
+            System.out.println(name + ": the Configure dialog did not open");
+            return;
+        }
+        javax.swing.JTabbedPane tabs = tabbedPane(dialog);
+        if (tabs != null && tab < tabs.getTabCount()) {
+            final int index = tab;
+            onEdt(() -> tabs.setSelectedIndex(index));
+        } else if (tab > 0) {
+            // A tab this build has not got is reported, not photographed again: the
+            // browser leaves out Audio, having neither a speaker nor a microphone to
+            // choose, and three pictures of one tab would be three copies of it.
+            System.out.println(name + ": no tab " + tab + " in this build's dialog");
+            close(dialog);
+            return;
+        }
+        settle();
+        shoot(dialog, name);
+        close(dialog);
+    }
+
+    /** Cancel, and then waits for the dialog to be gone before the next scene. */
+    private static void close(javax.swing.JDialog dialog) {
+        javax.swing.JButton cancel = button(dialog, "Cancel");
+        if (cancel != null) SwingUtilities.invokeLater(cancel::doClick);
+        else SwingUtilities.invokeLater(dialog::dispose);
+        for (int waited = 0; waited < 10_000 && dialog.isShowing(); waited += 100) {
+            settle();
+        }
+    }
+
+    /**
+     * One of the window's popup menus, open, over the window it belongs to.
+     *
+     * <p>These are not setComponentPopupMenu menus - JRock attaches them with a listener
+     * of its own, because a touch screen under CheerpJ never delivers a Swing popup
+     * trigger (see attachPopup in JRock.java). So this dispatches a real popup trigger,
+     * pressed and released on the component, and what opens is what a right-click opens.
+     */
+    private static void shootPopup(JFrame window, java.awt.Component on, String name) {
+        if (on == null) {
+            System.out.println(name + ": nothing of that kind to right-click");
+            return;
+        }
+        // SETTLED BEFORE THE CLICK, and CLICKED WHERE THE COMPONENT CAN BE SEEN. The
+        // log pane is as tall as the whole transcript and sits inside a viewport, so
+        // after the log has scrolled, the pane's own (14, 14) is somewhere above the top
+        // of the window - and a menu asked for there opens off the window, in a
+        // heavyweight popup of its own, which is not in a picture of the window. It cost
+        // two runs of this tool and a picture with a selection and no menu in it. The
+        // viewport's view rectangle is where the component actually is on screen.
+        settle();
+        java.awt.Point at = new java.awt.Point(14, 14);
+        if (on.getParent() instanceof javax.swing.JViewport) {
+            java.awt.Rectangle seen = ((javax.swing.JViewport) on.getParent()).getViewRect();
+            at = new java.awt.Point(seen.x + 14, seen.y + 14);
+        }
+        rightClick(on, at.x, at.y);
+        settle();
+        shoot(window, name);
+        dismissMenu();
+    }
+
+    /** The folder menu's first item, pressed, and the dialog it opens. */
+    private static void shootFolderDialog(JFrame window, String name) {
+        java.awt.Component label = folderLabel(window);
+        if (label == null) {
+            System.out.println(name + ": no folder label in the window");
+            return;
+        }
+        rightClick(label, 14, 14);
+        settle();
+        javax.swing.JMenuItem item = menuItem("What is in the JRock folder...");
+        if (item == null) {
+            System.out.println(name + ": the folder menu has no contents item");
+            dismissMenu();
+            return;
+        }
+        SwingUtilities.invokeLater(item::doClick);
+        javax.swing.JDialog dialog = awaitDialog(20_000);
+        if (dialog == null) {
+            System.out.println(name + ": the folder dialog did not open");
+            dismissMenu();
+            return;
+        }
+        settle();
+        shoot(dialog, name);
+        close(dialog);
+        dismissMenu();
+    }
+
+    /** Whatever menu is open, closed again, so it is not in the next scene. */
+    private static void dismissMenu() {
+        onEdt(() -> javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath());
+        settle();
+    }
+
+    /** A popup trigger on a component, pressed and released, as a right-click is. */
+    private static void rightClick(java.awt.Component on, int x, int y) {
+        onEdt(() -> {
+            long when = System.currentTimeMillis();
+            int[] ids = { java.awt.event.MouseEvent.MOUSE_PRESSED,
+                          java.awt.event.MouseEvent.MOUSE_RELEASED };
+            for (int id : ids) {
+                on.dispatchEvent(new java.awt.event.MouseEvent(on, id, when++,
+                        java.awt.event.InputEvent.BUTTON3_DOWN_MASK, x, y, 1, true,
+                        java.awt.event.MouseEvent.BUTTON3));
+            }
+        });
+    }
+
+    /** The first dialog of this application's own that is showing, or null. */
+    private static javax.swing.JDialog awaitDialog(int millis) {
+        for (int waited = 0; waited < millis; waited += 100) {
+            for (Window w : Window.getWindows()) {
+                if (w instanceof javax.swing.JDialog && w.isShowing()) {
+                    return (javax.swing.JDialog) w;
+                }
+            }
+            settle();
+        }
+        return null;
+    }
+
+    /** The menu item with this label in whichever popup is open, or null. */
+    private static javax.swing.JMenuItem menuItem(String label) {
+        for (Window w : Window.getWindows()) {
+            javax.swing.JMenuItem found = menuItemIn(w, label);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static javax.swing.JMenuItem menuItemIn(Container root, String label) {
+        for (java.awt.Component child : root.getComponents()) {
+            if (child instanceof javax.swing.JMenuItem
+                    && label.equals(((javax.swing.JMenuItem) child).getText())) {
+                return (javax.swing.JMenuItem) child;
+            }
+            if (child instanceof Container) {
+                javax.swing.JMenuItem found = menuItemIn((Container) child, label);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /** The label beside Configure that names the folder, and holds that folder's menu. */
+    private static java.awt.Component folderLabel(Container root) {
+        for (java.awt.Component child : root.getComponents()) {
+            if (child instanceof javax.swing.JLabel) {
+                String text = ((javax.swing.JLabel) child).getText();
+                if (text != null && text.endsWith("JRock/")) return child;
+            }
+            if (child instanceof Container) {
+                java.awt.Component found = folderLabel((Container) child);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /** The log pane: the largest styled text area in the window, which is the transcript. */
+    private static java.awt.Component logPane(Container root) {
+        java.awt.Component[] best = new java.awt.Component[1];
+        logPane(root, best);
+        return best[0];
+    }
+
+    private static void logPane(Container root, java.awt.Component[] best) {
+        for (java.awt.Component child : root.getComponents()) {
+            if (child instanceof javax.swing.JTextPane
+                    && (best[0] == null || area(child) > area(best[0]))) {
+                best[0] = child;
+            }
+            if (child instanceof Container) logPane((Container) child, best);
+        }
+    }
+
+    private static long area(java.awt.Component c) {
+        return (long) c.getWidth() * c.getHeight();
+    }
+
+    private static javax.swing.JButton button(Container root, String text) {
+        for (java.awt.Component child : root.getComponents()) {
+            if (child instanceof javax.swing.JButton
+                    && text.equals(((javax.swing.JButton) child).getText())) {
+                return (javax.swing.JButton) child;
+            }
+            if (child instanceof Container) {
+                javax.swing.JButton found = button((Container) child, text);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static javax.swing.JTabbedPane tabbedPane(Container root) {
+        for (java.awt.Component child : root.getComponents()) {
+            if (child instanceof javax.swing.JTabbedPane) {
+                return (javax.swing.JTabbedPane) child;
+            }
+            if (child instanceof Container) {
+                javax.swing.JTabbedPane found = tabbedPane((Container) child);
                 if (found != null) return found;
             }
         }
@@ -248,8 +522,15 @@ public final class Screenshots {
     /** Paints one window into screenshots/&lt;os&gt;-&lt;name&gt;.png. */
     private static void shoot(Window window, String name) {
         try {
+            BufferedImage contents = captured(window);
+            if (contents == null) {
+                BufferedImage[] painted = new BufferedImage[1];
+                SwingUtilities.invokeAndWait(() -> painted[0] = paint(window));
+                contents = painted[0];
+            }
             BufferedImage[] shot = new BufferedImage[1];
-            SwingUtilities.invokeAndWait(() -> shot[0] = paint(window));
+            final BufferedImage body = contents;
+            SwingUtilities.invokeAndWait(() -> shot[0] = withCaption(window, body));
             Path file = out.resolve(os + "-" + name + ".png");
             ImageIO.write(shot[0], "png", file.toFile());
             taken++;
@@ -257,6 +538,58 @@ public final class Screenshots {
                     + shot[0].getWidth() + "x" + shot[0].getHeight());
         } catch (Exception ex) {
             System.out.println(name + ": not shot (" + ex + ")");
+        }
+    }
+
+    /**
+     * The window's own pixels, read back off the screen.
+     *
+     * <p>WHY NOT JUST PAINT IT, which is what this did for three versions and what every
+     * example of screenshotting Swing does. Because a Swing text area breaks its lines
+     * using the font metrics of the SCREEN and then draws them with the font metrics of
+     * whatever Graphics it is given, and an offscreen image's are not the screen's: no
+     * LCD subpixel antialiasing, slightly wider advances, and a line that fitted when it
+     * was measured no longer fits when it is drawn. The last word or two of every long
+     * line in the Help window and the folder dialog was cut off at the component's edge
+     * - in the picture only. On screen those dialogs are perfect, which a Robot capture
+     * of one beside a painted copy of it is what proved; printAll, paint, double
+     * buffering off, the desktop's own rendering hints, none of it made any difference,
+     * because none of them changes which metrics the line breaks were computed with.
+     *
+     * <p>So the screen is asked instead, for exactly the rectangle the ROOT PANE occupies
+     * on it - which keeps the one property that made painting attractive in the first
+     * place: the operating system's title bar, borders and shadows are not in the
+     * picture, because they are not inside that rectangle. What comes back is what a
+     * person sitting in front of the machine sees, to the pixel.
+     *
+     * <p>Null when there is no screen to read (a truly headless JVM) or the window is not
+     * on it, and then the caller paints as before - a picture with a clipped line in it
+     * beats no picture at all. CI runs this under xvfb, which has a screen and a window
+     * manager of its own, so there it reads back the same as a desktop does.
+     */
+    private static BufferedImage captured(Window window) {
+        try {
+            javax.swing.JRootPane root = window instanceof javax.swing.RootPaneContainer
+                    ? ((javax.swing.RootPaneContainer) window).getRootPane() : null;
+            java.awt.Component of = root != null ? root : window;
+            java.awt.Rectangle[] where = new java.awt.Rectangle[1];
+            SwingUtilities.invokeAndWait(() -> {
+                window.toFront();
+                if (of.isShowing() && of.getWidth() > 0 && of.getHeight() > 0) {
+                    where[0] = new java.awt.Rectangle(of.getLocationOnScreen(),
+                            of.getSize());
+                }
+            });
+            if (where[0] == null) return null;
+            settle();
+            BufferedImage shot = new java.awt.Robot().createScreenCapture(where[0]);
+            // A scaled display gives back more pixels than the rectangle asked for, which
+            // is a sharper picture of the same thing and fine; what is not fine is a
+            // caption drawn to a different width, so withCaption measures the image.
+            return shot;
+        } catch (Exception | Error ex) {
+            System.out.println("  (read back from the screen: " + ex + ")");
+            return null;
         }
     }
 
@@ -292,7 +625,39 @@ public final class Screenshots {
         int w = Math.max(1, root != null ? root.getWidth() : window.getWidth());
         int h = Math.max(1, root != null ? root.getHeight() : window.getHeight());
 
-        BufferedImage image = new BufferedImage(w, h + TITLE_HEIGHT,
+        BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        // PAINTED AS THE SCREEN PAINTS IT, which printAll does not. printAll puts the
+        // hierarchy into printing mode, and Swing's text views lay themselves out again
+        // for a printer's font metrics when they are in it - so a wrapped text area broke
+        // its lines at one width and had them drawn at another, and every long line in the
+        // Help window and the folder dialog lost its last word under the scrollbar. It
+        // looked exactly like a bug in those dialogs, and cost an afternoon and a revert
+        // to find: a Robot capture of the same dialog showed the text whole, which is what
+        // proved the picture wrong rather than the program.
+        //
+        // paint() instead, with double buffering turned off for the duration - which is
+        // the reason printAll was here in the first place, since paint() on a buffered
+        // component can otherwise be answered from a back buffer that has nothing in it.
+        javax.swing.RepaintManager repaints = javax.swing.RepaintManager.currentManager(
+                root != null ? root : window);
+        boolean buffered = repaints.isDoubleBufferingEnabled();
+        repaints.setDoubleBufferingEnabled(false);
+        try {
+            if (root != null) root.paint(g); else window.paint(g);
+        } finally {
+            repaints.setDoubleBufferingEnabled(buffered);
+        }
+        g.dispose();
+        return image;
+    }
+
+    /** The caption this file draws, above the window's own pixels. */
+    private static BufferedImage withCaption(Window window, BufferedImage contents) {
+        int w = contents.getWidth();
+        BufferedImage image = new BufferedImage(w, contents.getHeight() + TITLE_HEIGHT,
                 BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
         g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
@@ -300,11 +665,7 @@ public final class Screenshots {
         g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
                 java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         titleBar(g, window, w);
-
-        g.translate(0, TITLE_HEIGHT);
-        // printAll and not paint: paint can be answered with a double-buffered repaint
-        // later, while printAll draws the whole hierarchy now.
-        if (root != null) root.printAll(g); else window.printAll(g);
+        g.drawImage(contents, 0, TITLE_HEIGHT, null);
         g.dispose();
         return image;
     }
