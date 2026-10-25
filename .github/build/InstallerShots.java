@@ -317,9 +317,19 @@ public final class InstallerShots {
             robot.setAutoDelay(60);
             pause(9_000);                       // the shell takes its time to paint
 
-            // The window has to have the focus before Win+Up means anything to it, and a
-            // click in the middle of the screen is a click in the middle of it.
+            // THE WINDOW, SIZED BY THE SHELL ITSELF. Win+Up went nowhere twice - the
+            // keystroke needs the window focused and a runner's desktop does not hand
+            // focus about reliably - and an Explorer window the size it feels like leaves
+            // this build's own console windows showing on both sides of the picture.
+            // Shell.Application lists Explorer's windows and each one has Left, Top,
+            // Width and Height to be set, which is the shell doing it rather than a
+            // keystroke asking it to.
             java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+            run("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                    "(New-Object -ComObject Shell.Application).Windows() | ForEach-Object "
+                    + "{ $_.Left = 0; $_.Top = 0; $_.Width = " + screen.width
+                    + "; $_.Height = " + screen.height + " }");
+            pause(1_500);
             robot.mouseMove(screen.width / 2, screen.height / 2);
             robot.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
             robot.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
@@ -376,16 +386,16 @@ public final class InstallerShots {
     }
 
     /**
-     * The screen with its taskbar cropped off - which is the Explorer window and the menu
-     * standing open on it, and none of the clock, the tray or the "Test Mode" watermark a
-     * build runner wears in its bottom corner.
+     * The whole screen, taskbar and all.
+     *
+     * <p>It used to crop the taskbar off, which cost the bottom of the MENU: these menus
+     * are twenty items tall and the one thing that must be whole in the picture is the
+     * list of entries. A taskbar in a picture of Explorer reads as Windows; a context
+     * menu with its last five items sliced off reads as a mistake.
      */
     private static void screen(java.awt.Robot robot, String name) {
         java.awt.Dimension size = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
-        int taskbar = 56;
-        java.awt.Rectangle area = new java.awt.Rectangle(
-                0, 0, size.width, Math.max(100, size.height - taskbar));
-        write(robot.createScreenCapture(area), name);
+        write(robot.createScreenCapture(new java.awt.Rectangle(size)), name);
     }
 
     /** One window, read back off the screen: see captured() in Screenshots.java. */

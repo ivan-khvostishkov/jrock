@@ -5327,7 +5327,15 @@ Page 8 of the installer writes three kinds of entry:
   action for `.txt` is untouched.
 - **One per agent and per flow** — see [the section below](#windows-agents-and-flows-one-entry-each).
 
-![The Explorer context menu for a folder, with a "JRock here!" entry among the other shell verbs](images/explorer-jrock-here.png)
+![A folder's own context menu with JRock's entries in it: one per agent, one per flow, and "JRock here!"](images/windows-20-explorer-the-folder-menu.png)
+
+*Right-clicked inside a folder: an entry per agent, an entry per flow, and **JRock here!** at the
+bottom of them. Each one carries the installation it belongs to, so two installations never
+look like one.*
+
+![The same menu on a file: the ten entries, each of which gets that file's full path](images/windows-21-explorer-the-file-menu.png)
+
+*And on a file of any type - the same ten, each handed that file's path as its only argument.*
 
 *The installed entry, sitting with the other developer verbs and carrying JRock's own icon.
 Clicking it starts JRock in that folder — no path argument, no console window.*
@@ -5519,6 +5527,12 @@ runners are headless, on JDK 11 — the minimum JRock supports.
 
 *Page four is the catalogue: an agent gets a folder of its own, the flows share one, and each is
 installed with the prompt files its own source names.*
+
+![The installer's ninth and last page: seven agents in Agents, three flows in Flows, one simple prompt, the start script, and the command line of every Explorer entry it wrote](images/windows-19-the-installer-finished.png)
+
+*And the last page is the account of where everything went: how many of each went where, the
+script that starts them, and - in the log at the bottom - the actual command line behind every
+right-click entry.*
 
 One Swing wizard, one Java source file, no build step — shipped **at the root of every
 release artifact**, beside `jrock.jar`. Unpack a release, and from that folder:
