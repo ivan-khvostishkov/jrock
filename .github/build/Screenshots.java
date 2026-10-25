@@ -719,9 +719,19 @@ public final class Screenshots {
             } catch (Exception | Error ignored) {
                 // No Robot here; the picture is whatever it is.
             }
+            // HELD ABOVE WHATEVER ELSE IS ON SCREEN, which reading back off the screen
+            // makes necessary: the browser agent starts a Chromium of its own, and that
+            // Chromium was on top of the agent's window when the picture was taken - so
+            // the caption said "JRock - Browser (16 hosts, read-only)" over a tab loading
+            // about:blank. Always-on-top for the moment of the capture, and put back
+            // after, because an agent left permanently on top is not what it is.
             java.awt.Rectangle[] where = new java.awt.Rectangle[1];
+            boolean[] wasOnTop = new boolean[1];
             SwingUtilities.invokeAndWait(() -> {
+                wasOnTop[0] = window.isAlwaysOnTop();
+                if (window.isAlwaysOnTopSupported()) window.setAlwaysOnTop(true);
                 window.toFront();
+                window.requestFocus();
                 if (of.isShowing() && of.getWidth() > 0 && of.getHeight() > 0) {
                     where[0] = new java.awt.Rectangle(of.getLocationOnScreen(),
                             of.getSize());
@@ -730,6 +740,9 @@ public final class Screenshots {
             if (where[0] == null) return null;
             settle();
             BufferedImage shot = new java.awt.Robot().createScreenCapture(where[0]);
+            SwingUtilities.invokeAndWait(() -> {
+                if (window.isAlwaysOnTopSupported()) window.setAlwaysOnTop(wasOnTop[0]);
+            });
             // A scaled display gives back more pixels than the rectangle asked for, which
             // is a sharper picture of the same thing and fine; what is not fine is a
             // caption drawn to a different width, so withCaption measures the image.
@@ -814,7 +827,32 @@ public final class Screenshots {
         titleBar(g, window, w);
         g.drawImage(contents, 0, TITLE_HEIGHT, null);
         g.dispose();
-        return image;
+        return rounded(image, CORNER);
+    }
+
+    /** How round the corners of a picture are. */
+    private static final int CORNER = 16;
+
+    /**
+     * The same picture with its corners taken off.
+     *
+     * <p>A window in a document is a card on a page, and a card has rounded corners -
+     * which is also what every desktop has drawn for a decade, so a square-cornered
+     * screenshot of a rounded window looks like a crop of something bigger. The corners
+     * are TRANSPARENT rather than white, so the same picture sits on a white README and
+     * on a dark one without a pale step around it.
+     */
+    private static BufferedImage rounded(BufferedImage image, int radius) {
+        BufferedImage out = new BufferedImage(image.getWidth(), image.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setClip(new java.awt.geom.RoundRectangle2D.Float(
+                0, 0, image.getWidth(), image.getHeight(), radius, radius));
+        g.drawImage(image, 0, 0, null);
+        g.dispose();
+        return out;
     }
 
     /** The caption above the window: its own icon, and its own title. */

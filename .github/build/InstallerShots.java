@@ -406,8 +406,14 @@ public final class InstallerShots {
                     ? ((javax.swing.RootPaneContainer) window).getRootPane() : null;
             java.awt.Component of = root != null ? root : window;
             java.awt.Rectangle[] where = new java.awt.Rectangle[1];
+            boolean[] wasOnTop = new boolean[1];
             SwingUtilities.invokeAndWait(() -> {
+                // Above anything the installer itself started (see captured() in
+                // Screenshots.java for what this costs when it is left out).
+                wasOnTop[0] = window.isAlwaysOnTop();
+                if (window.isAlwaysOnTopSupported()) window.setAlwaysOnTop(true);
                 window.toFront();
+                window.requestFocus();
                 if (of.isShowing() && of.getWidth() > 0) {
                     where[0] = new java.awt.Rectangle(of.getLocationOnScreen(), of.getSize());
                 }
@@ -417,7 +423,11 @@ public final class InstallerShots {
                 return;
             }
             settle();
-            write(new java.awt.Robot().createScreenCapture(where[0]), name);
+            BufferedImage shot = new java.awt.Robot().createScreenCapture(where[0]);
+            SwingUtilities.invokeAndWait(() -> {
+                if (window.isAlwaysOnTopSupported()) window.setAlwaysOnTop(wasOnTop[0]);
+            });
+            write(shot, name);
         } catch (Exception | Error ex) {
             System.out.println(name + ": not shot (" + ex + ")");
         }
@@ -440,8 +450,23 @@ public final class InstallerShots {
         }
     }
 
-    private static void write(BufferedImage image, String name) {
+    /** How round the corners of a picture are, as in Screenshots.java. */
+    private static final int CORNER = 16;
+
+    private static void write(BufferedImage raw, String name) {
         try {
+            // Corners off, transparent, so these sit beside the window pictures without
+            // one of them looking like a crop of something bigger.
+            BufferedImage image = new BufferedImage(raw.getWidth(), raw.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            java.awt.Graphics2D g = image.createGraphics();
+            g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setClip(new java.awt.geom.RoundRectangle2D.Float(
+                    0, 0, raw.getWidth(), raw.getHeight(), CORNER, CORNER));
+            g.drawImage(raw, 0, 0, null);
+            g.dispose();
+
             Path file = out.resolve(os + "-" + name + ".png");
             ImageIO.write(image, "png", file.toFile());
             taken++;
