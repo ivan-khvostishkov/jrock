@@ -161,9 +161,20 @@ public final class WebShots {
                 // deployed one is clicked, because the hash hook only exists in a page
                 // as new as this tool.
                 boolean driven = deployed == null;
-                desktop(dev, address, driven);
-                filesBrowser(dev, address);
-                phone(dev, address, driven);
+                try {
+                    desktop(dev, address, driven);
+                    filesBrowser(dev, address);
+                    phone(dev, address, driven);
+                } catch (IOException notComingUp) {
+                    // ONE SENTENCE, NOT A STACK TRACE. A page that will not come up is
+                    // something the caller handles - the step tries the deployed address
+                    // next - and a job that then succeeds should not have an exception
+                    // and a stack trace printed in the middle of its log as though
+                    // something had broken. What did not happen is in the message, and
+                    // the page's own log is in it too.
+                    System.out.println("this page did not come up: "
+                            + notComingUp.getMessage());
+                }
             } finally {
                 dev.close();
             }
@@ -199,7 +210,7 @@ public final class WebShots {
         dev.navigate(address + (driven ? "#shots" : ""));
         dev.untick("hideChrome");
         dev.click("runBtn");
-        if (driven && dev.driven(180_000)) {
+        if (driven && dev.driven(OWN_PAGE_MS)) {
             // DRIVEN, not clicked: the page ran the jar as a library and handed the class
             // over, so from here it is the automation API - await the window, then put a
             // question in the prompt, which is what makes this a picture of the program
@@ -216,7 +227,7 @@ public final class WebShots {
             dev.navigate(address);
             dev.untick("hideChrome");
             dev.click("runBtn");
-            dev.awaitCanvas();
+            dev.awaitCanvas(OWN_PAGE_MS);
         } else {
             dev.awaitCanvas();
         }
@@ -248,7 +259,7 @@ public final class WebShots {
         dev.navigate(address + (driven ? "#shots" : ""));
         dev.untick("hideChrome");
         dev.click("runBtn");
-        if (driven && dev.driven(180_000)) {
+        if (driven && dev.driven(OWN_PAGE_MS)) {
             dev.drive("automationAwaitReady(120000)");
         } else {
             if (driven) {
@@ -257,7 +268,7 @@ public final class WebShots {
                 dev.untick("hideChrome");
                 dev.click("runBtn");
             }
-            dev.awaitCanvas();
+            dev.awaitCanvas(driven ? OWN_PAGE_MS : START_TIMEOUT_MS);
         }
         shoot(dev, "mobile-01-jrock-on-a-phone");
 
