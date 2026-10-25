@@ -357,11 +357,20 @@ jobs:
             done
           done
 
-          # The address again, because the first run may have swallowed the intent that
-          # carried it.
+          # A FRESH CHROME, not the one that went through the welcome screen. The
+          # DevTools socket is opened by Chrome's deferred startup - the work it does a
+          # moment after its first window settles - and the first-run screen holds that
+          # back. The process that was sitting on the welcome screen when the address
+          # arrived may therefore never open it, which is what "could not connect to
+          # localabstract address" has been saying while Chrome's own window was in
+          # front. So Chrome is stopped and started again, on a device that now has no
+          # first run to show, and the address goes to that process.
+          echo "--- a fresh Chrome, now that the first run is behind us"
+          $ADB shell am force-stop com.android.chrome
+          sleep 3
           $ADB shell am start -n com.android.chrome/com.google.android.apps.chrome.Main \
                -a android.intent.action.VIEW -d "$URL" > /dev/null
-          sleep 10
+          sleep 15
           $ADB shell dumpsys window | grep -i mCurrentFocus || true
           $ADB exec-out screencap -p > screenshots/android-01-starting.png
           sleep "$WAIT"
@@ -381,13 +390,43 @@ jobs:
           # adb forwards its socket to a port here, and the same tool that drives a
           # desktop browser asks this one whether the page has a canvas - which is
           # CheerpJ having started and JRock having a display. No canvas, no pass.
+          # BY THE NAME THE DEVICE USES, not by the one it usually uses. Chrome's socket
+          # is "chrome_devtools_remote", a WebView's is "webview_devtools_remote_<pid>",
+          # and some builds put the pid on Chrome's too - so every name that the device
+          # admits to, and then the three it might not, are tried in turn until one
+          # answers. /proc/net/unix is not always readable by the shell user, so a silent
+          # grep there is not evidence of anything either way; what settles it is whether
+          # a forwarded port answers.
           echo "--- what the device is listening on"
-          $ADB shell cat /proc/net/unix | grep -i devtools || echo "(no devtools socket)"
-          $ADB forward tcp:9222 localabstract:chrome_devtools_remote
-          curl -sf http://127.0.0.1:9222/json/version || \
-            { echo "::error::the phone's Chrome is not answering on the DevTools port"
-              $ADB logcat -d -t 80 | tail -40 || true
-              exit 1; }
+          CHROME_PID=$($ADB shell pidof com.android.chrome | tr -d '\r' | awk '{print $1}')
+          echo "   Chrome is pid ${CHROME_PID:-unknown}"
+          NAMED=$($ADB shell cat /proc/net/unix 2>/dev/null | tr -d '\r' \
+                  | grep -o '[a-z_]*devtools_remote[_0-9]*' | sort -u | tr '\n' ' ')
+          echo "   /proc/net/unix offers: ${NAMED:-nothing (which may only mean it is not readable)}"
+          ANSWERING=""
+          for name in $NAMED chrome_devtools_remote \
+                      "chrome_devtools_remote_${CHROME_PID}" \
+                      "webview_devtools_remote_${CHROME_PID}"; do
+            [ -n "$name" ] || continue
+            $ADB forward --remove tcp:9222 > /dev/null 2>&1 || true
+            $ADB forward tcp:9222 "localabstract:$name" > /dev/null 2>&1 || continue
+            if curl -sf http://127.0.0.1:9222/json/version > /dev/null; then
+              ANSWERING="$name"
+              break
+            fi
+          done
+          if [ -z "$ANSWERING" ]; then
+            echo "::error::the phone's Chrome is not answering on the DevTools port"
+            echo "--- the device, for the next attempt at this"
+            $ADB shell getprop ro.build.type || true
+            $ADB shell getprop ro.debuggable || true
+            $ADB shell dumpsys package com.android.chrome \
+              | grep -iE "versionName|versionCode|flags" | head -5 || true
+            $ADB logcat -d -t 80 | tail -40 || true
+            exit 1
+          fi
+          echo "   answering on localabstract:$ANSWERING"
+          curl -sf http://127.0.0.1:9222/json/version || true
           java .github/build/WebShots.java screenshots android-04-as-chrome-sees-it \
                --attach 9222
 
