@@ -209,7 +209,12 @@ jobs:
       - name: An emulator, booted
         run: |
           SDK="$ANDROID_HOME/cmdline-tools/latest/bin"
-          IMAGE="system-images;android-34;google_apis;x86_64"
+          # PLAYSTORE AND NOT google_apis, because Chrome is not on a google_apis
+          # image: "am start -a VIEW" had nothing to open the address with, which
+          # is why three screenshots came back the same size and why nothing was
+          # listening on the DevTools socket afterwards. The playstore images carry
+          # Chrome, which is the browser this job is a check on.
+          IMAGE="system-images;android-34;google_apis_playstore;x86_64"
 
           # ONE FOLDER BOTH TOOLS AGREE ON. avdmanager wrote the device somewhere the
           # emulator does not look - "Unknown AVD name [jrock]", and then the emulator's
@@ -253,8 +258,24 @@ jobs:
         run: |
           mkdir -p screenshots
           ADB="$ANDROID_HOME/platform-tools/adb"
-          $ADB shell am start -a android.intent.action.VIEW -d "$URL" > /dev/null
+
+          # PAST CHROME'S FIRST RUN. A Chrome that has never been started shows its terms
+          # and a sign-in before it shows a page, and a picture of that is a picture of
+          # Chrome rather than of JRock. The command-line file is how an emulator image
+          # (which is userdebug) is told to skip it.
+          FLAGS="chrome --disable-fre --no-default-browser-check --no-first-run"
+          $ADB shell "echo '$FLAGS' > /data/local/tmp/chrome-command-line"
+          $ADB shell cat /data/local/tmp/chrome-command-line || true
+          $ADB shell am set-debug-app --persistent com.android.chrome || true
+
+          # By name, rather than by asking the system who wants a URL: on a device with one
+          # browser the answer is the same, and on one with none it is silence.
+          $ADB shell am start -n com.android.chrome/com.google.android.apps.chrome.Main \
+               -a android.intent.action.VIEW -d "$URL" > /dev/null
           sleep 25
+          echo "--- is Chrome running?"
+          $ADB shell pidof com.android.chrome || echo "(no Chrome process)"
+          $ADB shell dumpsys window | grep -i mCurrentFocus || true
           $ADB exec-out screencap -p > screenshots/android-01-starting.png
           sleep "$WAIT"
           $ADB exec-out screencap -p > screenshots/android-02-the-window.png
@@ -273,9 +294,13 @@ jobs:
           # adb forwards its socket to a port here, and the same tool that drives a
           # desktop browser asks this one whether the page has a canvas - which is
           # CheerpJ having started and JRock having a display. No canvas, no pass.
+          echo "--- what the device is listening on"
+          $ADB shell cat /proc/net/unix | grep -i devtools || echo "(no devtools socket)"
           $ADB forward tcp:9222 localabstract:chrome_devtools_remote
           curl -sf http://127.0.0.1:9222/json/version || \
-            { echo "::error::the phone's Chrome is not answering on the DevTools port"; exit 1; }
+            { echo "::error::the phone's Chrome is not answering on the DevTools port"
+              $ADB logcat -d -t 80 | tail -40 || true
+              exit 1; }
           java .github/build/WebShots.java screenshots android-04-as-chrome-sees-it \
                --attach 9222
 
