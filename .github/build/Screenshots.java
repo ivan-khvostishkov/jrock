@@ -125,6 +125,20 @@ public final class Screenshots {
         Path jrockDir = work.resolve("__JRock");
         Files.createDirectories(jrockDir);
 
+        // A FLOOR UNDER THE WHOLE RUN. Everything here drives a real window and waits
+        // for real things to appear; a modal dialog nobody answers, an agent that will
+        // not start, a runner with no display - none of that should cost more than the
+        // pictures it was going to take. Six minutes, and then out with whatever there is.
+        Thread watchdog = new Thread(() -> {
+            settleFor(6 * 60 * 1000L);
+            System.out.println("the six minutes are up: leaving with " + taken
+                    + " picture(s)");
+            System.out.flush();
+            Runtime.getRuntime().halt(0);
+        }, "the watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+
         HttpServer stub = startStub();
         String endpoint = "http://" + stub.getAddress().getHostString() + ":"
                 + stub.getAddress().getPort() + "/v1/chat/completions";
@@ -800,6 +814,15 @@ public final class Screenshots {
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
             int baseline = (TITLE_HEIGHT + g.getFontMetrics().getAscent()) / 2 - 1;
             g.drawString(title, textAt, baseline);
+        }
+    }
+
+    /** A plain wait, for when what is being waited for is not the event thread. */
+    private static void settleFor(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
         }
     }
 

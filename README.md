@@ -38,7 +38,7 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 ## Contents
 
 - **§01** [Highlights](#highlights)
-- **§02** [Paper in, paper out](#paper-in-paper-out)
+- **§02** [Paper in, typeset out](#paper-in-typeset-out)
 - **§03** [Requirements and recommended tooling](#requirements-and-recommended-tooling)
   - [Requirements](#requirements)
   - [Recommended tooling (FAQ)](#recommended-tooling-faq)
@@ -171,14 +171,15 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   file, ever ([**the installer**](#the-installer-installerinstalljrockjava) §36).
 - **Paper is the unit**, in and out: what arrives is a scan or a PDF in a standard page size,
   and what leaves is a document ready for a printer — or for **Adobe InDesign**, by its style
-  names ([**paper in, paper out**](#paper-in-paper-out) §02).
+  names ([**paper in, typeset out**](#paper-in-typeset-out) §02).
 
-## Paper in, paper out
+## Paper in, typeset out
 
 JRock is built on an assumption about where written natural language actually comes from: **not
 from a text box, but from paper**. A scanned letter, a contract, a form, an invoice, a spec, a
 manual — printed once, filed, and now a PDF in a standard page size, A4 above all. And what you
-want back is usually paper again: something to sign, file, hand over, or post.
+want back is paper again — but **set**, and not merely printed: something to sign, file, hand
+over or post, out of a layout you chose rather than out of whatever a converter felt like.
 
 So the page is not a detail at the end of the pipeline here, it is **the unit of measure
 throughout**:

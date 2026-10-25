@@ -65,6 +65,12 @@ jobs:
           java .github/build/BuildJar.java
           javac -encoding UTF-8 --release 11 -cp jrock.jar -d out-automation \
                 samples/agents/*.java samples/flows/*.java
+          # AND THE PROMPT FILES BESIDE THEM. An agent reads the prompts its own source
+          # names from the folder it is running out of - which is how an installed agent
+          # finds them beside its .java, and here that folder is out-automation. Without
+          # them each agent stops with "there is no jrock-prompt-...txt" and puts the
+          # message in a modal dialog, which on a runner nobody answers.
+          cp samples/agents/*.txt samples/flows/*.txt out-automation/
 
       # A display, on the one runner that has none. Xvfb is also what the GUI tests use.
       # The third argument is where the demo folder goes, and it is given here because the
