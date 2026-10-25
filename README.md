@@ -818,7 +818,7 @@ bill, and a guess is not one.
   microphone is open. Hidden, the key types a new line, which is what the box says when it is
   unticked. The test is **measured**, not a width in pixels: the preferred widths of both sides
   against the room there is, re-checked on every resize and twice a second (the mic's own timer),
-  with one grid cell of hysteresis so it cannot flicker while a window is being dragged. Measured
+  with enough slack that it cannot flicker while a window is being dragged. Measured
   here: with the mic showing it goes at 400 px and returns at 460, and in
   [JRock Web](#jrock-web-in-the-browser) §05 on a phone that means it is simply never there.
 
@@ -3465,12 +3465,10 @@ sequenceDiagram
 - **Every line names its calendar**, in square brackets, and `#calendars` lists them with their
   sizes — so "which calendar is that in?" is a question the model can actually answer, and a
   noisy feed can be recognised for what it is. Each calendar also has a **checkbox**, behind the
-  **Include…** button: *Holidays in Germany* is 546 entries and would drown a week. The ticks
-  were a column down the right-hand side of the window — 240 pixels of calendar names beside
-  every answer, for a setting touched once when a calendar is added — so they moved into a
-  window of their own and the briefing got the width back (the agent's smallest size went from
-  1140×503 to **740×529**). It is **modeless**: a tick re-asks the last question behind it, and
-  seeing that happen is the point.
+  **Include…** button: *Holidays in Germany* is 546 entries and would drown a week. They are in
+  a window of their own rather than a column beside every answer — a setting touched once when
+  a calendar is added does not need 240 pixels of the briefing — and it is **modeless**: a tick
+  re-asks the last question behind it, and seeing that happen is the point.
 - **Repeats are expanded**: `FREQ=DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY`, with `INTERVAL`,
   `COUNT`, `UNTIL`, `BYDAY` (weekly), `BYMONTH`, `BYMONTHDAY`, plus `EXDATE`, `RDATE` and the
   modified instances Thunderbird stores as rows of their own (a moved one says so, a cancelled
@@ -3654,11 +3652,10 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   **Behind Help, with everything else the window used to say all the time**: the hosts (built
   from the list the check itself uses, so it cannot describe a rule that is not enforced), the
   two-stage address check, that nothing is clicked for you, how a page is read, and the requests
-  an agent may send. On screen for ever that was four lines of host names and two paragraphs of
-  prose — more text than controls, in a window that could not be made narrower than a thousand
-  pixels. The buttons moved under the field, the text moved behind the button, and the window's
-  smallest size went from 1173×540 to **623×420**: small enough to sit beside the JRock it
-  belongs to.
+  an agent may send. All of it is behind the button rather than on the page, so what is on
+  screen is the field and the controls - a window small enough to sit beside the JRock it
+  belongs to, instead of four lines of host names and two paragraphs of prose in front of
+  every answer.
 
 | | |
 |---|---|
@@ -4700,43 +4697,6 @@ alone; this tab is for placing the window exactly, to the pixel, which a mouse c
 In the **browser** it also saves a resize at every start. CheerpJ sizes the window to the page it
 is in, and with the page's size already in the configuration the window is that size from the
 first paint instead of being built at JRock's default size and laid out a second time.
-
-#### Every window's smallest size, on a 32×27 grid
-
-**The smallest size of every window here is a whole number of cells**, 32 wide by 27 high, and
-each window says its own count in constants at the top of its own file — `WINDOW_MIN_CELLS_W`
-and `WINDOW_MIN_CELLS_H`, times `JRock.CELL_W` and `JRock.CELL_H`, which are the one definition
-of the grid.
-
-**Why a number in the source and not the layout's own.** Every agent used to end its window with
-`pack(); setMinimumSize(getSize())`, which makes the floor a figure nobody wrote: it is whatever
-the layout worked out at that moment, and it moves with the platform's fonts, the display
-scaling, and even the text that happened to be in a label while the window was being built. The
-Geo location agent was packed while its status line held a single space, so its minimum had room for
-one line of it — the first real sentence wrapped to two and pushed the last row of the form off
-the bottom. A grid cannot do that: it is the same number on every machine, and you can read it.
-
-`pack()` still asks for the size of what is in a window, and the window opens at whichever is
-larger — so a floor a cell or two above what the layout needs is simply the size that window
-opens at.
-
-| Window | Cells | Smallest size |
-|---|---|---|
-| JRock | 12 × 11 | **384 × 297** (it opens at 33 × 30 = 1056 × 810) |
-| Push-to-talk | 14 × 23 | 448 × 621 |
-| Timer | 12 × 12 | 384 × 324 |
-| Weather | 16 × 13 | 512 × 351 |
-| Geo location | 18 × 16 | 576 × 432 |
-| Browser | 20 × 16 | 640 × 432 |
-| Paper docs | 20 × 18 | 640 × 486 |
-| Thunderbird | 24 × 20 | 768 × 540 |
-| The installer | 25 × 24 | 800 × 648 (it opens at 28 × 30 = 896 × 810) |
-
-JRock's own window had **no minimum at all** before this and could be dragged to nothing; at
-384 × 297 it still holds Configure, the folder menu, *Dialog only*, *Clear log*, the log, the
-prompt and Send with its three checkboxes. The **Window** tab's Set button clamps a typed width
-or height to those same two numbers, so what Set accepts and what the window can be dragged to
-are one pair of numbers rather than two opinions.
 
 #### Per-folder window title & icon
 
