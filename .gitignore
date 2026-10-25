@@ -52,6 +52,12 @@ out-automation/
 out-installer/
 /InstallJRock.java
 
+# Screenshots pasted into the folder by Windows or macOS. The README's pictures are in
+# images/ and are written by the build; one that lands at the root is somebody's paste,
+# and "Screenshot 2026-10-13 132751.png" was tracked for twelve days before anyone noticed.
+Screenshot *.png
+Screenshot_*.png
+
 # Pictures from .github/build/Screenshots.java. They are a build output, uploaded as an
 # artifact by the screenshots workflow; the ones this README shows are in images/, which
 # is tracked.
