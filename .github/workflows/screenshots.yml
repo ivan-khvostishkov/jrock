@@ -94,6 +94,43 @@ jobs:
           java -cp "jrock.jar;out-automation" .github/build/Screenshots.java \
                screenshots ${{ matrix.name }}
 
+      # THE OTHER FIVE AGENTS, one process each. Five of the seven start a JRock of
+      # their own and then take it as an automation, and a process has one of each - so
+      # they cannot be photographed beside the conversation above, or beside each other.
+      # The timer and the paper docs agent drive nothing and are in the run above.
+      #
+      # One invocation per agent, and a missing picture is a line in the log: an agent
+      # that wants a microphone, a Thunderbird profile or a Chromium says so and stops,
+      # which is worth knowing and is not worth failing a build for.
+      - name: The agents that need a process of their own (Linux, under Xvfb)
+        if: matrix.runner == 'ubuntu-latest'
+        run: |
+          for agent in push-to-talk geo weather thunderbird browser; do
+            echo "--- $agent"
+            xvfb-run -a --server-args="-screen 0 1600x1200x24" \
+              java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
+                   screenshots ${{ matrix.name }} /tmp --agent "$agent" || true
+          done
+
+      - name: The agents that need a process of their own (macOS)
+        if: matrix.runner == 'macos-latest'
+        run: |
+          for agent in push-to-talk geo weather thunderbird browser; do
+            echo "--- $agent"
+            java -cp "jrock.jar:out-automation" .github/build/Screenshots.java \
+                 screenshots ${{ matrix.name }} /tmp --agent "$agent" || true
+          done
+
+      - name: The agents that need a process of their own (Windows)
+        if: matrix.runner == 'windows-latest'
+        shell: bash
+        run: |
+          for agent in push-to-talk geo weather thunderbird browser; do
+            echo "--- $agent"
+            java -cp "jrock.jar;out-automation" .github/build/Screenshots.java \
+                 screenshots ${{ matrix.name }} --agent "$agent" || true
+          done
+
       # THE INSTALLER, AND THE MENUS IT WRITES, on the one runner where either means
       # anything. The wizard is Swing, so it is driven the way JRock is - its real Next
       # button, its real radio button, its real ticks - and it really installs, because

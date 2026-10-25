@@ -115,8 +115,6 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   - [Windows: agents and flows, one entry each](#windows-agents-and-flows-one-entry-each)
 - **§34** [Keyboard shortcuts](#keyboard-shortcuts)
 - **§35** [Tests](#tests)
-  - [Coverage](#coverage)
-  - [Reporting](#reporting)
 - **§36** [The installer (`installer/InstallJRock.java`)](#the-installer-installerinstalljrockjava)
 - **§37** [No window at all: `--cli`](#no-window-at-all---cli)
 - **§38** [Finally: reproducible builds](#finally-reproducible-builds)
@@ -5457,48 +5455,6 @@ git-ignored, and that's also where the app's own `__JRock/` folder goes during a
 
 CI runs this on every push (`.github/workflows/tests.yml`), under `xvfb` since the Linux
 runners are headless, on JDK 11 — the minimum JRock supports.
-
-### Coverage
-
-[JaCoCo](https://www.jacoco.org/jacoco/) measures coverage on the same `mvn test` — no extra
-phase or profile. Reports land in `tests/target/site/jacoco/`: open `index.html` for the
-line-by-line view of `JRock.java`, and CI uploads that directory as the `coverage-report`
-artifact.
-
-Coverage is **reported, not enforced**. There is no threshold to fail a build on, because a
-threshold mostly buys tests written to move a number. One startup test currently reaches
-about **22% of lines and 9% of branches** — that is the honest baseline, and it is what a
-single test against a GUI application buys.
-
-| | Where it lands | How to read it |
-|---|---|---|
-| Line-by-line | `tests/target/site/jacoco/index.html` | open it |
-| The artifact | `coverage-report`, every run | download and open the same file |
-| The totals | the run's **job summary** | rendered by `TestSummary.java` |
-| The threshold | — | there isn't one, on purpose |
-
-### Reporting
-
-Results are published to the **job summary** on the run's own page: how many tests passed,
-each test's name, for a failure the assertion text inline, and the coverage totals — rather
-than only in the raw console log or the downloadable report zips. GitHub has no built-in
-JUnit view, so `.github/build/TestSummary.java` renders Surefire's XML and JaCoCo's CSV into
-Markdown. It uses nothing but the JDK and needs no third-party action, the same reasoning as
-`BuildJar.java`.
-
-| What a run leaves behind | Where |
-|---|---|
-| Passed, failed, and each test's name as a sentence | the **job summary** |
-| A failure's assertion text | the same page, inline — not in a log to scroll |
-| Coverage totals | the same page |
-| Surefire XML | the `test-reports` artifact |
-| The HTML coverage report | the `coverage-report` artifact |
-
-Run the summary locally with:
-
-```sh
-java .github/build/TestSummary.java tests/target/surefire-reports
-```
 
 ## The installer (`installer/InstallJRock.java`)
 

@@ -75,6 +75,33 @@ public final class Screenshots {
     private static String os;
     private static int taken;
 
+    /**
+     * THE AGENTS THAT CANNOT SHARE A PROCESS, one scene each.
+     *
+     * <p>Five of the seven start a JRock of their own - {@code JRock.main(args)} - and then
+     * take it as an automation, and a process has one JRock and one automation. This tool
+     * is already holding both by the time it has a conversation to photograph, so an agent
+     * started beside it would be told the automation is taken, and two agents started
+     * beside each other would tell each other the same. The timer and the paper docs agent
+     * are the two that drive nothing: they are in the run above, where they cost nothing.
+     *
+     * <p>So these are asked for one at a time, with {@code --agent <key>}, and each gets a
+     * process, a JRock and a demo folder of its own. Which is also truer to what they are:
+     * an agent is a program you start beside JRock, not a panel inside it.
+     *
+     * <p>Key, class, and the name of the picture.
+     */
+    private static final String[][] AGENTS = {
+        { "push-to-talk", "JRockPushToTalk",  "13-the-push-to-talk-agent" },
+        { "geo",          "JRockGeoLocation", "14-the-geo-location-agent" },
+        { "weather",      "JRockWeather",     "15-the-weather-agent" },
+        { "thunderbird",  "JRockThunderbird", "16-the-thunderbird-agent" },
+        { "browser",      "JRockBrowser",     "17-the-browser-agent" },
+    };
+
+    /** How long an agent gets to start its JRock and put its own window up. */
+    private static final int AGENT_TIMEOUT_MS = 120_000;
+
     /** Answers served so far, which is how the second turn differs from the first. */
     private static int answered;
 
@@ -117,6 +144,15 @@ public final class Screenshots {
         // the endpoint above takes whatever arrives without looking at it.
         Files.write(jrockDir.resolve("bedrock-key.txt"),
                 "not-a-credential-the-stub-endpoint-ignores-it\n".getBytes(StandardCharsets.UTF_8));
+
+        // ONE AGENT, IN A PROCESS OF ITS OWN (see AGENTS), and then nothing else: the
+        // agent starts the JRock here, so this tool must not.
+        String asked = argument(args, "--agent");
+        if (asked != null) {
+            oneAgent(asked, work);
+            System.out.println("wrote " + taken + " screenshot(s) to " + out);
+            System.exit(0);
+        }
 
         JRock.main(new String[] { "--working-dir", work.toString() });
         String notReady = JRock.automationAwaitReady(120_000);
@@ -487,6 +523,70 @@ public final class Screenshots {
             }
         }
         return null;
+    }
+
+    /** The value after a flag, or null: "--agent geo" gives "geo". */
+    private static String argument(String[] args, String flag) {
+        for (int i = 0; i < args.length - 1; i++) {
+            if (flag.equals(args[i])) return args[i + 1];
+        }
+        return null;
+    }
+
+    /**
+     * One agent, started on a thread of its own because an agent's main does not return -
+     * it is a loop - and photographed once its window is up beside the JRock it started.
+     */
+    private static void oneAgent(String key, Path work) {
+        String[] found = null;
+        for (String[] candidate : AGENTS) {
+            if (candidate[0].equals(key)) found = candidate;
+        }
+        final String[] row = found;
+        if (row == null) {
+            System.out.println("no agent called \"" + key + "\": the keys are "
+                    + java.util.Arrays.stream(AGENTS).map(a -> a[0])
+                            .collect(java.util.stream.Collectors.joining(", ")));
+            return;
+        }
+        String[] agentArgs = { "--working-dir", work.toString() };
+        try {
+            Class<?> type = Class.forName(row[1]);
+            java.lang.reflect.Method main = type.getMethod("main", String[].class);
+            Thread running = new Thread(() -> {
+                try {
+                    main.invoke(null, (Object) agentArgs);
+                } catch (ReflectiveOperationException ex) {
+                    System.out.println(row[1] + " stopped: " + ex.getCause());
+                }
+            }, row[1]);
+            running.setDaemon(true);
+            running.start();
+        } catch (ReflectiveOperationException ex) {
+            System.out.println(row[1] + ": not on the class path (" + ex + ")");
+            return;
+        }
+
+        // Its JRock first - the agent starts one and the window of its own usually waits
+        // for it - and then whichever window is not that one.
+        String notReady = JRock.automationAwaitReady(AGENT_TIMEOUT_MS);
+        if (notReady != null) System.out.println(row[1] + ": " + notReady);
+        Window own = null;
+        for (int waited = 0; waited < AGENT_TIMEOUT_MS && own == null; waited += 200) {
+            settle();
+            for (Window w : Window.getWindows()) {
+                if (!(w instanceof JFrame) || !w.isShowing()) continue;
+                if (w.equals(JRock.automationWindow())) continue;
+                String title = ((JFrame) w).getTitle();
+                if (title != null && !title.isEmpty()) own = w;
+            }
+        }
+        if (own == null) {
+            System.out.println(row[1] + ": no window of its own appeared");
+            return;
+        }
+        settle();
+        shoot(own, row[2]);
     }
 
     /** One agent, started in this JVM, with its window painted and left open. */

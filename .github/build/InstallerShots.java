@@ -56,6 +56,9 @@ public final class InstallerShots {
     /** How long any one wait gets before it is given up on. */
     private static final int PATIENCE_MS = 30_000;
 
+    /** The whole tool's deadline. A hang here held a runner for sixteen minutes. */
+    private static final long DEADLINE_MS = 5 * 60 * 1000L;
+
     private static Path out;
     private static String os;
     private static int taken;
@@ -68,6 +71,22 @@ public final class InstallerShots {
                 : Paths.get(System.getProperty("java.io.tmpdir")).resolve("JRockShots");
         boolean clean = java.util.Arrays.asList(args).contains("--clean");
         Files.createDirectories(out);
+
+        // THE WATCHDOG, and the reason for it. Everything below drives somebody else's
+        // window: a page that opens a dialog, a shell that will not come up, a Robot a
+        // window manager will not let near the keyboard. None of that should cost more
+        // than the pictures it was going to take, and a step that hangs costs a whole
+        // build - so after five minutes this prints where it got to and leaves with
+        // whatever it has.
+        Thread watchdog = new Thread(() -> {
+            pause(DEADLINE_MS);
+            System.out.println("the five minutes are up: leaving with " + taken
+                    + " picture(s). Where it got to is the last line above this one.");
+            System.out.flush();
+            Runtime.getRuntime().halt(0);
+        }, "the watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
 
         if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
             System.out.println("not Windows: the installer's pictures are of Windows, and "
@@ -137,7 +156,8 @@ public final class InstallerShots {
             javax.swing.JTextField folder = field(wizard, "JRockAssistant");
             if (folder != null) {
                 String path = home.toString();
-                onEdt(() -> folder.setText(path));
+                SwingUtilities.invokeLater(() -> folder.setText(path));
+                pause(300);
                 System.out.println("  page " + (page + 1) + ": installing into " + path);
                 settle();
             }
@@ -145,46 +165,70 @@ public final class InstallerShots {
             javax.swing.JRadioButton choose = radio(wizard,
                     "Choose which, and where each agent works");
             if (choose != null && !choose.isSelected()) {
-                onEdt(choose::doClick);
-                settle();
+                SwingUtilities.invokeLater(choose::doClick);
+                pause(800);
                 int off = 0;
                 for (String unwanted : UNWANTED) {
                     javax.swing.JCheckBox box = check(wizard, unwanted);
                     if (box != null && box.isSelected()) {
-                        onEdt(box::doClick);
+                        SwingUtilities.invokeLater(box::doClick);
+                        pause(200);
                         off++;
                     }
                 }
                 settle();
                 System.out.println("  page " + (page + 1) + ": the catalogue, with "
                         + off + " translation flow(s) left out");
-                shoot(wizard, "13-the-installer-agents-and-flows");
+                shoot(wizard, "18-the-installer-agents-and-flows");
             }
 
             // The last page says what it did, which is the other picture worth having:
             // every folder, every entry, every file, named.
-            if (button(wizard, "Next >") == null || !button(wizard, "Next >").isEnabled()) {
-                shoot(wizard, "14-the-installer-finished");
-                break;
-            }
             javax.swing.JButton next = button(wizard, "Next >");
-            String before = heading(wizard);
-            onEdt(next::doClick);
-            settle();
-            if (dismissWarning()) {
-                System.out.println("  page " + (page + 1) + " would not let go: "
-                        + heading(wizard));
+            if (next == null || !next.isEnabled()) {
+                shoot(wizard, "19-the-installer-finished");
                 break;
             }
-            if (heading(wizard) != null && heading(wizard).equals(before)
-                    && page > 0 && button(wizard, "Next >") != null) {
-                // The same page twice means Next did nothing, and pressing it again will
-                // do nothing again.
-                shoot(wizard, "14-the-installer-finished");
+
+            // PRESSED, NOT AWAITED. A page's own action can put a modal dialog up -
+            // a warning it will not go past, a chooser - and a modal dialog opened
+            // inside invokeAndWait never gives the call back: the dialog is waiting for
+            // an answer and the thread that could answer it is waiting for the dialog.
+            // That is a hang with no timeout in it, and it held a build runner for
+            // sixteen minutes before this comment was written. So the click is posted,
+            // and what happened is then watched for from here.
+            String before = heading(wizard);
+            System.out.println("  page " + (page + 1) + ": " + before);
+            SwingUtilities.invokeLater(next::doClick);
+
+            boolean moved = false;
+            for (int waited = 0; waited < PATIENCE_MS; waited += 200) {
+                pause(200);
+                if (dismissDialog()) {        // a warning or a chooser, answered
+                    moved = true;
+                    break;
+                }
+                if (!wizard.isShowing()) {
+                    moved = true;
+                    break;
+                }
+                String now = heading(wizard);
+                if (now != null && !now.equals(before)) {
+                    moved = true;
+                    break;
+                }
+            }
+            if (!moved) {
+                System.out.println("  page " + (page + 1) + " did not move on; stopping "
+                        + "here with what there is");
+                shoot(wizard, "19-the-installer-finished");
                 break;
             }
         }
-        if (wizard.isShowing()) onEdt(wizard::dispose);
+        if (wizard.isShowing()) {
+            SwingUtilities.invokeLater(wizard::dispose);
+            pause(600);
+        }
     }
 
     /**
@@ -209,7 +253,7 @@ public final class InstallerShots {
             robot.keyRelease(java.awt.event.KeyEvent.VK_ESCAPE);
             pause(400);
             contextMenu(robot);
-            screen(robot, "15-explorer-the-folder-menu");
+            screen(robot, "20-explorer-the-folder-menu");
             escape(robot);
 
             // The first item selected: the same menu for a file, which is where the flows
@@ -218,7 +262,7 @@ public final class InstallerShots {
             robot.keyRelease(java.awt.event.KeyEvent.VK_HOME);
             pause(600);
             contextMenu(robot);
-            screen(robot, "16-explorer-the-file-menu");
+            screen(robot, "21-explorer-the-file-menu");
             escape(robot);
         } catch (IOException | java.awt.AWTException | RuntimeException ex) {
             System.out.println("no Explorer pictures here (" + ex + ")");
@@ -281,18 +325,32 @@ public final class InstallerShots {
         }
     }
 
-    /** The warning a page puts up when it will not let go, closed again. */
-    private static boolean dismissWarning() {
+    /**
+     * Whatever dialog a page has put up, answered - and answered the way that gets the
+     * wizard moving again: OK or Yes for something it is telling us, Cancel or Close for
+     * something it is asking us to pick, and dispose for anything with no button this
+     * tool knows. Posted rather than awaited, for the reason the Next button is.
+     */
+    private static boolean dismissDialog() {
         for (Window w : Window.getWindows()) {
-            if (w instanceof javax.swing.JDialog && w.isShowing()) {
-                javax.swing.JButton ok = button((Container) w, "OK");
-                if (ok != null) onEdt(ok::doClick);
-                else onEdt(w::dispose);
-                settle();
-                return true;
+            if (!(w instanceof javax.swing.JDialog) || !w.isShowing()) continue;
+            javax.swing.JButton answer = null;
+            for (String label : new String[] { "OK", "Yes", "Cancel", "Close" }) {
+                answer = button((Container) w, label);
+                if (answer != null) break;
             }
+            final javax.swing.JButton press = answer;
+            System.out.println("    a dialog: \"" + title(w) + "\", answered with "
+                    + (press == null ? "nothing (disposed)" : press.getText()));
+            SwingUtilities.invokeLater(press == null ? w::dispose : press::doClick);
+            pause(600);
+            return true;
         }
         return false;
+    }
+
+    private static String title(Window w) {
+        return w instanceof javax.swing.JDialog ? ((javax.swing.JDialog) w).getTitle() : "";
     }
 
     /** Whatever the wizard is calling the page it is on, for telling pages apart. */
