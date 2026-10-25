@@ -44,7 +44,7 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   - [Recommended tooling (FAQ)](#recommended-tooling-faq)
 - **§04** [Getting started](#getting-started)
   - [The prompts directory](#the-prompts-directory)
-  - [`--working-dir`](#--working-dir)
+  - [The working directory (`--working-dir`)](#the-working-directory---working-dir)
 - **§05** [JRock Web (in the browser)](#jrock-web-in-the-browser)
 - **§06** [Mobile support for iOS and Android](#mobile-support-for-ios-and-android)
   - [Working with PDFs](#working-with-pdfs)
@@ -364,7 +364,7 @@ from the folder it names.*
 
 | The report line | What to check it against |
 |---|---|
-| `Working directory:` | [`--working-dir`](#--working-dir) |
+| `Working directory:` | [`--working-dir`](#the-working-directory---working-dir) |
 | `Bedrock API key:` / `Settings:` | [Settings files](#settings-files) §11 |
 | `API endpoint:` / `Configured model:` / `Model card:` | [Endpoint & API design](#endpoint--api-design) §07, [Models](#models) §07 |
 | `HTTP transport:` | [HTTP transport](#http-transport) §07 |
@@ -421,7 +421,7 @@ do **not** live here. Each is installed into a folder of its own with the prompt
 beside it, because that is where it looks for them; this directory is the library you read and
 borrow from. See [agents and flows](#windows-agents-and-flows-one-entry-each) §33.
 
-### `--working-dir`
+### The working directory (`--working-dir`)
 
 `--working-dir <dir>` (or `=<dir>`) names the folder JRock works in — its `__JRock/` files, its
 settings, its key — regardless of the directory the process was started in. A plain launch needs
