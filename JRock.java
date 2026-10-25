@@ -7986,10 +7986,10 @@ public class JRock {
         // The whole of what JRock saves, named file by file (see folderNotes), in its own
         // box above the notes: the one place in the window that says what the folder
         // holding the prompt, the transcript, the messages and the key can contain.
-        javax.swing.JTextArea files = wrapped(folderNotes(), plainFont, contentW);
+        javax.swing.JTextPane files = styledNotes(folderNotes(), plainFont);
         files.setBorder(javax.swing.BorderFactory.createCompoundBorder(
                 javax.swing.BorderFactory.createTitledBorder("The JRock folder"),
-                files.getBorder()));
+                javax.swing.BorderFactory.createEmptyBorder(4, 4, 4, 4)));
 
         javax.swing.JPanel content = new ViewportWidthPanel();
         content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
@@ -8045,7 +8045,7 @@ public class JRock {
         javax.swing.JLabel where = new javax.swing.JLabel(jrockDir().toString());
         where.setFont(plainFont.deriveFont(java.awt.Font.BOLD));
         where.setAlignmentX(0f);
-        javax.swing.JTextArea notes = wrapped(folderNotes(), plainFont, contentW);
+        javax.swing.JTextPane notes = styledNotes(folderNotes(), plainFont);
         notes.setAlignmentX(0f);
 
         javax.swing.JPanel content = new ViewportWidthPanel();
@@ -8053,7 +8053,7 @@ public class JRock {
         // ROOM ROUND THE WORDS. Without it the text starts hard against the left edge and
         // ends hard against the scrollbar, which reads as unfinished however right the
         // list is - and this dialog is a page of prose rather than a table.
-        content.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 12, 12));
+        content.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 12, 16));
         content.add(where);
         content.add(javax.swing.Box.createVerticalStrut(8));
         content.add(notes);
@@ -8132,6 +8132,63 @@ public class JRock {
     // font, which is JTextArea's own definition (getColumnWidth). Left to itself it asks
     // for one line as wide as its longest paragraph, and the dialog holding it comes out
     // wider than the screen.
+    /**
+     * The folder notes as styled text: every item's NAME in bold, the sentence after it
+     * plain.
+     *
+     * <p>WHY NOT A TEXT AREA, which the rest of these boxes are. A JTextArea has one font
+     * for everything in it, and this particular text is a LIST - twelve file and folder
+     * names, each followed by what it holds - which a reader scans for a name rather than
+     * reads from the top. Bold is what makes that scan possible, so this one box is a
+     * JTextPane with two styles in it; everything else about it is the same, including
+     * wrapping to the width it is given.
+     *
+     * <p>An item is a paragraph beginning with a name and " - ": no spaces in the name, so
+     * the opening paragraph of prose (which has no such head) stays plain, and so does
+     * any sentence that happens to contain a dash.
+     */
+    private static javax.swing.JTextPane styledNotes(String text, java.awt.Font font) {
+        javax.swing.JTextPane pane = new javax.swing.JTextPane();
+        pane.setEditable(false);
+        pane.setOpaque(false);
+        pane.setFont(font);
+        // ROOM ON THE RIGHT, which is the one measurement a reader notices here: without
+        // it the longest line of every paragraph ends against the scrollbar and the whole
+        // box reads as something squeezed in.
+        pane.setMargin(new java.awt.Insets(0, 0, 0, 14));
+
+        javax.swing.text.SimpleAttributeSet plain = new javax.swing.text.SimpleAttributeSet();
+        javax.swing.text.StyleConstants.setFontFamily(plain, font.getFamily());
+        javax.swing.text.StyleConstants.setFontSize(plain, font.getSize());
+        javax.swing.text.SimpleAttributeSet name =
+                new javax.swing.text.SimpleAttributeSet(plain);
+        javax.swing.text.StyleConstants.setBold(name, true);
+
+        javax.swing.text.StyledDocument doc = pane.getStyledDocument();
+        try {
+            String[] paragraphs = text.split("\n\n");
+            for (int i = 0; i < paragraphs.length; i++) {
+                String paragraph = paragraphs[i];
+                int dash = paragraph.indexOf(" - ");
+                String head = dash < 0 ? "" : paragraph.substring(0, dash);
+                boolean item = dash > 0 && !head.contains(" ") && head.length() < 40;
+                if (item) {
+                    doc.insertString(doc.getLength(), head, name);
+                    doc.insertString(doc.getLength(), paragraph.substring(dash), plain);
+                } else {
+                    doc.insertString(doc.getLength(), paragraph, plain);
+                }
+                if (i < paragraphs.length - 1) {
+                    doc.insertString(doc.getLength(), "\n\n", plain);
+                }
+            }
+        } catch (javax.swing.text.BadLocationException impossible) {
+            pane.setText(text);          // the words matter more than the two styles
+        }
+        pane.setCaretPosition(0);
+        return pane;
+    }
+
     private static javax.swing.JTextArea wrapped(String text, java.awt.Font font, int width) {
         javax.swing.JTextArea area = new javax.swing.JTextArea(text);
         area.setEditable(false);
