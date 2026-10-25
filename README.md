@@ -28,8 +28,7 @@ behind a service that could change its mind.
 *One turn, in a folder called `Demo` — which is also where the window title and its `DEM` icon
 come from. The question and the attached page are still in the prompt; the answer is above it,
 with the masked raw request and response and the token stats under it. Every picture in this
-README is taken by the build, by driving this program through its own automation API
-([how](#screenshots-taken-by-the-build) §38).*
+README is taken by the build, by driving this program through its own automation API.*
 
 By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
 
@@ -119,10 +118,8 @@ By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
   - [Coverage](#coverage)
   - [Reporting](#reporting)
 - **§36** [The installer (`installer/InstallJRock.java`)](#the-installer-installerinstalljrockjava)
-- **§37** [The DOCX of this README](#the-docx-of-this-readme)
-- **§38** [Screenshots, taken by the build](#screenshots-taken-by-the-build)
-- **§39** [No window at all: `--cli`](#no-window-at-all---cli)
-- **§40** [Finally: reproducible builds](#finally-reproducible-builds)
+- **§37** [No window at all: `--cli`](#no-window-at-all---cli)
+- **§38** [Finally: reproducible builds](#finally-reproducible-builds)
 
 <!-- toc:end -->
 
@@ -268,10 +265,6 @@ Two ways, and they are for different things.
   - **Adobe Acrobat** — open the DOCX and save as PDF, or use *Create PDF*. No typesetting, but
     a correct, searchable PDF in one step, and Acrobat is where you would then sign, redact or
     combine it.
-
-**This README is one of those documents.** Every build writes it out as a DOCX through that same
-export, and uploads it as the `readme-docx` artifact — see [the DOCX of this
-README](#the-docx-of-this-readme).
 
 #### I have no InDesign or Acrobat. What then?
 
@@ -2478,7 +2471,7 @@ the operator as *"the paper docs agent did not answer"*.
 **`-cp jrock.jar` has to name a jar that is there.** Nothing downloads it: the
 [installer](#the-installer-installerinstalljrockjava) §36 puts one in the folder it installs into
 (one level up from `Flows\`, two up from an agent's own folder), or take it from a
-[reproducible build](#finally-reproducible-builds) §40 artifact, or build it with
+[reproducible build](#finally-reproducible-builds) §38 artifact, or build it with
 `java .github/build/BuildJar.java`. Running from a clone, point `-cp` at wherever you built it.
 The jar is in
 `.gitignore` and the build tool skips `.jar` files in that directory, so a local copy changes
@@ -2881,8 +2874,7 @@ listed underneath, each counting down. Nothing is kept across runs but the speak
 is editing two digits; the speaker list fills itself the moment it is opened, because what is
 plugged into a machine changes between one opening and the next; and the line under it says what
 it would do with no speaker chosen rather than waiting to say it at the moment the alarm fails to
-ring. The window title is how the picture tells you which agent this is — see
-[the screenshots section](#screenshots-taken-by-the-build) §38.*
+ring. The window title is how the picture tells you which agent this is.*
 
 ```mermaid
 sequenceDiagram
@@ -4771,8 +4763,7 @@ of your own and it is named in the title just as on the desktop.
 | `/files` (the browser's own mount) | `JRock - Bedrock (mantle)` | `JR` |
 
 Every screenshot in this README shows it: the caption bar names the folder, which is how one
-picture of an agent is told from another — see [Screenshots, taken by the
-build](#screenshots-taken-by-the-build).
+picture of an agent is told from another.
 
 ## Getting the answer out: printing, RTF and DOCX
 
@@ -5542,8 +5533,6 @@ Markdown. It uses nothing but the JDK and needs no third-party action, the same 
 | Coverage totals | the same page |
 | Surefire XML | the `test-reports` artifact |
 | The HTML coverage report | the `coverage-report` artifact |
-| The screenshots of that build | `screenshots-linux`, `-macos`, `-windows` ([how](#screenshots-taken-by-the-build) §38) |
-| This README as a document | `readme-docx` ([how](#the-docx-of-this-readme) §37) |
 
 Run the summary locally with:
 
@@ -5762,213 +5751,6 @@ fresh install of what you already have.
 `--check` prints every one of those detections — including every JRock registry entry it would
 clear — and writes nothing, which is what CI runs on all three platforms so the installer
 cannot rot unnoticed.
-
-## The DOCX of this README
-
-Every build writes this README out as a **DOCX** — twice. Once whole, as the `readme-docx`
-artifact: one `README.docx` ready to place in a layout application's primary text frame. And
-once as a **book**, the `readme-book` artifact: **one document per chapter**, which is how a
-manual of this length is actually laid out.
-
-It is written by **JRock's own Markdown export** ([`.github/build/ReadmeDocx.java`](.github/build/ReadmeDocx.java)),
-driven through the [automation API](#the-automation-api) §27 exactly as a flow would: the README goes
-into the prompt, `automationExportPromptDocx` writes the file. So there is no pandoc here, no
-LaTeX, nothing to install and no second Markdown dialect to keep in step with the first — and
-the step is a check on the exporter in the same way the screenshots are a check on the window.
-
-| What InDesign (or Word) gets | From |
-|---|---|
-| `Heading 1` … `Heading 6` | `#` … `######`, under Word's conventional style names |
-| `Normal` | body paragraphs, with **bold**, *italic* and `code` runs |
-| `Code` | fenced and indented blocks, in Consolas |
-| `Quote` | `>` blockquotes |
-| `Hyperlink` | an address, as a real external relationship |
-| A cross-reference | a `#heading` link, as a **bookmark** in the document — see below |
-| Tables | Markdown tables, laid out to the text frame's width |
-| Pictures | `![...](images/x.png)`, placed at their physical size |
-| Diagrams | ```` ```mermaid ```` blocks, **rendered to PNGs** on the way in |
-
-- **Two fonts, both of them Windows'**: **Calibri** for text and **Consolas** for code. Nothing
-  exotic, nothing Adobe-only, nothing to go missing on import — InDesign on Windows 10 finds
-  both without asking.
-- **A4 portrait, 2 cm margins**, which is what the export lays tables and pictures out against.
-  Place it in your own text frame and your frame's measure wins; the geometry only matters for
-  how wide a table was fitted.
-- **The table of contents is left out.** The README's own contents list lives between its
-  `toc:start` and `toc:end` markers, and that whole block is dropped: a layout application
-  generates its own from the heading styles, with its own page numbers, and an imported list
-  of dead anchors in front of it is worse than none.
-- **The pictures go in.** The exporter places a picture when the reference names one of the
-  session's includes, so every image the README refers to is attached first through
-  `automationInclude`. The prose examples that only *look* like references (`![alt](url)`,
-  `![...](hash)`) have no file and stay as text, which is what they are.
-- **The diagrams are pictures, not source.** GitHub renders a ```` ```mermaid ```` block
-  itself; a word processor shows eighteen lines of `sequenceDiagram` in a monospaced font. So
-  each block is rendered to a PNG first, by
-  [mermaid-cli](https://github.com/mermaid-js/mermaid-cli) through `npx`, in whichever Chromium
-  the machine already has — and the block is replaced by a reference to the picture, which the
-  exporter then places like any other. It is the one outside tool in this build, it is asked
-  for rather than installed, and a machine that cannot reach it gets the blocks as they are and
-  still gets the document.
-- **Links into the document are cross-references, not addresses.** A `](#settings-files)` used
-  to be written as an external relationship — a file called `#settings-files` that Word looks
-  for and never finds. Now every heading carries a **bookmark** under the anchor GitHub's own
-  Markdown would give it, and a `#...` link is a `w:hyperlink` naming that bookmark: a real
-  cross-reference, which Word follows, InCopy keeps and InDesign imports. A `#...` whose
-  heading is **not in this document** — which is what a link across chapters becomes once the
-  book is split — is written as **plain text** rather than as a link that goes nowhere.
-- **Which is what the section marks in this README are for.** Every cross-chapter link in the
-  Markdown carries the target's chapter number: **§14** in a sentence is chapter 14 in the
-  contents list, and `14-settings-files.docx` in the book folder. On GitHub it is a working
-  link with a number beside it; on paper, and in InDesign's Book panel where each chapter is
-  its own document, the number is how the reference is followed. The same text works in both
-  places, which is the whole of the trick.
-- **One document per chapter, and a chapter is a level-two heading.** Everything under it —
-  every `###` and `####` — stays inside that document, one level up: the chapter title becomes
-  `Heading 1` and its sections `Heading 2`, so each file reads from its own top. What comes
-  before the first chapter is `00-front-matter.docx`. The forty files are named for their
-  section marks, so the book is in reading order in any file listing, and InDesign's Book
-  panel numbers the chapters itself from the order you add them.
-- **A folder of its own, not the checkout.** The referenced pictures are copied into a throwaway
-  folder and JRock is pointed at that. Running this at a desk must not write a `__JRock/` into
-  the repository and overwrite the endpoint, model and settings of whoever works in that folder.
-
-```sh
-javac -encoding UTF-8 --release 11 -d out JRock.java
-java .github/build/BuildJar.java
-java -cp jrock.jar .github/build/ReadmeDocx.java README.md README.docx
-java -cp jrock.jar .github/build/ReadmeDocx.java README.md README.docx book   # and the book
-```
-
-## Screenshots, taken by the build
-
-`.github/workflows/screenshots.yml` runs `.github/build/Screenshots.java` against the jar it has
-just built, on **Ubuntu, macOS and Windows**, and uploads `screenshots-linux`,
-`screenshots-macos` and `screenshots-windows` as build artifacts. Swing takes its look from the
-platform, so one window is three pictures and a section can show whichever suits it.
-
-Each scene is reached by driving the program itself — the
-[automation API](#the-automation-api) §27 for the conversation, and for the dialogs and menus
-the real button pressed and a real popup trigger dispatched, so these are pictures of the
-program and not of panels built for the occasion.
-
-**Each picture carries two or three things no other picture carries**, which is the whole rule
-of the set: a window at startup and the same window with a sentence typed into it differ by
-that sentence, and that is not a picture.
-
-| | What it is the only picture of |
-|---|---|
-| `01-window-at-startup` | the session report, the ticks, the `__JRock/` label, Send |
-| `02-a-question-and-a-page-attached` | the `@img` token, the Markdown reference above it, the log lines saying what was copied and what it was downscaled to |
-| `03-the-answer-in-the-log` | the teal role header, the answer as it arrived, the usage and cost of the send |
-| `04-two-turns-history-and-dialog-only` | a conversation resent, and the machinery hidden |
-| `05-configure-general` | the directories, the write-only key, the endpoint, the model, the cache, the autobackup |
-| `06-configure-files` | Images DPI, the PDF and RTF include modes, processed copies, the missing-include stop |
-| `07-configure-audio` | the speaker, the voices and **Add**, the crackle, the microphone, transcribe, [Mic always on](#mic-always-on) §30 |
-| `08-the-jrock-folder-menu` | the folder's own menu: its contents, both merges, backup, restore, cleanup |
-| `09-what-is-in-the-jrock-folder` | every file that folder can hold, and what each one is for |
-| `10-the-log-menu` | the log's menu over a **selected** answer, so the exports and Narrate are live |
-| `11-the-timer-agent` | `JRockTimer`: an agent's own window, and the port it answers on |
-| `12-the-papers-agent` | `JRockPaperDocs`, with the two folders it watches and its commands |
-
-**And four more on Windows, from an installer that really installs** —
-[`.github/build/InstallerShots.java`](.github/build/InstallerShots.java). The wizard is Swing,
-so it is driven the same way: its real **Next**, its real radio button, its real ticks. It
-installs into a folder of its own, which is what makes the last two pictures possible at all —
-Explorer's menu has JRock's entries in it only on a machine where JRock is installed — and
-`--clean` removes the entries it wrote afterwards, naming that installation and no other.
-
-| | What it is the only picture of |
-|---|---|
-| `13-the-installer-agents-and-flows` | the catalogue with its ticks: every agent, and the translation flows cut to two, because six languages in one menu is a menu nobody reads |
-| `14-the-installer-finished` | what it did: every folder, every entry, every file, named |
-| `15-explorer-the-folder-menu` | **JRock here!** and an entry per agent, on a folder's own background |
-| `16-explorer-the-file-menu` | the flow entries, on the file that was right-clicked |
-
-The two Explorer menus are the **shell's own**, opened with **Shift+F10** rather than a mouse
-click at a guessed pixel — the selection is what decides which menu opens, and nothing (the
-folder's) or the first item (a file's) is a selection this tool can be sure of. They are
-captured as the whole screen, which on a runner holds one window and an empty desktop.
-
-**The pictures are read back off the screen, not painted into an image.** A Swing text area
-breaks its lines using the metrics of the screen and draws them with the metrics of whatever
-`Graphics` it is handed, and an offscreen image's are not the screen's — so a line that fitted
-when it was measured did not fit when it was drawn, and the last word of every long line in the
-Help window and the folder dialog was cut off at the component's edge. In the picture only: on
-screen those dialogs are perfect, which a `Robot` capture beside a painted copy is what proved.
-So `Robot` is asked for exactly the rectangle the **root pane** occupies on screen, which keeps
-what painting the root pane was for — no title bar, no borders, no shadow, none of the three
-platforms' decoration — while being, to the pixel, what somebody in front of the machine sees.
-Painting stays as the fallback for a JVM with no screen to read.
-
-**The browser and the phone have a tool of their own** —
-[`.github/build/WebShots.java`](.github/build/WebShots.java) — because `Screenshots.java` paints
-JRock's Swing window, which is the right picture of the desktop build and no picture at all of
-the browser one: what [JRock Web](#jrock-web-in-the-browser) §05 *is* is the page around the canvas,
-and a phone is not a narrow desktop. It serves `jrock-web/index.html` and the jar from a
-loopback `com.sun.net.httpserver`, starts whichever Chromium is on the machine with
-`--remote-debugging-port`, and drives it over the **DevTools protocol** — navigate, click Run,
-emulate a 390×844 phone with touch events, dispatch a long press, capture — over a WebSocket
-`java.net.http` has had since JDK 11. One more single-file Java tool with nothing to install.
-
-**It does not yet produce pictures, and this is the honest state of it.** Driven locally through
-Edge, CheerpJ loads the page, fetches the jar and initialises — and then the JVM exits before a
-canvas is painted (`JRock exited with code 1` in the page's own footer log). Headless and
-headed, with and without cross-origin isolation headers, and with the **5.2.0** jar as well as
-this one: so it is the arrangement rather than the program, and the pictures in the web and
-mobile sections are still hand-taken. The tool is kept because everything up to that point
-works, the failure is reported with the page's log attached, and the same code run where CheerpJ
-does come up is the rest of the way there.
-
-```sh
-java .github/build/WebShots.java screenshots
-java .github/build/WebShots.java screenshots "C:\Program Files\Google\Chrome\Application\chrome.exe"
-```
-
-Run the Swing one locally the way CI does (the jar first, because the agents compile against it):
-
-```sh
-javac -encoding UTF-8 --release 11 -d out JRock.java
-java .github/build/BuildJar.java
-javac -encoding UTF-8 --release 11 -cp jrock.jar -d out-automation samples/agents/*.java samples/flows/*.java
-java -cp "jrock.jar:out-automation" .github/build/Screenshots.java screenshots linux /tmp
-```
-
-- **`printAll()`, not `java.awt.Robot`.** Robot photographs the screen, and on a macOS runner
-  that needs a screen-recording permission nobody can grant a CI job. `printAll()` asks the
-  window to draw itself into an image, which works under `xvfb` and on every runner.
-- **The root pane, and a caption bar drawn on top of it** — which is one word of code and was
-  three different bugs before it. An image the size of the *window* includes the system's title
-  bar and borders, a band Swing does not paint and each platform's peer then filled with
-  something else: macOS left it black, so every picture had a strip across the top; the X11 peer
-  drew the window manager's own decoration into it, landing on the first row of buttons and
-  slicing them in half; and the Windows peer drew the real non-client area, which on a Windows
-  Server runner is the themeless grey of a machine with no desktop — nothing like the Windows
-  anybody reading this is using. The root pane is exactly the part of a window Swing owns, so
-  painting that is all of the application and none of the operating system, and the three
-  runners now differ only in what Swing itself draws differently. The caption above it is drawn
-  by the tool, identically everywhere, from the window's own title and the icon JRock generates
-  from the folder's name (see [per-folder window title & icon](#per-folder-window-title--icon) §29):
-  that is real behaviour worth showing, and the agents' windows have nothing else to say which
-  is which.
-- **The replies are recorded and replayed.** Two scenes need an answer in the log, so each was
-  asked once of the real endpoint and the reply copied into `Screenshots.java` with the token
-  counts from the same response. The step serves them from a Chat Completions endpoint of its own
-  on the **loopback address**, under the model id that really answered — so the picture shows
-  what `openai.gpt-5.4` said and the stats are that turn's real numbers, while CI needs no
-  credential, reaches no network and cannot cost anything. The questions are ones whose answers
-  do not go stale; re-record with `--include` and `--cli` in a folder that has a key.
-- **A throwaway folder, named in the picture.** The window puts the working folder in its title
-  bar and the report prints the whole path, so where the demo folder goes is the third argument:
-  the Unix runners are given `/tmp`, for `/tmp/jrock-demo/Demo`. Without it the folder is under
-  your own temp path, account name and all — fine locally, worth knowing before pasting a
-  picture into a file everybody reads. It is emptied before each run, so every picture is of a
-  first start.
-
-**Not built:** the two browser pictures and the touch menu (JRock Web is a page, not a window),
-the Explorer context menu (a shell menu, not JRock's), and the Ghostscript PDF scene, which
-needs a tool installed on the runner. A new scene is a prompt, a send and a `shoot()` in
-`Screenshots.java`.
 
 ## No window at all: `--cli`
 
