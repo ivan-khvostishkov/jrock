@@ -8050,6 +8050,10 @@ public class JRock {
 
         javax.swing.JPanel content = new ViewportWidthPanel();
         content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
+        // ROOM ROUND THE WORDS. Without it the text starts hard against the left edge and
+        // ends hard against the scrollbar, which reads as unfinished however right the
+        // list is - and this dialog is a page of prose rather than a table.
+        content.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 12, 12, 12));
         content.add(where);
         content.add(javax.swing.Box.createVerticalStrut(8));
         content.add(notes);

@@ -109,6 +109,11 @@ public final class InstallerShots {
         System.out.println("installing into " + home);
         JFrame wizard = startWizard();
         if (wizard == null) System.exit(0);
+        // 880x749 does not fit a runner's 1024x768 once the taskbar has taken its share,
+        // and what is behind the taskbar is what a picture read off the screen shows (see
+        // fitOnScreen in Screenshots.java). Pages four and nine both had their last rows
+        // under it.
+        fitOnScreen(wizard);
 
         drive(wizard, home);
         if (windows) explorerMenus(documents);
@@ -370,6 +375,27 @@ public final class InstallerShots {
     private static final String LEGACY_MENU_KEY =
             "HKCU\\Software\\Classes\\CLSID\\"
             + "{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32";
+
+    /** The window made to fit the screen it is on - see Screenshots.java for why. */
+    private static void fitOnScreen(Window window) {
+        onEdt(() -> {
+            java.awt.GraphicsConfiguration where = window.getGraphicsConfiguration();
+            if (where == null) return;
+            java.awt.Rectangle screen = where.getBounds();
+            java.awt.Insets taken = java.awt.Toolkit.getDefaultToolkit()
+                    .getScreenInsets(where);
+            int room = screen.width - taken.left - taken.right;
+            int high = screen.height - taken.top - taken.bottom;
+            int w = Math.min(window.getWidth(), room);
+            int h = Math.min(window.getHeight(), high);
+            if (w != window.getWidth() || h != window.getHeight()) {
+                System.out.println("  the wizard's " + window.getWidth() + "x"
+                        + window.getHeight() + " does not fit " + room + "x" + high
+                        + ": resized to " + w + "x" + h);
+            }
+            window.setBounds(screen.x + taken.left, screen.y + taken.top, w, h);
+        });
+    }
 
     private static void contextMenu(java.awt.Robot robot) {
         robot.keyPress(java.awt.event.KeyEvent.VK_SHIFT);

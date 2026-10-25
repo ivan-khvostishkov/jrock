@@ -213,6 +213,7 @@ public final class Screenshots {
         }
 
         JFrame window = JRock.automationWindow();
+        fitOnScreen(window);
         settle();
         shoot(window, "01-window-at-startup");
 
@@ -625,6 +626,7 @@ public final class Screenshots {
             System.out.println(row[1] + ": no window of its own appeared");
             return;
         }
+        fitOnScreen(own);
         settle();
         shoot(own, row[2]);
     }
@@ -647,6 +649,7 @@ public final class Screenshots {
                 System.out.println(agent + ": no window of its own appeared");
                 return;
             }
+            fitOnScreen(found);
             shoot(found, name);
         } catch (ReflectiveOperationException | RuntimeException ex) {
             // An agent that cannot start on this runner is a missing picture, not a
@@ -879,7 +882,13 @@ public final class Screenshots {
             textAt = 8 + side + 8;
         }
 
-        String title = window instanceof JFrame ? ((JFrame) window).getTitle() : null;
+        // A FRAME OR A DIALOG, because four of these pictures are dialogs - the three
+        // Configure tabs and the folder's own listing - and asking only a JFrame for its
+        // title left their caption bars blank. A dialog's title is the one thing in the
+        // picture that says which dialog it is.
+        String title = window instanceof java.awt.Frame ? ((java.awt.Frame) window).getTitle()
+                : window instanceof java.awt.Dialog ? ((java.awt.Dialog) window).getTitle()
+                : null;
         if (title != null && !title.isEmpty()) {
             g.setColor(new Color(0x37, 0x47, 0x4F));
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
@@ -895,6 +904,38 @@ public final class Screenshots {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * The window made to fit the screen it is on, and moved to the corner of it.
+     *
+     * <p>A picture is read back off the screen, so a window taller than the screen is a
+     * window whose bottom is BEHIND something: on a build runner at 1024x768, JRock's own
+     * 1042x833 left its last twenty pixels under the taskbar - and the taskbar is what
+     * came back in the picture. The usable area is the screen less whatever the desktop
+     * reserves, which is exactly the right question to ask here.
+     *
+     * <p>It is also what makes the three runners agree: each has a screen of its own size,
+     * and a window that fits is the same window in all three pictures.
+     */
+    private static void fitOnScreen(Window window) {
+        onEdt(() -> {
+            java.awt.GraphicsConfiguration where = window.getGraphicsConfiguration();
+            if (where == null) return;
+            java.awt.Rectangle screen = where.getBounds();
+            java.awt.Insets taken = java.awt.Toolkit.getDefaultToolkit()
+                    .getScreenInsets(where);
+            int room = screen.width - taken.left - taken.right;
+            int high = screen.height - taken.top - taken.bottom;
+            int w = Math.min(window.getWidth(), room);
+            int h = Math.min(window.getHeight(), high);
+            if (w != window.getWidth() || h != window.getHeight()) {
+                System.out.println("  " + window.getWidth() + "x" + window.getHeight()
+                        + " does not fit " + room + "x" + high + ": resized to "
+                        + w + "x" + h);
+            }
+            window.setBounds(screen.x + taken.left, screen.y + taken.top, w, h);
+        });
     }
 
     /** Lets the window finish what it was asked to do, then lets it paint. */
