@@ -71,9 +71,12 @@ public final class WebShots {
     public static void main(String[] args) throws Exception {
         List<String> plain = new ArrayList<>();
         String deployed = null;
+        int attach = 0;
         for (int i = 0; i < args.length; i++) {
             if ("--url".equals(args[i]) && i + 1 < args.length) deployed = args[++i];
-            else plain.add(args[i]);
+            else if ("--attach".equals(args[i]) && i + 1 < args.length) {
+                attach = Integer.parseInt(args[++i]);
+            } else plain.add(args[i]);
         }
         out = Paths.get(plain.size() > 0 ? plain.get(0) : "screenshots").toAbsolutePath();
         Files.createDirectories(out);
@@ -82,6 +85,30 @@ public final class WebShots {
             System.out.println("no Chromium-based browser found: name one as the second "
                     + "argument (Edge and Chrome both work)");
             System.exit(1);
+        }
+
+        // --attach: A BROWSER SOMEBODY ELSE IS RUNNING, which is how a phone is checked.
+        // Chrome on Android speaks the same DevTools protocol as Chrome on a desktop, and
+        // adb will forward its socket to a port on the runner - so the same code that
+        // drives a browser here can ask a browser THERE whether CheerpJ got as far as
+        // putting a display on the page. That is a smoke test with an answer in it,
+        // rather than a screenshot nobody reads: the job fails if the canvas never
+        // appears, and the page's own log says how far it got.
+        //
+        // Nothing is navigated and nothing is served: the phone has already been sent to
+        // the address, and this attaches to what it is showing.
+        if (attach > 0) {
+            try (Devtools dev = Devtools.connect(attach)) {
+                dev.awaitCanvas();
+                shoot(dev, plain.size() > 1 ? plain.get(1) : "attached-the-page");
+                System.out.println("the canvas is there: CheerpJ started and JRock has a "
+                        + "display on this device");
+            } catch (Exception failed) {
+                System.out.println("ATTACHED CHECK FAILED: " + failed.getMessage());
+                System.exit(1);
+            }
+            System.out.println("wrote " + taken + " screenshot(s) to " + out);
+            System.exit(0);
         }
 
         // --url: A PAGE SOMEBODY ELSE IS SERVING, which is how this tool takes pictures

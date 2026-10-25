@@ -15,8 +15,13 @@
 # page start by itself (see autostartDir in jrock-web/index.html) - which is what a reader
 # gets from the same link.
 #
-# Android is not here on purpose. It is the same page, the same canvas and the same menu
-# as iOS, one status bar apart: a second picture of the first.
+# ANDROID IS A CHECK AND NOT A PICTURE. Its canvas, its page and its long-press menu are
+# iOS's, one status bar apart, so nothing in the README needs a second copy of them - but
+# "Android is a supported platform" is a claim this repository makes, and a claim with no
+# test behind it is a hope. So that job asks the phone's own Chrome, over the DevTools
+# protocol that adb forwards off the device, whether CheerpJ got as far as putting a
+# display on the page - and fails if it did not. Its pictures are uploaded too, for
+# looking at when it does fail.
 name: Web and mobile screenshots
 
 on:
@@ -137,5 +142,82 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: mobile-ios
+          path: screenshots/
+          if-no-files-found: error
+
+  android:
+    name: Android Chrome, in the emulator (a check, not a picture)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      # KVM, which the Linux runners have but do not open to the job's own user. Without
+      # it the emulator falls back to software and takes long enough to be useless.
+      - name: Let this job use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm-for-this-job.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      # Google's own tooling, already on the runner: sdkmanager, avdmanager, the emulator
+      # and adb. One system image, one device, nothing from the marketplace.
+      - name: An emulator, booted
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+              "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+              -n jrock -k "system-images;android-34;google_apis;x86_64" --device pixel_6 --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd jrock -no-window -no-audio \
+              -no-boot-anim -no-snapshot -gpu swiftshader_indirect > emulator.log 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+          # Booted means sys.boot_completed, not "adb answered": Chrome cannot be started
+          # before the framework is up.
+          timeout 420 bash -c 'until [ "$('"$ANDROID_HOME"'/platform-tools/adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
+          "$ANDROID_HOME/platform-tools/adb" shell wm size
+
+      - name: Open JRock, then ask the phone's own Chrome whether it is running
+        run: |
+          mkdir -p screenshots
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          $ADB shell am start -a android.intent.action.VIEW -d "$URL" > /dev/null
+          sleep 25
+          $ADB exec-out screencap -p > screenshots/android-01-starting.png
+          sleep "$WAIT"
+          $ADB exec-out screencap -p > screenshots/android-02-the-window.png
+
+          # The long press, which here is a swipe that does not move. The middle of the
+          # screen is inside JRock's log, which is the menu worth opening.
+          SIZE=$($ADB shell wm size | tr -d '\r' | awk -F'[: x]+' '{print $(NF-1), $NF}')
+          X=$(echo $SIZE | awk '{print int($1/2)}')
+          Y=$(echo $SIZE | awk '{print int($2/2)}')
+          $ADB shell input swipe $X $Y $X $Y 900
+          sleep 2
+          $ADB exec-out screencap -p > screenshots/android-03-the-touch-menu.png
+          ls -la screenshots/
+
+          # AND THE CHECK ITSELF. Chrome on the device speaks the DevTools protocol;
+          # adb forwards its socket to a port here, and the same tool that drives a
+          # desktop browser asks this one whether the page has a canvas - which is
+          # CheerpJ having started and JRock having a display. No canvas, no pass.
+          $ADB forward tcp:9222 localabstract:chrome_devtools_remote
+          curl -sf http://127.0.0.1:9222/json/version || \
+            { echo "::error::the phone's Chrome is not answering on the DevTools port"; exit 1; }
+          java .github/build/WebShots.java screenshots android-04-as-chrome-sees-it \
+               --attach 9222
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mobile-android
           path: screenshots/
           if-no-files-found: error
