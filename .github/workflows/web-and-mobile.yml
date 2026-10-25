@@ -211,6 +211,14 @@ jobs:
           SDK="$ANDROID_HOME/cmdline-tools/latest/bin"
           IMAGE="system-images;android-34;google_apis;x86_64"
 
+          # ONE FOLDER BOTH TOOLS AGREE ON. avdmanager wrote the device somewhere the
+          # emulator does not look - "Unknown AVD name [jrock]", and then the emulator's
+          # own error helpfully listing the three places it searches: $ANDROID_AVD_HOME,
+          # then $ANDROID_SDK_HOME/avd, then $HOME/.android/avd. The first of those is the
+          # one to set, so it is set here and everything below inherits it.
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+
           # "yes" INTO THE INSTALL AS WELL, which is what this was missing. --licenses
           # takes the acceptances and exits, breaking the pipe - that is the "yes: standard
           # output: Broken pipe" line in the log, and it is harmless - but the install
@@ -225,11 +233,16 @@ jobs:
           echo "--- a device"
           echo no | timeout 120 "$SDK/avdmanager" create avd \
               -n jrock -k "$IMAGE" --device pixel_6 --force
+          # Where it went, in the log, so the next thing that cannot find it says so here.
+          "$SDK/avdmanager" list avd || true
+          ls -la "$ANDROID_AVD_HOME" || true
           echo "--- booting"
           nohup "$ANDROID_HOME/emulator/emulator" -avd jrock -no-window -no-audio \
               -no-boot-anim -no-snapshot -gpu swiftshader_indirect > emulator.log 2>&1 &
           timeout 180 "$ANDROID_HOME/platform-tools/adb" wait-for-device \
-            || { echo "::error::adb never saw the device"; tail -40 emulator.log; exit 1; }
+            || { echo "::error::adb never saw the device"
+                 "$ANDROID_HOME/emulator/emulator" -list-avds || true
+                 tail -40 emulator.log; exit 1; }
           # Booted means sys.boot_completed, not "adb answered": Chrome cannot be started
           # before the framework is up.
           timeout 420 bash -c 'until [ "$('"$ANDROID_HOME"'/platform-tools/adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
