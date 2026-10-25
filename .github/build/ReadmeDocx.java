@@ -90,6 +90,15 @@ public final class ReadmeDocx {
     private static final Pattern IMAGE = Pattern.compile(
             "!\\[[^\\]\\n]*\\]\\((<[^>\\n]+>|[^)\\s]+)\\)");
 
+    /**
+     * The same, written as HTML - which is how a picture is given a width on GitHub, and
+     * so how the README's two iPhone pictures are written. The exporter reads these as
+     * references too, and a reference to a file that was never attached places nothing.
+     */
+    private static final Pattern HTML_IMAGE = Pattern.compile("(?is)<img\\s[^>]*>");
+    private static final Pattern HTML_SRC = Pattern.compile(
+            "(?is)\\bsrc\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'>]+))");
+
     public static void main(String[] args) throws Exception {
         Path readme = Paths.get(args.length > 0 ? args[0] : "README.md").toAbsolutePath();
         Path target = Paths.get(args.length > 1 ? args[1] : "README.docx").toAbsolutePath();
@@ -432,6 +441,20 @@ public final class ReadmeDocx {
             }
             if (target.contains("://")) continue;          // somebody else's picture
             if (!found.contains(target)) found.add(target);
+        }
+        Matcher tags = HTML_IMAGE.matcher(markdown);
+        while (tags.find()) {
+            Matcher source = HTML_SRC.matcher(tags.group());
+            if (!source.find()) continue;
+            for (int group = 1; group <= source.groupCount(); group++) {
+                String target = source.group(group);
+                if (target == null) continue;
+                target = target.trim();
+                if (!target.isEmpty() && !target.contains("://") && !found.contains(target)) {
+                    found.add(target);
+                }
+                break;
+            }
         }
         return found;
     }

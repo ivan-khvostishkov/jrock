@@ -16758,6 +16758,15 @@ public class JRock {
                 java.util.regex.Pattern.compile("!\\[[^\\]\\n]*\\]\\((<[^>\\n]+>|[^)\\s]+)\\)");
         private static final java.util.regex.Pattern HASH_REF =
                 java.util.regex.Pattern.compile("[0-9a-f]{" + HASH_LEN + "}");
+        // A picture written as HTML, and the two attributes worth reading out of it.
+        private static final java.util.regex.Pattern HTML_IMAGE =
+                java.util.regex.Pattern.compile("(?is)<img\\s[^>]*>");
+        private static final java.util.regex.Pattern IMAGE_SRC =
+                java.util.regex.Pattern.compile(
+                        "(?is)\\bsrc\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'>]+))");
+        private static final java.util.regex.Pattern IMAGE_ALT =
+                java.util.regex.Pattern.compile(
+                        "(?is)\\balt\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')");
 
         // An <svg> start or end tag, for finding where an inline SVG ends, nested ones
         // included. The <div> a model often wraps one in is matched separately: it is
@@ -17149,6 +17158,58 @@ public class JRock {
             return out.append(markdown, copied, markdown.length()).toString();
         }
 
+        // ---- pictures written as HTML ----
+
+        // Every <img> in the Markdown, replaced by a reference the rest of the parse
+        // places like any other picture.
+        //
+        // Markdown allows HTML, and the usual reason to write some is a width there is no
+        // Markdown syntax for - which is why the README's two iPhone pictures are tags
+        // rather than "![](...)". A tag left alone arrives in the document as its own
+        // source code, with no picture anywhere near it.
+        //
+        // The src becomes the reference and the alt its text. The width is dropped,
+        // because a document decides how big a picture is - as wide as the text frame,
+        // or 300 dpi, whichever is smaller (see Image) - while the attribute is pixels on
+        // somebody's screen. Inside a code fence a tag is the subject rather than markup,
+        // and is left exactly as it was written.
+        private static String htmlImages(String markdown) {
+            if (!markdown.contains("<img")) return markdown;
+            List<int[]> fences = fencedSpans(markdown);
+            StringBuilder out = new StringBuilder(markdown.length());
+            java.util.regex.Matcher tag = HTML_IMAGE.matcher(markdown);
+            int copied = 0;
+            while (tag.find()) {
+                if (inSpans(fences, tag.start())) continue;
+                String source = attribute(IMAGE_SRC, tag.group());
+                // No address, or one with a space in it, is nothing this can place: the
+                // tag stays as it is and says so to whoever reads the document.
+                if (source == null || source.isEmpty() || source.contains(" ")) continue;
+                String alt = attribute(IMAGE_ALT, tag.group());
+                out.append(markdown, copied, tag.start())
+                   .append("![").append(alt == null ? "" : label(alt))
+                   .append("](").append(source).append(')');
+                copied = tag.end();
+            }
+            return out.append(markdown, copied, markdown.length()).toString();
+        }
+
+        /** One attribute's value out of a start tag, or null when it has not got one. */
+        private static String attribute(java.util.regex.Pattern pattern, String tag) {
+            java.util.regex.Matcher value = pattern.matcher(tag);
+            if (!value.find()) return null;
+            for (int group = 1; group <= value.groupCount(); group++) {
+                if (value.group(group) != null) return value.group(group).trim();
+            }
+            return null;
+        }
+
+        /** Alt text as a reference's label: one line, and no bracket closing it early. */
+        private static String label(String alt) {
+            return alt.replace('\n', ' ').replace('\r', ' ')
+                      .replace('[', '(').replace(']', ')').trim();
+        }
+
         // Where the SVG whose start tag was just found ends, past its own closing tag
         // rather than a nested one's, or -1 when it is never closed.
         private static int svgEnd(java.util.regex.Matcher tag) {
@@ -17259,7 +17320,7 @@ public class JRock {
         // ---- parsing ----
 
         private void parse(String markdown) {
-            String[] lines = fileNames(inlineSvgs(markdown))
+            String[] lines = fileNames(htmlImages(inlineSvgs(markdown)))
                     .replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
             boolean fenced = false;
             int i = 0;
