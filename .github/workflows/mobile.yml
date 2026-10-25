@@ -49,6 +49,7 @@ jobs:
       - name: Open JRock and photograph it
         run: |
           mkdir -p screenshots
+          open -a Simulator            # the device screen has to be a window to press on
           xcrun simctl openurl "$UDID" "${{ inputs.url }}"
           # The first picture is taken early on purpose: the page's own log, which says
           # what it is doing while the runtime comes down, is the one thing a reader
@@ -57,6 +58,15 @@ jobs:
           xcrun simctl io "$UDID" screenshot screenshots/ios-01-starting.png
           sleep ${{ inputs.wait }}
           xcrun simctl io "$UDID" screenshot screenshots/ios-02-the-window.png
+
+          # AND THE LONG PRESS, which is how a menu opens where there is no right button
+          # to click - the one thing about JRock on a phone that a picture of the window
+          # cannot show. The press is the host's mouse held over the Simulator's window
+          # (see LongPress.java); the picture is still the device's own screen, so the
+          # menu is in it and the Simulator's chrome is not.
+          java .github/build/LongPress.java 0.5 0.55 900 || true
+          sleep 2
+          xcrun simctl io "$UDID" screenshot screenshots/ios-03-the-touch-menu.png
           ls -la screenshots/
 
       - name: Upload
@@ -107,6 +117,17 @@ jobs:
           $ADB exec-out screencap -p > screenshots/android-01-starting.png
           sleep ${{ inputs.wait }}
           $ADB exec-out screencap -p > screenshots/android-02-the-window.png
+
+          # The long press, which here is simply a swipe that does not move: input goes to
+          # the device, so no window of anybody's has to be found first. The middle of the
+          # screen is inside JRock's log, which is the menu worth opening.
+          SIZE=$($ADB shell wm size | tr -d '\r' | awk -F'[: x]+' '{print $(NF-1), $NF}')
+          X=$(echo $SIZE | awk '{print int($1/2)}')
+          Y=$(echo $SIZE | awk '{print int($2/2)}')
+          echo "long press at $X,$Y of $SIZE"
+          $ADB shell input swipe $X $Y $X $Y 900
+          sleep 2
+          $ADB exec-out screencap -p > screenshots/android-03-the-touch-menu.png
           ls -la screenshots/
 
       - name: Upload
