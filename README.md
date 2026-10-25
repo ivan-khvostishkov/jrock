@@ -30,7 +30,7 @@ come from. The question and the attached page are still in the prompt; the answe
 with the masked raw request and response and the token stats under it. Every picture in this
 README is taken by the build, by driving this program through its own automation API.*
 
-By Ivan Khvostishkov, with assistance of Kiro and JetBrains IntelliJ IDEA.
+By Ivan Khvostishkov, with assistance of Kiro, Claude and JetBrains IntelliJ IDEA.
 
 ---
 
