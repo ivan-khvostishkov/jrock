@@ -1,31 +1,39 @@
-# JRock in a browser, photographed in one: a desktop tab, and two phones.
+# JRock in a browser, photographed in one: a desktop tab, and a phone.
 #
-# WHY A DEPLOYED ADDRESS AND NOT THE BUNDLE JUST BUILT. The page runs JRock through
-# CheerpJ, which fetches its own runtime over the network and wants a page served the way
-# a page is served; driven against a loopback server on a desktop it initialises and then
-# the JVM exits before anything is painted (see WebShots.java). The deployed site does
-# work - it is what the browser section of the README is about - so that is what these
-# pictures are of. They show what is deployed rather than the jar built by this run, and
-# that is the honest trade: a real picture of a real phone against a slightly older jar.
+# TWO WAYS IN, AND THE BETTER ONE FIRST. The desktop job serves THIS BUILD'S bundle - the
+# page and the jar that were just made - and drives the program through the page's library
+# mode: "#shots" in the address runs the jar as a library and hands the JRock class to
+# JavaScript, so the tool calls the automation API (the same calls a flow makes) instead
+# of pressing at pixels, and a Java exception arrives with its message rather than as
+# "exited with code 1". That is a picture of this build, which is what a screenshot in a
+# README should be.
 #
-# The address ends in "?home": the page reads its query string as the folder to work in
-# and STARTS BY ITSELF when there is one (see autostartDir in jrock-web/index.html), so
-# nothing here has to find a button and press it. A phone screenshot of a page that
-# started on its own is also a fair picture of what a reader will get from the same link.
+# If that comes back with nothing, it falls back to the DEPLOYED page, which is known to
+# work - a true picture of a slightly older jar beats no picture of this one. The iOS job
+# has no choice in the matter: a phone cannot be handed a bundle off this runner, so it
+# opens the deployed address, where "?home" is the folder to work in and also makes the
+# page start by itself (see autostartDir in jrock-web/index.html) - which is what a reader
+# gets from the same link.
 #
-# Manual, because an emulator and a simulator are minutes each and nothing in the program
-# changes what they show. Run it when the browser pictures need refreshing.
+# Android is not here on purpose. It is the same page, the same canvas and the same menu
+# as iOS, one status bar apart: a second picture of the first.
 name: Web and mobile screenshots
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       url:
-        description: The address to open (its query string is the working folder)
+        description: The address a phone opens (its query string is the working folder)
         default: https://jrock.nosocial.net/?home
       wait:
         description: Seconds to let CheerpJ download its runtime and paint the window
         default: '150'
+
+env:
+  # A push carries no inputs, so every use of them falls back to these.
+  URL: ${{ inputs.url || 'https://jrock.nosocial.net/?home' }}
+  WAIT: ${{ inputs.wait || '150' }}
 
 jobs:
   web:
@@ -40,30 +48,31 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      # The same tool that serves the page locally, pointed at the deployed one instead
-      # (--url). Under Xvfb because it drives a real browser rather than a headless one:
-      # headless Chromium runs the page, fetches the jar, initialises CheerpJ and then the
-      # JVM exits before anything is painted - which is the whole reason these pictures
-      # come from a deployed address.
-      #
-      # Three scenes: the window in a tab, the /files browser with a real __JRock in it,
-      # and the page on a phone-sized screen with a long press - the last two are the same
-      # tool's mobile scenes, which the iOS and Android jobs below then show on real ones.
-      - name: Drive the deployed page
+      - name: Build the jar this page will run
+        run: |
+          javac -encoding UTF-8 --release 11 -g:source,lines,vars -d out JRock.java
+          java .github/build/BuildJar.java
+
+      # Xvfb because the tool drives a real browser and not a headless one: headless
+      # Chromium runs the page, fetches the jar, initialises CheerpJ - and then the JVM
+      # exits before anything is painted.
+      - name: Drive this build's page, then the deployed one if it has to
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb
           mkdir -p screenshots
-          # WITHOUT THE QUERY, deliberately. A folder in the address starts JRock the
-          # moment the jar has loaded, and the first scene wants the page's own chrome
-          # box unticked BEFORE that happens - the page reads it once, as the run begins.
-          # So the tool presses Run itself here, and the phones below keep the ?home that
-          # starts it for them.
-          BASE='${{ inputs.url }}'
-          BASE="${BASE%%\?*}"
-          echo "driving $BASE"
-          xvfb-run -a --server-args="-screen 0 1600x1200x24" \
-            java .github/build/WebShots.java screenshots --url "$BASE" || true
+          shots() { xvfb-run -a --server-args="-screen 0 1600x1200x24" \
+                      java .github/build/WebShots.java screenshots "$@" || true; }
+
+          shots
+          if [ -z "$(ls screenshots/*.png 2>/dev/null)" ]; then
+            # Without the query: a folder in the address starts JRock the moment the jar
+            # has loaded, and the first scene wants the page's own chrome box unticked
+            # BEFORE that happens, so the tool presses Run itself.
+            BASE="${URL%%\?*}"
+            echo "nothing from this build's own page; falling back to $BASE"
+            shots --url "$BASE"
+          fi
           ls -la screenshots/
 
       - name: Upload
@@ -105,13 +114,13 @@ jobs:
         run: |
           mkdir -p screenshots
           open -a Simulator            # the device screen has to be a window to press on
-          xcrun simctl openurl "$UDID" "${{ inputs.url }}"
+          xcrun simctl openurl "$UDID" "$URL"
           # The first picture is taken early on purpose: the page's own log, which says
           # what it is doing while the runtime comes down, is the one thing a reader
           # waiting on a slow connection will see.
           sleep 25
           xcrun simctl io "$UDID" screenshot screenshots/ios-01-starting.png
-          sleep ${{ inputs.wait }}
+          sleep $WAIT
           xcrun simctl io "$UDID" screenshot screenshots/ios-02-the-window.png
 
           # AND THE LONG PRESS, which is how a menu opens where there is no right button
@@ -128,66 +137,5 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: mobile-ios
-          path: screenshots/
-          if-no-files-found: error
-
-  android:
-    name: Android Chrome, in the emulator
-    runs-on: ubuntu-latest
-    steps:
-      # KVM, which the Linux runners have but do not open to the job's own user. Without
-      # it the emulator falls back to software and takes long enough to be useless.
-      - name: Let this job use KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm-for-this-job.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm
-
-      # Google's own tooling, also already on the runner: sdkmanager, avdmanager, the
-      # emulator and adb. One system image, one device, no action from the marketplace.
-      - name: An emulator, booted
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
-              "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64"
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
-              -n jrock -k "system-images;android-34;google_apis;x86_64" --device pixel_6 --force
-          nohup "$ANDROID_HOME/emulator/emulator" -avd jrock -no-window -no-audio \
-              -no-boot-anim -no-snapshot -gpu swiftshader_indirect > emulator.log 2>&1 &
-          "$ANDROID_HOME/platform-tools/adb" wait-for-device
-          # Booted means sys.boot_completed, not "adb answered": Chrome cannot be started
-          # before the framework is up.
-          timeout 420 bash -c 'until [ "$('"$ANDROID_HOME"'/platform-tools/adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
-          "$ANDROID_HOME/platform-tools/adb" shell wm size
-          "$ANDROID_HOME/platform-tools/adb" shell settings put system font_scale 1.0
-
-      - name: Open JRock and photograph it
-        run: |
-          mkdir -p screenshots
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          $ADB shell am start -a android.intent.action.VIEW -d '${{ inputs.url }}' > /dev/null
-          sleep 25
-          $ADB exec-out screencap -p > screenshots/android-01-starting.png
-          sleep ${{ inputs.wait }}
-          $ADB exec-out screencap -p > screenshots/android-02-the-window.png
-
-          # The long press, which here is simply a swipe that does not move: input goes to
-          # the device, so no window of anybody's has to be found first. The middle of the
-          # screen is inside JRock's log, which is the menu worth opening.
-          SIZE=$($ADB shell wm size | tr -d '\r' | awk -F'[: x]+' '{print $(NF-1), $NF}')
-          X=$(echo $SIZE | awk '{print int($1/2)}')
-          Y=$(echo $SIZE | awk '{print int($2/2)}')
-          echo "long press at $X,$Y of $SIZE"
-          $ADB shell input swipe $X $Y $X $Y 900
-          sleep 2
-          $ADB exec-out screencap -p > screenshots/android-03-the-touch-menu.png
-          ls -la screenshots/
-
-      - name: Upload
-        uses: actions/upload-artifact@v6
-        with:
-          name: mobile-android
           path: screenshots/
           if-no-files-found: error

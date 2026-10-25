@@ -253,6 +253,11 @@
       // settings, key and log without a click. The folder is created if it is new. A
       // query with "=" in it is a parameter rather than a folder, and so is ignored,
       // and so are "." and ".." segments, which could only lead out of /files.
+      // "#shots" in the address: run the program through library mode and hand the
+      // class to JavaScript (see the end of run). Nothing else in the page changes, and
+      // nobody arrives with a hash by accident.
+      var DRIVEN = location.hash.replace(/^#/, "") === "shots";
+
       var autostartDir = (function () {
         var query = location.search.replace(/^\?/, "");
         if (!query || query.indexOf("=") >= 0) return null;
@@ -1617,10 +1622,32 @@
           if (hideChrome) {
             setTimeout(function () { setChromeHidden(true); }, 5000);
           }
-          var code = autostartDir
-              ? await cheerpjRunJar(JAR_PATH, "--working-dir", autostartDir)
-              : await cheerpjRunJar(JAR_PATH);
-          log("JRock exited with code " + code + ".");
+          if (DRIVEN) {
+            // LIBRARY MODE, so that JavaScript can drive this program the way a GUI test
+            // drives it: by calling its own public static methods. Reached with "#shots"
+            // in the address - the hash, because the QUERY is already the folder to work
+            // in, and the two have to be sayable at once.
+            //
+            // Two things come of it. The automation API becomes callable from here, so a
+            // tool taking pictures sets the prompt and waits for the window through the
+            // same calls a flow uses instead of pressing at pixels. And a Java exception
+            // arrives as a JavaScript one, with its message: cheerpjRunJar only ever
+            // gives back an exit code, and "exited with code 1" is the least useful true
+            // thing a program can say about itself.
+            var lib = await cheerpjRunLibrary(JAR_PATH);
+            var JRockClass = await lib.JRock;
+            window.jrock = JRockClass;
+            log("Library mode: window.jrock is the JRock class. Starting it ...");
+            await (autostartDir
+                ? JRockClass.main(["--working-dir", autostartDir])
+                : JRockClass.main([]));
+            log("JRock is up, and window.jrock takes its automation calls.");
+          } else {
+            var code = autostartDir
+                ? await cheerpjRunJar(JAR_PATH, "--working-dir", autostartDir)
+                : await cheerpjRunJar(JAR_PATH);
+            log("JRock exited with code " + code + ".");
+          }
         } catch (e) {
           // The hint is there because the /files browser loads the Java standard library
           // into this page as a library-mode session (see its section above), and CheerpJ

@@ -119,9 +119,13 @@ public final class WebShots {
         try {
             Devtools dev = Devtools.connect(port);
             try {
-                desktop(dev, address);
+                // The page this build serves is driven through library mode; a
+                // deployed one is clicked, because the hash hook only exists in a page
+                // as new as this tool.
+                boolean driven = deployed == null;
+                desktop(dev, address, driven);
                 filesBrowser(dev, address);
-                phone(dev, address);
+                phone(dev, address, driven);
             } finally {
                 dev.close();
             }
@@ -148,15 +152,27 @@ public final class WebShots {
      * the tab, and a screenshot of that is a screenshot of a Swing window with no browser
      * around it - which the desktop pictures already are.
      */
-    private static void desktop(Devtools dev, String address) throws Exception {
+    private static void desktop(Devtools dev, String address, boolean driven)
+            throws Exception {
         // The plain address, and Run pressed here rather than a "?folder" in it: a folder
         // in the address starts JRock the moment the jar has loaded (which is what that
         // feature is for), and this scene wants the checkbox unticked BEFORE it starts -
         // the page reads it once, as the run begins.
-        dev.navigate(address);
+        dev.navigate(address + (driven ? "#shots" : ""));
         dev.untick("hideChrome");
         dev.click("runBtn");
-        dev.awaitCanvas();
+        if (driven) {
+            // DRIVEN, not clicked: the page ran the jar as a library and handed the class
+            // over, so from here it is the automation API - await the window, then put a
+            // question in the prompt, which is what makes this a picture of the program
+            // being used rather than of a program that has started.
+            dev.awaitDriven();
+            dev.drive("automationAwaitReady(120000)");
+            dev.drive("automationSetPrompt('Read this invoice and tell me what is due,"
+                    + " and when.\\n')");
+        } else {
+            dev.awaitCanvas();
+        }
         shoot(dev, "web-01-jrock-in-a-browser-tab");
     }
 
@@ -179,12 +195,18 @@ public final class WebShots {
     }
 
     /** The same page on a phone-sized screen, with touch events instead of a mouse. */
-    private static void phone(Devtools dev, String address) throws Exception {
+    private static void phone(Devtools dev, String address, boolean driven)
+            throws Exception {
         dev.phone(PHONE_W, PHONE_H);
-        dev.navigate(address);
+        dev.navigate(address + (driven ? "#shots" : ""));
         dev.untick("hideChrome");
         dev.click("runBtn");
-        dev.awaitCanvas();
+        if (driven) {
+            dev.awaitDriven();
+            dev.drive("automationAwaitReady(120000)");
+        } else {
+            dev.awaitCanvas();
+        }
         shoot(dev, "mobile-01-jrock-on-a-phone");
 
         // A long press on the prompt, which the page turns into a right-click for Swing
@@ -582,6 +604,31 @@ public final class WebShots {
             String data = first(answer, "\"data\":\"([^\"]+)\"");
             if (data == null) throw new IOException("no image came back: " + brief(answer));
             return Base64.getDecoder().decode(data);
+        }
+
+        /**
+         * One call into the running program, from JavaScript - which is the whole point
+         * of the page's library mode: {@code window.jrock} IS the JRock class, so this
+         * is its own automation API, the same calls a flow makes, reached through the
+         * browser instead of through a JVM on this machine.
+         *
+         * <p>Nothing is clicked and no pixel is guessed at. And a Java exception comes
+         * back as a JavaScript one with its message in it, where {@code cheerpjRunJar}
+         * could only ever report an exit code.
+         */
+        String drive(String call) throws Exception {
+            String answer = evaluate("window.jrock." + call);
+            if (answer.contains("\"exceptionDetails\"")) {
+                throw new IOException("window.jrock." + call + " threw: " + brief(answer)
+                        + "\nthe page's own log said:\n" + pageLog());
+            }
+            return answer;
+        }
+
+        /** Waits for library mode to have handed the class over. */
+        void awaitDriven() throws Exception {
+            await("typeof window.jrock !== 'undefined'", 240_000,
+                    "library mode to hand JavaScript the JRock class");
         }
 
         private String evaluate(String expression) throws Exception {
