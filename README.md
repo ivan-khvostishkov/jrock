@@ -520,8 +520,8 @@ file to the browser as a download.*
 Both work today, through [JRock Web](#jrock-web-in-the-browser) §05: the phone's browser runs the same
 unmodified `jrock.jar`, so there is nothing to install and no app store in the way.
 
-<img src="images/mobile-01-jrock-on-a-phone.png" width="340"
-     alt="JRock on a phone-sized screen: the Swing window, the session report, and the prompt">
+<img src="images/ios-02-the-window.png" width="340"
+     alt="JRock running on an iPhone in Safari: the window, the session report ending in Ready, the prompt, and the keyboard up under it">
 
 *Edge on an iPhone, with the page's own header and footer left showing: the jar's size and SHA-256
 to check before typing a key, and a footer log ending in `GET .../v1/models -> 200` — a real Bedrock
@@ -5203,13 +5203,14 @@ Right-clicking (or long-tapping on touch devices) opens a context menu:
 ![The log's menu over a selected answer: select the last answer, save or print the selection, the two Markdown exports, narrate it, and open a URL or a local path out of it](images/windows-10-the-log-menu.png)
 
 *Half of this menu acts on a selection, so the last answer is selected here: without one, five of
-the items are greyed out. The same menu opens on a phone from a long press —*
+the items are greyed out. And the same menu opens on a phone, from a long press —*
 
-<img src="images/mobile-02-the-long-tap-menu.png" width="330"
-     alt="The prompt's own menu, opened by a long press on a phone-sized screen">
+<img src="images/ios-03-the-touch-menu.png" width="330"
+     alt="The same log menu open on an iPhone, opened by holding a finger on the log">
 
-*— which is the prompt's own menu, and the only gesture a touch screen has for everything the
-Ctrl shortcuts do.*
+*— on an iPhone, in Safari, with the same items: a long press is the only gesture a touch screen
+has for everything the Ctrl shortcuts do, and the page turns it into the right-click Swing is
+waiting for.*
 
 - **Log pane** — *Select the last answer*, Save log copy as..., Print... The first
   (**Ctrl+Shift+A**) selects the **body of the most recent answer, whole** — not the teal role
