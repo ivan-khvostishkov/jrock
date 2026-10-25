@@ -5829,12 +5829,11 @@ java -jar jrock.jar
 ```
 
 Build hashes, the same from all three runners — straight out of CI, which is the only place
-these numbers can honestly come from. These are **5.3.0 as first built**; the commits after it
-changed `JRock.java`, so **the pair for the current build goes here once CI has run on it**:
+these numbers can honestly come from:
 
 ```
-2bb3cd80999d1072486f93caa06f4b0256f4487bbc54c84bd6ef397859907918  jrock.jar
-246c39fe1261ec2f826f7dc521fb1059  jrock.jar
+75476a4419d23c2ad1ff6cfea9f74229a1bd52d14238b5242dbf885bceb41319  jrock.jar
+c62c14ea867573e73cdc174a547381b0  jrock.jar
 ```
 
 Or, if you want to modify the source and run it in place (no build step):

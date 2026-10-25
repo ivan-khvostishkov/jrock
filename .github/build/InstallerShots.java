@@ -174,6 +174,20 @@ public final class InstallerShots {
                 settle();
             }
 
+            // NOT THROUGH AN EDITOR. Page six offers to open the settings and the key
+            // file for review, which a person wants and an unattended run does not: two
+            // Notepads that nobody closes, on top of every picture taken after them.
+            for (String opens : new String[] { "Open jrock-config.txt to review it",
+                                               "Open bedrock-key.txt to paste the key into" }) {
+                javax.swing.JCheckBox box = check(wizard, opens);
+                if (box != null && box.isSelected()) {
+                    SwingUtilities.invokeLater(box::doClick);
+                    pause(300);
+                    System.out.println("  page " + (page + 1) + ": unticked \"" + opens
+                            + "\"");
+                }
+            }
+
             javax.swing.JRadioButton choose = radio(wizard,
                     "Choose which, and where each agent works");
             if (choose != null && !choose.isSelected()) {
@@ -194,12 +208,38 @@ public final class InstallerShots {
                 shoot(wizard, "18-the-installer-agents-and-flows");
             }
 
-            // The last page says what it did, which is the other picture worth having:
-            // every folder, every entry, every file, named.
+            // A DIALOG FIRST, ALWAYS. Page six opens the settings and the key file in
+            // whatever shows a .txt and then waits on a modal "paste your key, then press
+            // OK" - and while that is up, Next is DISABLED. This used to look at Next
+            // before looking for a dialog, read "disabled" as "there is no next page",
+            // photograph page six under the name of the last page and stop: which is why
+            // the wizard never reached the Explorer entries, and why the menu in those
+            // pictures had no JRock in it.
+            if (dismissDialog()) continue;
+
             javax.swing.JButton next = button(wizard, "Next >");
-            if (next == null || !next.isEnabled()) {
+            if (next == null) {
+                // No Next at all is the last page, which says what it did: every folder,
+                // every entry, every file, named.
                 shoot(wizard, "19-the-installer-finished");
                 break;
+            }
+            if (!next.isEnabled()) {
+                // Disabled is "not yet", so it is waited on - a page doing real work
+                // (copying samples, writing entries) disables it while it runs.
+                boolean enabled = false;
+                for (int waited = 0; waited < PATIENCE_MS && !enabled; waited += 500) {
+                    pause(500);
+                    if (dismissDialog()) continue;
+                    javax.swing.JButton again = button(wizard, "Next >");
+                    enabled = again != null && again.isEnabled();
+                }
+                if (!enabled) {
+                    System.out.println("  page " + (page + 1) + ": Next stayed disabled");
+                    shoot(wizard, "19-the-installer-stopped-here");
+                    break;
+                }
+                next = button(wizard, "Next >");
             }
 
             // PRESSED, NOT AWAITED. A page's own action can put a modal dialog up -
@@ -264,13 +304,26 @@ public final class InstallerShots {
             // menu is one registry value away (an empty default under that CLSID), which
             // is the documented switch, and it is taken out again by --clean.
             run("reg", "add", LEGACY_MENU_KEY, "/f", "/ve");
-            // Explorer reads it once, at start.
+            // And nothing else of this build's on the screen behind it: the installer's
+            // own text editors, and whatever JRock the start script left up. This is a
+            // runner, and these windows are ours.
+            run("taskkill", "/f", "/im", "notepad.exe");
+            run("taskkill", "/f", "/im", "javaw.exe");
+            // Explorer reads the menu switch once, at start.
             run("taskkill", "/f", "/im", "explorer.exe");
             pause(2_000);
             new ProcessBuilder("explorer.exe", folder.toString()).start();
             java.awt.Robot robot = new java.awt.Robot();
             robot.setAutoDelay(60);
             pause(9_000);                       // the shell takes its time to paint
+
+            // The window has to have the focus before Win+Up means anything to it, and a
+            // click in the middle of the screen is a click in the middle of it.
+            java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+            robot.mouseMove(screen.width / 2, screen.height / 2);
+            robot.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+            robot.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+            pause(600);
 
             // MAXIMIZED, because the picture is the whole screen and a runner's desktop
             // has the rest of this build on it: consoles, a Notepad the installer opened,
@@ -338,6 +391,7 @@ public final class InstallerShots {
     /** One window, read back off the screen: see captured() in Screenshots.java. */
     private static void shoot(Window window, String name) {
         try {
+            parkPointer();
             javax.swing.JRootPane root = window instanceof javax.swing.RootPaneContainer
                     ? ((javax.swing.RootPaneContainer) window).getRootPane() : null;
             java.awt.Component of = root != null ? root : window;
@@ -356,6 +410,23 @@ public final class InstallerShots {
             write(new java.awt.Robot().createScreenCapture(where[0]), name);
         } catch (Exception | Error ex) {
             System.out.println(name + ": not shot (" + ex + ")");
+        }
+    }
+
+    /**
+     * The mouse out of the way, into the corner it came from.
+     *
+     * <p>A pointer resting on a control is a control with a TOOLTIP a second later, and a
+     * tooltip wider than the window it belongs to is drawn in a window of its own, half
+     * off the edge of the picture. Nothing about a tooltip is worth photographing: what
+     * it says is in the README already.
+     */
+    private static void parkPointer() {
+        try {
+            new java.awt.Robot().mouseMove(2, 2);
+            pause(400);
+        } catch (java.awt.AWTException | RuntimeException ex) {
+            // No Robot, no pointer to park: the picture is whatever it is.
         }
     }
 

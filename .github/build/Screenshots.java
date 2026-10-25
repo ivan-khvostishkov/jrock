@@ -165,6 +165,13 @@ public final class Screenshots {
         watchdog.setDaemon(true);
         watchdog.start();
 
+        // NO TOOLTIPS IN ANY OF THIS. A pointer left resting on a control is a tooltip
+        // a second later, and a tooltip wider than the window it belongs to is drawn in a
+        // window of its own, hanging off the edge of the picture - which is what turned up
+        // in a few of these. Nothing a tooltip says is worth photographing: the README
+        // says it in words, and the right-click menus say it in the program.
+        javax.swing.ToolTipManager.sharedInstance().setEnabled(false);
+
         HttpServer stub = startStub();
         String endpoint = "http://" + stub.getAddress().getHostString() + ":"
                 + stub.getAddress().getPort() + "/v1/chat/completions";
@@ -705,6 +712,13 @@ public final class Screenshots {
             javax.swing.JRootPane root = window instanceof javax.swing.RootPaneContainer
                     ? ((javax.swing.RootPaneContainer) window).getRootPane() : null;
             java.awt.Component of = root != null ? root : window;
+            // And the pointer out of the way: a hover is a highlighted button in the
+            // picture even with tooltips off.
+            try {
+                new java.awt.Robot().mouseMove(2, 2);
+            } catch (Exception | Error ignored) {
+                // No Robot here; the picture is whatever it is.
+            }
             java.awt.Rectangle[] where = new java.awt.Rectangle[1];
             SwingUtilities.invokeAndWait(() -> {
                 window.toFront();

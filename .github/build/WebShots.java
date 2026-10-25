@@ -188,12 +188,11 @@ public final class WebShots {
         dev.navigate(address + (driven ? "#shots" : ""));
         dev.untick("hideChrome");
         dev.click("runBtn");
-        if (driven) {
+        if (driven && dev.driven(180_000)) {
             // DRIVEN, not clicked: the page ran the jar as a library and handed the class
             // over, so from here it is the automation API - await the window, then put a
             // question in the prompt, which is what makes this a picture of the program
             // being used rather than of a program that has started.
-            dev.awaitDriven();
             dev.drive("automationAwaitReady(120000)");
             dev.drive("automationSetPrompt('Read this invoice and tell me what is due,"
                     + " and when.\\n')");
@@ -228,8 +227,7 @@ public final class WebShots {
         dev.navigate(address + (driven ? "#shots" : ""));
         dev.untick("hideChrome");
         dev.click("runBtn");
-        if (driven) {
-            dev.awaitDriven();
+        if (driven && dev.driven(180_000)) {
             dev.drive("automationAwaitReady(120000)");
         } else {
             dev.awaitCanvas();
@@ -652,10 +650,24 @@ public final class WebShots {
             return answer;
         }
 
-        /** Waits for library mode to have handed the class over. */
-        void awaitDriven() throws Exception {
-            await("typeof window.jrock !== 'undefined'", 240_000,
-                    "library mode to hand JavaScript the JRock class");
+        /**
+         * Whether library mode handed the class over - and not an exception if it did
+         * not: the page runs the jar itself in that case (see its DRIVEN branch), so
+         * there is a window to photograph either way, and the only thing lost is being
+         * able to set the prompt through the automation API.
+         */
+        boolean driven(long millis) throws Exception {
+            long until = System.currentTimeMillis() + millis;
+            while (System.currentTimeMillis() < until) {
+                if (evaluate("typeof window.jrock !== 'undefined'")
+                        .contains("\"value\":true")) {
+                    return true;
+                }
+                Thread.sleep(5_000);
+            }
+            System.out.println("  library mode did not hand the class over in "
+                    + millis / 1000 + "s; the page's own log says:\n" + pageLog());
+            return false;
         }
 
         private String evaluate(String expression) throws Exception {
