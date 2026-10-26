@@ -1,0 +1,161 @@
+# What JRock spends its startup on, measured by the JDK's own profiler.
+#
+# RUN IT FROM THE ACTIONS TAB. Not on push: a profile is a diagnostic somebody is about to
+# read, and one taken automatically on every commit is a hundred artifacts nobody opens.
+#
+# WHAT IT IS FOR. The window is blank for several seconds in a browser tab, which is
+# CheerpJ interpreting bytecode a desktop JVM would have compiled. CheerpJ's own cost is
+# not ours - but the WORK is: every class JRock loads is one CheerpJ must fetch and
+# interpret, and every widget built before the first paint is time a reader spends looking
+# at an empty rectangle. Measured here on a desktop JVM, where it can be measured
+# properly, on the understanding that what is heavy here is heavier there by a constant.
+#
+# NOTHING HERE AGGREGATES ANYTHING BY HAND. JFR takes the samples, "jfr summary" and
+# "jfr print" read them back, sort and uniq rank them, and async-profiler draws the flame
+# graph. The only code this repository contributes is the harness that starts JRock and
+# asks it when it is ready - which no off-the-shelf tool can know.
+name: Startup profile
+
+on:
+  workflow_dispatch:
+    inputs:
+      interval:
+        description: Sampling interval for the flame graph (async-profiler)
+        default: 1ms
+      asyncprofiler:
+        description: async-profiler version to download (Linux job only)
+        default: '3.0'
+
+jobs:
+  linux:
+    name: Linux, with a flame graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Eleven, because that is what the jar targets and what CheerpJ runs - profiling on
+      # a newer JVM would measure a JIT the browser does not have.
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Build
+        run: |
+          javac -encoding UTF-8 --release 11 -g:source,lines,vars -d out \
+                JRock.java .github/build/StartupProfile.java
+
+      - name: Fetch async-profiler
+        run: |
+          V="${{ inputs.asyncprofiler || '3.0' }}"
+          URL="https://github.com/async-profiler/async-profiler/releases/download"
+          curl -sSL "$URL/v$V/async-profiler-$V-linux-x64.tar.gz" -o ap.tar.gz
+          # Printed rather than pinned, for now: the day this needs pinning, the log
+          # already says to what.
+          echo "async-profiler-$V-linux-x64.tar.gz sha256: $(sha256sum ap.tar.gz | cut -d' ' -f1)"
+          mkdir -p ap && tar xzf ap.tar.gz -C ap --strip-components=1
+          echo "AGENT=$(find ap -name 'libasyncProfiler.so' | head -1)" >> "$GITHUB_ENV"
+          ls -la "$(dirname "$(find ap -name 'libasyncProfiler.so' | head -1)")"
+
+      # Xvfb because JRock is a Swing application: with no display there is no window to
+      # build, and the startup being measured is mostly the building of it.
+      - name: Profile the startup
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          mkdir -p profile
+          xvfb-run -a --server-args="-screen 0 1600x1200x24" \
+            java -XX:StartFlightRecording=settings=profile,filename=profile/startup.jfr,dumponexit=true \
+                 -agentpath:"$AGENT"=start,event=cpu,interval=${{ inputs.interval || '5ms' }},file=profile/startup-flamegraph.html \
+                 -cp out StartupProfile
+          mv startup-milestones.txt profile/ 2>/dev/null || true
+
+      # The JDK's own reader, twice: once for what is in the recording, once for the
+      # samples themselves - which sort and uniq rank. A sample's top frame is the first
+      # line after "stackTrace = [", which is the method that was actually running.
+      #
+      # EXPECT FEW JFR SAMPLES, AND DO NOT READ THEM AS A RANKING. A desktop startup is
+      # under three seconds and the "profile" settings sample every 10 ms, so there are
+      # tens of samples and most methods appear once: the order means nothing at that
+      # count. The flame graph above, at 1 ms, is the one to read for where the time
+      # goes - and the milestones are the one to read for how much there is. This step
+      # earns its place by saying what the JVM was doing at all, and by being the file
+      # that opens in Mission Control.
+      - name: Read the recording back
+        run: |
+          cd profile
+          jfr summary startup.jfr | tee jfr-summary.txt
+          jfr print --events jdk.ExecutionSample startup.jfr > samples.txt
+          echo "=== hottest methods, by the frame that was running ===" > jfr-hot-methods.txt
+          grep -A 1 'stackTrace = \[' samples.txt \
+            | grep -v 'stackTrace' | grep -v '^--' \
+            | sed 's/ line:.*//' | sed 's/^[[:space:]]*//' \
+            | sort | uniq -c | sort -rn | head -40 >> jfr-hot-methods.txt
+          echo >> jfr-hot-methods.txt
+          echo "=== samples per thread: time on AWT-EventQueue is a frozen window ===" >> jfr-hot-methods.txt
+          grep 'sampledThread = ' samples.txt | sed 's/.*sampledThread = //' \
+            | sort | uniq -c | sort -rn | head -20 >> jfr-hot-methods.txt
+          cat jfr-hot-methods.txt
+          # The raw dump is tens of megabytes of text and the two reports above are what
+          # anybody reads; the .jfr itself is uploaded for opening in Mission Control.
+          rm -f samples.txt
+          ls -la
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: startup-profile-linux
+          path: profile/
+          if-no-files-found: error
+
+  windows:
+    name: Windows, the platform most readers are on
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      # No async-profiler here: it has no Windows build. JFR does, and the .jfr opens in
+      # Mission Control on any desktop - so this job is the numbers and the recording.
+      - name: Profile the startup
+        shell: bash
+        run: |
+          javac -encoding UTF-8 --release 11 -g:source,lines,vars -d out \
+                JRock.java .github/build/StartupProfile.java
+          mkdir -p profile
+          java -XX:StartFlightRecording=settings=profile,filename=profile/startup.jfr,dumponexit=true \
+               -cp out StartupProfile
+          mv startup-milestones.txt profile/ 2>/dev/null || true
+
+      - name: Read the recording back
+        shell: bash
+        run: |
+          cd profile
+          jfr summary startup.jfr | tee jfr-summary.txt
+          jfr print --events jdk.ExecutionSample startup.jfr > samples.txt
+          echo "=== hottest methods, by the frame that was running ===" > jfr-hot-methods.txt
+          grep -A 1 'stackTrace = \[' samples.txt \
+            | grep -v 'stackTrace' | grep -v '^--' \
+            | sed 's/ line:.*//' | sed 's/^[[:space:]]*//' \
+            | sort | uniq -c | sort -rn | head -40 >> jfr-hot-methods.txt
+          echo >> jfr-hot-methods.txt
+          echo "=== samples per thread ===" >> jfr-hot-methods.txt
+          grep 'sampledThread = ' samples.txt | sed 's/.*sampledThread = //' \
+            | sort | uniq -c | sort -rn | head -20 >> jfr-hot-methods.txt
+          cat jfr-hot-methods.txt
+          rm -f samples.txt
+          ls -la
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: startup-profile-windows
+          path: profile/
+          if-no-files-found: error
