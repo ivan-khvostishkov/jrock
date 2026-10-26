@@ -17984,6 +17984,20 @@ public class JRock {
         // layout application imports a document by mapping style names onto its own, so
         // the headings are Heading 1..6 under their conventional names and not just
         // bigger type.
+        /** "List 1" to "List 5": one style per depth, each with its own hanging indent. */
+        private static String listStyles() {
+            StringBuilder xml = new StringBuilder();
+            for (int depth = 1; depth <= MAX_DEPTH; depth++) {
+                xml.append("<w:style w:type=\"paragraph\" w:styleId=\"List").append(depth)
+                   .append("\"><w:name w:val=\"List ").append(depth)
+                   .append("\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/><w:pPr>")
+                   .append("<w:spacing w:after=\"60\"/><w:ind w:left=\"")
+                   .append(INDENT * depth).append("\" w:hanging=\"").append(INDENT)
+                   .append("\"/></w:pPr></w:style>");
+            }
+            return xml.toString();
+        }
+
         private static String styles() {
             StringBuilder xml = new StringBuilder(XML_HEAD);
             xml.append("<w:styles xmlns:w=\"").append(W_NS).append("\">")
@@ -18011,6 +18025,12 @@ public class JRock {
                .append("<w:ind w:left=\"").append(INDENT).append("\"/></w:pPr>")
                .append("<w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
                .append("<w:sz w:val=\"").append(CODE_SIZE).append("\"/></w:rPr></w:style>")
+               // A STYLE PER LIST DEPTH. The README has 356 items at the first level and
+               // 59 at the second; five are declared because five is as deep as this
+               // reads (see MAX_DEPTH), and a reader that drops the unused ones is
+               // welcome to. The hanging indent is what lines a wrapped item up under its
+               // own text rather than under its bullet.
+               .append(listStyles())
                .append("<w:style w:type=\"paragraph\" w:styleId=\"Quote\">")
                .append("<w:name w:val=\"Quote\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
                .append("<w:pPr><w:ind w:left=\"").append(INDENT).append("\"/></w:pPr>")
@@ -18134,9 +18154,14 @@ public class JRock {
                     // The marker is written as text, not as list markup: real numbering
                     // means a numbering.xml part with its own definitions, and what
                     // this converter knows is the character in front of the item.
-                    xml.append("<w:p><w:pPr><w:spacing w:after=\"60\"/><w:ind w:left=\"")
-                       .append(INDENT * block.level).append("\" w:hanging=\"")
-                       .append(INDENT).append("\"/></w:pPr>")
+                    // THE INDENT IS IN A STYLE, not on the paragraph, so a list is
+                    // something a layout application can restyle: one style per depth,
+                    // "List 1" to "List 5", and the depth is which one it is. The same
+                    // reason the headings have names - a document that says "this is a
+                    // list item at depth 2" can be changed in one place, and one that
+                    // says "indent this paragraph 7.1 mm and hang 3.5" cannot.
+                    xml.append("<w:p><w:pPr><w:pStyle w:val=\"List")
+                       .append(Math.min(block.level, MAX_DEPTH)).append("\"/></w:pPr>")
                        .append("<w:r><w:t xml:space=\"preserve\">").append(xml(block.marker))
                        .append("</w:t><w:tab/></w:r>");
                     docxRuns(xml, block.runs, false, false);
