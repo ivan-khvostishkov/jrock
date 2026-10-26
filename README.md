@@ -4819,9 +4819,10 @@ because both converters are built in and neither starts a process.
   table is half of what a document is for.
 - **DOCX** is a six-part OOXML package (`[Content_Types].xml`, two `_rels`, `word/styles.xml`,
   `word/footer1.xml`, `word/document.xml`) zipped with `java.util.zip`, plus one `word/media/`
-  part per picture it places. The paragraphs carry **named styles** — Normal, Heading 1–6, Code,
-  Quote — and the page is A4 with 2 cm margins, which is why this is the format to export for
-  typesetting: a layout application imports a document by mapping style *names* onto its own.
+  part per picture it places. Everything in it carries a **named style** (the full list is
+  [below](#the-style-names-a-layout-application-maps)), and the page is A4 with 2 cm margins,
+  which is why this is the format to export for typesetting: a layout application imports a
+  document by mapping style *names* onto its own.
 - **A ``` fence round the whole selection comes off** before a word of it is read. A model asked
   for Markdown very often answers with the Markdown *inside* a fence — ` ```markdown ` on the
   first line, ` ``` ` on the last — which is it saying "this is Markdown" rather than Markdown.
@@ -4850,10 +4851,10 @@ What the Markdown becomes, in both:
 | In the Markdown | In the document |
 |---|---|
 | `#` … `######` | Heading 1–6, sized 18 pt down to 11 pt |
-| `**bold**`, `*italic*`, `` `code` `` | bold, italic, a monospace run |
-| `-`/`*`/`+` and `1.`/`1)` items, indented | a list paragraph, bullet or its own number, nested up to five levels |
+| `**bold**`, `*italic*`, `` `code` `` | bold, italic, and a monospace run — the *Code inline* style in the DOCX |
+| `-`/`*`/`+` and `1.`/`1)` items, indented | a list paragraph with its bullet or its own number, nested up to five levels — *List 1*–*List 5* in the DOCX, one style per depth |
 | `> quoted` | an indented italic paragraph — the *Quote* style in the DOCX, so a bold run inside it stays bold-italic |
-| a fenced block (three backticks or tildes) | a Code paragraph, verbatim |
+| a fenced block (three backticks or tildes) | a Code paragraph, verbatim — in the DOCX the whole block is **one** paragraph, its lines held apart by line breaks, so the space above and below belongs to the block and not to every line in it |
 | `---`, `***`, `___` | a horizontal rule |
 | `\| a \| table \|` with a `\| --- \|` row | a real table: bordered cells, columns shared across the page width, first row repeated as a header, and `:---:` / `---:` honoured as cell alignment |
 | `[text](url)` | in the DOCX, a real hyperlink: the text, underlined and clickable, in Word's *Hyperlink* character style; in the RTF, the text with the URL after it unless the two say the same thing |
@@ -4869,6 +4870,35 @@ A `.docx` written here reads back through **DOCX as Markdown text** as the same 
 the text it was placed at ([details](#rtf-and-docx-conversion-no-external-tool) §15) — give or take
 the two honest differences a round trip has: a table's header row is written bold, so it comes
 back as bold markup, and column alignment is layout the import doesn't read.
+
+#### The style names a layout application maps
+
+A layout application imports a document by mapping style *names* onto its own — so these are
+what the DOCX export is really for. Nothing in it is formatted by hand where a name will do:
+
+| Style | Kind | What wears it |
+|---|---|---|
+| *Normal* | paragraph | body text, and anything with no style of its own |
+| *Heading 1*–*Heading 6* | paragraph | `#` … `######`, each also at its outline level, so they are the document's bookmarks and its table of contents |
+| *List 1*–*List 5* | paragraph | list items, one style per depth |
+| *Code* | paragraph | a fenced block, one paragraph per block |
+| *Quote* | paragraph | `> quoted` |
+| *Figure* | paragraph | the paragraph a picture is placed in |
+| *Caption* | paragraph | the italic line under a picture |
+| *Table text* | paragraph | the text in every table cell |
+| *Table head* | paragraph | the text in a repeated header row |
+| *Book table* | table | every table |
+| *Code inline* | character | `` `code` `` inside a sentence |
+| *Hyperlink* | character | the text of a `[text](url)` |
+
+**The formatting is on the style, not on the text, wherever it can be.** A caption is italic
+because *Caption* is, a header row is bold because *Table head* is, a quote slants because
+*Quote* does. That is the difference between a book you can change your mind about and one you
+cannot: set *Table text* to a size and a leading you like and every cell in every table follows,
+where text that is italic because each of its own words is leaves you nothing to edit but the
+words. For the same reason a file name in a sentence is a *Code inline* run rather than text that
+happens to be in Consolas — a layout application's "replace this font everywhere" sweeps away an
+unnamed override and takes the meaning with it.
 
 #### Images in the DOCX
 

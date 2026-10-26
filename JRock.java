@@ -16709,13 +16709,15 @@ public class JRock {
         // Block kinds. `level` is the heading level for HEADING, and the nesting depth
         // for ITEM and QUOTE.
         private static final int BODY = 0, HEADING = 1, ITEM = 2, QUOTE = 3, CODE = 4,
-                RULE = 5, TABLE = 6;
+                RULE = 5, TABLE = 6, FIGURE = 7, CAPTION = 8;
 
         // Font sizes for h1..h6 in half-points, which is what both formats count in
         // (RTF's \fs and DOCX's w:sz). 22 half-points is the 11pt body.
         private static final int[] HEADING_SIZE = { 36, 32, 28, 24, 22, 22 };
         private static final int BODY_SIZE = 22;
         private static final int CODE_SIZE = 20;
+        private static final int CAPTION_SIZE = 18;
+        private static final int TABLE_SIZE = 20;
 
         /** One indent step, in twips: a quarter inch, the usual list indent. */
         private static final int INDENT = 360;
@@ -17363,7 +17365,14 @@ public class JRock {
                     // A picture on a line of its own gets a paragraph of its own, rather
                     // than being swept into the sentence below it - which here is usually
                     // the "@img" line the include wrote directly under the reference.
-                    block(BODY, 0).runs.addAll(inline(text));
+                    // AND THAT PARAGRAPH IS NAMED. "Figure" is the paragraph that holds a
+                    // picture, so the things every picture in a document wants - its own
+                    // space above and below, its own alignment, and not being left at the
+                    // foot of a page without its caption - are a style to edit. Finding
+                    // them afterwards means searching for the anchored-object marker and
+                    // styling whatever it turns up, which is a search that has to be
+                    // rerun every time the text is placed again.
+                    block(FIGURE, 0).runs.addAll(inline(text));
                     i++;
                 } else if ((m = ITEM_LINE.matcher(line)).matches()) {
                     Block item = block(ITEM, 1 + Math.min(m.group(1).length() / 2, MAX_DEPTH - 1));
@@ -17452,6 +17461,41 @@ public class JRock {
             gathering = null;
             gathered = null;
             block.runs.addAll(inline(text));
+            if (isCaption(block)) caption(block);
+        }
+
+        /**
+         * Whether this paragraph is the caption of the picture above it: the one straight
+         * after a figure, written wholly in italics. A sentence that merely follows a
+         * picture is not a caption, and neither is a paragraph with an italic phrase
+         * somewhere in it - both keep a run that is upright, and that is the test.
+         */
+        private boolean isCaption(Block block) {
+            if (block.kind != BODY || block.runs.isEmpty()) return false;
+            int at = blocks.lastIndexOf(block);
+            if (at <= 0 || blocks.get(at - 1).kind != FIGURE) return false;
+            for (Run run : block.runs) {
+                if (!run.italic) return false;
+            }
+            return true;
+        }
+
+        /**
+         * Makes a caption of it, with the italics TAKEN OFF THE RUNS and left to the
+         * style - the way a quote's italics are the Quote style's and not every run's.
+         * A caption that slants because its style says so can be made upright by editing
+         * that style; one that slants because each of its runs does cannot, and in a
+         * layout application the runs win. What stays on them is the formatting the
+         * caption's own text has: a file name in it is still code, a bold word still bold.
+         */
+        private void caption(Block block) {
+            List<Run> upright = new ArrayList<>(block.runs.size());
+            for (Run run : block.runs) {
+                upright.add(new Run(run.text, run.bold, false, run.mono, run.image, run.link));
+            }
+            block.kind = CAPTION;
+            block.runs.clear();
+            block.runs.addAll(upright);
         }
 
         // "|---|:--:|" and the like: the row of dashes under a table's header, which is
@@ -18008,6 +18052,22 @@ public class JRock {
             return xml.toString();
         }
 
+        /**
+         * The six sides of a table's rules, hairline and black. Written both into the
+         * table style and onto every table (see docxTable), and from here so that the
+         * two cannot drift apart: a reader that honours the style and one that only
+         * reads the table show the same table.
+         */
+        private static String tableBorders() {
+            StringBuilder xml = new StringBuilder("<w:tblBorders>");
+            for (String side : new String[] { "top", "left", "bottom", "right",
+                                              "insideH", "insideV" }) {
+                xml.append("<w:").append(side).append(" w:val=\"single\" w:sz=\"8\"")
+                   .append(" w:space=\"0\" w:color=\"auto\"/>");
+            }
+            return xml.append("</w:tblBorders>").toString();
+        }
+
         private static String styles() {
             StringBuilder xml = new StringBuilder(XML_HEAD);
             xml.append("<w:styles xmlns:w=\"").append(W_NS).append("\">")
@@ -18045,6 +18105,54 @@ public class JRock {
                .append("<w:name w:val=\"Quote\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
                .append("<w:pPr><w:ind w:left=\"").append(INDENT).append("\"/></w:pPr>")
                .append("<w:rPr><w:i/></w:rPr></w:style>")
+               // THE PICTURE'S OWN PARAGRAPH, AND THE CAPTION UNDER IT. keepNext is why
+               // they are two styles and not one: it is what holds the pair together, so
+               // a picture is never left at the foot of a page with its caption overleaf.
+               // The rest is what a figure wants and a sentence does not - space above
+               // it, little below it, and the picture centred on the measure.
+               .append("<w:style w:type=\"paragraph\" w:styleId=\"Figure\">")
+               .append("<w:name w:val=\"Figure\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
+               .append("<w:pPr><w:keepNext/><w:spacing w:before=\"240\" w:after=\"60\"/>")
+               .append("<w:jc w:val=\"center\"/></w:pPr></w:style>")
+               .append("<w:style w:type=\"paragraph\" w:styleId=\"Caption\">")
+               .append("<w:name w:val=\"Caption\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/>")
+               .append("<w:pPr><w:spacing w:after=\"240\"/></w:pPr>")
+               .append("<w:rPr><w:i/><w:sz w:val=\"").append(CAPTION_SIZE)
+               .append("\"/></w:rPr></w:style>")
+               // AND THE TEXT INSIDE A TABLE'S CELLS, which of all of these is the one
+               // worth most. A cell inheriting the body style is a cell with body-sized
+               // type and body-sized leading in it, and a four-column table of those is
+               // a page of its own; the usual relationship is a size or two smaller, set
+               // solid. Every cell is written with one of these two names (see
+               // docxTable), so that is one style to edit rather than a tableful of
+               // cells - and the head's bold belongs to the style rather than to the
+               // runs, for the same reason a caption's italics do.
+               .append("<w:style w:type=\"paragraph\" w:styleId=\"TableText\">")
+               .append("<w:name w:val=\"Table text\"/><w:basedOn w:val=\"Normal\"/>")
+               .append("<w:qFormat/><w:pPr>")
+               .append("<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"240\"")
+               .append(" w:lineRule=\"auto\"/>")
+               .append("<w:ind w:left=\"0\" w:firstLine=\"0\"/><w:jc w:val=\"left\"/>")
+               .append("</w:pPr><w:rPr><w:sz w:val=\"").append(TABLE_SIZE)
+               .append("\"/></w:rPr></w:style>")
+               .append("<w:style w:type=\"paragraph\" w:styleId=\"TableHead\">")
+               .append("<w:name w:val=\"Table head\"/><w:basedOn w:val=\"TableText\"/>")
+               .append("<w:qFormat/><w:rPr><w:b/></w:rPr></w:style>")
+               // AND A NAME ON THE TABLE ITSELF, carrying the rules and the cell insets.
+               // A word processor reads this and a table is a style to edit there too;
+               // a layout application may instead bring every table in as its own basic
+               // table with the formatting written on it, which is why the rules are
+               // written onto each table as well and why the cell styles above are the
+               // part of this to rely on.
+               .append("<w:style w:type=\"table\" w:styleId=\"BookTable\">")
+               .append("<w:name w:val=\"Book table\"/><w:qFormat/><w:tblPr>")
+               .append(tableBorders())
+               .append("<w:tblCellMar>")
+               .append("<w:top w:w=\"85\" w:type=\"dxa\"/>")
+               .append("<w:left w:w=\"113\" w:type=\"dxa\"/>")
+               .append("<w:bottom w:w=\"85\" w:type=\"dxa\"/>")
+               .append("<w:right w:w=\"113\" w:type=\"dxa\"/>")
+               .append("</w:tblCellMar></w:tblPr></w:style>")
                // Word's own name for the look of a link, which a layout application maps.
                .append("<w:style w:type=\"character\" w:styleId=\"Hyperlink\">")
                .append("<w:name w:val=\"Hyperlink\"/>")
@@ -18176,6 +18284,16 @@ public class JRock {
                        .append("</w:t><w:tab/></w:r>");
                     docxRuns(xml, block.runs, false, false);
                     break;
+                case FIGURE:
+                    xml.append("<w:p><w:pPr><w:pStyle w:val=\"Figure\"/></w:pPr>");
+                    docxRuns(xml, block.runs, false, false);
+                    break;
+                case CAPTION:
+                    // Italic comes from the Caption style, the runs having had it taken
+                    // off them (see caption()).
+                    xml.append("<w:p><w:pPr><w:pStyle w:val=\"Caption\"/></w:pPr>");
+                    docxRuns(xml, block.runs, false, false);
+                    break;
                 case QUOTE:
                     // Italic comes from the Quote style, not from the runs: a reader
                     // importing this document should see a quotation, not a paragraph
@@ -18194,14 +18312,13 @@ public class JRock {
         private void docxTable(StringBuilder xml, Table table) {
             int columns = Math.max(1, table.columns);
             int width = frameWidth / columns;      // the frame of THIS page, not of A4 portrait
-            xml.append("<w:tbl><w:tblPr><w:tblW w:w=\"").append(frameWidth)
-               .append("\" w:type=\"dxa\"/><w:tblBorders>");
-            for (String side : new String[] { "top", "left", "bottom", "right",
-                                              "insideH", "insideV" }) {
-                xml.append("<w:").append(side).append(" w:val=\"single\" w:sz=\"8\"")
-                   .append(" w:space=\"0\" w:color=\"auto\"/>");
-            }
-            xml.append("</w:tblBorders><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>");
+            // The style first, which is the schema's order for w:tblPr and not a
+            // preference; then the rules on the table itself, for a reader that does not
+            // read the style (see tableBorders).
+            xml.append("<w:tbl><w:tblPr><w:tblStyle w:val=\"BookTable\"/><w:tblW w:w=\"")
+               .append(frameWidth).append("\" w:type=\"dxa\"/>")
+               .append(tableBorders())
+               .append("<w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>");
             for (int c = 0; c < columns; c++) {
                 xml.append("<w:gridCol w:w=\"").append(width).append("\"/>");
             }
@@ -18212,15 +18329,23 @@ public class JRock {
                 if (header) xml.append("<w:trPr><w:tblHeader/></w:trPr>");
                 List<List<Run>> row = table.rows.get(r);
                 for (int c = 0; c < columns; c++) {
+                    // THE CELL'S TEXT IS NAMED, and the head's bold is the style's: the
+                    // alternative is a cell wearing the body style with bold written
+                    // over it, which is both the wrong size and an override that beats
+                    // whatever the style is later changed to. A column the Markdown
+                    // asked to be centred or ranged right still says so, that being
+                    // something about this table rather than about tables.
                     xml.append("<w:tc><w:tcPr><w:tcW w:w=\"").append(width)
-                       .append("\" w:type=\"dxa\"/></w:tcPr><w:p>");
+                       .append("\" w:type=\"dxa\"/></w:tcPr><w:p><w:pPr><w:pStyle w:val=\"")
+                       .append(header ? "TableHead" : "TableText").append("\"/>");
                     if (table.align[c] >= 0) {
-                        xml.append("<w:pPr><w:jc w:val=\"")
+                        xml.append("<w:jc w:val=\"")
                            .append(table.align[c] == 0 ? "center" : "right")
-                           .append("\"/></w:pPr>");
+                           .append("\"/>");
                     }
+                    xml.append("</w:pPr>");
                     docxRuns(xml, c < row.size() ? row.get(c) : new ArrayList<>(),
-                            header, false);
+                            false, false);
                     xml.append("</w:p></w:tc>");
                 }
                 xml.append("</w:tr>");
