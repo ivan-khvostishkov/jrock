@@ -666,9 +666,66 @@ public final class WebShots {
             await("(function(){var c=document.querySelector('#display-wrap canvas');"
                     + "return !!c && c.width > 200 && c.height > 200;})()",
                     millis, "CheerpJ to put JRock's window on the page");
-            // The canvas exists as soon as the display is made; what goes in it is a
-            // window painting itself, a model list being fetched and a log being read.
-            Thread.sleep(20_000);
+            awaitPainted(millis);
+        }
+
+        /**
+         * Waits for the canvas to have a WINDOW in it and not just to exist.
+         *
+         * <p>The canvas is created when the display is made, which is seconds before Swing
+         * has painted anything into it: a picture taken then is a title bar over an empty
+         * grey rectangle. What is being waited for is the painting, and the canvas itself
+         * is asked - how many distinct colours are in the band where the window's own
+         * widgets go, which is one while it is blank and hundreds once there is a prompt,
+         * a log and a row of buttons in it.
+         *
+         * <p>Then it has to STOP changing, because the middle of a start is as busy as the
+         * end of one: the model list arrives, the log is read in, the layout settles. Two
+         * readings the same, five seconds apart, is a window that has finished.
+         *
+         * <p>A canvas this cannot read - a WebGL context, where getImageData is not there
+         * to call - leaves the count at -1, and then the wait is the flat twenty seconds
+         * this had before. Slower than it needs to be and never wrong.
+         */
+        private void awaitPainted(long millis) throws Exception {
+            String colours = "(function(){"
+                    + "var c=document.querySelector('#display-wrap canvas');"
+                    + "if(!c)return -1;"
+                    + "var x;try{x=c.getContext('2d');}catch(e){return -1;}"
+                    + "if(!x||!x.getImageData)return -1;"
+                    + "var h=Math.min(c.height,600),d;"
+                    + "try{d=x.getImageData(0,0,c.width,h).data;}catch(e){return -1;}"
+                    + "var seen={},n=0;"
+                    // Every 40th pixel: enough to tell a painted window from a flat one,
+                    // and a fraction of the work of reading every pixel of a big canvas.
+                    + "for(var i=0;i<d.length;i+=160){"
+                    + "var k=(d[i]<<16)|(d[i+1]<<8)|d[i+2];"
+                    + "if(!seen[k]){seen[k]=1;n++;}}"
+                    + "return n;})()";
+            long until = System.currentTimeMillis() + millis;
+            int previous = -2;
+            while (System.currentTimeMillis() < until) {
+                int now = number(evaluate(colours));
+                if (now < 0) {
+                    System.out.println("   the canvas cannot be read, so waiting a flat 20s");
+                    Thread.sleep(20_000);
+                    return;
+                }
+                if (now > 8 && now == previous) {
+                    System.out.println("   the window is painted and settled ("
+                            + now + " colours)");
+                    return;
+                }
+                previous = now;
+                Thread.sleep(5_000);
+            }
+            System.out.println("   the window never settled, so taking it as it is");
+        }
+
+        /** The integer a Runtime.evaluate reply carries, or -1 when it carries none. */
+        private static int number(String reply) {
+            String value = first(reply, "\"value\":(-?\\d+)");
+            return value == null ? -1 : Integer.parseInt(value);
         }
 
         /** Waits for the /files browser to have listed something. */
