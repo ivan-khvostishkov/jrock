@@ -194,7 +194,36 @@ public final class ReadmeDocx {
                 + " characters of Markdown");
 
         if (args.length > 2) chapters(text, Paths.get(args[2]).toAbsolutePath());
+
+        // THE WORKING FOLDER GOES. It holds a copy of every picture the document places
+        // and the diagrams drawn for it, which is megabytes a run - and this tool is run
+        // over and over while a book is being set, so the copies add up under %TEMP%
+        // where nobody thinks to look for them.
+        deleteTree(root);
         System.exit(0);
+    }
+
+    /**
+     * Deletes a tree, best effort, saying so when it cannot: scratch left behind
+     * silently is a disk filling up for no reason anybody can find.
+     */
+    private static void deleteTree(Path folder) {
+        if (folder == null || !Files.exists(folder)) return;
+        try (java.util.stream.Stream<Path> tree = Files.walk(folder)) {
+            for (Path each : tree.sorted(java.util.Comparator.reverseOrder())
+                    .collect(java.util.stream.Collectors.toList())) {
+                try {
+                    Files.deleteIfExists(each);
+                } catch (IOException held) {
+                    // Something still has it open; the rest of the tree still goes.
+                }
+            }
+        } catch (IOException unreadable) {
+            System.out.println("could not clean up " + folder + ": " + unreadable);
+        }
+        if (Files.exists(folder)) {
+            System.out.println("left " + folder + " behind, to delete by hand");
+        }
     }
 
     /**

@@ -133,9 +133,32 @@ public final class StartupProfile {
         Files.write(report, lines);
         System.out.println("wrote " + report.toAbsolutePath());
 
+        // THE WORKING FOLDER GOES, when this made it. A profile run is a thing done
+        // repeatedly while chasing a number down, and each one left a folder with a
+        // JRock session in it behind. Not when the folder was given as an argument: that
+        // one is the caller's, and theirs to keep.
+        if (args.length == 0) deleteTree(dir);
+
         // JRock leaves non-daemon threads running, so the JVM will not end by itself -
         // and the recording is written by the shutdown hook this triggers.
         System.exit(0);
+    }
+
+    /** Deletes a tree, best effort: JRock may still hold its own log file open. */
+    private static void deleteTree(Path folder) {
+        if (folder == null || !Files.exists(folder)) return;
+        try (java.util.stream.Stream<Path> tree = Files.walk(folder)) {
+            for (Path each : tree.sorted(java.util.Comparator.reverseOrder())
+                    .collect(java.util.stream.Collectors.toList())) {
+                try {
+                    Files.deleteIfExists(each);
+                } catch (java.io.IOException held) {
+                    // Open, and the process is about to end anyway.
+                }
+            }
+        } catch (java.io.IOException unreadable) {
+            System.out.println("could not clean up " + folder);
+        }
     }
 
     /**

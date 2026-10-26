@@ -201,8 +201,19 @@ public final class WebShots {
                 dev.close();
             }
         } finally {
+            // THE CHILDREN FIRST, which is what makes the deletion below work. A browser
+            // is a tree of processes, and destroying the one that was launched leaves its
+            // renderers and its GPU process running with the profile's files open - so
+            // the tree cannot be removed, and on Windows most of it stays. Descendants
+            // are collected BEFORE the parent dies, because a dead parent has none.
+            List<ProcessHandle> children = chromium.descendants()
+                    .collect(java.util.stream.Collectors.toList());
             chromium.destroy();
             chromium.waitFor(10, TimeUnit.SECONDS);
+            for (ProcessHandle child : children) {
+                child.destroyForcibly();
+            }
+            if (chromium.isAlive()) chromium.destroyForcibly();
             if (site != null) site.stop(0);
             // THE PROFILE GOES. It is a browser profile with CheerpJ's whole runtime
             // cached in it - 150 MB and more - and a tool that left one behind per run
@@ -419,20 +430,57 @@ public final class WebShots {
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
     }
 
-    /** Deletes a tree, best effort: a profile left behind is this tool's own mess. */
+    /**
+     * Deletes a tree, and says so when it could not: a profile left behind is this
+     * tool's own mess, and one left behind SILENTLY is a disk filling up without a
+     * reason anybody can find.
+     *
+     * <p>Three passes with a pause between them, because a handle is released shortly
+     * after the process holding it dies rather than at the moment it does. One pass
+     * removes the files whose owner has already gone and fails on the rest; by the third
+     * there is usually nothing left to fail on.
+     */
     private static void deleteTree(Path folder) {
-        if (!Files.exists(folder)) return;
-        try (java.util.stream.Stream<Path> tree = Files.walk(folder)) {
-            for (Path each : tree.sorted(java.util.Comparator.reverseOrder())
-                    .collect(java.util.stream.Collectors.toList())) {
-                try {
-                    Files.deleteIfExists(each);
-                } catch (IOException held) {
-                    // the browser may still have a handle on one file; the rest goes
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            if (!Files.exists(folder)) return;
+            try (java.util.stream.Stream<Path> tree = Files.walk(folder)) {
+                for (Path each : tree.sorted(java.util.Comparator.reverseOrder())
+                        .collect(java.util.stream.Collectors.toList())) {
+                    try {
+                        Files.deleteIfExists(each);
+                    } catch (IOException held) {
+                        // Still open. The next pass will find it closed.
+                    }
                 }
+            } catch (IOException unreadable) {
+                System.out.println("could not read " + folder + ": " + unreadable);
+                return;
             }
+            if (!Files.exists(folder)) return;
+            try {
+                Thread.sleep(1_000);
+            } catch (InterruptedException stop) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        System.out.println("::warning::left " + folder + " behind, which is "
+                + size(folder) / (1024 * 1024) + " MB of browser profile to delete by "
+                + "hand - something in it is still open");
+    }
+
+    /** How big a tree is, for saying what was left behind. */
+    private static long size(Path folder) {
+        try (java.util.stream.Stream<Path> tree = Files.walk(folder)) {
+            return tree.filter(Files::isRegularFile).mapToLong(each -> {
+                try {
+                    return Files.size(each);
+                } catch (IOException gone) {
+                    return 0;
+                }
+            }).sum();
         } catch (IOException unreadable) {
-            System.out.println("could not clean up " + folder + ": " + unreadable);
+            return 0;
         }
     }
 
