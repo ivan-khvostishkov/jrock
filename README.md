@@ -509,11 +509,17 @@ as WebAssembly), so nothing runs on a server.
 
 ![JRock running in a browser tab: the page's own header and footer around the Swing window](images/web-01-jrock-in-a-browser-tab.png)
 
+*The same jar in a browser tab, with the page's own header and footer left showing. The startup
+report is the desktop's, line for line, apart from the two lines that cannot be: the transport is
+`window.myBrowserHttp` — the page's own `fetch()` — and the working directory is `/files`, which is
+storage inside the browser. No key is set yet, so the model list is skipped and the log says so.*
+
 ![The page's own /files browser, listing what JRock wrote into the browser's storage](images/web-02-the-files-browser.png)
 
-*The same jar in a browser tab — a Swing window, its own file chooser and all. Only the reply is
-selected, so the context menu offers **Save selected text as...**; saving into `downloads` hands the
-file to the browser as a download.*
+*The page's `/files` browser, open on `/files/__JRock`: the log, the prompt, the settings and an
+as-yet-empty `bedrock-key.txt`, each with its own **Delete**, and one button for every editor
+leftover ending in `~`. `uploads/` and `downloads/` are CheerpJ's own and are left alone. This is
+how a browser session is read and cleared, there being no file manager on that side of the tab.*
 
 ## Mobile support for iOS and Android
 
