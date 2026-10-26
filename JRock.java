@@ -18020,6 +18020,21 @@ public class JRock {
                .append("<w:name w:val=\"Hyperlink\"/>")
                .append("<w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr>")
                .append("</w:style>")
+               // AND A NAME FOR `code` IN A SENTENCE, for the same reason the paragraph
+               // styles have names: a document that says "this run is code" can be
+               // restyled, and one that merely says "this run is in Consolas" cannot.
+               // The difference is not academic. A file name in the middle of a sentence
+               // is the commonest formatting this exporter writes - commoner than bold -
+               // and a layout application's "replace this font everywhere" sweeps away
+               // every unnamed override it finds, which takes the meaning with it and
+               // leaves nothing behind to search for. A named style survives that, and
+               // can be given a size of its own: Consolas has the larger x-height, so
+               // inline code usually wants to be set a point smaller than the prose
+               // around it.
+               .append("<w:style w:type=\"character\" w:styleId=\"CodeInline\">")
+               .append("<w:name w:val=\"Code inline\"/><w:qFormat/>")
+               .append("<w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
+               .append("</w:rPr></w:style>")
                .append("</w:styles>");
             return xml.toString();
         }
@@ -18259,8 +18274,12 @@ public class JRock {
                 xml.append("<w:r>");
                 if (bold || italic || run.mono || linked) {
                     xml.append("<w:rPr>");
+                    // ONE NAME PER RUN, which is all a run gets: a link that is also code
+                    // is named as the link - that being the one a reader clicks - and
+                    // keeps its font as an override, the way every code run used to.
                     if (linked) xml.append("<w:rStyle w:val=\"Hyperlink\"/>");
-                    if (run.mono) {
+                    else if (run.mono) xml.append("<w:rStyle w:val=\"CodeInline\"/>");
+                    if (run.mono && linked) {
                         xml.append("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>");
                     }
                     if (bold) xml.append("<w:b/>");
