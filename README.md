@@ -1,3 +1,5 @@
+![JRock's mark: the file name read as a knife, with JRock struck into the blade, the dot of .java as the rivet through the handle, and java on the handle](images/jrock-logo.png)
+
 # JRock
 
 A minimal, dependency-free Swing GUI desktop client (playground) for **Amazon Bedrock**,
