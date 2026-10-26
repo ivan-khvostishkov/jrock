@@ -70,6 +70,13 @@ public final class WebShots {
      */
     private static final long OWN_PAGE_MS = 60_000;
 
+    /**
+     * How many distinct colours in the window's client area mean it has been painted. A
+     * blank one is the flat grey of an unfilled panel - one colour, two with a border -
+     * and a finished one has text, buttons and a log in it.
+     */
+    private static final int MIN_COLOURS = 60;
+
     /** How long one DevTools command may take. A screenshot of a big canvas is slow. */
     private static final long COMMAND_TIMEOUT_MS = 180_000;
 
@@ -693,8 +700,15 @@ public final class WebShots {
                     + "if(!c)return -1;"
                     + "var x;try{x=c.getContext('2d');}catch(e){return -1;}"
                     + "if(!x||!x.getImageData)return -1;"
-                    + "var h=Math.min(c.height,600),d;"
-                    + "try{d=x.getImageData(0,0,c.width,h).data;}catch(e){return -1;}"
+                    // THE MIDDLE BAND ONLY, which is the whole trick: the window's TITLE
+                    // BAR is painted the moment the frame exists, and "JRock - Bedrock
+                    // (mantle)" in anti-aliased white on blue is hundreds of distinct
+                    // colours that never change again. Counted from the top of the
+                    // canvas, a blank window therefore looks exactly as painted as a
+                    // finished one. The client area is flat grey until Swing fills it.
+                    + "var top=Math.round(c.height*0.20);"
+                    + "var h=Math.round(c.height*0.60),d;"
+                    + "try{d=x.getImageData(0,top,c.width,h).data;}catch(e){return -1;}"
                     + "var seen={},n=0;"
                     // Every 40th pixel: enough to tell a painted window from a flat one,
                     // and a fraction of the work of reading every pixel of a big canvas.
@@ -711,11 +725,17 @@ public final class WebShots {
                     Thread.sleep(20_000);
                     return;
                 }
-                if (now > 8 && now == previous) {
+                // Hundreds once there is a prompt, a log and a row of buttons in it;
+                // one or two while it is the flat grey of an empty client area. And
+                // settled WITHIN A TWENTIETH rather than exactly: a count in the
+                // hundreds moves by a pixel of anti-aliasing and never repeats itself.
+                if (now > MIN_COLOURS && previous > 0
+                        && Math.abs(now - previous) <= Math.max(2, now / 20)) {
                     System.out.println("   the window is painted and settled ("
-                            + now + " colours)");
+                            + now + " colours in the client area)");
                     return;
                 }
+                System.out.println("   waiting: " + now + " colours so far");
                 previous = now;
                 Thread.sleep(5_000);
             }

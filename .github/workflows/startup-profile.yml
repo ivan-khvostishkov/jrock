@@ -55,8 +55,16 @@ jobs:
           # already says to what.
           echo "async-profiler-$V-linux-x64.tar.gz sha256: $(sha256sum ap.tar.gz | cut -d' ' -f1)"
           mkdir -p ap && tar xzf ap.tar.gz -C ap --strip-components=1
-          echo "AGENT=$(find ap -name 'libasyncProfiler.so' | head -1)" >> "$GITHUB_ENV"
-          ls -la "$(dirname "$(find ap -name 'libasyncProfiler.so' | head -1)")"
+          AGENT=$(find ap -name 'libasyncProfiler.so' | head -1)
+          if [ -z "$AGENT" ]; then
+            echo "::error::the tarball holds no libasyncProfiler.so"
+            find ap -type f | head -20
+            exit 1
+          fi
+          echo "AGENT=$PWD/$AGENT" >> "$GITHUB_ENV"
+          ls -la "$(dirname "$AGENT")"
+          echo -n "kernel.perf_event_paranoid = "
+          cat /proc/sys/kernel/perf_event_paranoid || true
 
       # Xvfb because JRock is a Swing application: with no display there is no window to
       # build, and the startup being measured is mostly the building of it.
@@ -64,11 +72,30 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
           mkdir -p profile
+          # ITIMER, NOT CPU. The cpu event needs perf, which the runner's
+          # perf_event_paranoid denies - and denied, async-profiler produces nothing at
+          # all rather than saying so, which is how the first run came back with no flame
+          # graph in the artifact and no error in the log. itimer is setitimer inside the
+          # process and needs nothing from the kernel. It samples wall time on running
+          # threads, which for a startup - where the question is what the event thread is
+          # doing - is the more useful of the two anyway.
+          #
+          # DebugNonSafepoints so the stacks are honest: without it the JIT records line
+          # numbers only at safepoints and frames are attributed to the wrong method.
           xvfb-run -a --server-args="-screen 0 1600x1200x24" \
             java -XX:StartFlightRecording=settings=profile,filename=profile/startup.jfr,dumponexit=true \
-                 -agentpath:"$AGENT"=start,event=cpu,interval=${{ inputs.interval || '5ms' }},file=profile/startup-flamegraph.html \
+                 -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints \
+                 -agentpath:"$AGENT"=start,event=itimer,interval=${{ inputs.interval || '1ms' }},file=profile/startup-flamegraph.html \
                  -cp out StartupProfile
           mv startup-milestones.txt profile/ 2>/dev/null || true
+          # Checked loudly: a missing flame graph is the one failure this job had that
+          # nothing in it reported.
+          if [ ! -s profile/startup-flamegraph.html ]; then
+            echo "::error::async-profiler wrote no flame graph"
+            ls -la profile/
+            exit 1
+          fi
+          echo "flame graph: $(du -h profile/startup-flamegraph.html | cut -f1)"
 
       # The JDK's own reader, twice: once for what is in the recording, once for the
       # samples themselves - which sort and uniq rank. A sample's top frame is the first
