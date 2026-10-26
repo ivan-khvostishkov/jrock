@@ -470,7 +470,7 @@ as WebAssembly), so nothing runs on a server.
 - **`Files...` browses CheerpJ's storage, and deletes from it.** `/files` lives in the browser's
   own storage, where no Explorer, Finder or shell can reach it: a folder of four thousand message
   files and a hundred converted PDF pages is invisible from outside, slows down every file dialog
-  JRock opens, and used to be impossible to throw away — JRock's file chooser can *rename* a dead
+  JRock opens, and nothing else can throw it away — JRock's file chooser can *rename* a dead
   folder (hence the trick of calling it `junk~`) but a chooser does not delete, and the browser's
   own storage controls are all or nothing: clear the site's data and the key, the settings and the
   whole transcript go with it. So the page lists `/files` itself: one folder at a time with its
@@ -760,8 +760,8 @@ bill, and a guess is not one.
   system/status output in gray. A header has a **blank line under it**, which is a Markdown
   decision rather than a cosmetic one: a selection is exported as Markdown
   ([Ctrl+Shift+D](#markdown-export-rtf-and-docx) §30), and in Markdown a line directly under
-  another line is the *same paragraph* — so a header and the first line of the answer used to
-  arrive in the DOCX run together in one sentence. The empty line makes the header a paragraph
+  another line is the *same paragraph* — so without it a header and the first line of the answer
+  would arrive in the DOCX run together in one sentence. The empty line makes the header a paragraph
   of its own. It is not stored in the main log: the renderer adds it, on every start.
 - A send says **which model** it is calling, not just where:
   `Calling [xai.grok-4.3] at /openai/v1/chat/completions ...`. The path is the same for every
@@ -963,8 +963,8 @@ The zone is named in full (`Europe/Berlin`), not just offset: a model that knows
 about summer time, holidays and business hours, which an offset alone doesn't say. Without this
 a model has no idea what day it is - the request carries no clock of its own.
 
-**Plain sentences, not markup.** This used to be `<clock><now>…</now></clock>`, and the argument
-for that shape was that tags mark injected context off from the conversation so that nothing in
+**Plain sentences, not markup.** The clock could be sent as tags — `<clock><now>…</now></clock>` —
+on the argument that tags mark injected context off from the conversation so that nothing in
 it can be read as something you said. But the message is sent with role `system`, which marks it
 off already — that is what the role is *for* — and tags buy nothing a model needs twice. What
 they cost is read by everything else: a sentence is what a language model reads best, it is what
@@ -2317,8 +2317,8 @@ sequenceDiagram
 **Cancel the chooser and the JRock window opens anyway** — with nothing run and no automation on
 it: an editable prompt, a working Send, the folder's own log. A flow's right-click entry is often
 the quickest way to a JRock *in the folder you clicked* — to change a setting there, to read the
-log, to clean the folder up — and closing the chooser used to end the process and leave you to go
-and find JRock yourself. (Under `--auto` it does not: whoever started the flow is waiting for the
+log, to clean the folder up — so closing the chooser leaves that window rather than ending the
+process and leaving you to find JRock yourself. (Under `--auto` it does not: whoever started the flow is waiting for the
 process to end, and a window held open by a flow with nothing to file is a flow that never
 answers.) Every flow does this, the six translators included.
 
@@ -2394,9 +2394,9 @@ file exactly as it was, and anything typed in between is the name used instead. 
 document and guesses a counterparty, a date and a subject out of it; the person at the keyboard
 knows what the page does not say — that this *Stadtsparkasse* is the one the rest of the folder
 calls `SSKM`, that the letter is about the flat and not the account it names, that the number
-worth finding it by is the one stamped on it. The answer to a name that is nearly right used to
-be **No**, and then four files renamed by hand in Explorer with their suffixes copied across by
-eye. What you type goes through the same cleaning as the model's own answer — a trailing space,
+worth finding it by is the one stamped on it. Without somewhere to type that, the answer to a name
+that is nearly right is **No** — and then four files renamed by hand in Explorer with their
+suffixes copied across by eye. What you type goes through the same cleaning as the model's own answer — a trailing space,
 a slash out of a pasted path, `Rechnung Mai 2026` with the spaces still in it — and a name that
 is nothing but punctuation is asked for again rather than guessed at. JRock's log keeps the
 suggestion too, whenever it is not what the files ended up being called: the names themselves no
@@ -2788,8 +2788,8 @@ the voice, so the microphone doesn't record the last answer as the next question
   All three end the same way: the document goes into **`Incoming/`** as a Word document named by
   the doc inventory flow, and the agent **says where it went** — *"Saved into Incoming as DHL,
   Follow Up On Parcel Delivery, 14 June 2026, document number 5 2 8 1 8 8 3 2 1 7."* That
-  sentence replaces the model's own: a save asked for across a room used to be answered on a
-  screen nobody was looking at, and two narrations at once would have cut each other off. A save
+  sentence replaces the model's own: a save asked for across a room would otherwise be answered on
+  a screen nobody is looking at, and two narrations at once would cut each other off. A save
   that could not be spoken, or that failed, ends in the usual *"Something went wrong."*
 - **A new time for an appointment of your own.** An answer that says *"I'm proposing to move
   event a3f91c to 2026-10-20 at 14:30"* — the id being the one the calendar answer printed —
@@ -3293,9 +3293,9 @@ java -cp jrock.jar JRockThunderbird.java --print week      # one briefing, no wi
   is not a move, and neither is "show me as free". An appointment that already reads the way you
   are asking for comes back saying so, and nothing is prepared.
 
-  This also fixed a quiet bug in `#move`: the update it wrote carried no `TRANSP` at all, and an
-  update without one is **`OPAQUE` by the standard's own default** — so moving an event that
-  showed as free used to make it show as busy. Every update carries the event's own value now.
+  An update carries the event's own `TRANSP` with it, which matters more than it sounds: an update
+  without one is **`OPAQUE` by the standard's own default**, so an event showing as free would come
+  back showing as busy for having been moved an hour.
 - **A new event goes by post, to you from yourself.** `#new` is the one thing here that is not
   read-only, and it still writes nothing to a calendar: it writes a temporary `.ics` file and has
   **Thunderbird** compose a mail with that invitation attached, **from** the address picked in the
@@ -3649,15 +3649,15 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   background tab never answers at all. It was invisible while every page got a tab of its own —
   a new tab is in front already — and it is what you should see anyway: the window shows the
   page being read.
-- **It opens maximized, and the page is the size of the window.** Every tab used to be pinned
-  to 1240x1000 whatever the window was doing, so a maximized browser showed the page laid out
-  for 1240 pixels with a band of white beside it — the window you are watching, lying about the
-  page in it. The metrics override is now **cleared** rather than left unset, because an
-  override belongs to the tab and one adopted from a browser a previous run left behind can
-  still be carrying the last one. The pictures never needed it: each A4 piece is captured with
+- **It opens maximized, and the page is the size of the window.** A tab pinned to a fixed
+  1240x1000 whatever the window is doing shows a maximized browser laying the page out for 1240
+  pixels with a band of white beside it — the window you are watching, lying about the page in
+  it. So the metrics override is **cleared** rather than left unset, an override belonging to the
+  tab and one adopted from a browser a previous run left behind being able to
+  still carry the last one. The pictures do not need it: each A4 piece is captured with
   `captureBeyondViewport` and a clip out of the page's own layout metrics, so what is
-  photographed is the page at whatever width it is laid out at — measured, duckduckgo.com now
-  reads at **1504** pixels wide in 7 pieces on this screen where it read 1240 before. And
+  photographed is the page at whatever width it is laid out at — measured, duckduckgo.com
+  reads at **1504** pixels wide in 7 pieces on this screen. And
   `--start-maximized`, because hands-free the page in that window is your only view of what the
   agent is reading.
 - **Its browser is not yours, and the window says where it lives.** The agent starts a Chromium
@@ -3677,7 +3677,7 @@ java -cp jrock.jar JRockBrowser.java --links zdnet --wanted "the innovation sect
   that has never been anywhere, consent walls and all. Nothing deletes it by itself, because the
   whole point of keeping it is that a consent answered once stays answered.
 
-  **Behind Help, with everything else the window used to say all the time**: the hosts (built
+  **Behind Help, with everything else that would otherwise crowd the window**: the hosts (built
   from the list the check itself uses, so it cannot describe a rule that is not enforced), the
   two-stage address check, that nothing is clicked for you, how a page is read, and the requests
   an agent may send. All of it is behind the button rather than on the page, so what is on
@@ -4279,9 +4279,9 @@ log holds everything JRock has ever said out loud, in order, with the conversati
 the window shows the very words while they are being spoken.
 
 **And the answer is not written down twice.** The model's answer is *already* in the log, as the
-answer, so that is what gets selected and read. It used to be copied into a gray line first and
-the copy was what was narrated, which put every answer in the window twice — once as the answer,
-once as a grey repetition of it underneath. Gray lines are now for what is **not** in the log: an
+answer, so that is what gets selected and read. Copying it into a gray line and narrating the copy
+would put every answer in the window twice — once as the answer, once as a grey repetition of it
+underneath. Gray lines are for what is **not** in the log: an
 agent's own sentences, *"Something went wrong. Should I try again?"*, written with
 `automationNote(agent, line)` — the agent's name in front so the transcript says who spoke, and
 only the words after the name are selected and read out. Reading the answer where it stands also
@@ -4471,11 +4471,11 @@ session report again, so what changed is visible in the log rather than taken on
 
   **That list is fetched at startup, and afterwards only when there is something new to ask.**
   It depends on exactly two things — the endpoint and the key — and applying this dialog re-runs
-  the session report, so changing the narration voice used to cost an HTTP round trip to a models
-  endpoint that was going to answer the same thing. Now OK fetches again only when it changed the
-  **endpoint**, the **key**, or the **working folder** (which has a key and an endpoint of its
-  own); otherwise the report names the list it already has and says it is unchanged. A restart
-  always asks.
+  the session report, so OK fetches again only when it changed the **endpoint**, the **key**, or
+  the **working folder** (which has a key and an endpoint of its own); otherwise the report names
+  the list it already has and says it is unchanged. Re-asking regardless would make changing the
+  narration voice cost an HTTP round trip to a models endpoint that was going to answer the same
+  thing. A restart always asks.
 - **Autobackup log** — on a line of its own, right under the Model, and **on by default**: after five
   minutes without the cursor moving in the prompt, the whole `__JRock/` folder is zipped into
   `jrock-backup-yymmddhhmm.zip` in the working directory, with the Send button held for as
@@ -4558,8 +4558,8 @@ rather than repeated on every row.
   like a crackle and it now has a note in it, with the filter's corner riding along so the low
   notes stay duller and the high ones sharper. The loudness is set **after** the ringing, from
   the peak the noise itself reached, because a resonator's gain depends on its frequency. The
-  five old names read as the nearest note, so a folder configured before this goes on
-  crackling. Tested before it was built: three processes, three tones, one device, 28 opens and
+  five older names read as the nearest note, so a folder configured with one of them goes on
+  crackling. Three processes can ring at once: three tones, one device, 28 opens and
   not one refusal — Java Sound asks for shared streams, so Windows mixes them. The line is
   **closed between crackles**, since a speaker hisses whenever its output stream is active.
 
@@ -4654,15 +4654,6 @@ with the line that says what it holds (see
 every setting does and which file keeps it. All of it in one scrolling window that opens *on top
 of* Configure and centred on it, so anything already typed into the form is still there when it
 closes.
-
-| The Help window holds | Which is |
-|---|---|
-| Title and version | the same line the About box has |
-| Write about it | `jrock@nosocial.net`, on a line of its own |
-| Source, releases, donate | this repository, likewise |
-| **Shortcuts** | all of [the twenty](#keyboard-shortcuts) §34 |
-| **The JRock folder** | every file and folder it can hold, each with what it is for ([Persistence](#persistence-crash-recovery--full-local-history) §10) |
-| **Notes** | what every Configure row does, and which file keeps it ([Settings files](#settings-files) §11) |
 
 It is a window of its own rather than part of the Configure dialog, so someone who opened
 Configure to change the model sees the rows and not three screens of prose around them, and the
@@ -4779,10 +4770,10 @@ which source they are about to use (*"…from the prompt"*, *"…from the log"*)
 sent or cleared: the prompt is read, not consumed.
 
 **The same two items are in the prompt's own menu**, on the prompt's selection. Each menu acts
-on its own side, and neither has to say which: they used to live in the log's menu alone and take
-whichever selection existed, the prompt's winning when both did, with the label changing to
-*"...(from the prompt)"* to admit it — which is a menu answering a question nobody asked it. The
-prompt's selection is the interesting one, and now it is reached from where the editing was done:
+on its own side, and neither has to say which. One menu taking whichever selection existed — the
+prompt's winning when both did, with the label changing to
+*"...(from the prompt)"* to admit it — is a menu answering a question nobody asked it. The
+prompt's selection is the interesting one, and it is reached from where the editing was done:
 the way to make a document out of an answer with a correction in it is to copy the answer into
 the prompt, change the line that is wrong, select it and export **that**. The log is a transcript
 and cannot be edited at all.
@@ -5187,8 +5178,7 @@ it is included or transcribed like any other.
   words that did the recognising were already over by the time anything was being kept, and a
   question came out as *"…varisch, what is the weather"*. The microphone's last **2 s** are
   therefore held in a ring buffer all the time it is listening, and that is what the recording
-  starts with: you can simply start talking. (It used to be "start with a word to be heard by",
-  e.g. *"Hey, Tovarisch, what is …"* — which was a workaround for a buffer.) The log says how
+  starts with: you can simply start talking, with no word to be heard by first. The log says how
   much of the before went in, and those seconds of room tone trouble no recognizer.
 - **What counts as speech:** loud enough over the room's own noise, most of it in the voice band
   (250–4000 Hz), for about 0.2 s, and spread over many frequencies. It doesn't matter who is
@@ -5650,9 +5640,9 @@ Nine pages, in this order:
    Explorer entry names; the full catalogue is one radio button away (*Show all 14 and let me
    change the set*), and it opens with **what is installed already ticked** — or everything,
    when nothing is. Leaving *Update these 10* alone installs **those ten**: page 1 reads the
-   artifact again every time it is left, which used to rebuild the catalogue from scratch and
-   quietly re-tick all fourteen while the page went on saying ten. A re-read now carries over
-   what was already decided, ticks and typed folders both.
+   artifact again every time it is left, and a re-read carries over what was already decided,
+   ticks and typed folders both — rebuilding the catalogue from scratch would quietly re-tick all
+   fourteen while the page went on saying ten.
 
    The table has **no scrollbar of its own** either: a scrolling box inside a scrolling page is
    two bars side by side, each moving a different thing. An agent that is installed but not in this artifact is named on the page:
