@@ -11,16 +11,17 @@ import javax.imageio.ImageIO;
  *     java CanvasAppeared.java before.png after.png [percent]
  * </pre>
  *
- * <p>WHY A PICTURE AND NOT THE PROTOCOL. The Android job used to ask Chrome itself,
- * over the DevTools protocol, whether the page had a canvas of a sensible size - the
- * same question the desktop browser is asked. On an emulator it never got to ask. Chrome
- * runs, its window is in front, the page renders, and
- * {@code localabstract:chrome_devtools_remote} does not exist: a Play-store image is a
- * {@code user} build with {@code ro.debuggable=0} and a release Chrome whose
- * {@code flags=0x0}, and no amount of restarting it, flag files or socket names has
- * produced that socket. Four configurations have now failed the same way.
+ * <p>WHEN A PICTURE AND NOT THE PROTOCOL. The Android job prefers to ask Chrome itself,
+ * over the DevTools protocol, whether the page has a canvas of a sensible size - the
+ * same question the desktop browser is asked, and the one with a real answer in it. On
+ * an emulator it sometimes cannot ask: a Play-store image is a {@code user} build with
+ * {@code ro.debuggable=0} and a release Chrome whose {@code flags=0x0}, and on such a
+ * device {@code localabstract:chrome_devtools_remote} has more than once not existed at
+ * all, with Chrome running and its window in front. This is what the job falls back to
+ * on those runs, and only on those: where the socket answers, its answer is the one that
+ * counts.
  *
- * <p>So the check is made out of what the job already has. Two screenshots: one taken
+ * <p>The fallback is made out of what the job already has. Two screenshots: one taken
  * seconds after the address is opened, one taken after the wait. If CheerpJ started a JVM
  * and Swing painted a window, the middle of the screen is unrecognisable between them -
  * the page's dark panel is replaced by JRock. If the page never came up, the middle of

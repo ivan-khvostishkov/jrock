@@ -415,19 +415,25 @@ jobs:
               break
             fi
           done
+          # WHAT THE BROWSER SAYS, WHERE IT WILL SAY ANYTHING, is the answer this job
+          # wants: "the page has a canvas of a sensible size" is CheerpJ having started a
+          # JVM and Swing having a display, stated by the thing that would know. Where
+          # the socket answers, that settles it - and the pictures below are not
+          # consulted, because a weaker check that can only disagree is not a second
+          # opinion, it is a way to fail a passing build.
+          ANSWER=unknown
           if [ -n "$ANSWERING" ]; then
             echo "   answering on localabstract:$ANSWERING"
             curl -sf http://127.0.0.1:9222/json/version || true
-            java .github/build/WebShots.java screenshots android-04-as-chrome-sees-it \
-                 --attach 9222
+            if java .github/build/WebShots.java screenshots android-04-as-chrome-sees-it \
+                 --attach 9222; then ANSWER=yes; else ANSWER=no; fi
           else
-            # NOT A FAILURE ANY MORE, and here is the device saying why. A Play-store
-            # image is a "user" build with ro.debuggable=0, and its Chrome is a release
-            # build with flags=0x0; on such a device that socket has never appeared -
+            # AND WHERE IT WILL NOT, here is the device saying why. A Play-store image is
+            # a "user" build with ro.debuggable=0, and its Chrome is a release build with
+            # flags=0x0; on such a device that socket has sometimes not appeared at all -
             # not with a flag file, not as the debug app, not after a clean restart, not
-            # under any of the four names tried above. The attempt is kept because it
-            # costs a second and the day it answers the log will say so; the job is no
-            # longer gated on it.
+            # under any of the four names tried above. So its absence is not failed over,
+            # it is fallen back from.
             echo "   no DevTools socket on this device, which is what a user build does:"
             echo -n "     ro.build.type="; $ADB shell getprop ro.build.type | tr -d '\r'
             echo -n "     ro.debuggable="; $ADB shell getprop ro.debuggable | tr -d '\r'
@@ -435,17 +441,33 @@ jobs:
               | grep -m1 -i versionName | tr -d '\r' | sed 's/^/     /' || true
           fi
 
-          # AND THE CHECK ITSELF, made of the two pictures the job already took. A page
-          # that came up replaced the whole middle of the screen - its dark panel is now
-          # a Swing window - and a page that did not left that band exactly as it was.
-          # No protocol, no socket, no browser cooperation required.
           echo "--- did JRock come up?"
-          java .github/build/CanvasAppeared.java \
-               screenshots/android-01-starting.png \
-               screenshots/android-02-the-window.png \
-            || { echo "--- the last of the log, for why it did not"
-                 $ADB logcat -d -t 80 | tail -40 || true
-                 exit 1; }
+          case "$ANSWER" in
+            yes)
+              echo "   Chrome on the device says the page has a canvas, which is the"
+              echo "   whole of what this job asks. The two screenshots are uploaded"
+              echo "   for looking at, and are not a second gate on top of this one."
+              ;;
+            no)
+              echo "::error::Chrome reached the page and no canvas ever appeared on it"
+              echo "--- the last of the log, for why it did not"
+              $ADB logcat -d -t 80 | tail -40 || true
+              exit 1
+              ;;
+            *)
+              # THE FALLBACK, made of the two pictures the job already took. A page that
+              # came up replaced the whole middle of the screen - its dark panel is now a
+              # Swing window - and a page that did not left that band exactly as it was.
+              # No protocol, no socket, no browser cooperation required; and a coarser
+              # answer than the one above, which is why it is only used instead of it.
+              java .github/build/CanvasAppeared.java \
+                   screenshots/android-01-starting.png \
+                   screenshots/android-02-the-window.png \
+                || { echo "--- the last of the log, for why it did not"
+                     $ADB logcat -d -t 80 | tail -40 || true
+                     exit 1; }
+              ;;
+          esac
 
       - name: Upload
         if: always()
