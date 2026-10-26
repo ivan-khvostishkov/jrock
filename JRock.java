@@ -17323,6 +17323,7 @@ public class JRock {
             String[] lines = fileNames(htmlImages(inlineSvgs(markdown)))
                     .replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
             boolean fenced = false;
+            Block codeBlock = null;
             int i = 0;
             while (i < lines.length) {
                 String line = lines[i];
@@ -17331,11 +17332,20 @@ public class JRock {
                 if (text.startsWith("```") || text.startsWith("~~~")) {
                     endParagraph();                 // the fence itself is not content
                     fenced = !fenced;
+                    if (!fenced) codeBlock = null;  // finished this code block
                     i++;
                 } else if (fenced) {
                     // Verbatim, markup and indentation included: that is what a code
-                    // block is for.
-                    block(CODE, 0).runs.add(new Run(line, false, false, true));
+                    // block is for. All lines in the fenced block go into ONE paragraph,
+                    // joined by line breaks, so the block can have its own space-before
+                    // and space-after without adding it between each line.
+                    if (codeBlock == null) {
+                        codeBlock = block(CODE, 0);
+                    }
+                    if (!codeBlock.runs.isEmpty()) {
+                        codeBlock.runs.add(new Run("\n", false, false, true));
+                    }
+                    codeBlock.runs.add(new Run(line, false, false, true));
                     i++;
                 } else if (text.isEmpty()) {
                     endParagraph();
@@ -18148,7 +18158,7 @@ public class JRock {
                     break;
                 case CODE:
                     xml.append("<w:p><w:pPr><w:pStyle w:val=\"Code\"/></w:pPr>");
-                    docxRuns(xml, block.runs, false, false);
+                    docxCodeRuns(xml, block.runs);
                     break;
                 case ITEM:
                     // The marker is written as text, not as list markup: real numbering
@@ -18317,6 +18327,34 @@ public class JRock {
                    .append("</w:t></w:r>");
             }
             if (open != null) xml.append("</w:hyperlink>");
+        }
+
+        // Code block runs, joined by <w:br/>: lines in a fenced block are collected
+        // into one block and joined with \n markers, so the paragraph can have its own
+        // space-before and space-after without adding it between every line. Here, each
+        // \n becomes a line break element, not a separate paragraph.
+        private void docxCodeRuns(StringBuilder xml, List<Run> runs) {
+            for (int i = 0; i < runs.size(); i++) {
+                Run run = runs.get(i);
+                String text = run.text;
+                String[] lines = text.split("\n", -1);
+                for (int j = 0; j < lines.length; j++) {
+                    if (j > 0) xml.append("<w:br/>");
+                    String line = lines[j];
+                    if (!line.isEmpty()) {
+                        xml.append("<w:r><w:rStyle w:val=\"CodeInline\"/>");
+                        if (run.bold || run.italic) {
+                            xml.append("<w:rPr>");
+                            if (run.bold) xml.append("<w:b/>");
+                            if (run.italic) xml.append("<w:i/>");
+                            xml.append("</w:rPr>");
+                        }
+                        xml.append("<w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/></w:rPr>")
+                           .append("<w:t xml:space=\"preserve\">").append(xml(line))
+                           .append("</w:t></w:r>");
+                    }
+                }
+            }
         }
 
         // A picture in the text flow: wp:inline, as opposed to the floating wp:anchor a
