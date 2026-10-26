@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>JRock in the browser</title>
 
+  <!-- The tab's icon, and a phone home screen's: the same rounded teal "JR" tile the
+       program's own window wears, drawn by .github/build/Favicon.java from the same
+       brand colour. Declared rather than left to be found, because a browser with no
+       icon element asks for /favicon.ico anyway and a 404 for it lands in the console -
+       and from there in the log of anything driving this page. -->
+  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
   <!-- CheerpJ runtime: runs unmodified JVM bytecode as WebAssembly + JS. -->
   <script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
 
