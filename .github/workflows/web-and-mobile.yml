@@ -188,6 +188,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Set up OpenJDK 11 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Build the jar
+        run: |
+          javac -encoding UTF-8 --release 11 -g:source,lines,vars -d out JRock.java
+          java .github/build/BuildJar.java
+
       # NO setup-java HERE, deliberately. Google's sdkmanager and avdmanager are compiled
       # for Java 17 (class file 61), so a job pinned to Temurin 11 cannot even ask them
       # for their licences: "has been compiled by a more recent version of the Java
@@ -288,6 +299,20 @@ jobs:
           "$ANDROID_HOME/platform-tools/adb" shell wm size
           tail -5 emulator.log || true
 
+      - name: Serve the locally-built jar to the Android emulator
+        run: |
+          # Start a simple HTTP server in the background, serving the web folder
+          cd jrock-web
+          python3 -m http.server 8000 > /tmp/http-server.log 2>&1 &
+          HTTP_PID=$!
+          echo "HTTP_SERVER_PID=$HTTP_PID" >> "$GITHUB_ENV"
+          cd ..
+          sleep 2
+
+          # Forward the emulator's port 8000 to localhost:8000 (will be set up after boot)
+          echo "HTTP server started with PID $HTTP_PID"
+          echo "LOCAL_URL=http://10.0.2.2:8000/?home" >> "$GITHUB_ENV"
+
       - name: Open JRock, then ask the phone's own Chrome whether it is running
         run: |
           mkdir -p screenshots
@@ -309,8 +334,9 @@ jobs:
 
           # By name, rather than by asking the system who wants a URL: on a device with one
           # browser the answer is the same, and on one with none it is silence.
+          # Use the local server (10.0.2.2 is the host's localhost from inside the emulator)
           $ADB shell am start -n com.android.chrome/com.google.android.apps.chrome.Main \
-               -a android.intent.action.VIEW -d "$URL" > /dev/null
+               -a android.intent.action.VIEW -d "$LOCAL_URL" > /dev/null
           sleep 20
           echo "--- is Chrome running?"
           $ADB shell pidof com.android.chrome || echo "(no Chrome process)"
