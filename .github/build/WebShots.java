@@ -76,6 +76,21 @@ public final class WebShots {
     /** The phone this emulates: an iPhone-sized viewport, as the README's section is. */
     private static final int PHONE_W = 390, PHONE_H = 844;
 
+    /**
+     * The window the /files scene is photographed in, and why it is not the other one.
+     *
+     * <p>{@code #display-wrap} is the dark panel the page shows before JRock starts -
+     * light text on dark is what that panel is designed for - and it stretches to
+     * whatever height the window has. The Files button is offered BEFORE a run and not
+     * during one, so there is no Swing canvas to cover that panel: in a 1280x813 window
+     * the dialog ends up floating in the middle of three quarters of a page of
+     * near-black, which in print is 180 cm of ink around the thing the picture is of.
+     *
+     * <p>So this scene gets a window the dialog nearly fills. Nothing is restyled and
+     * nothing is faked: it is the page as somebody with a short window sees it.
+     */
+    private static final int FILES_W = 1280, FILES_H = 540;
+
     private static Path out;
     private static int taken;
 
@@ -242,8 +257,12 @@ public final class WebShots {
      * settings into {@code /files/__JRock}. So this RELOADS the page - a session where nothing has been started,
      * which is the only time the button is offered - and opens the browser on a folder
      * with a real {@code __JRock/} in it.
+     *
+     * <p>In a window of its own, which is the shape of the picture rather than its
+     * contents: see FILES_H.
      */
     private static void filesBrowser(Devtools dev, String address) throws Exception {
+        dev.window(FILES_W, FILES_H);
         dev.navigate(address);
         dev.click("filesBtn");
         dev.awaitRows();
@@ -584,6 +603,13 @@ public final class WebShots {
             // Not Page.loadEventFired: the page's own work starts at load, and everything
             // below waits for a condition in the page itself rather than for an event.
             await("document.readyState === 'complete'", 60_000, "the page to load");
+        }
+
+        /** A desktop window of a stated size, for a scene that wants a shorter page. */
+        void window(int width, int height) throws Exception {
+            call("Emulation.setDeviceMetricsOverride", "{\"width\":" + width
+                    + ",\"height\":" + height
+                    + ",\"deviceScaleFactor\":1,\"mobile\":false}");
         }
 
         /** A phone-sized screen, with touch events and the mobile flag the page sees. */
