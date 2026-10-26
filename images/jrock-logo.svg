@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  JRock's wordmark: the file name read as a knife.
+
+  "JRock.java" has the shape of one already - a long part, a dot, a short part - so the
+  logo is not a picture added to the name but the name set along the thing it describes.
+  JRock is struck into the blade the way a maker's name is; the dot of ".java" is the
+  rivet through the handle; java is on the handle, where a handle's name goes.
+
+  The knife points LEFT, which no catalogue photograph does, because the name has to read
+  left to right and the blade is the first word.
+
+  Steel is the only non-brand colour here, and it is what makes the two halves read as
+  blade and handle rather than as two boxes. The teal is #0F8B8D: BRAND in JRock.java, the
+  brand custom property in jrock-web/index.html, and the fill of the favicon.
+
+  Set in whatever grotesque the renderer has. Convert the text to outlines before using
+  this as an actual trademark, or it will set itself differently on a machine without
+  Segoe UI.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200" width="640" height="200"
+     role="img" aria-labelledby="t d">
+  <title id="t">JRock</title>
+  <desc id="d">A knife pointing left: "JRock" on the blade, the dot of ".java" as the
+    rivet in the handle, and "java" on the handle.</desc>
+
+  <defs>
+    <!-- Steel, lit from above: the spine catches the light, the edge sits in shade. -->
+    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F2F5F6"/>
+      <stop offset="0.45" stop-color="#DCE3E6"/>
+      <stop offset="1" stop-color="#B9C4C9"/>
+    </linearGradient>
+    <linearGradient id="grip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#139A9C"/>
+      <stop offset="1" stop-color="#0B7577"/>
+    </linearGradient>
+  </defs>
+
+  <!-- THE BLADE: a straight spine, a straight CLIP down to the point, and a curved belly.
+       The clip is what makes it a knife - drawn with a curve instead, the two curves meet
+       at too shallow an angle and the tip comes out blunt, which reads as a wedge or a
+       shoe. A straight line into a curve gives a point. -->
+  <path d="M 352 58 L 130 58 L 14 100 Q 140 146 352 141 Z"
+        fill="url(#steel)" stroke="#9AA8AE" stroke-width="2"/>
+  <!-- The light along the spine, and the ground bevel above the edge. -->
+  <path d="M 136 69 L 344 69" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"
+        opacity="0.75"/>
+  <path d="M 34 105 Q 142 136 348 132" fill="none" stroke="#FFFFFF" stroke-width="2.5"
+        stroke-linecap="round" opacity="0.55"/>
+
+  <!-- THE BOLSTER: the collar between blade and handle, and the full stop's own weight. -->
+  <rect x="348" y="52" width="26" height="96" rx="7" fill="#0A6A6C"/>
+
+  <!-- THE HANDLE. -->
+  <path d="M 372 64 L 578 64 Q 612 64 612 100 Q 612 136 578 136 L 372 136 Z"
+        fill="url(#grip)"/>
+
+  <!-- THE RIVET, which is the dot in "JRock.java" and is why the dot is on the handle. -->
+  <circle cx="404" cy="100" r="10.5" fill="#F4F6F7"/>
+  <circle cx="404" cy="100" r="10.5" fill="none" stroke="#0A6A6C" stroke-width="1.5"
+          opacity="0.5"/>
+
+  <!-- THE NAME, struck into the blade. -->
+  <text x="208" y="112" text-anchor="middle"
+        font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="56"
+        font-weight="700" letter-spacing="1" fill="#0B5E60">JRock</text>
+
+  <!-- AND THE LANGUAGE, on the handle. -->
+  <text x="516" y="116" text-anchor="middle"
+        font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="50"
+        font-weight="600" letter-spacing="1" fill="#FFFFFF">java</text>
+</svg>

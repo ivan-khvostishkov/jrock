@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The same knife in ONE colour, for everywhere the full mark cannot go: a B&W interior, a
+  stamp, an embroidery, a watermark, anything printed in a single ink.
+
+  It is not the colour logo with the colour taken out - that gives a grey blade against a
+  grey handle and no knife at all. Here the whole knife is solid, the name is knocked out
+  of it, and blade and handle are told apart by the gap where the bolster was and by the
+  rivet. Which is what a one-colour mark has to do: carry the shape with no tones to help.
+
+  KNOCKED OUT WITH A MASK, not with white type laid over the top. The letters are holes:
+  what shows through them is whatever the mark is placed on, so the same file reverses out
+  of a dark page without a second version of it. White type would only work on white.
+
+  currentColor throughout, so it takes the colour of its surroundings - the brand teal,
+  black for print, white reversed out. Nothing here names a colour of its own.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200" width="640" height="200"
+     color="#0F8B8D" role="img" aria-labelledby="t d">
+  <title id="t">JRock</title>
+  <desc id="d">A knife pointing left in a single colour: "JRock" knocked out of the
+    blade, the dot of ".java" as the rivet, and "java" knocked out of the handle.</desc>
+
+  <defs>
+    <!-- White shows the ink, black hides it: the knife in white, everything to be cut
+         out of it in black. -->
+    <mask id="knife" maskUnits="userSpaceOnUse" x="0" y="0" width="640" height="200">
+      <!-- THE BLADE: a straight spine, a straight clip to the point, a curved belly.
+           The clip is what makes the tip a point rather than a wedge. -->
+      <path d="M 352 58 L 130 58 L 14 100 Q 140 146 352 141 Z" fill="#FFFFFF"/>
+      <!-- THE HANDLE, starting past the gap that stands in for the bolster. -->
+      <path d="M 378 64 L 578 64 Q 612 64 612 100 Q 612 136 578 136 L 378 136 Z"
+            fill="#FFFFFF"/>
+      <!-- THE NAME, struck through the blade. -->
+      <text x="208" y="112" text-anchor="middle" fill="#000000"
+            font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="58"
+            font-weight="700" letter-spacing="1">JRock</text>
+      <!-- AND THE LANGUAGE, through the handle. -->
+      <text x="519" y="116" text-anchor="middle" fill="#000000"
+            font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="50"
+            font-weight="600" letter-spacing="1">java</text>
+      <!-- THE RIVET: the dot of ".java", a hole through the handle. -->
+      <circle cx="406" cy="100" r="10.5" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <rect x="0" y="0" width="640" height="200" fill="currentColor" mask="url(#knife)"/>
+</svg>
