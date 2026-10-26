@@ -17717,7 +17717,7 @@ public class JRock {
         private List<Run> inline(String text) {
             List<Run> runs = new ArrayList<>();
             StringBuilder current = new StringBuilder();
-            boolean bold = false, italic = false, mono = false;
+            boolean bold = false, italic = false;
             int i = 0;
             while (i < text.length()) {
                 char c = text.charAt(i);
@@ -17728,25 +17728,44 @@ public class JRock {
                     current.append(next);
                     i += 2;
                 } else if (c == '`') {
-                    flush(runs, current, bold, italic, mono);
-                    mono = !mono;
-                    i++;
-                } else if (!mono && (c == '*' || c == '_') && next == c
+                    // A CODE SPAN, TAKEN WHOLE. Its delimiter is as many backticks as
+                    // were written, and what closes it is the next run of EXACTLY that
+                    // many - which is the only way to put a backtick inside code, and
+                    // the way this README writes a fence inline: "` ``` `". A single
+                    // backtick that toggles code on and off cannot do it. It reads the
+                    // three backticks as three empty spans and drops the text between
+                    // them on the floor.
+                    //
+                    // Whole, because what is inside a code span is not markup: an
+                    // asterisk in it is an asterisk, and nothing in it opens emphasis.
+                    int fence = backticks(text, i);
+                    int closer = closingBackticks(text, i + fence, fence);
+                    if (closer < 0) {
+                        // No closer, so these are not a delimiter: they are backticks.
+                        current.append(text, i, i + fence);
+                        i += fence;
+                    } else {
+                        flush(runs, current, bold, italic, false);
+                        runs.add(new Run(codeSpan(text.substring(i + fence, closer)),
+                                bold, italic, true));
+                        i = closer + fence;
+                    }
+                } else if ((c == '*' || c == '_') && next == c
                         && delimits(text, i, 2, !bold)) {
-                    flush(runs, current, bold, italic, mono);
+                    flush(runs, current, bold, italic, false);
                     bold = !bold;
                     i += 2;
-                } else if (!mono && (c == '*' || c == '_') && delimits(text, i, 1, !italic)) {
-                    flush(runs, current, bold, italic, mono);
+                } else if ((c == '*' || c == '_') && delimits(text, i, 1, !italic)) {
+                    flush(runs, current, bold, italic, false);
                     italic = !italic;
                     i++;
-                } else if (!mono && images != null && c == '!' && next == '['
+                } else if (images != null && c == '!' && next == '['
                         && (afterImage = picture(text, i, runs, current, bold, italic)) > 0) {
                     i = afterImage;
-                } else if (!mono && c == '['
+                } else if (c == '['
                         && (afterLink = link(text, i, runs, current, bold, italic)) > 0) {
                     i = afterLink;
-                } else if (!mono && c == '!' && next == '['
+                } else if (c == '!' && next == '['
                         // Any other image is written as its alt text and its URL: there is
                         // no picture to place, only what it was called and where it was.
                         && (afterLink = linkAsText(text, i + 1, current)) > 0) {
@@ -17756,8 +17775,45 @@ public class JRock {
                     i++;
                 }
             }
-            flush(runs, current, bold, italic, mono);
+            flush(runs, current, bold, italic, false);
             return runs;
+        }
+
+        /** How many backticks run from `at`. */
+        private static int backticks(String text, int at) {
+            int end = at;
+            while (end < text.length() && text.charAt(end) == '`') end++;
+            return end - at;
+        }
+
+        /**
+         * Where the next run of EXACTLY `fence` backticks begins at or after `from`, or
+         * -1 for none. Exactly, because a longer run is not a closer: it is why "` ``` `"
+         * has a single backtick round three and closes on the single one.
+         */
+        private static int closingBackticks(String text, int from, int fence) {
+            for (int at = from; at < text.length(); at++) {
+                if (text.charAt(at) != '`') continue;
+                int run = backticks(text, at);
+                if (run == fence) return at;
+                at += run - 1;
+            }
+            return -1;
+        }
+
+        /**
+         * A code span's text: ONE space comes off each end, when there is one at both
+         * ends and the span is not all spaces. That rule is what lets a code span hold a
+         * backtick at either end - "` `` `" is two backticks and not a space, two
+         * backticks and a space - and it is the whole reason the spaces are written.
+         */
+        private static String codeSpan(String content) {
+            if (content.length() >= 2 && content.charAt(0) == ' '
+                    && content.charAt(content.length() - 1) == ' '
+                    && !content.trim().isEmpty()) {
+                return content.substring(1, content.length() - 1);
+            }
+            return content;
         }
 
         // The "![alt](<hash>)" at `at`, placed as the picture that hash names.

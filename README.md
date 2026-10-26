@@ -97,7 +97,6 @@ By Ivan Khvostishkov, with assistance of Kiro, Claude and JetBrains IntelliJ IDE
 - **§25** [A seventh agent: paper docs, in and out (`JRockPaperDocs.java`)](#a-seventh-agent-paper-docs-in-and-out-jrockpaperdocsjava)
 - **§26** [Multi-agent collaboration](#multi-agent-collaboration)
 - **§27** [The automation API](#the-automation-api)
-  - [One breaking change in 5.1.0](#one-breaking-change-in-510)
   - [The cheat sheet: `JRock.Automation`](#the-cheat-sheet-jrockautomation)
 - **§28** [Configure dialog (top-left button)](#configure-dialog-top-left-button)
   - [Help (the button on the first line)](#help-the-button-on-the-first-line)
@@ -4289,20 +4288,6 @@ only the words after the name are selected and read out. Reading the answer wher
 made narration work in *Dialog only*, where the window shows no gray lines at all and what is not
 shown cannot be selected.
 
-### One breaking change in 5.1.0
-
-| Was | Is now | Pick it when you were selecting |
-|---|---|---|
-| `automationSelectInLog(String text)` | `automationSelectLastAnswer()` | the model's last answer |
-| | `automationSelectLastNote()` | the agent's own last note |
-
-`automationSelectInLog(String text)` is **gone**, replaced by `automationSelectLastNote()`
-beside `automationSelectLastAnswer()` (both below). An agent or flow of your own that calls
-the old one will not compile against this jar; the fix is one line, and which of the two
-replaces it depends on what was being selected — the model's last answer, or the agent's own
-last note. Everything else added since 5.0.0 is additive: the samples in this release are
-written against the new pair.
-
 ### The cheat sheet: `JRock.Automation`
 
 **The whole surface in one declaration**, for reading rather than for calling: `public interface
@@ -4825,7 +4810,7 @@ because both converters are built in and neither starts a process.
   [below](#the-style-names-a-layout-application-maps)), and the page is A4 with 2 cm margins,
   which is why this is the format to export for typesetting: a layout application imports a
   document by mapping style *names* onto its own.
-- **A ``` fence round the whole selection comes off** before a word of it is read. A model asked
+- **A ` ``` ` fence round the whole selection comes off** before a word of it is read. A model asked
   for Markdown very often answers with the Markdown *inside* a fence — ` ```markdown ` on the
   first line, ` ``` ` on the last — which is it saying "this is Markdown" rather than Markdown.
   Read as it stands, the whole letter became **one code block**: Consolas, indented, no headings,
