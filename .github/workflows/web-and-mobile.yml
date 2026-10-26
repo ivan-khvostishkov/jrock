@@ -415,20 +415,37 @@ jobs:
               break
             fi
           done
-          if [ -z "$ANSWERING" ]; then
-            echo "::error::the phone's Chrome is not answering on the DevTools port"
-            echo "--- the device, for the next attempt at this"
-            $ADB shell getprop ro.build.type || true
-            $ADB shell getprop ro.debuggable || true
-            $ADB shell dumpsys package com.android.chrome \
-              | grep -iE "versionName|versionCode|flags" | head -5 || true
-            $ADB logcat -d -t 80 | tail -40 || true
-            exit 1
+          if [ -n "$ANSWERING" ]; then
+            echo "   answering on localabstract:$ANSWERING"
+            curl -sf http://127.0.0.1:9222/json/version || true
+            java .github/build/WebShots.java screenshots android-04-as-chrome-sees-it \
+                 --attach 9222
+          else
+            # NOT A FAILURE ANY MORE, and here is the device saying why. A Play-store
+            # image is a "user" build with ro.debuggable=0, and its Chrome is a release
+            # build with flags=0x0; on such a device that socket has never appeared -
+            # not with a flag file, not as the debug app, not after a clean restart, not
+            # under any of the four names tried above. The attempt is kept because it
+            # costs a second and the day it answers the log will say so; the job is no
+            # longer gated on it.
+            echo "   no DevTools socket on this device, which is what a user build does:"
+            echo -n "     ro.build.type="; $ADB shell getprop ro.build.type | tr -d '\r'
+            echo -n "     ro.debuggable="; $ADB shell getprop ro.debuggable | tr -d '\r'
+            $ADB shell dumpsys package com.android.chrome 2>/dev/null \
+              | grep -m1 -i versionName | tr -d '\r' | sed 's/^/     /' || true
           fi
-          echo "   answering on localabstract:$ANSWERING"
-          curl -sf http://127.0.0.1:9222/json/version || true
-          java .github/build/WebShots.java screenshots android-04-as-chrome-sees-it \
-               --attach 9222
+
+          # AND THE CHECK ITSELF, made of the two pictures the job already took. A page
+          # that came up replaced the whole middle of the screen - its dark panel is now
+          # a Swing window - and a page that did not left that band exactly as it was.
+          # No protocol, no socket, no browser cooperation required.
+          echo "--- did JRock come up?"
+          java .github/build/CanvasAppeared.java \
+               screenshots/android-01-starting.png \
+               screenshots/android-02-the-window.png \
+            || { echo "--- the last of the log, for why it did not"
+                 $ADB logcat -d -t 80 | tail -40 || true
+                 exit 1; }
 
       - name: Upload
         if: always()
