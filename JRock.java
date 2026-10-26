@@ -188,8 +188,8 @@ public class JRock {
     // these at the top of its own file. One grid, eight windows, no pixel arithmetic in
     // the middle of a layout.
     //
-    // WHY A NUMBER HERE RATHER THAN THE LAYOUT'S OWN. The agents used to end with
-    // "pack(); setMinimumSize(getSize())", which makes the smallest size whatever the
+    // WHY A NUMBER HERE RATHER THAN THE LAYOUT'S OWN. "pack(); setMinimumSize(getSize())"
+    // makes the smallest size whatever the
     // layout worked out at that moment - a figure nobody wrote, nobody could read off the
     // source, and which moved with the platform's fonts, the display scaling and even the
     // text that happened to be in a label while the window was being built. One agent's
@@ -3153,11 +3153,11 @@ public class JRock {
         }
         // ONLY WHEN THERE IS SOMETHING NEW TO ASK. The list depends on exactly two things
         // - the endpoint and the key - and the session report runs again every time the
-        // Configure dialog is applied, so changing the narration voice used to cost an
-        // HTTP round trip to a models endpoint that was going to answer the same thing.
-        // Now the dialog says whether either of those changed (see modelsStale), and this
-        // is a fetch at startup, after a change to the endpoint or the key, and after a
-        // move to another folder - which has a key and an endpoint of its own.
+        // Configure dialog is applied. Asking regardless would make changing the narration
+        // voice cost an HTTP round trip to a models endpoint that was going to answer the
+        // same thing, so the dialog says whether either of those changed (see modelsStale)
+        // and this is a fetch at startup, after a change to the endpoint or the key, and
+        // after a move to another folder - which has a key and an endpoint of its own.
         if (!modelsStale) {
             log.gray("Available models (mantle): "
                     + (availableModels.isEmpty()
@@ -4000,9 +4000,9 @@ public class JRock {
             }
         });
 
-        // Ctrl+Shift+D and Ctrl+Shift+R: the two exports, which had no keys at all - and
-        // they matter more now that the selection may be the PROMPT's, since the whole
-        // point of that is to copy an answer down, correct a line and keep the result.
+        // Ctrl+Shift+D and Ctrl+Shift+R: the two exports. They earn keys because the
+        // selection may be the PROMPT's, and the whole point of that is to copy an answer
+        // down, correct a line and keep the result - which is a thing done repeatedly.
         frame.getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_D,
                         InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
@@ -7121,7 +7121,7 @@ public class JRock {
         // THE OPERATOR'S OWN NAME, which is the only thing in this dialog that is about
         // the person rather than the machine: written after the time on their own header
         // lines, and told to the model beside the clock (see contextMessage). Empty is
-        // not set, and not set is how it was before this existed.
+        // not set, and not set is the default: nothing is told to anybody.
         javax.swing.JTextField operatorF = new javax.swing.JTextField(operatorName, 30);
         operatorF.setName("operator");
         operatorF.setToolTipText("Your name, if you want the model told it and your own "
@@ -16712,10 +16712,10 @@ public class JRock {
     // mean" than one sitting in a transcript, so when both have one, that one is used.
     //
     // Nothing is sent and nothing is cleared: the prompt is read, not consumed.
-    // TWO MENUS, TWO SOURCES, AND NO GUESSING BETWEEN THEM. Both export items used to
-    // live in the LOG's menu and take whichever selection existed, the prompt's winning
-    // when both did - with the item's own label saying which it was about to use ("...from
-    // the prompt"). Which is a menu that answers a question nobody asked it: an item in
+    // TWO MENUS, TWO SOURCES, AND NO GUESSING BETWEEN THEM. One pair of export items in
+    // the LOG's menu, taking whichever selection existed and the prompt's when both had
+    // one - with the item's own label saying which it was about to use ("...from
+    // the prompt") - is a menu that answers a question nobody asked it: an item in
     // the log's menu should act on the log, and the prompt's selection is reached from the
     // prompt's own menu, where the hand already is.
     //
@@ -17474,7 +17474,7 @@ public class JRock {
                     if (codeBlock == null) codeBlock = block(CODE, 0);
                     // ONE RUN PER LINE, and the line break is what goes between them -
                     // not a run of its own, which both writers would then have to tell
-                    // from a line and neither did.
+                    // from a line of the program.
                     codeBlock.runs.add(new Run(line, false, false, true));
                     i++;
                 } else if (text.isEmpty()) {
@@ -18654,7 +18654,7 @@ public class JRock {
                     xml.append("<w:rPr>");
                     // ONE NAME PER RUN, which is all a run gets: a link that is also code
                     // is named as the link - that being the one a reader clicks - and
-                    // keeps its font as an override, the way every code run used to.
+                    // keeps its font as an override, there being only one name to give.
                     if (linked) xml.append("<w:rStyle w:val=\"Hyperlink\"/>");
                     else if (run.mono) xml.append("<w:rStyle w:val=\"CodeInline\"/>");
                     if (run.mono && linked) {
@@ -18672,10 +18672,10 @@ public class JRock {
             if (open != null) xml.append("</w:hyperlink>");
         }
 
-        // Code block runs, joined by <w:br/>: lines in a fenced block are collected
-        // into one block and joined with \n markers, so the paragraph can have its own
-        // space-before and space-after without adding it between every line. Here, each
-        // \n becomes a line break element, not a separate paragraph.
+        // A fenced block as ONE paragraph: its lines are the runs, held apart by <w:br/>.
+        // One paragraph rather than one per line because the space above and below a block
+        // belongs to the block - a paragraph per line has nowhere to put that space which
+        // does not also open up the inside of the block.
         private void docxCodeRuns(StringBuilder xml, List<Run> runs) {
             for (int i = 0; i < runs.size(); i++) {
                 // The break goes INSIDE the run whose line it precedes: w:br is run

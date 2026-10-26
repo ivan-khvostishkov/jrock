@@ -16,10 +16,9 @@ import javax.imageio.ImageIO;
  * same question the desktop browser is asked, and the one with a real answer in it. On
  * an emulator it sometimes cannot ask: a Play-store image is a {@code user} build with
  * {@code ro.debuggable=0} and a release Chrome whose {@code flags=0x0}, and on such a
- * device {@code localabstract:chrome_devtools_remote} has more than once not existed at
- * all, with Chrome running and its window in front. This is what the job falls back to
- * on those runs, and only on those: where the socket answers, its answer is the one that
- * counts.
+ * device {@code localabstract:chrome_devtools_remote} may not exist at all, with Chrome
+ * running and its window in front. This is what the job falls back to on a run like
+ * that, and only on one: where the socket answers, its answer is the one that counts.
  *
  * <p>The fallback is made out of what the job already has. Two screenshots: one taken
  * seconds after the address is opened, one taken after the wait. If CheerpJ started a JVM

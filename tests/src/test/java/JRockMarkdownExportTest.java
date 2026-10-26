@@ -63,9 +63,9 @@ class JRockMarkdownExportTest {
      * heading, the emphasis, the list, the table's shape and every character of its text
      * - survives both ways.
      * <p>
-     * The header row used to come back as {@code | **Region** |}, because its bold was
-     * written onto the runs. It is the Table head style's now, so there is no bold in
-     * the text to read back and the row returns as the row that was written.
+     * The header row returns as the row that was written, rather than as
+     * {@code | **Region** |}: its bold belongs to the Table head style, so there is no
+     * bold in the text for the import to read back as markup.
      *
      * @see JRockConversionRoundTripTest for the invariant this is one case of
      */

@@ -196,10 +196,10 @@ class JRockConversionRoundTripTest {
     void theMarkupIsWhereTheSchemaPutsIt() throws Exception {
         String body = part(docx(export(EVERYTHING)), "word/document.xml");
 
-        // Both of these were written wrong once, and both were tolerated by a layout
-        // application while being a document Word offers to repair - which is the worst
-        // way for markup to be wrong, because nothing says so until someone else opens
-        // it. w:br is run content; w:rStyle belongs inside w:rPr.
+        // Asserted because a layout application tolerates both of these while a word
+        // processor offers to repair the document - which is the worst way for markup to
+        // be wrong, since nothing says so until somebody else opens it. w:br is run
+        // content; w:rStyle belongs inside w:rPr.
         assertThat(body).describedAs("a w:br outside a run")
                 .doesNotContain("</w:pPr><w:br/>").doesNotContain("<w:p><w:br/>");
         assertThat(body).describedAs("a w:rStyle outside w:rPr")
