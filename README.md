@@ -4867,9 +4867,18 @@ written: the file, the block and table counts, and the byte count.
 
 A `.docx` written here reads back through **DOCX as Markdown text** as the same Markdown,
 **pictures and all** — each one written out beside the Markdown and referred to from the place in
-the text it was placed at ([details](#rtf-and-docx-conversion-no-external-tool) §15) — give or take
-the two honest differences a round trip has: a table's header row is written bold, so it comes
-back as bold markup, and column alignment is layout the import doesn't read.
+the text it was placed at ([details](#rtf-and-docx-conversion-no-external-tool) §15) — give or
+take one honest difference: column alignment is layout, and the import doesn't read it back.
+
+**It is the style names that make that true, in both directions.** The export writes what a
+paragraph *is* and the import reads it: a `Code` paragraph comes back inside a fence with its
+lines intact, a `Caption` comes back in italics, a `List 3` item comes back indented to the third
+level, a `Code inline` run comes back between backticks. None of those leave a mark in the text
+the way `**bold**` does — a caption is italic because its style is — so a converter that read the
+text alone would lose every one of them, and a document that had been through a layout
+application would come back as flat prose. Which is the point of the round trip: the Markdown is
+the source, the document is what a typesetter works in, and an edit made in either is still the
+same book.
 
 #### The style names a layout application maps
 
@@ -4887,6 +4896,7 @@ what the DOCX export is really for. Nothing in it is formatted by hand where a n
 | *Caption* | paragraph | the italic line under a picture |
 | *Table text* | paragraph | the text in every table cell |
 | *Table head* | paragraph | the text in a repeated header row |
+| *Table space* | paragraph | the empty paragraph after a table — which is what a layout application makes the table's own, a table being content *inside* a paragraph there and a sibling of one here. Without it a table and the heading under it arrive as one paragraph, which cannot be spaced apart or broken across pages |
 | *Book table* | table | every table |
 | *Code inline* | character | `` `code` `` inside a sentence |
 | *Hyperlink* | character | the text of a `[text](url)` |

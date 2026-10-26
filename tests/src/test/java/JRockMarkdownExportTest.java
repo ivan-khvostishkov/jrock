@@ -58,11 +58,16 @@ class JRockMarkdownExportTest {
     /**
      * What {@link #MARKDOWN} comes back as after a trip through DOCX and out again.
      * <p>
-     * Not identical to it, and the two differences are the honest ones: the header row
-     * of a table is written bold (it is a header), so it returns as bold markup; and the
-     * column's right alignment is a layout decision that the import does not read back.
-     * Everything that carries meaning - the heading, the emphasis, the list, the table's
-     * shape and every character of its text - survives both ways.
+     * Identical to it but for ONE thing: the column's right alignment, which is a layout
+     * decision the import does not read back. Everything that carries meaning - the
+     * heading, the emphasis, the list, the table's shape and every character of its text
+     * - survives both ways.
+     * <p>
+     * The header row used to come back as {@code | **Region** |}, because its bold was
+     * written onto the runs. It is the Table head style's now, so there is no bold in
+     * the text to read back and the row returns as the row that was written.
+     *
+     * @see JRockConversionRoundTripTest for the invariant this is one case of
      */
     private static final String ROUND_TRIPPED = String.join("\n",
             "# Quarterly Report",
@@ -72,7 +77,7 @@ class JRockMarkdownExportTest {
             "- Revenue up",
             "- Costs flat",
             "",
-            "| **Region** | **Revenue** |",
+            "| Region | Revenue |",
             "| --- | --- |",
             "| EMEA | 12 |",
             "");

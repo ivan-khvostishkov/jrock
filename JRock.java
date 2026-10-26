@@ -15044,6 +15044,13 @@ public class JRock {
              * else is a document's own characters, and is escaped.
              */
             final boolean markdown;
+            /**
+             * Whether the run is code, and comes back out between backticks. A document
+             * says so with a character style named for it ("Code inline" is what this
+             * converter writes), which is read rather than the font: a run is code
+             * because something said it was, not because it happens to be in Consolas.
+             */
+            final boolean mono;
 
             Run(String text, boolean bold, boolean italic, int size) {
                 this(text, bold, italic, size, null);
@@ -15055,17 +15062,23 @@ public class JRock {
 
             Run(String text, boolean bold, boolean italic, int size, String link,
                 boolean markdown) {
+                this(text, bold, italic, size, link, markdown, false);
+            }
+
+            Run(String text, boolean bold, boolean italic, int size, String link,
+                boolean markdown, boolean mono) {
                 this.text = text;
                 this.bold = bold;
                 this.italic = italic;
                 this.size = size;
                 this.link = link;
                 this.markdown = markdown;
+                this.mono = mono;
             }
 
             boolean sameStyleAs(Run other) {
                 return bold == other.bold && italic == other.italic && size == other.size
-                        && markdown == other.markdown
+                        && markdown == other.markdown && mono == other.mono
                         && java.util.Objects.equals(link, other.link);
             }
         }
@@ -15304,7 +15317,8 @@ public class JRock {
                     link = run.link;
                 }
                 label.append(run.markdown ? text
-                        : emphasis ? emphasised(text, run.bold, run.italic) : escape(text));
+                        : emphasis ? emphasised(text, run.bold, run.italic, run.mono)
+                        : escape(text));
             }
             return out.append(linked(label.toString(), link)).toString();
         }
@@ -15349,17 +15363,36 @@ public class JRock {
         // Wraps a run in its emphasis markers, keeping any surrounding whitespace
         // outside them: "** bold **" is not emphasis in Markdown, it is four asterisks
         // and a word, and a run that ends in a space is entirely normal in RTF.
-        private static String emphasised(String text, boolean bold, boolean italic) {
-            String escaped = escape(text);
-            if (!bold && !italic) return escaped;
+        private static String emphasised(String text, boolean bold, boolean italic,
+                                         boolean mono) {
+            if (!bold && !italic && !mono) return escape(text);
             int start = 0;
-            int end = escaped.length();
-            while (start < end && Character.isWhitespace(escaped.charAt(start))) start++;
-            while (end > start && Character.isWhitespace(escaped.charAt(end - 1))) end--;
-            if (start == end) return escaped;   // whitespace only: nothing to emphasise
-            String marker = bold && italic ? "***" : (bold ? "**" : "*");
-            return escaped.substring(0, start) + marker + escaped.substring(start, end)
-                    + marker + escaped.substring(end);
+            int end = text.length();
+            while (start < end && Character.isWhitespace(text.charAt(start))) start++;
+            while (end > start && Character.isWhitespace(text.charAt(end - 1))) end--;
+            if (start == end) return escape(text);   // whitespace only: nothing to mark
+            // The whitespace at either end stays OUTSIDE the markers, which is where
+            // Markdown needs it: "* word *" is not emphasis, and "` code `" carries the
+            // spaces into the code.
+            String lead = text.substring(0, start), tail = text.substring(end);
+            String core = text.substring(start, end);
+            if (mono) {
+                // Code is literal, so what is inside the backticks is NOT escaped -
+                // Markdown reads no markup there either, and escaping it would put
+                // backslashes into the code. A backtick in the code itself needs a
+                // longer fence than the one it contains, and one at either end needs a
+                // space to keep it clear of the fence.
+                String fence = core.contains("`") ? "``" : "`";
+                String pad = core.startsWith("`") || core.endsWith("`") ? " " : "";
+                core = fence + pad + core + pad + fence;
+            } else {
+                core = escape(core);
+            }
+            if (bold || italic) {
+                String marker = bold && italic ? "***" : (bold ? "**" : "*");
+                core = marker + core + marker;
+            }
+            return lead + core + tail;
         }
 
         // The document's text is data, not markup: an asterisk someone typed must come
@@ -15532,6 +15565,20 @@ public class JRock {
                 java.util.regex.Pattern.compile("(?i)code|preformat|listing|source");
         private static final java.util.regex.Pattern QUOTE_STYLE =
                 java.util.regex.Pattern.compile("(?i)quot|citation");
+        /**
+         * The styles whose own formatting carries the meaning, so that reading the text
+         * is not enough to find it. A caption is italic because the Caption style is,
+         * and an item is at depth 3 because its style is List 3 - neither leaves a mark
+         * in the text the way "**bold**" does, which is the point of a named style and
+         * the reason the names have to be read back.
+         */
+        private static final java.util.regex.Pattern CAPTION_STYLE =
+                java.util.regex.Pattern.compile("(?i)^caption$");
+        private static final java.util.regex.Pattern LIST_STYLE =
+                java.util.regex.Pattern.compile("(?i)^list[ _-]*([1-9])$");
+        /** A CHARACTER style that means code: "Code inline" is what this writes. */
+        private static final java.util.regex.Pattern CODE_RUN_STYLE =
+                java.util.regex.Pattern.compile("(?i)code|verbatim|monospac");
 
         private DocxMarkdown() { }
 
@@ -15769,14 +15816,42 @@ public class JRock {
                                        Pictures pictures) {
             StringBuilder md = new StringBuilder();
             boolean previousWasListItem = false;
-            for (org.w3c.dom.Element element : children(body)) {
-                String name = element.getLocalName();
+            // The code paragraphs gathered so far, waiting for the end of the run of
+            // them. A null is appended to the elements below as the sentinel that ends
+            // the last one, so the fence is closed in one place rather than two.
+            List<String> code = new ArrayList<>();
+            List<org.w3c.dom.Element> elements = new ArrayList<>(children(body));
+            elements.add(null);
+            for (org.w3c.dom.Element element : elements) {
+                String name = element == null ? "" : element.getLocalName();
+                // A RUN OF CODE PARAGRAPHS IS ONE BLOCK, and comes out inside one fence.
+                // This converter writes a fenced block as a single paragraph with line
+                // breaks in it, and a word processor's own document writes a paragraph
+                // per line; either way what it was is one code block. A fence rather
+                // than four spaces of indent, because an indented block is not a block
+                // to every reader of Markdown - this converter's own parser reads the
+                // fence and would take the indent for body text, which is a round trip
+                // that loses the code.
+                if ("p".equals(name) && CODE_STYLE.matcher(style(element)).find()) {
+                    code.add(codeText(element));
+                    continue;
+                }
+                if (!code.isEmpty()) {
+                    if (md.length() > 0) md.append('\n');
+                    md.append("```\n").append(String.join("\n", code)).append("\n```\n");
+                    code.clear();
+                    previousWasListItem = false;
+                }
+                if (element == null) break;
                 String block;
                 boolean listItem = false;
                 if ("p".equals(name)) {
                     block = paragraph(element, links, pictures);
-                    listItem = block.startsWith("- ")
-                            || RtfMarkdown.NUMBERED.matcher(block).find();
+                    // Stripped first: a nested item is indented, and a list whose
+                    // second level is held apart by a blank line is two lists.
+                    String bare = block.stripLeading();
+                    listItem = bare.startsWith("- ")
+                            || RtfMarkdown.NUMBERED.matcher(bare).find();
                 } else if ("tbl".equals(name)) {
                     block = table(element, links, pictures);
                 } else {
@@ -15834,15 +15909,34 @@ public class JRock {
                 marker = "- ";
             }
 
+            // HOW DEEP THE ITEM IS, which is the style's name and nothing in the text:
+            // "List 3" is an item at the third level, and this converter writes the
+            // indent into the style rather than onto the paragraph. Two spaces a level,
+            // which is what its own parser reads back (see MarkdownExport.ITEM_LINE).
+            java.util.regex.Matcher list = LIST_STYLE.matcher(style);
+            StringBuilder indent = new StringBuilder();
+            if (list.matches() && !marker.isEmpty()) {
+                for (int depth = Integer.parseInt(list.group(1)); depth > 1; depth--) {
+                    indent.append("  ");
+                }
+            }
+
             String text = RtfMarkdown.inline(runs, drop).trim();
             if (text.isEmpty()) return "";
             if (marker.isEmpty() && QUOTE_STYLE.matcher(style).find()) return "> " + text;
+            // The italics of a caption are the Caption style's, so there is nothing in
+            // the text to read them off: the style is what says this is a caption, and
+            // the markup has to be put back for the parser that reads this to know it
+            // too (see MarkdownExport.isCaption).
+            if (marker.isEmpty() && CAPTION_STYLE.matcher(style).matches()) {
+                return "*" + text + "*";
+            }
             // A paragraph that happens to start with Markdown's own markup is text,
             // not markup: "#" would silently become a heading, ">" a quote.
             if (marker.isEmpty() && (text.startsWith("#") || text.startsWith(">"))) {
                 text = "\\" + text;
             }
-            return marker + text;
+            return indent + marker + text;
         }
 
         // One w:tbl as a Markdown pipe table, with the first row as the header -
@@ -15956,12 +16050,13 @@ public class JRock {
                     if (link != null) break;
                     if (field[1] != null && !field[1].isEmpty()) link = field[1];
                 }
-                RtfMarkdown.Run run =
-                        new RtfMarkdown.Run(text, on(r, "b"), on(r, "i"), 0, link);
+                boolean mono = codeRun(r);
+                RtfMarkdown.Run run = new RtfMarkdown.Run(
+                        text, on(r, "b"), on(r, "i"), 0, link, false, mono);
                 int last = runs.size() - 1;
                 if (last >= 0 && runs.get(last).sameStyleAs(run)) {
-                    runs.set(last, new RtfMarkdown.Run(
-                            runs.get(last).text + text, run.bold, run.italic, 0, link));
+                    runs.set(last, new RtfMarkdown.Run(runs.get(last).text + text,
+                            run.bold, run.italic, 0, link, false, mono));
                 } else {
                     runs.add(run);
                 }
@@ -16079,6 +16174,41 @@ public class JRock {
             if (toggle == null) return false;
             String value = toggle.getAttributeNS(W, "val");
             return !("0".equals(value) || "false".equals(value) || "off".equals(value));
+        }
+
+        /**
+         * Whether this run is code: its character style says so. The font is not
+         * consulted on purpose - a run is code because a style named it, and a document
+         * whose code is merely "in Consolas" has lost that before this is asked.
+         */
+        private static boolean codeRun(org.w3c.dom.Element r) {
+            org.w3c.dom.Element rPr = child(r, "rPr");
+            org.w3c.dom.Element style = rPr == null ? null : child(rPr, "rStyle");
+            return style != null
+                    && CODE_RUN_STYLE.matcher(style.getAttributeNS(W, "val")).find();
+        }
+
+        /**
+         * A code paragraph's text with its LINE BREAKS KEPT. Everywhere else a w:br is a
+         * space, because a line break in a sentence is a wrap and Markdown rewraps; in a
+         * code block each break is a line of the program, and this converter writes a
+         * whole fenced block as one paragraph of them (see MarkdownExport.docxCodeRuns).
+         * A tab stays a tab here for the same reason: it is the code's indentation.
+         */
+        private static String codeText(org.w3c.dom.Element p) {
+            StringBuilder out = new StringBuilder();
+            org.w3c.dom.NodeList found = p.getElementsByTagNameNS(W, "r");
+            for (int i = 0; i < found.getLength(); i++) {
+                for (org.w3c.dom.Element child
+                        : children((org.w3c.dom.Element) found.item(i))) {
+                    String name = child.getLocalName();
+                    if ("t".equals(name)) out.append(child.getTextContent());
+                    else if ("br".equals(name) || "cr".equals(name)) out.append('\n');
+                    else if ("tab".equals(name)) out.append('\t');
+                    else if ("noBreakHyphen".equals(name)) out.append('-');
+                }
+            }
+            return stripEnd(out.toString());
         }
 
         /** The paragraph's style id, or "" when it has none (i.e. body text). */
@@ -17341,12 +17471,10 @@ public class JRock {
                     // block is for. All lines in the fenced block go into ONE paragraph,
                     // joined by line breaks, so the block can have its own space-before
                     // and space-after without adding it between each line.
-                    if (codeBlock == null) {
-                        codeBlock = block(CODE, 0);
-                    }
-                    if (!codeBlock.runs.isEmpty()) {
-                        codeBlock.runs.add(new Run("\n", false, false, true));
-                    }
+                    if (codeBlock == null) codeBlock = block(CODE, 0);
+                    // ONE RUN PER LINE, and the line break is what goes between them -
+                    // not a run of its own, which both writers would then have to tell
+                    // from a line and neither did.
                     codeBlock.runs.add(new Run(line, false, false, true));
                     i++;
                 } else if (text.isEmpty()) {
@@ -17779,10 +17907,16 @@ public class JRock {
                     break;
                 case CODE:
                     // The paragraph is already in the monospace font, so its text goes
-                    // in as it stands - no group and no switches around it.
+                    // in as it stands - no group and no switches around it. The lines of
+                    // the block are held apart by \line, a break WITHIN a paragraph: one
+                    // \par each would make every line a paragraph of its own, and then
+                    // the space a reader puts after a paragraph would open the block up.
                     rtf.append("\\pard\\plain\\sa0\\li").append(INDENT)
                        .append("\\f1\\fs").append(CODE_SIZE).append(' ');
-                    for (Run run : block.runs) rtf.append(rtfText(run.text));
+                    for (int line = 0; line < block.runs.size(); line++) {
+                        if (line > 0) rtf.append("\\line ");
+                        rtf.append(rtfText(block.runs.get(line).text));
+                    }
                     break;
                 case ITEM:
                     // A hanging indent, so a wrapped item lines up under its own text
@@ -18138,6 +18272,16 @@ public class JRock {
                .append("<w:style w:type=\"paragraph\" w:styleId=\"TableHead\">")
                .append("<w:name w:val=\"Table head\"/><w:basedOn w:val=\"TableText\"/>")
                .append("<w:qFormat/><w:rPr><w:b/></w:rPr></w:style>")
+               // The paragraph a table lives in (see docxTable): no space of its own, so
+               // the space around a table is the table's own to set and nothing is added
+               // above or below it.
+               .append("<w:style w:type=\"paragraph\" w:styleId=\"TableSpace\">")
+               .append("<w:name w:val=\"Table space\"/><w:basedOn w:val=\"Normal\"/>")
+               .append("<w:qFormat/><w:pPr>")
+               .append("<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"240\"")
+               .append(" w:lineRule=\"auto\"/></w:pPr>")
+               .append("<w:rPr><w:sz w:val=\"").append(TABLE_SIZE)
+               .append("\"/></w:rPr></w:style>")
                // AND A NAME ON THE TABLE ITSELF, carrying the rules and the cell insets.
                // A word processor reads this and a table is a style to edit there too;
                // a layout application may instead bring every table in as its own basic
@@ -18351,6 +18495,24 @@ public class JRock {
                 xml.append("</w:tr>");
             }
             xml.append("</w:tbl>");
+            // AND AN EMPTY PARAGRAPH AFTER IT, which is not a blank line. A table is not
+            // a paragraph in either format: in OOXML w:tbl is a sibling of w:p, and in a
+            // layout application a table is content INSIDE a paragraph. With nothing
+            // between a table and what follows, the importing filter has no paragraph to
+            // put the table in and anchors it in the NEXT one - so a table and the
+            // heading under it become one paragraph, which cannot be spaced apart,
+            // cannot be broken across pages, and drags the heading with it wherever it
+            // goes. The empty paragraph is what that filter makes the table's own, and
+            // the reason it is the table's rather than a line of its own.
+            //
+            // It also keeps two tables two tables: "</w:tbl><w:tbl>" with nothing
+            // between them is ONE table to a word processor, which is a table of the
+            // Markdown's two joined end to end with the second one's header in the
+            // middle of it.
+            //
+            // Named, so it is not Normal: the paragraph the table sits in would
+            // otherwise bring the body's leading and spacing to the table's edges.
+            xml.append("<w:p><w:pPr><w:pStyle w:val=\"TableSpace\"/></w:pPr></w:p>");
         }
 
         /**
@@ -18460,25 +18622,20 @@ public class JRock {
         // \n becomes a line break element, not a separate paragraph.
         private void docxCodeRuns(StringBuilder xml, List<Run> runs) {
             for (int i = 0; i < runs.size(); i++) {
-                Run run = runs.get(i);
-                String text = run.text;
-                String[] lines = text.split("\n", -1);
-                for (int j = 0; j < lines.length; j++) {
-                    if (j > 0) xml.append("<w:br/>");
-                    String line = lines[j];
-                    if (!line.isEmpty()) {
-                        xml.append("<w:r><w:rStyle w:val=\"CodeInline\"/>");
-                        if (run.bold || run.italic) {
-                            xml.append("<w:rPr>");
-                            if (run.bold) xml.append("<w:b/>");
-                            if (run.italic) xml.append("<w:i/>");
-                            xml.append("</w:rPr>");
-                        }
-                        xml.append("<w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/></w:rPr>")
-                           .append("<w:t xml:space=\"preserve\">").append(xml(line))
-                           .append("</w:t></w:r>");
-                    }
+                // The break goes INSIDE the run whose line it precedes: w:br is run
+                // content, not paragraph content, and a w:p with a w:br among its own
+                // children is a document a word processor offers to repair. The font is
+                // the Code style's and is not written again here - a character style on
+                // every run of a code block is an override on every run of it, and the
+                // paragraph already says what it is.
+                xml.append("<w:r>");
+                if (i > 0) xml.append("<w:br/>");
+                String line = runs.get(i).text;
+                if (!line.isEmpty()) {
+                    xml.append("<w:t xml:space=\"preserve\">").append(xml(line))
+                       .append("</w:t>");
                 }
+                xml.append("</w:r>");
             }
         }
 
