@@ -708,7 +708,6 @@ Built-in cards include:
 |---|---|---|---|
 | Grok 4.3 | `xai.grok-4.3` | yes (`/openai/v1`) | $1.25 / $2.50; GovCloud $1.50 / $3.00 |
 | Grok 4.6 | `xai.grok-4.6` | yes (`/openai/v1`) | $2.20 / $6.60, at any input length (us-west-2, us-gov-east-1) |
-| Kimi K2.5 | `moonshotai.kimi-k2.5` | yes (`/v1`) | — |
 | Kimi K3 | `moonshotai.kimi-k3` | no (bedrock-runtime only) | — |
 | GLM 5.3 | `zai.glm-5.3` | no (bedrock-runtime only) | — |
 | DeepSeek-V3.1 | `deepseek.v3.1` | yes (`/v1`) | — |

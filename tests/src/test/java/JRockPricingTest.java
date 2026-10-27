@@ -145,7 +145,7 @@ class JRockPricingTest {
     @DisplayName("no price, no counts, no line - and never a guess")
     void logsNothingWithoutAPrice() throws Exception {
         // A card that states no price, and a model there is no card for at all.
-        assertThat(costLine("moonshotai.kimi-k2.5", "us-east-1", 1000, 1000)).isEmpty();
+        assertThat(costLine("moonshotai.kimi-k3", "us-east-1", 1000, 1000)).isEmpty();
         assertThat(costLine("someone.unknown-model", "us-east-1", 1000, 1000)).isEmpty();
         // A known price, but the reply reported no token counts: nothing to multiply,
         // so nothing is written - not a line about the rate instead.

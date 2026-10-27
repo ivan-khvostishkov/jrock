@@ -584,21 +584,6 @@ public class JRock {
         @Override String mantleChatCompletionsPath() { return null; }
     }
 
-    // Moonshot AI Kimi K2.5.
-    // Mantle base per the model card is /v1, so Chat Completions is /v1/chat/completions.
-    private static final class KimiK25Card extends BedrockModelCard {
-        String modelId()              { return "moonshotai.kimi-k2.5"; }
-        String displayName()          { return "Kimi K2.5"; }
-        String cardUrl()              { return "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-moonshot-ai-kimi-k2-5.html"; }
-        String[] inputModalities()    { return new String[] { "Image", "Text" }; }
-        String[] outputModalities()   { return new String[] { "Text" }; }
-        String[] endpointsSupported() { return new String[] { "bedrock-runtime", "bedrock-mantle" }; }
-        // Card lists Chat Completions, Invoke, Converse (Responses NOT supported).
-        String[] apisOnRuntime()      { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
-        String[] apisOnMantle()       { return new String[] { "Chat Completions", "Invoke", "Converse" }; }
-        // Uses the mantle default /v1/chat/completions (inherited).
-    }
-
     // Shared traits of OpenAI GPT models on Bedrock. Per their model cards, on
     // bedrock-mantle "both APIs use the /openai/v1 base path, not /v1", so Chat
     // Completions lives at /openai/v1/chat/completions. Text/Image-in, Text-out.
@@ -944,9 +929,17 @@ public class JRock {
     }
 
     // Registry of known model cards, and a lookup by model id.
+    //
+    // A CARD IS FOR A MODEL WITH A FUTURE. One goes as soon as its deprecation is
+    // announced, rather than when the model stops answering: a card is what the picker
+    // offers and what the session report prices a request from, so a card for a model
+    // on its way out is an invitation to start something that will have to be moved.
+    // A model with no card still works - the vendor fallbacks below route it by prefix
+    // and the list from the endpoint still lists it - so removing one takes nothing
+    // away but the recommendation.
     private static final BedrockModelCard[] MODEL_CARDS = {
         new Grok43Card(), new Grok46Card(),
-        new KimiK25Card(), new KimiK3Card(), new Glm53Card(),
+        new KimiK3Card(), new Glm53Card(),
         new DeepSeekV31Card(), new Qwen332bCard(),
         new Gpt54Card(), new Gpt55Card(), new Gpt56SolCard(), new Gpt56TerraCard(),
         new Gpt6SolCard(), new Gpt61SolCard(), new Gpt6AstraCard(),
