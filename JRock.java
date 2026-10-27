@@ -2998,16 +2998,36 @@ public class JRock {
     // Configure dialog. The FIRST line is always the current working directory.
     // promptSourceNote is logged only when non-null (startup); on reconfigure the
     // prompt is untouched so it's omitted.
-    private static void initSession(LogView log, JTextArea input, String promptSourceNote) {
-        // Not ready while the report is being written, and ready again when it ends.
-        // The Configure dialog runs this a second time, so an automation that arrives
-        // mid-reconfiguration waits for the new session rather than the old one (see
-        // automationAwaitReady).
+    /**
+     * The cheap half of starting a session: what the WINDOW has to know before it can be
+     * built, and nothing that touches the transcript.
+     *
+     * <p>Split off because the two halves are wanted at different moments. The controls
+     * are made from this folder's settings - the Clock and History checkboxes are
+     * constructed with its values in them - so this has to run before they exist. The
+     * other half reads a log of any size off the disk and styles it into a text pane,
+     * which is the slowest thing JRock does at startup and has no business happening
+     * before there is a window on screen to do it in.
+     *
+     * <p>Reading a config file is microseconds. Restoring a transcript is not.
+     */
+    private static void adoptSession() {
         sessionReady = false;
         // Every file chooser starts fresh in the (possibly new) working directory.
         includeChooserDir.reset();
         logChooserDir.reset();
         scanChooserDir.reset();
+        // Nothing here logs, so it does not matter that it runs before the log is
+        // restored - it only decides what the report will have to say.
+        adoptSettingsOfWorkingDir();
+    }
+
+    private static void initSession(LogView log, JTextArea input, String promptSourceNote) {
+        // Not ready while the report is being written, and ready again when it ends.
+        // The Configure dialog runs this a second time, so an automation that arrives
+        // mid-reconfiguration waits for the new session rather than the old one (see
+        // automationAwaitReady).
+        adoptSession();
 
         // Recover any previous log from disk FIRST. loadFromDisk() replaces the
         // entry list (rebuild -> setText), so it must run before we log anything
@@ -3017,10 +3037,6 @@ public class JRock {
         // What the log already holds in costs, read before this session adds a line.
         double[] pastCosts = loggedCosts(hadLog ? readFileQuietly(logFile()) : null);
 
-        // The settings of this folder, before anything reports what they are. After
-        // loadFromDisk for the same reason the report lines are: it replaces the entry
-        // list, so anything logged before it would be wiped.
-        adoptSettingsOfWorkingDir();
         // The settings with a control of their own on the main window, which show the
         // folder's value as soon as there is a window (at startup, it is made with them).
         Ui shown = ui;
@@ -3426,7 +3442,10 @@ public class JRock {
 
         // Emit the startup session report (CWD, log recovery, region/model, model
         // list, Ready). Reused verbatim after reconfiguration.
-        initSession(log, input, promptSource);
+        // Only the half the controls need (see adoptSession). The session report, and
+        // the restoring of this folder's transcript, happen once there is a window to
+        // put them in - which is the end of this method.
+        adoptSession();
 
         // "History" mode: when on, each send includes the full prior dialog so the model
         // sees a continuous conversation, not a single message.
@@ -4555,6 +4574,37 @@ public class JRock {
         applyRememberedBounds(frame, log);
         rememberBoundsAsTheyChange(frame);
         frame.setVisible(true);
+
+        // AND THE SESSION, LAST, IN A TASK OF ITS OWN.
+        //
+        // Everything above this line is construction, and all of it together is a few
+        // hundred milliseconds. The session report is not: it reads this folder's whole
+        // transcript off the disk and styles it into a text pane, and a transcript grows
+        // for as long as the folder is used. Done before setVisible - which is where it
+        // was - that work happens with NO WINDOW ON SCREEN, so the longer somebody has
+        // been using JRock the longer they look at nothing. In a browser tab, where the
+        // log survives a reload and every class is interpreted, that was seconds.
+        //
+        // Queued rather than called, so this task ENDS here: the event thread goes back
+        // to its queue, paints the window it was just handed, and only then starts on the
+        // report. The window is therefore up and laid out before the transcript arrives
+        // in it, which is the whole point.
+        //
+        // SEND IS HELD UNTIL IT IS DONE, and nothing else is. The prompt takes typing
+        // from the first moment - typing into it costs nothing and it is autosaved
+        // whatever happens - so the only thing an operator cannot do during that second
+        // is send, which they could not do usefully anyway: the model and the endpoint
+        // are not reported yet. One disabled control, one reason for it.
+        sendGate.accept(false);
+        SwingUtilities.invokeLater(() -> {
+            try {
+                initSession(log, input, promptSource);
+            } finally {
+                // In a finally, because a half-written report that left Send dead would
+                // be a window that cannot be used at all.
+                sendGate.accept(true);
+            }
+        });
     }
 
     // The window at the size and place it was left at in this folder, if there is one.

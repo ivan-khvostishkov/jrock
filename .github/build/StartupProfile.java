@@ -89,7 +89,16 @@ public final class StartupProfile {
         //    by the first layout has run by the time this gets its turn, so it is the
         //    last moment before a reader has a window to look at. Not "painted" - nothing
         //    outside Swing can be told that - but the nearest thing that can be asked.
-        JFrame window = JRock.automationWindow();
+        // WAITED FOR, not asked for once. main() only QUEUES the window's construction
+        // and returns, so automationWindow() is null for as long as that task takes - and
+        // a null window made the loop below exit at once and report 0 ms for a window
+        // that did not exist yet.
+        JFrame window = null;
+        long untilWindow = System.currentTimeMillis() + SHOWING_MS;
+        while (window == null && System.currentTimeMillis() < untilWindow) {
+            window = JRock.automationWindow();
+            if (window == null) Thread.sleep(20);
+        }
         // Showing first, and then the queue empty. A window that exists is not a window
         // on screen: isShowing goes true when it is displayable and visible, which is the
         // moment a reader has something to look at - and then the queue has to drain
