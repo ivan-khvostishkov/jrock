@@ -3459,7 +3459,7 @@ public class JRock {
                 + "that is sent is saved as its own __JRock/messages/<date>-<time>-clock.txt, "
                 + "so the record shows exactly what the model was told.");
 
-        JButton send = new JButton("Send (Ctrl-Enter)");
+        JButton send = new JButton(SEND_LABEL);
         send.setToolTipText("Call the model with the prompt below (Ctrl+Enter)");
         explains(send, "Send", "Calls the model in Configure with the prompt below, and "
                 + "writes the answer into the log under its header (Ctrl+Enter). Every "
@@ -3467,8 +3467,14 @@ public class JRock {
                 + "behind it sent with the message; one that is missing stops the send, "
                 + "which is a checkbox in Configure. The prompt, the answer and the clock "
                 + "each get their own file in __JRock/messages/, and the gray lines that "
-                + "follow say what was called, what it cost, and where it went. The "
-                + "button is held while a send - or a backup - is running.");
+                + "follow say what was called, what it cost, and where it went. While "
+                + "an answer is on its way the button reads Stop waiting, and pressing "
+                + "it - after a question, so a thumb cannot do it by accident - abandons "
+                + "the answer and frees the button. AWS may still charge for what the "
+                + "model generated: stopping ends the waiting, not the work. Ctrl+Enter "
+                + "never stops anything, so the prompt you are typing meanwhile can end "
+                + "the way it always does. A backup holds the button too, and your "
+                + "prompt is never touched by any of it.");
 
         // "Enter" mode: when on, plain Enter sends too. Off at startup and never
         // remembered - deliberately, both times. Built here either way, because the key
@@ -3500,16 +3506,47 @@ public class JRock {
         // re-enable it while the backup is still running. So the button is gated by a
         // count of reasons rather than by whoever spoke last. EDT only, like the button.
         int[] sendBlockers = { 0 };
+        // THE REQUEST IN FLIGHT, if there is one, so that the same button can abandon it.
+        // One at a time: Send is held for the duration, so there is never a second.
+        final javax.swing.SwingWorker<?, ?>[] inFlight = { null };
+        Runnable showSendState = () -> {
+            boolean waiting = inFlight[0] != null;
+            send.setText(waiting ? STOP_LABEL : SEND_LABEL);
+            // ENABLED WHILE WAITING whatever else is holding the button down. Stop is
+            // the way out of a request, and a disabled way out is no way out - an
+            // autobackup starting mid-answer must not trap the answer.
+            send.setEnabled(waiting || sendBlockers[0] == 0);
+        };
         java.util.function.Consumer<Boolean> sendGate = allow -> {
             if (allow) {
                 if (sendBlockers[0] > 0) sendBlockers[0]--;
             } else {
                 sendBlockers[0]++;
             }
-            send.setEnabled(sendBlockers[0] == 0);
+            showSendState.run();
         };
 
         send.addActionListener(e -> {
+            // STOP, when something is on its way. Asked first, because the press that
+            // abandons an answer is the same press that asked for it and a thumb on a
+            // phone finds it twice: a model thinking for forty seconds is forty seconds
+            // in which the button is a trap.
+            if (inFlight[0] != null) {
+                int answer = javax.swing.JOptionPane.showConfirmDialog(frame,
+                        "Stop waiting for this answer?\n\n"
+                        + "The request is already with the model, so AWS may still charge "
+                        + "for the tokens it has generated - stopping ends the waiting, "
+                        + "not the work.\n\n"
+                        + "Your prompt stays exactly as it is.",
+                        "Stop waiting", javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                        javax.swing.JOptionPane.WARNING_MESSAGE);
+                if (answer == javax.swing.JOptionPane.OK_OPTION && inFlight[0] != null) {
+                    // true, so the thread blocked in HttpClient.send is interrupted and
+                    // stops waiting on the socket rather than on the answer.
+                    inFlight[0].cancel(true);
+                }
+                return;
+            }
             // Normalized here, at the one point the prompt leaves the text area, so
             // the request and the transcript get the identical string.
             String prompt = stripMessage(input.getText());
@@ -3618,7 +3655,7 @@ public class JRock {
                     : calling + " ...");
             // The line is not quite silent while the answer is on its way (see crackleOn).
             crackleOn();
-            new SwingWorker<String[], Void>() {
+            SwingWorker<String[], Void> asking = new SwingWorker<String[], Void>() {
                 @Override
                 protected String[] doInBackground() {
                     try {
@@ -3671,15 +3708,37 @@ public class JRock {
                             log.grayDump(result[2]);
                             log.gray("");        // closes the raw request/response/stats block
                         }
+                    } catch (java.util.concurrent.CancellationException stopped) {
+                        // STOPPED ON PURPOSE, so not an error: the answer was abandoned
+                        // and the transcript says so, because a gap in a log with no line
+                        // explaining it is a gap somebody will come back and wonder about.
+                        //
+                        // AND IT MAY HAVE BEEN PAID FOR. The request reached the model
+                        // and the model was generating; the tokens it produced are
+                        // billable whether or not they were ever read. A cancel that
+                        // looked free would be the one line in this log that lies about
+                        // money.
+                        failure = "the answer was stopped before it arrived.";
+                        log.gray("Stopped waiting for the answer. The request had already "
+                                + "reached the model, so AWS may still charge for the "
+                                + "tokens it generated - there is no cost line for it "
+                                + "here because no reply came back to count.");
+                        log.gray("Your prompt is untouched.");
+                        log.gray("");
                     } catch (Exception ex) {
                         failure = "ERROR: " + ex.getMessage();
                         log.gray("ERROR: " + ex.getMessage());
                         log.gray("");
                     }
+                    inFlight[0] = null;
                     sendGate.accept(true);
+                    showSendState.run();
                     sendFinished(failure);
                 }
-            }.execute();
+            };
+            inFlight[0] = asking;
+            showSendState.run();
+            asking.execute();
         });
 
         // Autobackup: a one-shot timer, restarted by every caret event in the prompt
@@ -3704,12 +3763,17 @@ public class JRock {
         input.addCaretListener(e -> idleBackup.restart());
         idleBackup.start();   // so the first idle spell counts from startup
 
-        // Ctrl+Enter in the prompt area triggers Send.
+        // Ctrl+Enter in the prompt area triggers Send - and NOTHING while an answer is
+        // on its way, although the button it stands for says Stop by then. The keys mean
+        // one thing each: a prompt typed while waiting ends in the same Ctrl+Enter it
+        // always ends in, out of habit and without looking, and that keystroke must not
+        // be the one that abandons the answer still coming. Stopping is deliberate, and
+        // deliberate means the button.
         input.getInputMap().put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.CTRL_DOWN_MASK), "jrock-send");
         input.getActionMap().put("jrock-send", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) {
-                if (send.isEnabled()) send.doClick();
+                if (inFlight[0] == null && send.isEnabled()) send.doClick();
             }
         });
 
@@ -3735,7 +3799,7 @@ public class JRock {
             @Override public void actionPerformed(ActionEvent e) {
                 if (!enterSends.isSelected()) {
                     newLine.actionPerformed(e);
-                } else if (send.isEnabled()) {
+                } else if (inFlight[0] == null && send.isEnabled()) {
                     send.doClick();
                 }
             }
@@ -19191,6 +19255,14 @@ public class JRock {
     }
 
     // The Configure checkbox, which the send's refusal names so it can be found.
+    /**
+     * What the one button says, in each of its two states. Named rather than typed twice
+     * because the press that stops a request is the same press that started it: the label
+     * is the only thing telling a reader which of the two they are about to do.
+     */
+    private static final String SEND_LABEL = "Send (Ctrl-Enter)";
+    private static final String STOP_LABEL = "Stop waiting";
+
     private static final String MISSING_STOPS_SEND_LABEL = "Stop a send on a missing include";
 
     // Whether the file behind a hash can be sent: known, and there to be read.

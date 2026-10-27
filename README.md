@@ -823,6 +823,37 @@ bill, and a guess is not one.
   inserted directly rather than delegated to the editor kit's action, which is a look-up that
   can come back empty — and a key that silently does nothing is the one thing this checkbox
   exists to rule out.
+- **Your prompt is never erased. Not on send, not on error, not on a crash.** Most assistants
+  take the prompt away the moment you send it, which is fine until the request fails, the
+  connection drops or the app dies - and then the thing you spent twenty minutes writing is gone
+  and the only copy was in a text box. JRock reads the prompt and leaves it: it is still there,
+  word for word, while the answer is on its way, after the answer arrives, after an error, and
+  after a restart (it is in `__JRock/jrock-prompt.txt`, written as you type). Clearing it is
+  something **you** do - select all and delete, or *Load prompt from file* over the top of it.
+  Nothing else in JRock clears it, and that is deliberate.
+
+  Which is also why **the prompt stays editable while an answer is on its way**: the text that
+  went to the model was taken at the moment you pressed Send, so nothing you type afterwards can
+  reach it. Write the next question while this one is being answered.
+
+- **Stop waiting**, when an answer is taking too long or you have changed your mind. While a
+  request is in flight the Send button reads **Stop waiting**, and pressing it asks first - the
+  press that abandons an answer is the same press that asked for it, and a thumb on a phone finds
+  it twice. Say yes and the waiting ends, the button comes back, and the log says what happened:
+
+  ```
+  Stopped waiting for the answer. The request had already reached the model, so AWS may still
+  charge for the tokens it generated - there is no cost line for it here because no reply came
+  back to count.
+  Your prompt is untouched.
+  ```
+
+  **Stopping ends the waiting, not the work.** The request reached Bedrock and the model was
+  generating; those tokens are billable whether or not anybody read them. A cancel presented as
+  free would be the one line in this log that lies about money. **Ctrl+Enter never stops
+  anything** - the keys mean one thing each, so the prompt you are typing meanwhile can end the
+  way it always ends without abandoning the answer still coming.
+
 - **Stats** per response: the **round trip**, input/output text symbols, and input/output tokens
   (from the API's `usage`) — and **what the request cost**, when that can be worked out: the
   token counts at the price the model's [card](#models) §07 states for the region.
