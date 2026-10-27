@@ -179,23 +179,26 @@ jobs:
           # page when it raises its keyboard over it - whether it zooms, and whether the
           # Save button is still somewhere a thumb can reach. So it gets photographed.
           #
-          # THE SOFTWARE KEYBOARD HAS TO BE TURNED ON. A simulator types from the Mac's
-          # keyboard by default and never draws its own, so a screenshot taken with a
-          # field focused shows no keyboard at all - which is the opposite of the thing
-          # being looked at. This is the preference that decides it, and the simulator
-          # has to be restarted to read it.
-          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-          killall Simulator 2>/dev/null || true
-          sleep 4
-          open -a Simulator
-          sleep 10
+          # NO SIMULATOR RESTART, and no keyboard preference to write: this device draws
+          # its software keyboard already - ios-02 has one over JRock's own prompt. The
+          # restart that used to be here is what made this shot fail: killing the
+          # Simulator left Safari cold, and one openurl twelve seconds before a
+          # screenshot caught a page that was still loading. A blank white picture.
 
           # "#editor" opens it on a sample prompt with no jar and no runtime (see
           # EDITOR_SHOT in index.html): the editor is the subject, and waiting out
           # CheerpJ to photograph a text box would be two minutes for nothing.
+          #
+          # RETRIED, for the reason the first openurl in this job is retried: the call
+          # asks the device to hand a URL to whatever opens it, and an answer of "it
+          # took" is not an answer of "the page is there".
           BASE="${URL%%\?*}"
-          xcrun simctl openurl "$UDID" "${BASE}#editor" || true
-          sleep 12
+          for attempt in 1 2 3 4 5; do
+            if xcrun simctl openurl "$UDID" "${BASE}#editor"; then break; fi
+            echo "openurl for the editor did not take (attempt $attempt); waiting"
+            sleep 8
+          done
+          sleep 25
           # A TAP, because a tap is what raises a keyboard. Focusing a field from script
           # does not: every mobile browser requires a user gesture, which is also why
           # JRock cannot raise the keyboard at startup. The tap lands in the text area,

@@ -345,13 +345,19 @@
       // checked by looking at the code. Nobody arrives with a hash by accident.
       var EDITOR_SHOT = location.hash.replace(/^#/, "") === "editor";
 
-      if (EDITOR_SHOT) {
-        window.addEventListener("load", function () {
+      // ON LOAD AND ON HASHCHANGE BOTH. A browser already showing this page and asked
+      // for the same address with a fragment on the end does not reload it - it changes
+      // the fragment and fires hashchange, and no load event ever comes. Which is a
+      // screenshot of whatever was already on screen.
+      window.addEventListener("hashchange", function () {
+        if (location.hash.replace(/^#/, "") === "editor") openEditorForShot();
+      });
+      function openEditorForShot() {
           openPromptEditor("Summarise the attached invoice and tell me what is owed, "
               + "by when, and to whom.\n\n@img 1f3a9c0b7e42\n\n"
               + "Then draft a two-line reply I can send as it stands.");
-        });
       }
+      if (EDITOR_SHOT) window.addEventListener("load", openEditorForShot);
 
       var autostartDir = (function () {
         var query = location.search.replace(/^\?/, "");
