@@ -5932,8 +5932,8 @@ Build hashes, the same from all three runners — straight out of CI, which is t
 these numbers can honestly come from:
 
 ```
-0de829704a2ac5b7b0cc2606b1987f20827086b30b3b61719b4917ed81526acd  jrock.jar
-5a7de4ba86023530b898d20fffecad74  jrock.jar
+d9feb074516ea651d0301fe4372dabf132c274fdc38b0180e925a64b59ccb5a3  jrock.jar
+3f346ed3615b2e53598b6774485ad84e  jrock.jar
 ```
 
 Or, if you want to modify the source and run it in place (no build step):
