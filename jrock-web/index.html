@@ -171,10 +171,17 @@
     #promptEditor textarea {
       flex: 1 1 auto; width: 100%; resize: none; border: 0; outline: none;
       padding: 12px; box-sizing: border-box;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      /* 16px at least: iOS zooms the page in on any field smaller than that, and a
-         zoomed page is one the Save button has left the side of. */
-      font-size: 16px; line-height: 1.45; color: var(--text);
+      /* NO GENERIC "monospace" AT THE END OF THIS LIST, deliberately. Safari sizes the
+         generic monospace family against a 13px default rather than the 16px one, so a
+         field asking for 16px can end up rendering under the threshold at which iOS
+         zooms the page in to focus it - and a zoomed page is one the Save button has
+         left the side of. Three real families, all present on Apple and Windows
+         machines, so the generic is never reached. */
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New";
+      /* 17px, not 16: the threshold is 16 and sitting exactly on it leaves nothing for
+         a rounding error or a text-size-adjust to eat. */
+      font-size: 17px; line-height: 1.45; color: var(--text);
+      -webkit-text-size-adjust: 100%;
       background: var(--panel);
     }
     #promptEditor .foot {
@@ -330,6 +337,21 @@
       // class to JavaScript (see the end of run). Nothing else in the page changes, and
       // nobody arrives with a hash by accident.
       var DRIVEN = location.hash.replace(/^#/, "") === "shots";
+
+      // "#editor" in the address: open the full screen prompt editor on a sample prompt
+      // and nothing else - no jar, no runtime, no Swing. It is how the editor gets into
+      // the README's screenshots and, more to the point, how it gets photographed WITH A
+      // KEYBOARD UP on a real phone, which is the one thing about it that cannot be
+      // checked by looking at the code. Nobody arrives with a hash by accident.
+      var EDITOR_SHOT = location.hash.replace(/^#/, "") === "editor";
+
+      if (EDITOR_SHOT) {
+        window.addEventListener("load", function () {
+          openPromptEditor("Summarise the attached invoice and tell me what is owed, "
+              + "by when, and to whom.\n\n@img 1f3a9c0b7e42\n\n"
+              + "Then draft a two-line reply I can send as it stands.");
+        });
+      }
 
       var autostartDir = (function () {
         var query = location.search.replace(/^\?/, "");
@@ -664,8 +686,38 @@
       // queued, because two Java threads each waiting for the same text box is a
       // deadlock with extra steps.
       var promptEditorBusy = false;
+
+      // Java's way in. Everything after these two lines is openPromptEditor, which the
+      // screenshot hook calls as well - so the picture in the README is of this editor
+      // and not of something assembled to be photographed.
       async function Java_JRock_browserEditPrompt(lib, text) {
         if (promptEditorBusy) return "0\nthe editor is already open";
+        return await openPromptEditor(text);
+      }
+
+      // THE EDITOR FOLLOWS THE VISIBLE WINDOW, not the layout one. When iOS raises the
+      // keyboard it does not shrink the layout viewport - only the VISUAL one - so a
+      // "position: fixed; inset: 0" box stays as tall as the whole screen with its lower
+      // half behind the keyboard. That alone is survivable here, the buttons being at the
+      // top; what is not is Safari then scrolling and scaling to bring the focused field
+      // into view, which is how the Save button ends up off the side of a zoomed page.
+      // Sized to visualViewport, the box is exactly the part of the screen that can be
+      // seen, there is nothing out of view to scroll to, and the bar stays where it is.
+      function fitPromptEditorToKeyboard() {
+        var box = document.getElementById("promptEditor");
+        var vv = window.visualViewport;
+        if (!box || !vv) return;
+        box.style.height = vv.height + "px";
+        // offsetTop, because a scrolled-and-scaled page moves the visual viewport's
+        // origin away from the layout viewport's and a fixed box does not follow.
+        box.style.transform = "translateY(" + vv.offsetTop + "px)";
+      }
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", fitPromptEditorToKeyboard);
+        window.visualViewport.addEventListener("scroll", fitPromptEditorToKeyboard);
+      }
+
+      async function openPromptEditor(text) {
         var box = document.getElementById("promptEditor");
         var area = document.getElementById("promptEditorText");
         var save = document.getElementById("promptEditorSave");
@@ -676,6 +728,7 @@
         promptEditorBusy = true;
         area.value = text == null ? "" : String(text);
         box.setAttribute("data-open", "yes");
+        fitPromptEditorToKeyboard();
         // Focused from inside the tap that opened the menu item - which is still the
         // same user gesture as far as the browser is concerned - so the keyboard comes
         // up by itself. Focusing a field outside a gesture is what mobile browsers
@@ -691,6 +744,8 @@
           return await new Promise(function (settle) {
             function close(reply) {
               box.setAttribute("data-open", "no");
+              box.style.height = "";
+              box.style.transform = "";
               save.removeEventListener("click", onSave);
               cancel.removeEventListener("click", onCancel);
               area.removeEventListener("keydown", onKey);

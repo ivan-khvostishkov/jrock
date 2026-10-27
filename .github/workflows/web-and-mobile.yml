@@ -173,6 +173,36 @@ jobs:
           java .github/build/LongPress.java 0.5 0.32 1500 || true
           sleep 2
           xcrun simctl io "$UDID" screenshot screenshots/ios-03-the-touch-menu.png
+
+          # AND THE FULL SCREEN EDITOR, WITH THE KEYBOARD UP. The one thing about that
+          # editor which cannot be checked by reading the code is what iOS does to the
+          # page when it raises its keyboard over it - whether it zooms, and whether the
+          # Save button is still somewhere a thumb can reach. So it gets photographed.
+          #
+          # THE SOFTWARE KEYBOARD HAS TO BE TURNED ON. A simulator types from the Mac's
+          # keyboard by default and never draws its own, so a screenshot taken with a
+          # field focused shows no keyboard at all - which is the opposite of the thing
+          # being looked at. This is the preference that decides it, and the simulator
+          # has to be restarted to read it.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          killall Simulator 2>/dev/null || true
+          sleep 4
+          open -a Simulator
+          sleep 10
+
+          # "#editor" opens it on a sample prompt with no jar and no runtime (see
+          # EDITOR_SHOT in index.html): the editor is the subject, and waiting out
+          # CheerpJ to photograph a text box would be two minutes for nothing.
+          BASE="${URL%%\?*}"
+          xcrun simctl openurl "$UDID" "${BASE}#editor" || true
+          sleep 12
+          # A TAP, because a tap is what raises a keyboard. Focusing a field from script
+          # does not: every mobile browser requires a user gesture, which is also why
+          # JRock cannot raise the keyboard at startup. The tap lands in the text area,
+          # a third of the way down, well clear of the bar at the top.
+          java .github/build/LongPress.java 0.5 0.35 60 || true
+          sleep 5
+          xcrun simctl io "$UDID" screenshot screenshots/ios-04-the-full-screen-editor.png
           ls -la screenshots/
 
       - name: Upload
