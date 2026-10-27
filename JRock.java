@@ -1308,6 +1308,13 @@ public class JRock {
     // than by Bedrock: true or false, and absent is true (see the Local prompt cache).
     private static final String CONFIG_PROMPT_CACHE = "local-prompt-cache";
     private static volatile boolean promptCacheOn = true;
+    // Whether a DOCX or RTF just written is handed to the program that opens it: true or
+    // false, and absent is true. On, because an export is made to be looked at - the
+    // point of writing a letter as a document is to read it as one, and a path in a log
+    // is a path to go and find. Off for anything exporting in bulk, where fifty documents
+    // would be fifty windows (see writeMarkdownExport).
+    private static final String CONFIG_OPEN_EXPORT = "open-export";
+    private static volatile boolean openExportOn = true;
 
     // EXTRA FIELDS FOR THE REQUEST BODY: a JSON object, on one line, whose fields are put
     // into every Chat Completions request beside "model" and "messages" - or absent, which
@@ -1400,6 +1407,7 @@ public class JRock {
             missingIncludeStopsSend =
                     !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_MISSING_STOPS_SEND)));
             promptCacheOn = !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_PROMPT_CACHE)));
+            openExportOn = !"false".equalsIgnoreCase(trimmed(settings.get(CONFIG_OPEN_EXPORT)));
             requestExtra = trimmed(settings.get(CONFIG_REQUEST_EXTRA));
             settingsSource = "__JRock/jrock-config.txt";
         }
@@ -1468,6 +1476,7 @@ public class JRock {
         appendSetting(text, CONFIG_PROCESSED_COPIES, String.valueOf(includeProcessedCopies));
         appendSetting(text, CONFIG_MISSING_STOPS_SEND, String.valueOf(missingIncludeStopsSend));
         appendSetting(text, CONFIG_PROMPT_CACHE, String.valueOf(promptCacheOn));
+        appendSetting(text, CONFIG_OPEN_EXPORT, String.valueOf(openExportOn));
         // Written back as it was read, blank left out: no dialog sets it, so this is the
         // one thing that keeps a line nobody here understands from being dropped the next
         // time anything else is saved.
@@ -6036,8 +6045,11 @@ public class JRock {
                     + "(automationSelectLastAnswer).";
         }
         Path target = Paths.get(file).toAbsolutePath().normalize();
+        // NEVER OPENED, whatever the setting says: this is a program writing a file,
+        // and a flow filing fifty answers would be fifty windows nobody asked for. The
+        // tick in Configure is about the menu item a person just chose.
         String failure = writeMarkdownExport(live.log, selected[0], true, false,
-                "DOCX (A4 portrait)", target);
+                "DOCX (A4 portrait)", target, false);
         return failure == null ? null : "could not export " + target + ": " + failure;
     }
 
@@ -6070,7 +6082,7 @@ public class JRock {
         }
         Path target = Paths.get(file).toAbsolutePath().normalize();
         String failure = writeMarkdownExport(live.log, markdown[0], true, false,
-                "DOCX (A4 portrait)", target);
+                "DOCX (A4 portrait)", target, false);
         return failure == null ? null : "could not export " + target + ": " + failure;
     }
 
@@ -7430,6 +7442,25 @@ public class JRock {
                 + "included files - gets that answer again, with no call to Bedrock. Every "
                 + "file in __JRock/messages/ counts: delete the ones whose answers should not "
                 + "be reused. Not for a prompt that goes with History's earlier messages.");
+        // OPENING WHAT WAS JUST WRITTEN. Not offered in a browser tab, where there is no
+        // default program to hand a file to: the export lands in the page's own storage
+        // and the Files... browser is how it is reached, so a tick here would be a tick
+        // that does nothing.
+        javax.swing.JCheckBox openExportF = isCheerpJ() ? null
+                : new javax.swing.JCheckBox(
+                        "Open an exported DOCX or RTF in the default program",
+                        openExportOn);
+        if (openExportF != null) {
+            openExportF.setName("openExportOn");
+            openExportF.setFont(openExportF.getFont().deriveFont(java.awt.Font.PLAIN));
+            openExportF.setToolTipText("A document written by Export selected Markdown "
+                    + "as DOCX or RTF is handed to whatever opens that kind of file - "
+                    + "Word, LibreOffice, InDesign, whichever is the default. Off and "
+                    + "the log line naming the file is all that happens. An agent or a "
+                    + "flow exporting through the automation API never opens anything, "
+                    + "whichever way this is set.");
+        }
+
         javax.swing.JCheckBox missingF = new javax.swing.JCheckBox(
                 MISSING_STOPS_SEND_LABEL, missingIncludeStopsSend);
         missingF.setName("missingIncludeStopsSend");
@@ -7462,7 +7493,8 @@ public class JRock {
         // there is one wording of it and a phone, which has nothing to hover with, is
         // told exactly what a mouse is told.
         for (javax.swing.JCheckBox box : new javax.swing.JCheckBox[] {
-                autoBackupF, refsF, copiesF, missingF, cacheF, transcribeF, alwaysOnF }) {
+                autoBackupF, refsF, copiesF, missingF, cacheF, openExportF,
+                transcribeF, alwaysOnF }) {
             if (box != null && box.getToolTipText() != null) {
                 explains(box, box.getText(), box.getToolTipText());
             }
@@ -7563,6 +7595,14 @@ public class JRock {
                 + "to have somewhere to write the result. With it off those four are "
                 + "refused, and everything else is included where it already is.",
                 noteW)));
+
+        // AND THE OTHER DIRECTION, on the same tab: everything above is a file coming in
+        // and being converted to something a model can read, and this is a file going out
+        // and being converted to something a person can read. One tab for files, both
+        // ways, rather than the way in here and the way out somewhere else.
+        if (openExportF != null) {
+            addSection(fileTypes, c, row++, "DOCX & RTF out", openExportF);
+        }
 
         javax.swing.JPanel audio = new javax.swing.JPanel(new java.awt.GridBagLayout());
         row = 0;
@@ -7771,6 +7811,8 @@ public class JRock {
         // Off empties the table, and on again builds it afresh from the folder - both
         // in the session report that applying this dialog runs (see syncPromptCache).
         promptCacheOn = cacheF.isSelected();
+        // Left as it was in a browser tab, where the box is not offered at all.
+        if (openExportF != null) openExportOn = openExportF.isSelected();
 
         // Narrate's device: taken as it stands, empty included - unlike the model, an
         // empty field here means something, "no device", and is how one is unset.
@@ -16692,7 +16734,8 @@ public class JRock {
         // The extension belongs to the format, not to the typist: "notes" or
         // "notes.txt" holding a DOCX is a file nothing will open by double-click.
         Path target = withExtension(chooser.getSelectedFile().toPath(), ext);
-        String failure = writeMarkdownExport(log, selection, asDocx, landscape, kind, target);
+        String failure = writeMarkdownExport(log, selection, asDocx, landscape, kind,
+                target, true);
         if (failure != null) {
             javax.swing.JOptionPane.showMessageDialog(frame,
                     "Could not export to " + target + ":\n" + failure,
@@ -16744,7 +16787,8 @@ public class JRock {
     // pictures are placed) and logs what went in. Returns null, or why it could not be
     // written - which is also logged. kind is what the log calls the format.
     private static String writeMarkdownExport(LogView log, String markdown, boolean asDocx,
-                                              boolean landscape, String kind, Path target) {
+                                              boolean landscape, String kind, Path target,
+                                              boolean mayOpen) {
         MarkdownExport document = asDocx
                 ? MarkdownExport.of(markdown, INCLUDES, landscape)
                 : MarkdownExport.of(markdown);
@@ -16769,6 +16813,21 @@ public class JRock {
                 log.gray("Its Markdown could not be read as Markdown, so the lines went "
                         + "in as plain paragraphs - the text is all there, the "
                         + "formatting is not.");
+            }
+            // AND IT OPENS, which is the point of having written it: a letter exported as
+            // a document is a letter somebody is about to read as one, and a path in a
+            // log is a path to go and find. Handed to whatever opens that kind of file -
+            // Word, LibreOffice, InDesign, whichever the desktop says.
+            //
+            // Nothing is said when it works, the document appearing being the loudest
+            // possible report. A failure is said, because then the only sign of the
+            // setting is a window that did not open.
+            if (mayOpen && openExportOn && !isCheerpJ()) {
+                String notOpened = openWithDesktop(target);
+                if (notOpened != null) {
+                    log.gray("Wrote it, but could not open it: " + notOpened
+                            + " - the file is there, at " + target + ".");
+                }
             }
             return null;
         } catch (IOException | RuntimeException ex) {

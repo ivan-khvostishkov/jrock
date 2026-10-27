@@ -1174,6 +1174,7 @@ from inside the running application, and different for every way of launching it
 | `include-markdown-references$` | write a `![...](name)` above an include | `false` |
 | `include-missing-stops-send$` | refuse a send whose include has gone | `true` |
 | `local-prompt-cache$` | [answer from `messages/`](#local-prompt-cache) §08 | `true` |
+| `open-export$` | open an exported DOCX or RTF in the default program | `true` |
 | `request-extra$` | [extra fields in the request body](#extra-request-fields-request-extra) | nothing added |
 | `window$` | where the window was last ([Ctrl+M](#window-size-and-position-configure--window-ctrlm) §29) | centred, at its preferred size |
 
@@ -4419,7 +4420,7 @@ the one they are looking for.
 | Tab | Holds | Kept in |
 |---|---|---|
 | **General** | working directory, prompts directory, API key, endpoint, model, your name, History limit, Clock, History, the prompt cache, the autobackup | `bedrock-key.txt`, and `jrock-config.txt` for the rest |
-| **Files** | Images DPI, how a PDF is included, how an RTF is, processed copies, Markdown references, whether a missing include stops a send | `jrock-config.txt` |
+| **Files** | in: Images DPI, how a PDF is included, how an RTF is, processed copies, Markdown references, whether a missing include stops a send — out: whether an exported DOCX or RTF opens | `jrock-config.txt` |
 | **Audio** | the speaker, the voices, the crackle, the microphone, transcribe, [Mic always on](#mic-always-on) §31 | `jrock-config.txt` — **absent in the browser**, which has neither to choose |
 | **Window** | where the window is and how big ([Ctrl+M](#window-size-and-position-configure--window-ctrlm) §29) | `window$` |
 | **Help** | [one window of prose](#help-the-button-on-the-first-line): the shortcuts, the folder, the notes | — |
@@ -4528,9 +4529,20 @@ unrelated switches; a label over them says which three belong to each other.
   [Multimodal includes](#multimodal-includes-ctrli) §14). The browser offers page images only.
 - **Include RTF as** — *Markdown (converted)*, the default, or *Text as is (RTF markup)*.
 
-These two and the four on General above them are kept in `__JRock/jrock-config.txt`, per folder,
+- **Open an exported DOCX or RTF in the default program** — on, and the one thing on this tab
+  about a file going *out* rather than coming in. A document written by
+  [**Export selected Markdown**](#markdown-export-rtf-and-docx) §30 is handed to whatever opens
+  that kind of file: Word, LibreOffice, InDesign, whichever the desktop says. Nothing is written
+  to the log when it works — the document appearing is the loudest report there is — and a
+  failure says so and names the file, which is there either way. Off, and the log line naming
+  the file is all that happens. **An agent or a flow exporting through the automation API never
+  opens anything**, whichever way this is set: a flow filing fifty answers would be fifty windows
+  nobody asked for. Not offered in a browser tab, which has no default program to hand a file to.
+
+These three and the four on General above them are kept in `__JRock/jrock-config.txt`, per folder,
 as `include-pdf-as$`, `include-rtf-as$`, `include-markdown-references$`,
-`include-processed-copies$`, `include-missing-stops-send$` and `local-prompt-cache$`.
+`include-processed-copies$`, `include-missing-stops-send$`, `local-prompt-cache$` and
+`open-export$`.
 
 The tab is laid out **by file type**, not by setting: the type in bold down the left, how it is
 read on the right. Only the three types with something to choose are rows — Images, PDF and RTF —
@@ -4759,6 +4771,12 @@ write that answer out as a document: **Export selected Markdown as RTF...** and 
 selected Markdown with images as DOCX...**. Both are greyed out without a selection — there is
 nothing to export but a selection — and a save dialog gives the file the right extension whatever
 you type into it.
+
+**And it opens**, in whatever program opens that kind of file — because a letter exported as a
+document is a letter somebody is about to read as one, and a path in a log is a path to go and
+find. Turned off with *Open an exported DOCX or RTF in the default program* on the
+[Configure → Files](#configure-dialog-top-left-button) §28 tab, where the log line naming the file
+becomes all that happens.
 
 **The selection may be the prompt's, not only the log's.** Both export items take whichever
 selection there is, and the **prompt's wins** when both have one — which is the whole point of
