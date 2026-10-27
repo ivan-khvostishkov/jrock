@@ -1019,6 +1019,60 @@ public class JRock {
     private static Path jrockDir()         { return workingDir.resolve(JROCK_DIR); }
     private static Path legacyJrockDir()   { return workingDir.resolve(LEGACY_JROCK_DIR); }
     /**
+     * Hands the prompt to the page to be edited in a real text field, and takes back what
+     * was typed (see browserEditPrompt).
+     *
+     * <p>OFF THE EVENT THREAD, because the bridge call blocks until the editing is over -
+     * which is as long as somebody takes to write a prompt. Blocking the event thread for
+     * that would freeze the canvas the page is drawing JRock onto, and the editor is on
+     * top of it: a frozen window under a working text box, with no way to tell that the
+     * one is waiting for the other.
+     *
+     * <p>THE TEXT IS SET THROUGH THE DOCUMENT, not around the lock. setText works on a
+     * read-only field - editable only stops a PERSON typing - which is what makes this
+     * worth having with Lock on: the prompt stays untypeable, and this is the way in.
+     *
+     * <p>A cancelled edit changes nothing, and says nothing: the operator shut a box they
+     * opened, which is not news for a transcript.
+     */
+    private static void editPromptInPage(JFrame frame, javax.swing.JTextArea input,
+                                         LogView log) {
+        String before = input.getText();
+        new SwingWorker<String[], Void>() {
+            @Override protected String[] doInBackground() {
+                try {
+                    return bridgeReply(browserEditPrompt(before));
+                } catch (Throwable noBridge) {
+                    // An older page, served from somewhere that has not caught up with
+                    // this jar: the jar says what is missing rather than what broke.
+                    return new String[] { "0", "this page has no full screen editor - it "
+                            + "was served before the jar had one (see "
+                            + "Java_JRock_browserEditPrompt in jrock-web/index.html)" };
+                }
+            }
+
+            @Override protected void done() {
+                String[] reply;
+                try {
+                    reply = get();
+                } catch (Exception lost) {
+                    reply = new String[] { "0", String.valueOf(lost.getMessage()) };
+                }
+                if ("1".equals(reply[0])) {
+                    if (!reply[1].equals(before)) {
+                        input.setText(reply[1]);
+                        input.setCaretPosition(input.getDocument().getLength());
+                    }
+                    return;
+                }
+                if ("cancelled".equals(reply[1])) return;
+                log.gray("Could not open the full screen editor: " + reply[1]);
+                log.gray("");
+            }
+        }.execute();
+    }
+
+    /**
      * Locks or unlocks the prompt, and makes it LOOK locked. A read-only text field that
      * is the same colour as an editable one is a field that appears broken: the tap does
      * nothing, no caret arrives, and nothing on screen says why. The tint is the answer
@@ -4486,6 +4540,20 @@ public class JRock {
                 + "runs.");
         lockItem.addActionListener(e -> setPromptLocked(input, lockItem.isSelected()));
         promptMenu.add(lockItem);
+
+        // AND BELOW LOCK, THE WAY TO TYPE WITH IT ON. Only in a browser tab, because
+        // only there is there a page to borrow a text field from - on the desktop this
+        // field already IS one, with every key the platform offers.
+        //
+        // The pair is the point: lock the prompt so no tap can disturb it or raise a
+        // keyboard over what is being read, and open this when there is something to
+        // write. On a phone that is the difference between a window you can read and a
+        // window that keeps covering itself up; on a desktop tab it is a bigger box with
+        // the browser's own spelling, autocomplete and undo in it.
+        if (isCheerpJ()) {
+            addMenuItem(promptMenu, FULL_SCREEN_EDIT_LABEL,
+                    () -> editPromptInPage(frame, input, log));
+        }
 
         promptMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
@@ -19371,6 +19439,9 @@ public class JRock {
      */
     private static volatile boolean promptLocked = false;
     private static final String PROMPT_LOCK_LABEL = "Lock (read-only, no keyboard)";
+    /** The browser-only editor, named for what it gives rather than where it runs. */
+    private static final String FULL_SCREEN_EDIT_LABEL =
+            "Full screen editor (real keyboard, autocorrect)...";
 
     private static final String MISSING_STOPS_SEND_LABEL = "Stop a send on a missing include";
 
@@ -19754,6 +19825,32 @@ public class JRock {
     // A new tab, for "Open URL in new tab" in the log, over the same wire format.
     //   browserOpenTab("<url>") -> "1\n", or "0\n<reason>" (a popup blocker, say).
     static native String browserOpenTab(String url);
+
+    // THE PROMPT, EDITED IN A REAL TEXT FIELD. The page puts a full-screen <textarea>
+    // over everything, with this text in it, and hands back what was typed.
+    //   browserEditPrompt("<text>") -> "1\n<the edited text>", "0\ncancelled", or
+    //                                  "0\n<reason>".
+    //
+    // WHY THE PAGE AND NOT THE PROMPT ITSELF. In a browser tab JRock is Swing painted
+    // onto a canvas: the text lives in a Java document and the DOM holds pixels. iOS
+    // and Android attach their keyboard, their autocorrect, their predictive text and
+    // their spelling underlines to a FOCUSED EDITABLE ELEMENT whose value is the text -
+    // they need word boundaries to replace words - and a canvas gives them nothing to
+    // work with. A real <textarea> gives them everything, at once, for free.
+    //
+    // It also fixes what a canvas cannot: a tap on a real field is the user gesture a
+    // mobile browser requires before it will raise a keyboard at all, and the selection
+    // handles, the magnifier and the Paste bubble are the platform's own.
+    //
+    // FULL SCREEN rather than a box positioned over the prompt, which was the other way
+    // to do it and the wrong one: an overlay has to track the canvas through every
+    // resize, scroll and relayout, and the failure mode is a text field floating over
+    // the wrong part of the window. Full screen has no position to get wrong.
+    //
+    // BLOCKS until the editing is over, as browserHttpSend blocks until the reply comes:
+    // the page's function is async and CheerpJ suspends the calling Java thread until
+    // its promise settles. Which is why the caller is a worker and not the event thread.
+    static native String browserEditPrompt(String text);
 
     // Downscaling an image, over the same bridge and the same "<ok>\n<rest>" format.
     // The browser JVM has no image pipeline to speak of - ImageIO.read wants a native

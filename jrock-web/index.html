@@ -146,6 +146,44 @@
     }
     #filesPanel .note { flex: 1 1 100%; }
     button.secondary { background: var(--panel); color: var(--text); }
+
+    /* THE FULL SCREEN PROMPT EDITOR (see Java_JRock_browserEditPrompt). A real
+       <textarea> over the whole tab, because the prompt JRock draws is pixels on a
+       canvas and a canvas has nothing for a phone's keyboard, autocorrect, predictive
+       text or spelling underlines to attach to. This has all of them, for free.
+
+       Over EVERYTHING, and sized in dvh rather than vh: on iOS the keyboard takes half
+       the window and vh does not notice, so a Save button placed 100vh down sits behind
+       the keyboard where no thumb can reach it. dvh is the height that is actually
+       there. */
+    #promptEditor {
+      position: fixed; inset: 0; z-index: 50;
+      display: none; flex-direction: column;
+      background: var(--panel);
+    }
+    #promptEditor[data-open="yes"] { display: flex; }
+    #promptEditor .bar {
+      display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    #promptEditor .bar strong { font-size: 14px; flex: 1 1 auto; min-width: 0; }
+    #promptEditor textarea {
+      flex: 1 1 auto; width: 100%; resize: none; border: 0; outline: none;
+      padding: 12px; box-sizing: border-box;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      /* 16px at least: iOS zooms the page in on any field smaller than that, and a
+         zoomed page is one the Save button has left the side of. */
+      font-size: 16px; line-height: 1.45; color: var(--text);
+      background: var(--panel);
+    }
+    #promptEditor .foot {
+      flex: 0 0 auto; padding: 8px 12px; font-size: 12px; color: var(--muted);
+      border-top: 1px solid var(--border); background: var(--bg);
+    }
+    @supports (height: 100dvh) {
+      #promptEditor { height: 100dvh; }
+    }
     button.danger { background: #b3261e; color: #fff; }
 
     /* Bottom bar: shows descriptive help on load, then the running log. */
@@ -230,6 +268,23 @@
         and <code>downloads/</code> are CheerpJ's own and are left alone.</span>
       </div>
     </div>
+  </div>
+
+  <!-- The full screen prompt editor. Empty and hidden until JRock asks for it (see
+       Java_JRock_browserEditPrompt); the <textarea> is a real one, which is the entire
+       reason this exists. -->
+  <div id="promptEditor" data-open="no" role="dialog" aria-modal="true"
+       aria-label="Edit the prompt">
+    <div class="bar">
+      <strong>Prompt</strong>
+      <button id="promptEditorCancel" class="secondary" type="button">Cancel</button>
+      <button id="promptEditorSave" type="button">Save</button>
+    </div>
+    <textarea id="promptEditorText" spellcheck="true" autocapitalize="sentences"
+              autocorrect="on" autocomplete="off" wrap="soft"
+              aria-label="Prompt text"></textarea>
+    <div class="foot" id="promptEditorFoot">Your keyboard, autocorrect and spelling are
+      the device's own here. Save puts the text back into JRock.</div>
   </div>
 
   <footer id="bottom">Runs unmodified JRock Java bytecode via CheerpJ (WebAssembly + JS). Bedrock calls go out through this page's own HTTP <code>fetch()</code>, with the API key JRock holds: put it into JRock's Configure dialog. A short-term key can be generated in the <a href="https://console.aws.amazon.com/bedrock-mantle/api-keys" target="_blank" rel="noopener">AWS console</a>. Use a Java window's title-bar upload button to load a local file into /files/uploads/; anything JRock saves under /files/downloads/ is downloaded to your machine.</footer>
@@ -588,6 +643,78 @@
           return "1\n";
         } catch (e) {
           return "0\n" + ((e && e.message) ? e.message : e);
+        }
+      }
+
+      // THE PROMPT, IN A REAL TEXT FIELD, over the same wire format.
+      //
+      // JRock's prompt is a Swing text area painted onto the canvas, and a canvas gives
+      // a phone nothing to attach its keyboard, its autocorrect, its predictive text or
+      // its spelling underlines to: those are services for a FOCUSED EDITABLE ELEMENT
+      // whose value is the text, because replacing a word needs to know where the words
+      // are. A <textarea> has all of them and needed no asking.
+      //
+      // ASYNC, AND THAT IS THE MECHANISM. CheerpJ suspends the Java thread that called
+      // the native method until the promise returned here settles - so JRock can call
+      // this like any blocking method and get the edited text as its return value, with
+      // no callback to plumb and no second entry point for the answer to come back
+      // through. The promise settles when a button is pressed.
+      //
+      // ONE AT A TIME: a second call while the editor is open is refused rather than
+      // queued, because two Java threads each waiting for the same text box is a
+      // deadlock with extra steps.
+      var promptEditorBusy = false;
+      async function Java_JRock_browserEditPrompt(lib, text) {
+        if (promptEditorBusy) return "0\nthe editor is already open";
+        var box = document.getElementById("promptEditor");
+        var area = document.getElementById("promptEditorText");
+        var save = document.getElementById("promptEditorSave");
+        var cancel = document.getElementById("promptEditorCancel");
+        if (!box || !area || !save || !cancel) {
+          return "0\nthis page has no prompt editor in it";
+        }
+        promptEditorBusy = true;
+        area.value = text == null ? "" : String(text);
+        box.setAttribute("data-open", "yes");
+        // Focused from inside the tap that opened the menu item - which is still the
+        // same user gesture as far as the browser is concerned - so the keyboard comes
+        // up by itself. Focusing a field outside a gesture is what mobile browsers
+        // refuse, and the reason JRock cannot raise the keyboard at startup.
+        area.focus();
+        // At the end rather than the beginning: somebody opening this is about to add to
+        // what is there, not to retype it.
+        try {
+          area.setSelectionRange(area.value.length, area.value.length);
+        } catch (noRange) { /* a browser that will not be told where the caret goes */ }
+
+        try {
+          return await new Promise(function (settle) {
+            function close(reply) {
+              box.setAttribute("data-open", "no");
+              save.removeEventListener("click", onSave);
+              cancel.removeEventListener("click", onCancel);
+              area.removeEventListener("keydown", onKey);
+              settle(reply);
+            }
+            function onSave() { close("1\n" + area.value); }
+            function onCancel() { close("0\ncancelled"); }
+            function onKey(e) {
+              // Ctrl/Cmd+Enter saves, Escape abandons - the two keys a desktop hand
+              // reaches for, and neither of them types into a prompt.
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                onSave();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onCancel();
+              }
+            }
+            save.addEventListener("click", onSave);
+            cancel.addEventListener("click", onCancel);
+            area.addEventListener("keydown", onKey);
+          });
+        } finally {
+          promptEditorBusy = false;
         }
       }
 
@@ -1264,6 +1391,7 @@
         Java_JRock_browserClipboardWrite: Java_JRock_browserClipboardWrite,
         Java_JRock_browserToggleChrome: Java_JRock_browserToggleChrome,
         Java_JRock_browserOpenTab: Java_JRock_browserOpenTab,
+        Java_JRock_browserEditPrompt: Java_JRock_browserEditPrompt,
         Java_JRock_browserScaleImage: Java_JRock_browserScaleImage,
         Java_JRock_browserPdfOpen: Java_JRock_browserPdfOpen,
         Java_JRock_browserPdfRenderPage: Java_JRock_browserPdfRenderPage,

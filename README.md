@@ -5345,6 +5345,24 @@ waiting for.*
   field for its own reasons, and when it finishes the prompt goes back to what *you* chose
   rather than to editable.
 
+  And in a browser tab only, under Lock: **Full screen editor (real keyboard, autocorrect)...**
+
+  **This is the pair that makes a phone usable.** Lock the prompt so no tap can disturb it or
+  raise a keyboard over the answer you are reading; open the editor when there is something to
+  write. The editor is a real HTML `<textarea>` over the whole tab, put there by the page — not
+  by Java — which is the entire point: JRock's own prompt is Swing *painted onto a canvas*, and a
+  canvas gives iOS nothing to attach its keyboard, autocorrect, predictive text or spelling
+  underlines to. Those are services for a focused editable element whose value **is** the text,
+  because replacing a word means knowing where the words are. A `<textarea>` has every one of
+  them and needed no asking for. Save puts the text back; Cancel changes nothing. **Ctrl+Enter
+  saves and Escape cancels**, and the text goes back into the prompt even while it is locked —
+  the lock stops a *person* typing, not JRock.
+
+  It is full screen rather than a box over the prompt because an overlay would have to track the
+  canvas through every resize, scroll and relayout, and the failure mode is a text field floating
+  over the wrong part of the window. Full screen has no position to get wrong. On a desktop tab
+  it earns its place too: a bigger box, with the browser's own spelling and autocomplete in it.
+
   *Insert document number* types a random 10-digit number, never starting with 0, at the caret —
   a fresh reference for an invoice, a ticket or a letter, which keeps all ten digits in a
   spreadsheet cell or a numeric field. The edit items are there for a touch device, which has no
