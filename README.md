@@ -5330,7 +5330,21 @@ waiting for.*
   the same two items the log's menu has, on the **prompt's** selection, which is the one a
   correction is made in (see [**Markdown export**](#markdown-export-rtf-and-docx) §30),
   Load prompt from file..., Save prompt copy
-  as..., then Cut / Copy / Paste / *Insert document number* / **Select all** / Undo / Redo.
+  as..., then Cut / Copy / Paste / *Insert document number* / **Select all** / Undo / Redo, and
+  last of all **Lock (read-only, no keyboard)**.
+
+  **Lock** is last because it is the one item here somebody goes *looking* for, and the end of a
+  list is where a thumb lands. It makes the prompt read-only: a tap cannot type into it, and
+  on a phone cannot raise the keyboard over the answer you are reading — which is the whole
+  point of it. A caret in a text field is what makes iOS throw its keyboard up over half the
+  window, so reading a long answer on a phone otherwise means dismissing a keyboard nobody
+  asked for, over and over. Send still works, the text is untouched, and the field is tinted
+  while it holds, because a read-only field the same colour as an editable one is a field that
+  looks broken. **Not remembered between runs**: a prompt that came back locked would look
+  broken too, and nobody would remember why they could not type. An agent or flow locks the same
+  field for its own reasons, and when it finishes the prompt goes back to what *you* chose
+  rather than to editable.
+
   *Insert document number* types a random 10-digit number, never starting with 0, at the caret —
   a fresh reference for an invoice, a ticket or a letter, which keeps all ten digits in a
   spreadsheet cell or a numeric field. The edit items are there for a touch device, which has no

@@ -1018,6 +1018,24 @@ public class JRock {
 
     private static Path jrockDir()         { return workingDir.resolve(JROCK_DIR); }
     private static Path legacyJrockDir()   { return workingDir.resolve(LEGACY_JROCK_DIR); }
+    /**
+     * Locks or unlocks the prompt, and makes it LOOK locked. A read-only text field that
+     * is the same colour as an editable one is a field that appears broken: the tap does
+     * nothing, no caret arrives, and nothing on screen says why. The tint is the answer
+     * to the question the silence raises.
+     */
+    private static void setPromptLocked(javax.swing.JTextArea input, boolean locked) {
+        promptLocked = locked;
+        input.setEditable(!locked);
+        input.setBackground(locked ? PROMPT_LOCKED_BG : javax.swing.UIManager.getColor(
+                "TextArea.background"));
+        if (locked) input.getCaret().setVisible(false);
+    }
+
+    /** The prompt's tint when it is locked: a shade off white, not a grey slab. */
+    private static final java.awt.Color PROMPT_LOCKED_BG =
+            new java.awt.Color(0xF0, 0xF0, 0xEC);
+
     private static Path promptFile()       { return jrockDir().resolve("jrock-prompt.txt"); }
     private static Path logFile()          { return jrockDir().resolve("jrock-log.txt"); }
     private static Path logsDir()          { return jrockDir().resolve("messages"); }
@@ -4425,6 +4443,31 @@ public class JRock {
                 () -> { if (promptUndo.canUndo()) promptUndo.undo(); });
         javax.swing.JMenuItem redoItem  = addEditItem(promptMenu, "Redo",  input,
                 () -> { if (promptUndo.canRedo()) promptUndo.redo(); });
+
+        // LOCK, LAST IN THE MENU AND ON ITS OWN. Last because it is the one item here
+        // somebody goes looking for rather than stumbles on, and the end of a list is
+        // where a thumb lands; on its own because everything above it edits the prompt
+        // and this stops the prompt being edited at all.
+        //
+        // WHAT IT IS REALLY FOR is a phone. A tap anywhere near the prompt gives it the
+        // caret, and a caret in a text field is what makes iOS throw its keyboard up over
+        // half the window - so reading a long answer on a phone means dismissing a
+        // keyboard nobody asked for, again and again. A read-only field is not focused
+        // for typing, so no keyboard comes.
+        //
+        // NOT REMEMBERED between runs, deliberately: a prompt that comes back locked is a
+        // prompt that looks broken, and the operator who locked it last week will not
+        // remember why they cannot type. One tap puts it back.
+        promptMenu.addSeparator();
+        javax.swing.JCheckBoxMenuItem lockItem =
+                new javax.swing.JCheckBoxMenuItem(PROMPT_LOCK_LABEL, promptLocked);
+        lockItem.setToolTipText("Makes the prompt read-only, so a tap cannot type into it "
+                + "and - on a phone - cannot raise the keyboard over what you are reading. "
+                + "Send still works, and the text is untouched. Not remembered between "
+                + "runs.");
+        lockItem.addActionListener(e -> setPromptLocked(input, lockItem.isSelected()));
+        promptMenu.add(lockItem);
+
         promptMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
                 boolean selected = input.getSelectedText() != null;
@@ -4438,6 +4481,10 @@ public class JRock {
                     recordItem.setText(recording != null ? "Stop recording" : RECORD_LABEL);
                 }
                 if (alwaysOnShown != null) alwaysOnShown.setSelected(micAlwaysOn);
+                // Shown as it is, not as this menu last left it: an automation locks the
+                // prompt too, and the tick has to tell the truth about what the field is.
+                lockItem.setSelected(!input.isEditable());
+                lockItem.setEnabled(!automating);
             }
             @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) { }
             @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) { }
@@ -6704,7 +6751,10 @@ public class JRock {
         Ui live = ui;
         if (live == null || !automating) return;
         onEdt(() -> {
-            live.input.setEditable(true);
+            // Back to what the OPERATOR chose, not to editable: a prompt locked by hand
+            // before a flow started must still be locked when it ends. The automation
+            // borrowed the field; it does not get to decide what it is handed back as.
+            setPromptLocked(live.input, promptLocked);
             live.sendGate.accept(true);
         });
         automating = false;
@@ -19262,6 +19312,15 @@ public class JRock {
      */
     private static final String SEND_LABEL = "Send (Ctrl-Enter)";
     private static final String STOP_LABEL = "Stop waiting";
+
+    /**
+     * Whether the operator has locked the prompt against typing (see the prompt menu's
+     * last item). Held here rather than read off the field because an automation makes
+     * the same field read-only for its own reasons, and when it finishes the field has to
+     * go back to what the OPERATOR chose - not to editable.
+     */
+    private static volatile boolean promptLocked = false;
+    private static final String PROMPT_LOCK_LABEL = "Lock (read-only, no keyboard)";
 
     private static final String MISSING_STOPS_SEND_LABEL = "Stop a send on a missing include";
 
