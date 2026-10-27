@@ -2832,19 +2832,80 @@ public class JRock {
         // rewrite the file (loading shouldn't trigger a save). Returns what was loaded,
         // as a timeline: the entries themselves are only replaced later, on the EDT, so
         // a caller that reads the log straight away has to read it from this.
-        java.util.List<String[]> loadFromDisk() {
+        /**
+         * Restores this folder's transcript, OFF THE EVENT THREAD and then A CHUNK AT A
+         * TIME, and calls back with its timeline when the last line is on screen.
+         *
+         * <p>Both halves of the old way blocked the window. Reading the file and parsing
+         * it blocks for as long as the disk takes - and it is not one file, every message
+         * the transcript refers to being read in as well. Rendering blocks for longer:
+         * styling tens of thousands of lines into a text pane is the slowest thing JRock
+         * does, and done in one loop it is one event the window cannot interrupt. A
+         * 48,000-line transcript froze it for sixteen seconds.
+         *
+         * <p>So the parse goes to a worker, and the rendering is handed back to the queue
+         * every few hundred entries. Between chunks the event thread does what it was
+         * always going to do - a keystroke, a caret, a repaint - so the PROMPT TAKES
+         * TYPING while the transcript is still arriving. Which is the whole point: this
+         * pane is read-only and append-only, so nothing the operator can do to it
+         * competes with the lines coming in.
+         *
+         * <p>The callback is how the session report stays in order. Its lines belong
+         * AFTER the transcript they are reporting on, and an append that happened halfway
+         * through the restore would land in the middle of last week's conversation.
+         */
+        void restoreFromDisk(java.util.function.Consumer<java.util.List<String[]>> whenDone) {
             Path from = logFile();
-            java.util.List<Entry> loaded = parseMainLog(from);
-            SwingUtilities.invokeLater(() -> {
-                // Together with the entries, on the EDT: a line queued before this
-                // runs is saved with the entries it joins, into the file they came from.
-                file = from;
-                entries.clear();
-                entries.addAll(loaded);
-                logCopySaved = true;   // just loaded from disk; no unsaved changes
-                rebuild();
-            });
-            return timeline(loaded);
+            new SwingWorker<java.util.List<Entry>, Void>() {
+                @Override protected java.util.List<Entry> doInBackground() {
+                    return parseMainLog(from);
+                }
+
+                @Override protected void done() {
+                    java.util.List<Entry> loaded;
+                    try {
+                        loaded = get();
+                    } catch (Exception unreadable) {
+                        // A transcript that cannot be read is a session that starts
+                        // without one, which is what a new folder does anyway.
+                        loaded = new ArrayList<>();
+                    }
+                    // Together with the entries, on the EDT: a line queued before this
+                    // runs is saved with the entries it joins, into the file they
+                    // came from.
+                    file = from;
+                    entries.clear();
+                    entries.addAll(loaded);
+                    logCopySaved = true;   // just loaded from disk; no unsaved changes
+                    java.util.List<String[]> timeline = timeline(loaded);
+                    renderChunk(0, () -> whenDone.accept(timeline));
+                }
+            }.execute();
+        }
+
+        /** How many entries are rendered before the event thread gets its queue back. */
+        private static final int RESTORE_CHUNK = 60;
+
+        /**
+         * Renders entries from {@code at} onwards, a chunk per turn of the event queue.
+         *
+         * <p>Re-queued rather than looped, which is the difference between a window that
+         * is busy and a window that is frozen: each call ENDS, so every keystroke and
+         * repaint waiting behind it is dealt with before the next chunk starts.
+         */
+        private void renderChunk(int at, Runnable whenDone) {
+            if (at == 0) pane.setText("");
+            int end = Math.min(entries.size(), at + RESTORE_CHUNK);
+            for (int i = at; i < end; i++) {
+                Entry e = entries.get(i);
+                if (!isVisible(e)) continue;
+                if (e.dialog) renderDialog(e); else renderGray(e.text);
+            }
+            if (end >= entries.size()) {
+                whenDone.run();
+                return;
+            }
+            SwingUtilities.invokeLater(() -> renderChunk(end, whenDone));
         }
 
         // Parses the main log. The file is the pane text as persistMainLog writes it: a
@@ -3083,14 +3144,31 @@ public class JRock {
         // automationAwaitReady).
         adoptSession();
 
-        // Recover any previous log from disk FIRST. loadFromDisk() replaces the
-        // entry list (rebuild -> setText), so it must run before we log anything
-        // for this session, otherwise those lines would be wiped.
+        // Recover any previous log from disk FIRST - it replaces the entry list, so it
+        // has to be in place before anything is logged for this session or those lines
+        // would be wiped. Restored off the event thread and rendered a chunk at a time
+        // (see restoreFromDisk), so the prompt takes typing while it arrives; the report
+        // follows in the callback, its lines belonging after the transcript they report
+        // on rather than in the middle of it.
         boolean hadLog = Files.exists(logFile());
-        java.util.List<String[]> restored = log.loadFromDisk();
         // What the log already holds in costs, read before this session adds a line.
         double[] pastCosts = loggedCosts(hadLog ? readFileQuietly(logFile()) : null);
+        log.restoreFromDisk(restored ->
+                sessionReport(log, input, promptSourceNote, hadLog, pastCosts, restored));
+    }
 
+    /**
+     * The session report: everything JRock says about the folder it has just opened, from
+     * the working directory down to "Ready."
+     *
+     * <p>Its own method because it is the CONTINUATION of the transcript's restore and
+     * not the start of a session. Split out when the restore stopped blocking the window:
+     * what used to be one method that could not be interrupted is now a short one that
+     * starts the reading and this one, which runs when the reading is done.
+     */
+    private static void sessionReport(LogView log, JTextArea input, String promptSourceNote,
+                                      boolean hadLog, double[] pastCosts,
+                                      java.util.List<String[]> restored) {
         // The settings with a control of their own on the main window, which show the
         // folder's value as soon as there is a window (at startup, it is made with them).
         Ui shown = ui;

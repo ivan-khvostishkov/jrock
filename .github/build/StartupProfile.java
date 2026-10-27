@@ -114,7 +114,26 @@ public final class StartupProfile {
         drained.await();
         long afterDrain = System.nanoTime();
 
-        // 3. and ready, reported after it and separately, being a different question.
+        // 3. HOW LONG A KEYSTROKE WOULD HAVE WAITED, which is the number that decides
+        //    whether a window is usable while it is still starting. The transcript is
+        //    being restored on the event thread right now; a task posted to that thread
+        //    and timed is exactly what a key press goes through, so the worst delay seen
+        //    here is the worst a typist would have felt. Blocked, it is the length of the
+        //    whole restore; handed back between chunks, it is a chunk.
+        long worstWait = 0;
+        long watchUntil = System.currentTimeMillis() + READY_MS;
+        // A zero timeout asks without waiting: null means ready.
+        while (System.currentTimeMillis() < watchUntil
+                && JRock.automationAwaitReady(0) != null) {
+            long posted = System.nanoTime();
+            CountDownLatch ran = new CountDownLatch(1);
+            SwingUtilities.invokeLater(ran::countDown);
+            ran.await();
+            worstWait = Math.max(worstWait, (System.nanoTime() - posted) / 1_000_000);
+            Thread.sleep(15);
+        }
+
+        // 4. and ready, reported after it and separately, being a different question.
         String notReady = JRock.automationAwaitReady(READY_MS);
         long afterReady = System.nanoTime();
 
@@ -126,6 +145,7 @@ public final class StartupProfile {
         say("TOTAL, JVM start to a window on screen", ms(jvm, afterDrain));
         say("", "");
         say("afterwards: to automation ready", ms(afterDrain, afterReady));
+        say("WORST a keystroke would have waited", worstWait + " ms");
         if (notReady != null) {
             say("  not ready, which is expected here", notReady);
         }
