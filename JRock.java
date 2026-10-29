@@ -2883,6 +2883,15 @@ public class JRock {
             }.execute();
         }
 
+        /** Puts a collected run of gray lines into the pane as one insert, and empties it. */
+        private void flushGray(StringBuilder gray) {
+            if (gray.length() == 0) return;
+            // The trailing newline is already there: appendStyled adds one per call, and
+            // this is one call for many lines, so the lines bring their own.
+            appendStyledRaw(gray.toString(), java.awt.Color.GRAY);
+            gray.setLength(0);
+        }
+
         /** How many entries are rendered before the event thread gets its queue back. */
         private static final int RESTORE_CHUNK = 60;
 
@@ -2894,14 +2903,36 @@ public class JRock {
          * repaint waiting behind it is dealt with before the next chunk starts.
          */
         private void renderChunk(int at, Runnable whenDone) {
-            if (at == 0) pane.setText("");
+            if (at == 0) {
+                pane.setText("");
+                following = false;   // nobody is reading it yet; see following
+            }
             int end = Math.min(entries.size(), at + RESTORE_CHUNK);
+            // A RUN OF GRAY LINES GOES IN AS ONE STRING. Styling a document is charged
+            // per insert, not per character: each insertString fires its document event,
+            // invalidates the view and re-lays-out what follows, and a transcript is
+            // mostly gray - so inserting its lines one at a time was paying that price
+            // 48,000 times for text of one colour. Collected here and inserted when the
+            // colour changes, which a dialog entry is the only thing that does.
+            StringBuilder gray = new StringBuilder();
             for (int i = at; i < end; i++) {
                 Entry e = entries.get(i);
                 if (!isVisible(e)) continue;
-                if (e.dialog) renderDialog(e); else renderGray(e.text);
+                if (e.dialog) {
+                    flushGray(gray);
+                    renderDialog(e);
+                } else {
+                    gray.append(addWrapPoints(e.text)).append('\n');
+                }
             }
+            flushGray(gray);
             if (end >= entries.size()) {
+                // The one scroll the whole restore needs, and the end is where a
+                // transcript is read from.
+                following = true;
+                if (pane.getSelectionStart() == pane.getSelectionEnd()) {
+                    pane.setCaretPosition(pane.getStyledDocument().getLength());
+                }
                 whenDone.run();
                 return;
             }
@@ -3000,6 +3031,23 @@ public class JRock {
             appendStyled(line, color, true);
         }
 
+        /**
+         * Inserts text that already ends in its own newline, with no scrolling and no
+         * selection dance: used by the restore, where neither applies - nothing is
+         * selected in a pane that is being filled for the first time, and the end is
+         * scrolled to once when the last chunk is in.
+         */
+        private void appendStyledRaw(String text, java.awt.Color color) {
+            SimpleAttributeSet attrs = new SimpleAttributeSet();
+            StyleConstants.setForeground(attrs, color);
+            try {
+                pane.getStyledDocument().insertString(
+                        pane.getStyledDocument().getLength(), text, attrs);
+            } catch (BadLocationException ignored) {
+                // Position is always valid (document end); ignore defensively.
+            }
+        }
+
         private void appendStyled(String line, java.awt.Color color, boolean follow) {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setForeground(attrs, color);
@@ -3022,10 +3070,20 @@ public class JRock {
                 // still mean what they meant; put it back in case the caret moved with
                 // the document, and scroll nowhere.
                 pane.select(from, to);
-            } else if (follow) {
+            } else if (follow && following) {
                 pane.setCaretPosition(pane.getStyledDocument().getLength());
             }
         }
+
+        /**
+         * Whether an arriving line scrolls the pane to show itself.
+         *
+         * <p>Off while a transcript is being restored, and the saving is not small:
+         * setCaretPosition scrolls AND re-lays-out the pane, and a restore did it once
+         * per line - 48,000 scrolls of a view nobody has looked at yet, every one of them
+         * on the event thread. The end is scrolled to once, when the last chunk is in.
+         */
+        private boolean following = true;
 
         // ---- Persistence ---------------------------------------------------
         // Writes the main log as a copy of the pane, with two differences, both of them
@@ -4615,7 +4673,10 @@ public class JRock {
         lockItem.setToolTipText("Makes the prompt read-only, so a tap cannot type into it "
                 + "and - on a phone - cannot raise the keyboard over what you are reading. "
                 + "Send still works, and the text is untouched. Not remembered between "
-                + "runs.");
+                + "runs."
+                + (isCheerpJ() ? " Locked, a single tap on the prompt opens the full "
+                                 + "screen editor: the tap has nothing else to do, and "
+                                 + "that is where the typing happens." : ""));
         lockItem.addActionListener(e -> setPromptLocked(input, lockItem.isSelected()));
         promptMenu.add(lockItem);
 
@@ -4655,6 +4716,27 @@ public class JRock {
             @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) { }
         });
         attachPopup(input, promptMenu);
+
+        // A TAP ON A LOCKED PROMPT OPENS THE EDITOR, in a browser tab. Locked, the field
+        // has nothing to do with a tap: there is no caret to place and no keyboard to
+        // raise, which is the point of locking it. So the tap gets the job it was going
+        // to be used for anyway - two taps and a slide down a menu, every time, to reach
+        // the one item that can still change the prompt.
+        //
+        // ONLY WHEN LOCKED, and only in a browser. Unlocked, a tap places the caret,
+        // which is what a tap on a text field is for; on the desktop the field is already
+        // a real one and there is nothing to borrow from a page.
+        if (isCheerpJ()) {
+            input.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                    // A single tap, undragged. A long press is the menu's (see
+                    // attachPopup), and a press that moved was a scroll.
+                    if (promptLocked && e.getClickCount() == 1 && !e.isConsumed()) {
+                        editPromptInPage(frame, input, log);
+                    }
+                }
+            });
+        }
 
         // In the browser, point Ctrl+C/X/V at the page's clipboard too, so the
         // keyboard and the menu reach the same place.
@@ -7239,6 +7321,9 @@ public class JRock {
             // up), so the clock is read from the press instead of trusted to fire.
             @Override public void mouseReleased(java.awt.event.MouseEvent e) {
                 if (e.isPopupTrigger()) { cancel(); showAt(e.getX(), e.getY()); return; }
+                // The lift at the end of that slide, to the menu rather than to the text
+                // under it: this is the event that chooses the item the finger is on.
+                if (forwardToMenu(e)) { cancel(); return; }
                 // Not for a component that acts on its own click: this runs after a modal
                 // dialog that the click opened has been closed again, and the press it
                 // would be measuring is minutes old by then. Such a component is given a
@@ -7251,8 +7336,33 @@ public class JRock {
             }
 
             @Override public void mouseDragged(java.awt.event.MouseEvent e) {
+                // A FINGER ALREADY ON ITS WAY TO AN ITEM. The menu opened under a finger
+                // that is still down, and it opened because of a timer - so the toolkit
+                // never saw a press inside the menu and the menu never took the pointer.
+                // Every further move is therefore delivered here, to the component the
+                // menu is sitting on, and the slide that was choosing an item was really
+                // a drag across a text area: it selected text on the way and the release
+                // at the end landed on nothing, which shut the menu with no item chosen.
+                //
+                // Handed to the menu's own manager instead, which is what would have had
+                // them if the press had started inside: it highlights the item under the
+                // finger and arms it. Consumed as well, so the text area below does not
+                // also act on a drag that is not for it.
+                if (forwardToMenu(e)) return;
                 // Moving too far (scroll/select) cancels the pending long-press.
                 if (origin != null && origin.distance(e.getPoint()) > LONG_PRESS_SLOP) cancel();
+            }
+
+            /**
+             * Gives the open menu an event that was delivered to the component beneath
+             * it, and says whether it took it.
+             */
+            private boolean forwardToMenu(java.awt.event.MouseEvent e) {
+                if (!menu.isVisible()) return false;
+                javax.swing.MenuSelectionManager.defaultManager().processMouseEvent(
+                        javax.swing.SwingUtilities.convertMouseEvent(comp, e, menu));
+                e.consume();
+                return true;
             }
 
             @Override public void mouseExited(java.awt.event.MouseEvent e) { cancel(); }
